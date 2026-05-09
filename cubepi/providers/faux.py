@@ -239,9 +239,7 @@ class FauxProvider:
                         content=[],
                         stop_reason="error",
                         error_message="No more faux responses queued",
-                        usage=self._compute_cache_usage(
-                            system_prompt, tools, messages, Usage()
-                        ),
+                        usage=Usage(),
                         timestamp=time.time(),
                     )
                     ms.push(
