@@ -30,7 +30,7 @@ _THINKING_TO_EFFORT: dict[ThinkingLevel, str | None] = {
     "low": "low",
     "medium": "medium",
     "high": "high",
-    "xhigh": "high",
+    "xhigh": "xhigh",
 }
 
 
@@ -164,11 +164,16 @@ class OpenAIResponsesProvider:
                             current_item_type = "function_call"
                             current_tool_json = ""
                             current_tool_call_id = item.call_id
-                            current_tool_item_id = item.id
+                            current_tool_item_id = item.id or ""
                             current_tool_name = item.name
+                            tc_id = (
+                                f"{item.call_id}|{current_tool_item_id}"
+                                if current_tool_item_id
+                                else item.call_id
+                            )
                             partial.content.append(
                                 ToolCall(
-                                    id=f"{item.call_id}|{item.id}",
+                                    id=tc_id,
                                     name=item.name,
                                     arguments={},
                                 )
@@ -339,7 +344,11 @@ class OpenAIResponsesProvider:
                                 )
                             except json.JSONDecodeError:
                                 args = {}
-                            tc_id = f"{current_tool_call_id}|{current_tool_item_id}"
+                            tc_id = (
+                                f"{current_tool_call_id}|{current_tool_item_id}"
+                                if current_tool_item_id
+                                else current_tool_call_id
+                            )
                             # Update the tool call in partial with final args
                             for i, c in enumerate(partial.content):
                                 if isinstance(c, ToolCall) and c.id == tc_id:
@@ -464,28 +473,25 @@ class OpenAIResponsesProvider:
                     api_input.append({"role": "user", "content": content})
 
             elif isinstance(msg, AssistantMessage):
+                text_blocks: list[dict[str, Any]] = []
                 for c in msg.content:
                     if isinstance(c, ThinkingContent):
-                        # Reasoning items cannot be replayed without
-                        # encrypted_content, so we skip them for now.
                         pass
                     elif isinstance(c, TextContent):
-                        api_input.append(
-                            {
-                                "type": "message",
-                                "role": "assistant",
-                                "content": [
-                                    {
-                                        "type": "output_text",
-                                        "text": c.text,
-                                        "annotations": [],
-                                    }
-                                ],
-                                "status": "completed",
-                            }
+                        text_blocks.append(
+                            {"type": "output_text", "text": c.text, "annotations": []}
                         )
                     elif isinstance(c, ToolCall):
-                        # Parse compound id format "call_id|item_id"
+                        if text_blocks:
+                            api_input.append(
+                                {
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": text_blocks,
+                                    "status": "completed",
+                                }
+                            )
+                            text_blocks = []
                         parts = c.id.split("|", 1)
                         call_id = parts[0]
                         item_id = parts[1] if len(parts) > 1 else None
@@ -498,6 +504,15 @@ class OpenAIResponsesProvider:
                         if item_id:
                             fc["id"] = item_id
                         api_input.append(fc)
+                if text_blocks:
+                    api_input.append(
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": text_blocks,
+                            "status": "completed",
+                        }
+                    )
 
             elif isinstance(msg, ToolResultMessage):
                 parts = msg.tool_call_id.split("|", 1)
