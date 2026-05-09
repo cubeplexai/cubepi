@@ -26,6 +26,12 @@ from cubepi.providers.faux import (
     faux_thinking,
     faux_tool_call,
 )
+from cubepi.providers.models import (
+    THINKING_LEVELS,
+    clamp_thinking_level,
+    get_supported_thinking_levels,
+    models_are_equal,
+)
 
 
 # Lazy imports for optional providers
@@ -62,8 +68,12 @@ __all__ = [
     "Usage",
     "UserMessage",
     "adjust_max_tokens_for_thinking",
+    "clamp_thinking_level",
     "faux_assistant_message",
     "faux_text",
     "faux_thinking",
     "faux_tool_call",
+    "get_supported_thinking_levels",
+    "models_are_equal",
+    "THINKING_LEVELS",
 ]

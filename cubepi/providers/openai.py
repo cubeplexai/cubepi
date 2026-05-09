@@ -22,6 +22,7 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
 )
+from cubepi.providers.models import clamp_thinking_level
 
 
 class OpenAIProvider:
@@ -49,6 +50,7 @@ class OpenAIProvider:
         signal: asyncio.Event | None = None,
     ) -> MessageStream:
         ms = MessageStream()
+        thinking = clamp_thinking_level(model, thinking)
 
         api_messages: list[dict[str, Any]] = []
         if system_prompt:
