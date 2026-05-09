@@ -139,7 +139,8 @@ def _close_partial_json(text: str) -> str:
                 continue
             if ch == '"':
                 in_string = False
-                stack.pop()  # Remove the '"' we pushed.
+                if stack:
+                    stack.pop()
             i += 1
             continue
 
