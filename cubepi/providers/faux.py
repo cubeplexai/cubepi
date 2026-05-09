@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import math
 import time
@@ -22,8 +23,10 @@ from cubepi.providers.base import (
 
 FauxContentBlock = TextContent | ThinkingContent | ToolCall
 
+# New extended signature: (messages, model, system_prompt, tools)
+# Old signature (messages, model) is still supported for backward compatibility
 FauxResponseFactory = Callable[
-    [list[Message], Model],
+    ...,
     AssistantMessage | Awaitable[AssistantMessage],
 ]
 
@@ -87,6 +90,62 @@ def _split_by_token_size(text: str, min_size: int, max_size: int) -> list[str]:
     return chunks or [""]
 
 
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count from text (approx 4 chars per token)."""
+    return max(1, math.ceil(len(text) / 4))
+
+
+def _common_prefix_length(a: str, b: str) -> int:
+    """Return the length of the common prefix between two strings."""
+    length = min(len(a), len(b))
+    index = 0
+    while index < length and a[index] == b[index]:
+        index += 1
+    return index
+
+
+def _serialize_prompt_context(
+    system_prompt: str,
+    tools: list[ToolDefinition] | None,
+    messages: list[Message],
+) -> str:
+    """Serialize prompt context for cache comparison (prefix-based)."""
+    parts: list[str] = []
+    if system_prompt:
+        parts.append(f"system:{system_prompt}")
+    if tools:
+        parts.append(
+            f"tools:{json.dumps([t.model_dump() for t in tools], sort_keys=True)}"
+        )
+    for msg in messages:
+        parts.append(f"{msg.role}:{msg.model_dump_json()}")
+    return "\n\n".join(parts)
+
+
+def _can_accept_extended_args(factory: FauxResponseFactory) -> bool:
+    """Check if a factory can accept the extended (messages, model, system_prompt, tools) signature."""
+    try:
+        sig = inspect.signature(factory)
+        params = [
+            p
+            for p in sig.parameters.values()
+            if p.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ]
+        # Check for VAR_POSITIONAL (*args)
+        has_var_positional = any(
+            p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
+        )
+        if has_var_positional:
+            return True
+        return len(params) >= 4
+    except (ValueError, TypeError):
+        return False
+
+
 class FauxProvider:
     def __init__(
         self,
@@ -100,6 +159,7 @@ class FauxProvider:
         self._min = max(1, min(token_size_min, token_size_max))
         self._max = max(self._min, token_size_max)
         self.call_count = 0
+        self._prompt_cache: dict[str, str] = {}
 
     def set_responses(self, responses: list[FauxResponseStep]) -> None:
         self._responses = list(responses)
@@ -110,6 +170,48 @@ class FauxProvider:
     @property
     def pending_response_count(self) -> int:
         return len(self._responses)
+
+    def clear_prompt_cache(self) -> None:
+        """Clear the prompt cache, useful between test scenarios."""
+        self._prompt_cache.clear()
+
+    @property
+    def prompt_cache(self) -> dict[str, str]:
+        """Read-only access to the prompt cache for test assertions."""
+        return dict(self._prompt_cache)
+
+    def _compute_cache_usage(
+        self,
+        system_prompt: str,
+        tools: list[ToolDefinition] | None,
+        messages: list[Message],
+        usage: Usage,
+    ) -> Usage:
+        """Compute cache-aware usage based on prompt prefix matching."""
+        prompt_text = _serialize_prompt_context(system_prompt, tools, messages)
+        prompt_tokens = _estimate_tokens(prompt_text)
+        # Use "default" as session key (single-session simulation)
+        session_key = "default"
+        previous_prompt = self._prompt_cache.get(session_key)
+
+        if previous_prompt is not None:
+            cached_chars = _common_prefix_length(previous_prompt, prompt_text)
+            cache_read = _estimate_tokens(previous_prompt[:cached_chars])
+            cache_write = _estimate_tokens(prompt_text[cached_chars:])
+            input_tokens = max(0, prompt_tokens - cache_read)
+        else:
+            cache_read = 0
+            cache_write = prompt_tokens
+            input_tokens = 0
+
+        self._prompt_cache[session_key] = prompt_text
+
+        return Usage(
+            input_tokens=input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+        )
 
     async def stream(
         self,
@@ -133,7 +235,9 @@ class FauxProvider:
                         content=[],
                         stop_reason="error",
                         error_message="No more faux responses queued",
-                        usage=Usage(),
+                        usage=self._compute_cache_usage(
+                            system_prompt, tools, messages, Usage()
+                        ),
                         timestamp=time.time(),
                     )
                     ms.push(
@@ -143,14 +247,27 @@ class FauxProvider:
                     return
 
                 if callable(step):
-                    import inspect
+                    if _can_accept_extended_args(step):
+                        args = (messages, model, system_prompt, tools)
+                    else:
+                        args = (messages, model)
 
                     if inspect.iscoroutinefunction(step):
-                        resolved = await step(messages, model)
+                        resolved = await step(*args)
                     else:
-                        resolved = step(messages, model)
+                        resolved = step(*args)
                 else:
                     resolved = step
+
+                # Compute cache-aware usage
+                output_tokens = _estimate_tokens(
+                    json.dumps([b.model_dump() for b in resolved.content], default=str)
+                )
+                base_usage = Usage(output_tokens=output_tokens)
+                cache_usage = self._compute_cache_usage(
+                    system_prompt, tools, messages, base_usage
+                )
+                resolved = resolved.model_copy(update={"usage": cache_usage})
 
                 await self._stream_with_deltas(ms, resolved, signal)
             except BaseException as exc:
