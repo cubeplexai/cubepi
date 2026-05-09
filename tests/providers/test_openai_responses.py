@@ -50,9 +50,7 @@ class TestBuildInput:
         assert result[0]["content"] == [{"type": "input_text", "text": "hello"}]
 
     def test_assistant_text_message(self):
-        msgs = [
-            AssistantMessage(content=[TextContent(text="hi there")])
-        ]
+        msgs = [AssistantMessage(content=[TextContent(text="hi there")])]
         result = OpenAIResponsesProvider._build_input(msgs)
         assert len(result) == 1
         assert result[0]["type"] == "message"
@@ -86,9 +84,7 @@ class TestBuildInput:
         """Tool call id without pipe separator should omit item id."""
         msgs = [
             AssistantMessage(
-                content=[
-                    ToolCall(id="call_123", name="search", arguments={"q": "x"})
-                ],
+                content=[ToolCall(id="call_123", name="search", arguments={"q": "x"})],
             )
         ]
         result = OpenAIResponsesProvider._build_input(msgs)
@@ -129,9 +125,7 @@ class TestBuildInput:
             AssistantMessage(
                 content=[
                     TextContent(text="hi"),
-                    ToolCall(
-                        id="c1|fc_1", name="search", arguments={"q": "test"}
-                    ),
+                    ToolCall(id="c1|fc_1", name="search", arguments={"q": "test"}),
                 ],
                 stop_reason="tool_use",
             ),
@@ -173,16 +167,16 @@ class TestMapStopReason:
         assert OpenAIResponsesProvider._map_stop_reason("completed", partial) == "stop"
 
     def test_completed_with_tools(self):
-        partial = AssistantMessage(
-            content=[ToolCall(id="x", name="y", arguments={})]
-        )
+        partial = AssistantMessage(content=[ToolCall(id="x", name="y", arguments={})])
         assert (
             OpenAIResponsesProvider._map_stop_reason("completed", partial) == "tool_use"
         )
 
     def test_incomplete(self):
         partial = AssistantMessage(content=[])
-        assert OpenAIResponsesProvider._map_stop_reason("incomplete", partial) == "length"
+        assert (
+            OpenAIResponsesProvider._map_stop_reason("incomplete", partial) == "length"
+        )
 
     def test_failed(self):
         partial = AssistantMessage(content=[])
@@ -306,9 +300,7 @@ class TestStreamThinking:
                 "response.output_item.added",
                 item=_make_output_item("reasoning", id="rs_1", summary=[]),
             ),
-            _make_event(
-                "response.reasoning_summary_text.delta", delta="Thinking..."
-            ),
+            _make_event("response.reasoning_summary_text.delta", delta="Thinking..."),
             _make_event(
                 "response.output_item.done",
                 item=_make_output_item(
@@ -407,12 +399,8 @@ class TestStreamToolUse:
                     arguments="",
                 ),
             ),
-            _make_event(
-                "response.function_call_arguments.delta", delta='{"q": '
-            ),
-            _make_event(
-                "response.function_call_arguments.delta", delta='"test"}'
-            ),
+            _make_event("response.function_call_arguments.delta", delta='{"q": '),
+            _make_event("response.function_call_arguments.delta", delta='"test"}'),
             _make_event(
                 "response.function_call_arguments.done",
                 arguments='{"q": "test"}',
@@ -702,11 +690,14 @@ class TestReasoningParams:
             provider._client = mock_client
 
             model = _model(reasoning=True)
-            await provider.stream(
+            ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="hi")])],
                 thinking="off",
             )
+            async for _ in ms:
+                pass
+            await ms.result()
 
             call_kwargs = mock_client.responses.create.call_args[1]
             assert "reasoning" not in call_kwargs
@@ -741,11 +732,14 @@ class TestReasoningParams:
             provider._client = mock_client
 
             model = _model(reasoning=True)
-            await provider.stream(
+            ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="hi")])],
                 system_prompt="You are helpful.",
             )
+            async for _ in ms:
+                pass
+            await ms.result()
 
             call_kwargs = mock_client.responses.create.call_args[1]
             api_input = call_kwargs["input"]
@@ -783,11 +777,14 @@ class TestReasoningParams:
             provider._client = mock_client
 
             model = _model(reasoning=False)
-            await provider.stream(
+            ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="hi")])],
                 system_prompt="You are helpful.",
             )
+            async for _ in ms:
+                pass
+            await ms.result()
 
             call_kwargs = mock_client.responses.create.call_args[1]
             api_input = call_kwargs["input"]
