@@ -73,6 +73,7 @@ class Model(BaseModel):
     context_window: int = 200_000
     max_tokens: int = 8192
     cost: ModelCost | None = None
+    thinking_level_map: dict[str, str | None] | None = None
 
 
 class TextContent(BaseModel):

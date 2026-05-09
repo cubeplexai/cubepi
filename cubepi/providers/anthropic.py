@@ -22,6 +22,7 @@ from cubepi.providers.base import (
     UserMessage,
     adjust_max_tokens_for_thinking,
 )
+from cubepi.providers.models import clamp_thinking_level
 
 CacheRetention = Literal["short", "long", "none"]
 
@@ -50,6 +51,7 @@ class AnthropicProvider:
         signal: asyncio.Event | None = None,
     ) -> MessageStream:
         ms = MessageStream()
+        thinking = clamp_thinking_level(model, thinking)
 
         cache_control = self._get_cache_control()
         api_messages = [self._convert_message(m) for m in messages]
