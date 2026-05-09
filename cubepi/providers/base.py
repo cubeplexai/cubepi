@@ -1,7 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator, Literal, Protocol, runtime_checkable
+import inspect
+from dataclasses import dataclass, field
+from typing import (
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Literal,
+    Protocol,
+    runtime_checkable,
+)
 
 from pydantic import BaseModel
 
@@ -184,6 +194,49 @@ class MessageStream:
         return await self._result_future
 
 
+@dataclass
+class ProviderResponse:
+    """HTTP response metadata exposed to on_response callbacks."""
+
+    status: int
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+OnPayloadCallback = Callable[[dict, Model], Awaitable[dict | None] | dict | None]
+"""Optional callback for inspecting/replacing provider payloads before sending.
+Return a dict to replace the payload, or None to keep unchanged."""
+
+OnResponseCallback = Callable[["ProviderResponse", Model], Awaitable[None] | None]
+"""Optional callback invoked after an HTTP response is received."""
+
+
+async def _invoke_on_payload(
+    callback: OnPayloadCallback | None,
+    payload: dict,
+    model: Model,
+) -> dict:
+    """Call *on_payload* and return the (possibly replaced) payload dict."""
+    if callback is None:
+        return payload
+    result = callback(payload, model)
+    if inspect.isawaitable(result):
+        result = await result
+    return result if isinstance(result, dict) else payload
+
+
+async def _invoke_on_response(
+    callback: OnResponseCallback | None,
+    response: ProviderResponse,
+    model: Model,
+) -> None:
+    """Call *on_response* if provided."""
+    if callback is None:
+        return
+    result = callback(response, model)
+    if inspect.isawaitable(result):
+        await result
+
+
 @runtime_checkable
 class Provider(Protocol):
     async def stream(
@@ -196,4 +249,6 @@ class Provider(Protocol):
         thinking: ThinkingLevel = "off",
         thinking_budgets: ThinkingBudgets | None = None,
         signal: asyncio.Event | None = None,
+        on_payload: OnPayloadCallback | None = None,
+        on_response: OnResponseCallback | None = None,
     ) -> MessageStream: ...

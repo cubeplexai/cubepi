@@ -10,6 +10,9 @@ from cubepi.providers.base import (
     Message,
     MessageStream,
     Model,
+    OnPayloadCallback,
+    OnResponseCallback,
+    ProviderResponse,
     StreamEvent,
     TextContent,
     ThinkingBudgets,
@@ -21,6 +24,8 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
     adjust_max_tokens_for_thinking,
+    _invoke_on_payload,
+    _invoke_on_response,
 )
 from cubepi.providers.models import clamp_thinking_level
 
@@ -49,6 +54,8 @@ class AnthropicProvider:
         thinking: ThinkingLevel = "off",
         thinking_budgets: ThinkingBudgets | None = None,
         signal: asyncio.Event | None = None,
+        on_payload: OnPayloadCallback | None = None,
+        on_response: OnResponseCallback | None = None,
     ) -> MessageStream:
         ms = MessageStream()
         thinking = clamp_thinking_level(model, thinking)
@@ -91,7 +98,22 @@ class AnthropicProvider:
 
         async def _produce() -> None:
             try:
+                nonlocal kwargs
+                kwargs = await _invoke_on_payload(on_payload, kwargs, model)
+
                 async with self._client.messages.stream(**kwargs) as stream:
+                    # Invoke on_response with HTTP metadata if available
+                    http_response = getattr(stream, "response", None)
+                    if http_response is not None:
+                        await _invoke_on_response(
+                            on_response,
+                            ProviderResponse(
+                                status=http_response.status_code,
+                                headers=dict(http_response.headers),
+                            ),
+                            model,
+                        )
+
                     partial = AssistantMessage(
                         content=[], usage=Usage(), timestamp=time.time()
                     )
