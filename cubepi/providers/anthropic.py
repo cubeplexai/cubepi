@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, Literal
 
 from cubepi.providers.base import (
     AssistantMessage,
@@ -23,12 +23,20 @@ from cubepi.providers.base import (
     adjust_max_tokens_for_thinking,
 )
 
+CacheRetention = Literal["short", "long", "none"]
+
 
 class AnthropicProvider:
-    def __init__(self, *, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        cache_retention: CacheRetention = "short",
+    ) -> None:
         import anthropic
 
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        self._cache_retention = cache_retention
 
     async def stream(
         self,
@@ -43,9 +51,11 @@ class AnthropicProvider:
     ) -> MessageStream:
         ms = MessageStream()
 
+        cache_control = self._get_cache_control()
         api_messages = [self._convert_message(m) for m in messages]
+        if cache_control:
+            self._apply_message_cache_control(api_messages, cache_control)
 
-        # Adjust max_tokens to accommodate the thinking budget
         max_tokens, thinking_budget = adjust_max_tokens_for_thinking(
             base_max_tokens=model.max_tokens,
             model_max_tokens=model.context_window,
@@ -59,9 +69,18 @@ class AnthropicProvider:
             "max_tokens": max_tokens,
         }
         if system_prompt:
-            kwargs["system"] = system_prompt
+            kwargs["system"] = [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    **({"cache_control": cache_control} if cache_control else {}),
+                }
+            ]
         if tools:
-            kwargs["tools"] = [self._convert_tool(t) for t in tools]
+            api_tools = [self._convert_tool(t) for t in tools]
+            if cache_control and api_tools:
+                api_tools[-1]["cache_control"] = cache_control
+            kwargs["tools"] = api_tools
         if thinking != "off" and thinking_budget > 0:
             kwargs["thinking"] = {
                 "type": "enabled",
@@ -117,6 +136,40 @@ class AnthropicProvider:
 
         asyncio.create_task(_produce())
         return ms
+
+    def _get_cache_control(self) -> dict[str, str] | None:
+        """Return the cache_control marker based on the retention setting."""
+        if self._cache_retention == "none":
+            return None
+        return {"type": "ephemeral"}
+
+    @staticmethod
+    def _apply_message_cache_control(
+        api_messages: list[dict[str, Any]],
+        cache_control: dict[str, str],
+    ) -> None:
+        """Apply cache_control to the last content block of the last message.
+
+        This caches the conversation prefix so subsequent turns get cache hits
+        on all prior messages.
+        """
+        if not api_messages:
+            return
+
+        last_msg = api_messages[-1]
+        content = last_msg.get("content")
+        if not content:
+            return
+
+        if isinstance(content, list) and len(content) > 0:
+            last_block = content[-1]
+            if isinstance(last_block, dict):
+                last_block["cache_control"] = cache_control
+        elif isinstance(content, str):
+            # Convert bare string content to a block so we can attach cache_control
+            last_msg["content"] = [
+                {"type": "text", "text": content, "cache_control": cache_control}
+            ]
 
     @staticmethod
     def _convert_message(msg: Message) -> dict[str, Any]:
