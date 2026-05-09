@@ -92,6 +92,8 @@ def _split_by_token_size(text: str, min_size: int, max_size: int) -> list[str]:
 
 def _estimate_tokens(text: str) -> int:
     """Estimate token count from text (approx 4 chars per token)."""
+    if not text:
+        return 0
     return max(1, math.ceil(len(text) / 4))
 
 
