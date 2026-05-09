@@ -204,7 +204,7 @@ class FauxProvider:
         else:
             cache_read = 0
             cache_write = prompt_tokens
-            input_tokens = 0
+            input_tokens = prompt_tokens
 
         self._prompt_cache[session_key] = prompt_text
 
@@ -237,9 +237,7 @@ class FauxProvider:
                         content=[],
                         stop_reason="error",
                         error_message="No more faux responses queued",
-                        usage=self._compute_cache_usage(
-                            system_prompt, tools, messages, Usage()
-                        ),
+                        usage=Usage(),
                         timestamp=time.time(),
                     )
                     ms.push(
