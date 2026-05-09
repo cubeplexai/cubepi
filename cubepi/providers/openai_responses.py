@@ -112,11 +112,10 @@ class OpenAIResponsesProvider:
                 # Track current streaming state
                 current_thinking = ""
                 current_text = ""
-                current_tool_json = ""
                 current_item_type: str | None = None
-                current_tool_call_id = ""
-                current_tool_item_id = ""
-                current_tool_name = ""
+                # Per-item tool call state keyed by item.id
+                tool_state: dict[str, dict[str, str]] = {}
+                active_tool_item_id: str | None = None
 
                 async for event in response:
                     if signal and signal.is_set():
@@ -162,15 +161,20 @@ class OpenAIResponsesProvider:
                             )
                         elif item.type == "function_call":
                             current_item_type = "function_call"
-                            current_tool_json = ""
-                            current_tool_call_id = item.call_id
-                            current_tool_item_id = item.id or ""
-                            current_tool_name = item.name
+                            item_id = item.id or ""
                             tc_id = (
-                                f"{item.call_id}|{current_tool_item_id}"
-                                if current_tool_item_id
+                                f"{item.call_id}|{item_id}"
+                                if item_id
                                 else item.call_id
                             )
+                            tool_state[item_id or item.call_id] = {
+                                "call_id": item.call_id,
+                                "item_id": item_id,
+                                "name": item.name,
+                                "json": "",
+                                "tc_id": tc_id,
+                            }
+                            active_tool_item_id = item_id or item.call_id
                             partial.content.append(
                                 ToolCall(
                                     id=tc_id,
@@ -271,8 +275,8 @@ class OpenAIResponsesProvider:
 
                     # --- Tool call argument deltas ---
                     elif etype == "response.function_call_arguments.delta":
-                        if current_item_type == "function_call":
-                            current_tool_json += event.delta
+                        if active_tool_item_id and active_tool_item_id in tool_state:
+                            tool_state[active_tool_item_id]["json"] += event.delta
                             ms.push(
                                 StreamEvent(
                                     type="toolcall_delta",
@@ -282,8 +286,8 @@ class OpenAIResponsesProvider:
                             )
 
                     elif etype == "response.function_call_arguments.done":
-                        if current_item_type == "function_call":
-                            current_tool_json = event.arguments
+                        if active_tool_item_id and active_tool_item_id in tool_state:
+                            tool_state[active_tool_item_id]["json"] = event.arguments
 
                     # --- Output item done ---
                     elif etype == "response.output_item.done":
@@ -336,25 +340,27 @@ class OpenAIResponsesProvider:
                             current_item_type = None
 
                         elif item.type == "function_call":
+                            item_key = (item.id or "") or item.call_id
+                            ts = tool_state.pop(item_key, None)
+                            final_json = (
+                                getattr(item, "arguments", None)
+                                or (ts["json"] if ts else "")
+                            )
                             try:
-                                args = (
-                                    json.loads(current_tool_json)
-                                    if current_tool_json
-                                    else {}
-                                )
+                                args = json.loads(final_json) if final_json else {}
                             except json.JSONDecodeError:
                                 args = {}
+                            item_id = item.id or ""
                             tc_id = (
-                                f"{current_tool_call_id}|{current_tool_item_id}"
-                                if current_tool_item_id
-                                else current_tool_call_id
+                                f"{item.call_id}|{item_id}"
+                                if item_id
+                                else item.call_id
                             )
-                            # Update the tool call in partial with final args
                             for i, c in enumerate(partial.content):
                                 if isinstance(c, ToolCall) and c.id == tc_id:
                                     partial.content[i] = ToolCall(
                                         id=tc_id,
-                                        name=current_tool_name,
+                                        name=item.name,
                                         arguments=args,
                                     )
                             ms.push(

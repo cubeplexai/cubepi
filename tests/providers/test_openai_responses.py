@@ -477,6 +477,111 @@ class TestStreamToolUse:
             assert result.content[0].id == "call_abc|fc_1"
 
 
+class TestStreamParallelToolCalls:
+    """Test parallel tool calls with interleaved events."""
+
+    @pytest.mark.asyncio
+    async def test_parallel_tool_calls(self):
+        events = [
+            _make_event(
+                "response.output_item.added",
+                item=_make_output_item(
+                    "function_call",
+                    id="fc_1",
+                    call_id="call_a",
+                    name="search",
+                    arguments="",
+                ),
+            ),
+            _make_event(
+                "response.output_item.added",
+                item=_make_output_item(
+                    "function_call",
+                    id="fc_2",
+                    call_id="call_b",
+                    name="fetch",
+                    arguments="",
+                ),
+            ),
+            _make_event("response.function_call_arguments.delta", delta='{"q": "x"}'),
+            _make_event(
+                "response.function_call_arguments.done",
+                arguments='{"q": "x"}',
+            ),
+            _make_event(
+                "response.output_item.done",
+                item=_make_output_item(
+                    "function_call",
+                    id="fc_1",
+                    call_id="call_a",
+                    name="search",
+                    arguments='{"q": "x"}',
+                ),
+            ),
+            _make_event("response.function_call_arguments.delta", delta='{"url": "y"}'),
+            _make_event(
+                "response.function_call_arguments.done",
+                arguments='{"url": "y"}',
+            ),
+            _make_event(
+                "response.output_item.done",
+                item=_make_output_item(
+                    "function_call",
+                    id="fc_2",
+                    call_id="call_b",
+                    name="fetch",
+                    arguments='{"url": "y"}',
+                ),
+            ),
+            _make_event(
+                "response.completed",
+                response=SimpleNamespace(
+                    id="resp_1",
+                    status="completed",
+                    usage=SimpleNamespace(
+                        input_tokens=10,
+                        output_tokens=20,
+                        total_tokens=30,
+                        input_tokens_details=SimpleNamespace(cached_tokens=0),
+                    ),
+                    service_tier=None,
+                ),
+            ),
+        ]
+
+        with patch("openai.AsyncOpenAI") as mock_openai:
+            mock_client = MagicMock()
+            mock_openai.return_value = mock_client
+            mock_client.responses = MagicMock()
+            mock_client.responses.create = AsyncMock(return_value=_async_iter(events))
+
+            provider = OpenAIResponsesProvider(api_key="test-key")
+            provider._client = mock_client
+
+            model = _model()
+            ms = await provider.stream(
+                model,
+                [UserMessage(content=[TextContent(text="do both")])],
+            )
+
+            stream_events = []
+            async for event in ms:
+                stream_events.append(event)
+
+            result = await ms.result()
+
+            assert result.stop_reason == "tool_use"
+            assert len(result.content) == 2
+            assert isinstance(result.content[0], ToolCall)
+            assert isinstance(result.content[1], ToolCall)
+            assert result.content[0].name == "search"
+            assert result.content[0].arguments == {"q": "x"}
+            assert result.content[0].id == "call_a|fc_1"
+            assert result.content[1].name == "fetch"
+            assert result.content[1].arguments == {"url": "y"}
+            assert result.content[1].id == "call_b|fc_2"
+
+
 class TestStreamAbort:
     """Test abort handling."""
 
