@@ -122,14 +122,14 @@ class TestClampThinkingLevel:
         model = _model(reasoning=True)
         assert clamp_thinking_level(model, "xhigh") == "high"
 
-    def test_clamp_up_to_nearest(self):
-        """When a level is disabled, search upward first."""
+    def test_clamp_down_to_nearest(self):
+        """When a level is disabled, search downward first (prefer cheaper)."""
         model = _model(
             reasoning=True,
             thinking_level_map={"low": None},
         )
-        # "low" disabled -> next up is "medium"
-        assert clamp_thinking_level(model, "low") == "medium"
+        # "low" disabled -> next down is "minimal"
+        assert clamp_thinking_level(model, "low") == "minimal"
 
     def test_clamp_down_when_nothing_above(self):
         """When all higher levels are disabled, clamp down."""
@@ -197,7 +197,7 @@ class TestModelsAreEqual:
         assert models_are_equal(a, None) is False
 
     def test_both_none(self):
-        assert models_are_equal(None, None) is False
+        assert models_are_equal(None, None) is True
 
 
 # ---------------------------------------------------------------------------

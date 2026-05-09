@@ -69,14 +69,14 @@ def clamp_thinking_level(model: Model, level: ThinkingLevel) -> ThinkingLevel:
 
     requested_idx = THINKING_LEVELS.index(level)
 
-    # Search upward first
-    for i in range(requested_idx, len(THINKING_LEVELS)):
+    # Search downward first (prefer cheaper/lower intensity)
+    for i in range(requested_idx - 1, -1, -1):
         candidate = THINKING_LEVELS[i]
         if candidate in available:
             return candidate
 
-    # Then downward
-    for i in range(requested_idx - 1, -1, -1):
+    # Then upward
+    for i in range(requested_idx + 1, len(THINKING_LEVELS)):
         candidate = THINKING_LEVELS[i]
         if candidate in available:
             return candidate
@@ -90,6 +90,8 @@ def models_are_equal(a: Model | None, b: Model | None) -> bool:
     Comparison is by ``id`` and ``provider``.  Returns ``False`` when either
     argument is ``None``.
     """
+    if a is None and b is None:
+        return True
     if a is None or b is None:
         return False
     return a.id == b.id and a.provider == b.provider
