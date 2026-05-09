@@ -226,7 +226,8 @@ class FauxProvider:
         thinking: ThinkingLevel = "off",
         thinking_budgets: ThinkingBudgets | None = None,
         signal: asyncio.Event | None = None,
-        **_extra: Any,
+        on_payload: Any = None,
+        on_response: Any = None,
     ) -> MessageStream:
         ms = MessageStream()
         self.call_count += 1
