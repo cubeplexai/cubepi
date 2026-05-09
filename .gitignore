@@ -1,0 +1,5 @@
+docs/specs
+docs/plans
+__pycache__/
+*.pyc
+.venv/
