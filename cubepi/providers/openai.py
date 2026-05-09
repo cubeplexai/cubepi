@@ -5,6 +5,8 @@ import json
 import time
 from typing import Any
 
+from cubepi.utils.json_parse import parse_streaming_json
+
 from cubepi.providers.base import (
     AssistantMessage,
     Message,
@@ -176,14 +178,7 @@ class OpenAIProvider:
                             )
 
                         for idx, tc_data in tool_calls_in_progress.items():
-                            try:
-                                args = (
-                                    json.loads(tc_data["arguments"])
-                                    if tc_data["arguments"]
-                                    else {}
-                                )
-                            except json.JSONDecodeError:
-                                args = {}
+                            args = parse_streaming_json(tc_data["arguments"])
                             for i, c in enumerate(partial.content):
                                 if isinstance(c, ToolCall) and c.id == tc_data["id"]:
                                     partial.content[i] = ToolCall(
