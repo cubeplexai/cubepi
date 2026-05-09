@@ -48,7 +48,7 @@ class AnthropicProvider:
         # Adjust max_tokens to accommodate the thinking budget
         max_tokens, thinking_budget = adjust_max_tokens_for_thinking(
             base_max_tokens=model.max_tokens,
-            model_max_tokens=model.max_tokens,
+            model_max_tokens=model.context_window,
             reasoning_level=thinking,
             custom_budgets=thinking_budgets,
         )
@@ -62,7 +62,7 @@ class AnthropicProvider:
             kwargs["system"] = system_prompt
         if tools:
             kwargs["tools"] = [self._convert_tool(t) for t in tools]
-        if thinking != "off":
+        if thinking != "off" and thinking_budget > 0:
             kwargs["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": thinking_budget,
