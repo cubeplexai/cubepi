@@ -163,9 +163,7 @@ class OpenAIResponsesProvider:
                             current_item_type = "function_call"
                             item_id = item.id or ""
                             tc_id = (
-                                f"{item.call_id}|{item_id}"
-                                if item_id
-                                else item.call_id
+                                f"{item.call_id}|{item_id}" if item_id else item.call_id
                             )
                             tool_state[item_id or item.call_id] = {
                                 "call_id": item.call_id,
@@ -342,9 +340,8 @@ class OpenAIResponsesProvider:
                         elif item.type == "function_call":
                             item_key = (item.id or "") or item.call_id
                             ts = tool_state.pop(item_key, None)
-                            final_json = (
-                                getattr(item, "arguments", None)
-                                or (ts["json"] if ts else "")
+                            final_json = getattr(item, "arguments", None) or (
+                                ts["json"] if ts else ""
                             )
                             try:
                                 args = json.loads(final_json) if final_json else {}
@@ -352,9 +349,7 @@ class OpenAIResponsesProvider:
                                 args = {}
                             item_id = item.id or ""
                             tc_id = (
-                                f"{item.call_id}|{item_id}"
-                                if item_id
-                                else item.call_id
+                                f"{item.call_id}|{item_id}" if item_id else item.call_id
                             )
                             for i, c in enumerate(partial.content):
                                 if isinstance(c, ToolCall) and c.id == tc_id:
