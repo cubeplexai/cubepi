@@ -50,6 +50,12 @@ def get_openai_provider():
     return OpenAIProvider
 
 
+def get_openai_responses_provider():
+    from cubepi.providers.openai_responses import OpenAIResponsesProvider
+
+    return OpenAIResponsesProvider
+
+
 __all__ = [
     "AssistantMessage",
     "Content",
