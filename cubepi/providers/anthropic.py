@@ -138,10 +138,12 @@ class AnthropicProvider:
         return ms
 
     def _get_cache_control(self) -> dict[str, str] | None:
-        """Return the cache_control marker based on the retention setting."""
         if self._cache_retention == "none":
             return None
-        return {"type": "ephemeral"}
+        cc: dict[str, str] = {"type": "ephemeral"}
+        if self._cache_retention == "long":
+            cc["ttl"] = "1h"
+        return cc
 
     @staticmethod
     def _apply_message_cache_control(

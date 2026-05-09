@@ -86,12 +86,10 @@ class TestCacheRetention:
         cc = provider._get_cache_control()
         assert cc == {"type": "ephemeral"}
 
-    def test_retention_long_returns_ephemeral(self):
-        # In this implementation long also returns ephemeral; TTL extension
-        # would require model-specific feature detection like the TS reference.
+    def test_retention_long_returns_ephemeral_with_ttl(self):
         provider = _make_provider("long")
         cc = provider._get_cache_control()
-        assert cc == {"type": "ephemeral"}
+        assert cc == {"type": "ephemeral", "ttl": "1h"}
 
 
 class TestCacheControlOnMessages:
