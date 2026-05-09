@@ -9,6 +9,7 @@ from cubepi.providers.base import (
     Provider,
     StreamEvent,
     TextContent,
+    ThinkingBudgets,
     ThinkingContent,
     ThinkingLevel,
     ToolCall,
@@ -16,6 +17,7 @@ from cubepi.providers.base import (
     ToolResultMessage,
     Usage,
     UserMessage,
+    adjust_max_tokens_for_thinking,
 )
 from cubepi.providers.faux import (
     FauxProvider,
@@ -51,6 +53,7 @@ __all__ = [
     "Provider",
     "StreamEvent",
     "TextContent",
+    "ThinkingBudgets",
     "ThinkingContent",
     "ThinkingLevel",
     "ToolCall",
@@ -58,6 +61,7 @@ __all__ = [
     "ToolResultMessage",
     "Usage",
     "UserMessage",
+    "adjust_max_tokens_for_thinking",
     "faux_assistant_message",
     "faux_text",
     "faux_thinking",

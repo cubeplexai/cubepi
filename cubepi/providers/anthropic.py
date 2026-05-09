@@ -12,6 +12,7 @@ from cubepi.providers.base import (
     Model,
     StreamEvent,
     TextContent,
+    ThinkingBudgets,
     ThinkingContent,
     ThinkingLevel,
     ToolCall,
@@ -19,6 +20,7 @@ from cubepi.providers.base import (
     ToolResultMessage,
     Usage,
     UserMessage,
+    adjust_max_tokens_for_thinking,
 )
 
 
@@ -36,15 +38,25 @@ class AnthropicProvider:
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
         thinking: ThinkingLevel = "off",
+        thinking_budgets: ThinkingBudgets | None = None,
         signal: asyncio.Event | None = None,
     ) -> MessageStream:
         ms = MessageStream()
 
         api_messages = [self._convert_message(m) for m in messages]
+
+        # Adjust max_tokens to accommodate the thinking budget
+        max_tokens, thinking_budget = adjust_max_tokens_for_thinking(
+            base_max_tokens=model.max_tokens,
+            model_max_tokens=model.max_tokens,
+            reasoning_level=thinking,
+            custom_budgets=thinking_budgets,
+        )
+
         kwargs: dict[str, Any] = {
             "model": model.id,
             "messages": api_messages,
-            "max_tokens": model.max_tokens,
+            "max_tokens": max_tokens,
         }
         if system_prompt:
             kwargs["system"] = system_prompt
@@ -53,7 +65,7 @@ class AnthropicProvider:
         if thinking != "off":
             kwargs["thinking"] = {
                 "type": "enabled",
-                "budget_tokens": self._thinking_budget(thinking, model),
+                "budget_tokens": thinking_budget,
             }
 
         async def _produce() -> None:
@@ -170,17 +182,6 @@ class AnthropicProvider:
             "description": td.description,
             "input_schema": td.parameters,
         }
-
-    @staticmethod
-    def _thinking_budget(level: ThinkingLevel, model: Model) -> int:
-        budgets = {
-            "minimal": 1024,
-            "low": 2048,
-            "medium": 4096,
-            "high": 8192,
-            "xhigh": 16384,
-        }
-        return budgets.get(level, 4096)
 
     def _handle_event(
         self, event: Any, partial: AssistantMessage, ms: MessageStream

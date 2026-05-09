@@ -8,6 +8,49 @@ from pydantic import BaseModel
 ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 
 
+class ThinkingBudgets(BaseModel):
+    """Token budgets for each thinking level."""
+
+    minimal: int = 1024
+    low: int = 2048
+    medium: int = 8192
+    high: int = 16384
+
+
+def adjust_max_tokens_for_thinking(
+    base_max_tokens: int,
+    model_max_tokens: int,
+    reasoning_level: ThinkingLevel,
+    custom_budgets: ThinkingBudgets | None = None,
+) -> tuple[int, int]:
+    """Adjust max_tokens to reserve space for a thinking budget.
+
+    Given a base max_tokens (the desired output capacity), increases it to
+    accommodate the thinking budget while respecting the model's hard cap.
+    If the model cap is too small to fit both, the thinking budget is reduced
+    to leave at least ``min_output_tokens`` (1024) for output.
+
+    Returns:
+        A ``(max_tokens, thinking_budget)`` tuple.
+    """
+    if reasoning_level == "off":
+        return base_max_tokens, 0
+
+    budgets = custom_budgets or ThinkingBudgets()
+    min_output_tokens = 1024
+
+    # Clamp "xhigh" down to "high"
+    level = "high" if reasoning_level == "xhigh" else reasoning_level
+    thinking_budget: int = getattr(budgets, level)
+
+    max_tokens = min(base_max_tokens + thinking_budget, model_max_tokens)
+
+    if max_tokens <= thinking_budget:
+        thinking_budget = max(0, max_tokens - min_output_tokens)
+
+    return max_tokens, thinking_budget
+
+
 class ModelCost(BaseModel):
     input: float = 0
     output: float = 0
@@ -150,5 +193,6 @@ class Provider(Protocol):
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
         thinking: ThinkingLevel = "off",
+        thinking_budgets: ThinkingBudgets | None = None,
         signal: asyncio.Event | None = None,
     ) -> MessageStream: ...

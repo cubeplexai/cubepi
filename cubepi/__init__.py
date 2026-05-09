@@ -17,11 +17,13 @@ from cubepi.providers import (
     Provider,
     StreamEvent,
     TextContent,
+    ThinkingBudgets,
     ThinkingLevel,
     ToolCall,
     ToolDefinition,
     ToolResultMessage,
     UserMessage,
+    adjust_max_tokens_for_thinking,
 )
 
 __all__ = [
@@ -37,11 +39,13 @@ __all__ = [
     "Provider",
     "StreamEvent",
     "TextContent",
+    "ThinkingBudgets",
     "ThinkingLevel",
     "ToolCall",
     "ToolDefinition",
     "ToolResultMessage",
     "UserMessage",
+    "adjust_max_tokens_for_thinking",
     "compose_middleware",
     "run_agent_loop",
     "run_agent_loop_continue",

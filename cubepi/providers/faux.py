@@ -13,6 +13,7 @@ from cubepi.providers.base import (
     Model,
     StreamEvent,
     TextContent,
+    ThinkingBudgets,
     ThinkingContent,
     ThinkingLevel,
     ToolCall,
@@ -119,6 +120,7 @@ class FauxProvider:
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
         thinking: ThinkingLevel = "off",
+        thinking_budgets: ThinkingBudgets | None = None,
         signal: asyncio.Event | None = None,
     ) -> MessageStream:
         ms = MessageStream()
