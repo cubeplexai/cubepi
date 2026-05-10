@@ -1,3 +1,5 @@
+import asyncio
+import time
 from typing import Any
 
 from pydantic import BaseModel
@@ -10,9 +12,15 @@ from cubepi.agent.types import (
     AgentToolResult,
 )
 from cubepi.providers.base import (
+    AssistantMessage,
     Message,
+    MessageStream,
     Model,
+    StreamEvent,
+    StreamOptions,
     TextContent,
+    ToolDefinition,
+    Usage,
     UserMessage,
 )
 from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
@@ -411,3 +419,247 @@ class TestAgentLoopContinue:
         message_ends = [e for e in events if e.type == "message_end"]
         assert len(message_ends) == 1
         assert message_ends[0].message.role == "assistant"
+
+
+class TestFollowUpMessages:
+    async def test_follow_up_messages_trigger_second_turn(self):
+        """Lines 238-244: get_follow_up_messages injects messages and continues loop."""
+        provider = FauxProvider()
+        provider.set_responses(
+            [
+                faux_assistant_message("first response"),
+                faux_assistant_message("second response"),
+            ]
+        )
+
+        context = AgentContext(system_prompt="", messages=[], tools=[])
+        follow_up_call_count = 0
+
+        async def get_follow_ups():
+            nonlocal follow_up_call_count
+            follow_up_call_count += 1
+            if follow_up_call_count == 1:
+                return [make_user_message("follow-up question")]
+            return []
+
+        events: list[AgentEvent] = []
+        messages = await run_agent_loop(
+            prompts=[make_user_message("Hello")],
+            context=context,
+            provider=provider,
+            model=make_model(),
+            convert_to_llm=identity_converter,
+            get_follow_up_messages=get_follow_ups,
+            emit=lambda e: events.append(e),
+        )
+
+        # Should have: user prompt, first assistant, follow-up user, second assistant
+        roles = [m.role for m in messages]
+        assert roles == ["user", "assistant", "user", "assistant"]
+
+        # Provider should have been called twice (once per assistant turn)
+        assert provider.call_count == 2
+
+        # Follow-up message events should be present
+        message_starts = [e for e in events if e.type == "message_start"]
+        message_start_roles = [e.message.role for e in message_starts]
+        # user prompt, first assistant (partial start), follow-up user, second assistant (partial start)
+        assert message_start_roles.count("user") == 2
+        assert message_start_roles.count("assistant") == 2
+
+        # Verify 2 turn_start events (first turn + follow-up turn)
+        turn_starts = [e for e in events if e.type == "turn_start"]
+        assert len(turn_starts) == 2
+
+
+class TestAsyncConvertToLlm:
+    async def test_async_converter_awaited_correctly(self):
+        """Line 266: convert_to_llm returning a coroutine is awaited."""
+        provider = FauxProvider()
+        provider.set_responses([faux_assistant_message("Response")])
+
+        context = AgentContext(system_prompt="", messages=[], tools=[])
+        converter_called = False
+
+        async def async_converter(messages: list[Any]) -> list[Message]:
+            nonlocal converter_called
+            converter_called = True
+            return [
+                m
+                for m in messages
+                if hasattr(m, "role") and m.role in ("user", "assistant", "tool_result")
+            ]
+
+        events: list[AgentEvent] = []
+        messages = await run_agent_loop(
+            prompts=[make_user_message("Hello")],
+            context=context,
+            provider=provider,
+            model=make_model(),
+            convert_to_llm=async_converter,
+            emit=lambda e: events.append(e),
+        )
+
+        assert converter_called
+        assert len(messages) == 2
+        assert messages[0].role == "user"
+        assert messages[1].role == "assistant"
+
+        event_types = [e.type for e in events]
+        assert "agent_end" in event_types
+
+
+class _NoFinalEventProvider:
+    """Minimal provider whose stream ends without a 'done' or 'error' event.
+
+    This triggers the fallback path at lines 328-335 of loop.py.
+    """
+
+    def __init__(self, message: AssistantMessage) -> None:
+        self._message = message
+        self.call_count = 0
+
+    async def stream(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        self.call_count += 1
+        ms = MessageStream()
+
+        async def _produce() -> None:
+            # Push a start event with a partial, then end iteration without done/error.
+            partial = self._message.model_copy(
+                update={"content": [TextContent(text="")]}
+            )
+            ms.push(StreamEvent(type="start", partial=partial))
+
+            # Push text deltas so added_partial is True
+            full = self._message.model_copy(deep=True)
+            ms.push(
+                StreamEvent(
+                    type="text_start",
+                    content_index=0,
+                    partial=full,
+                )
+            )
+            ms.push(
+                StreamEvent(
+                    type="text_end",
+                    content_index=0,
+                    partial=full,
+                )
+            )
+
+            # Set the result so stream.result() works, but do NOT push done/error.
+            ms.set_result(self._message)
+            # Push None sentinel to end iteration without done/error.
+            ms._queue.put_nowait(None)
+
+        ms.attach_task(asyncio.create_task(_produce()))
+        return ms
+
+
+class _NoFinalEventNoPartialProvider:
+    """Provider whose stream ends without done/error AND without a start event.
+
+    This covers the else-branch at line 332 of the fallback path.
+    """
+
+    def __init__(self, message: AssistantMessage) -> None:
+        self._message = message
+        self.call_count = 0
+
+    async def stream(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        self.call_count += 1
+        ms = MessageStream()
+
+        async def _produce() -> None:
+            # No start event at all -- added_partial stays False.
+            ms.set_result(self._message)
+            ms._queue.put_nowait(None)
+
+        ms.attach_task(asyncio.create_task(_produce()))
+        return ms
+
+
+class TestStreamFallback:
+    async def test_fallback_with_partial(self):
+        """Lines 328-335 fallback: stream ends without done/error, partial was added."""
+        final = AssistantMessage(
+            content=[TextContent(text="fallback result")],
+            stop_reason="stop",
+            usage=Usage(),
+            timestamp=time.time(),
+        )
+        provider = _NoFinalEventProvider(final)
+        context = AgentContext(system_prompt="", messages=[], tools=[])
+
+        events: list[AgentEvent] = []
+        messages = await run_agent_loop(
+            prompts=[make_user_message("Hello")],
+            context=context,
+            provider=provider,
+            model=make_model(),
+            convert_to_llm=identity_converter,
+            emit=lambda e: events.append(e),
+        )
+
+        assert len(messages) == 2
+        assert messages[1].role == "assistant"
+        assert messages[1].content[0].text == "fallback result"
+
+        # Should still emit message_end even via fallback
+        message_ends = [e for e in events if e.type == "message_end"]
+        assert any(e.message.role == "assistant" for e in message_ends)
+
+    async def test_fallback_without_partial(self):
+        """Lines 328-335 fallback: no partial was added (added_partial=False)."""
+        final = AssistantMessage(
+            content=[TextContent(text="no-partial fallback")],
+            stop_reason="stop",
+            usage=Usage(),
+            timestamp=time.time(),
+        )
+        provider = _NoFinalEventNoPartialProvider(final)
+        context = AgentContext(system_prompt="", messages=[], tools=[])
+
+        events: list[AgentEvent] = []
+        messages = await run_agent_loop(
+            prompts=[make_user_message("Hello")],
+            context=context,
+            provider=provider,
+            model=make_model(),
+            convert_to_llm=identity_converter,
+            emit=lambda e: events.append(e),
+        )
+
+        assert len(messages) == 2
+        assert messages[1].role == "assistant"
+        assert messages[1].content[0].text == "no-partial fallback"
+
+        # Fallback without partial should emit both message_start and message_end
+        message_starts = [
+            e
+            for e in events
+            if e.type == "message_start" and e.message.role == "assistant"
+        ]
+        message_ends = [
+            e
+            for e in events
+            if e.type == "message_end" and e.message.role == "assistant"
+        ]
+        assert len(message_starts) == 1
+        assert len(message_ends) == 1
