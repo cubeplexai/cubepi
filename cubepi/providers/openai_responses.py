@@ -114,6 +114,7 @@ class OpenAIResponsesProvider:
                 current_thinking = ""
                 current_text = ""
                 current_item_type: str | None = None
+                current_content_index = 0
                 # Per-item tool call state keyed by item.id
                 tool_state: dict[str, dict[str, str]] = {}
                 active_tool_item_id: str | None = None
@@ -144,9 +145,11 @@ class OpenAIResponsesProvider:
                             current_item_type = "reasoning"
                             current_thinking = ""
                             partial.content.append(ThinkingContent(thinking=""))
+                            current_content_index = len(partial.content) - 1
                             ms.push(
                                 StreamEvent(
                                     type="thinking_start",
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -154,9 +157,11 @@ class OpenAIResponsesProvider:
                             current_item_type = "message"
                             current_text = ""
                             partial.content.append(TextContent(text=""))
+                            current_content_index = len(partial.content) - 1
                             ms.push(
                                 StreamEvent(
                                     type="text_start",
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -181,9 +186,11 @@ class OpenAIResponsesProvider:
                                     arguments={},
                                 )
                             )
+                            current_content_index = len(partial.content) - 1
                             ms.push(
                                 StreamEvent(
                                     type="toolcall_start",
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -202,6 +209,7 @@ class OpenAIResponsesProvider:
                                 StreamEvent(
                                     type="thinking_delta",
                                     delta=event.delta,
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -219,6 +227,7 @@ class OpenAIResponsesProvider:
                                 StreamEvent(
                                     type="thinking_delta",
                                     delta=event.delta,
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -237,6 +246,7 @@ class OpenAIResponsesProvider:
                                 StreamEvent(
                                     type="thinking_delta",
                                     delta="\n\n",
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -253,6 +263,7 @@ class OpenAIResponsesProvider:
                                 StreamEvent(
                                     type="text_delta",
                                     delta=event.delta,
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -268,6 +279,7 @@ class OpenAIResponsesProvider:
                                 StreamEvent(
                                     type="text_delta",
                                     delta=event.delta,
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -280,6 +292,7 @@ class OpenAIResponsesProvider:
                                 StreamEvent(
                                     type="toolcall_delta",
                                     delta=event.delta,
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -308,6 +321,7 @@ class OpenAIResponsesProvider:
                             ms.push(
                                 StreamEvent(
                                     type="thinking_end",
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -333,6 +347,7 @@ class OpenAIResponsesProvider:
                             ms.push(
                                 StreamEvent(
                                     type="text_end",
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -362,6 +377,7 @@ class OpenAIResponsesProvider:
                             ms.push(
                                 StreamEvent(
                                     type="toolcall_end",
+                                    content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )

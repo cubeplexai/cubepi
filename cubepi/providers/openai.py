@@ -93,6 +93,7 @@ class OpenAIProvider:
                 current_text = ""
                 tool_calls_in_progress: dict[int, dict[str, Any]] = {}
                 text_started = False
+                text_content_index = 0
 
                 async for chunk in response:
                     if opts.signal and opts.signal.is_set():
@@ -118,9 +119,11 @@ class OpenAIProvider:
                     if delta.content:
                         if not text_started:
                             partial.content.append(TextContent(text=""))
+                            text_content_index = len(partial.content) - 1
                             ms.push(
                                 StreamEvent(
                                     type="text_start",
+                                    content_index=text_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -134,6 +137,7 @@ class OpenAIProvider:
                             StreamEvent(
                                 type="text_delta",
                                 delta=delta.content,
+                                content_index=text_content_index,
                                 partial=partial.model_copy(deep=True),
                             )
                         )
@@ -146,6 +150,7 @@ class OpenAIProvider:
                                     ms.push(
                                         StreamEvent(
                                             type="text_end",
+                                            content_index=text_content_index,
                                             partial=partial.model_copy(deep=True),
                                         )
                                     )
@@ -166,9 +171,12 @@ class OpenAIProvider:
                                         arguments={},
                                     )
                                 )
+                                tc_content_index = len(partial.content) - 1
+                                tool_calls_in_progress[idx]["content_index"] = str(tc_content_index)
                                 ms.push(
                                     StreamEvent(
                                         type="toolcall_start",
+                                        content_index=tc_content_index,
                                         partial=partial.model_copy(deep=True),
                                     )
                                 )
@@ -180,6 +188,7 @@ class OpenAIProvider:
                                     StreamEvent(
                                         type="toolcall_delta",
                                         delta=tc_delta.function.arguments,
+                                        content_index=int(tool_calls_in_progress[idx]["content_index"]),
                                         partial=partial.model_copy(deep=True),
                                     )
                                 )
@@ -192,6 +201,7 @@ class OpenAIProvider:
                             ms.push(
                                 StreamEvent(
                                     type="text_end",
+                                    content_index=text_content_index,
                                     partial=partial.model_copy(deep=True),
                                 )
                             )
@@ -208,6 +218,7 @@ class OpenAIProvider:
                             ms.push(
                                 StreamEvent(
                                     type="toolcall_end",
+                                    content_index=int(tc_data["content_index"]),
                                     partial=partial.model_copy(deep=True),
                                 )
                             )

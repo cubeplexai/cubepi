@@ -160,6 +160,7 @@ class StreamEvent(BaseModel):
         "done",
         "error",
     ]
+    content_index: int | None = None
     delta: str | None = None
     partial: AssistantMessage | None = None
     error_message: str | None = None

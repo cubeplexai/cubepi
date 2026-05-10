@@ -318,9 +318,12 @@ class FauxProvider:
 
             if isinstance(block, ThinkingContent):
                 partial.content.append(ThinkingContent(thinking=""))
+                block_idx = len(partial.content) - 1
                 stream.push(
                     StreamEvent(
-                        type="thinking_start", partial=partial.model_copy(deep=True)
+                        type="thinking_start",
+                        content_index=block_idx,
+                        partial=partial.model_copy(deep=True),
                     )
                 )
                 for chunk in _split_by_token_size(block.thinking, self._min, self._max):
@@ -343,20 +346,26 @@ class FauxProvider:
                         StreamEvent(
                             type="thinking_delta",
                             delta=chunk,
+                            content_index=block_idx,
                             partial=partial.model_copy(deep=True),
                         )
                     )
                 stream.push(
                     StreamEvent(
-                        type="thinking_end", partial=partial.model_copy(deep=True)
+                        type="thinking_end",
+                        content_index=block_idx,
+                        partial=partial.model_copy(deep=True),
                     )
                 )
 
             elif isinstance(block, TextContent):
                 partial.content.append(TextContent(text=""))
+                block_idx = len(partial.content) - 1
                 stream.push(
                     StreamEvent(
-                        type="text_start", partial=partial.model_copy(deep=True)
+                        type="text_start",
+                        content_index=block_idx,
+                        partial=partial.model_copy(deep=True),
                     )
                 )
                 for chunk in _split_by_token_size(block.text, self._min, self._max):
@@ -377,20 +386,28 @@ class FauxProvider:
                         StreamEvent(
                             type="text_delta",
                             delta=chunk,
+                            content_index=block_idx,
                             partial=partial.model_copy(deep=True),
                         )
                     )
                 stream.push(
-                    StreamEvent(type="text_end", partial=partial.model_copy(deep=True))
+                    StreamEvent(
+                        type="text_end",
+                        content_index=block_idx,
+                        partial=partial.model_copy(deep=True),
+                    )
                 )
 
             elif isinstance(block, ToolCall):
                 partial.content.append(
                     ToolCall(id=block.id, name=block.name, arguments={})
                 )
+                block_idx = len(partial.content) - 1
                 stream.push(
                     StreamEvent(
-                        type="toolcall_start", partial=partial.model_copy(deep=True)
+                        type="toolcall_start",
+                        content_index=block_idx,
+                        partial=partial.model_copy(deep=True),
                     )
                 )
                 json_str = json.dumps(block.arguments)
@@ -409,6 +426,7 @@ class FauxProvider:
                         StreamEvent(
                             type="toolcall_delta",
                             delta=chunk,
+                            content_index=block_idx,
                             partial=partial.model_copy(deep=True),
                         )
                     )
@@ -419,7 +437,9 @@ class FauxProvider:
                     )
                 stream.push(
                     StreamEvent(
-                        type="toolcall_end", partial=partial.model_copy(deep=True)
+                        type="toolcall_end",
+                        content_index=block_idx,
+                        partial=partial.model_copy(deep=True),
                     )
                 )
 
