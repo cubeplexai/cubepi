@@ -21,6 +21,7 @@ from cubepi.providers.base import (
     AssistantMessage,
     StreamEvent,
     TextContent,
+    ToolResultMessage,
     UserMessage,
 )
 
@@ -147,3 +148,30 @@ class TestHookTypes:
         assert r.terminate is True
         assert r.content is None
         assert r.is_error is None
+
+
+class TestTypedMessages:
+    def test_agent_context_accepts_message_union(self):
+        ctx = AgentContext(
+            system_prompt="test",
+            messages=[
+                UserMessage(content=[TextContent(text="hi")]),
+                AssistantMessage(content=[TextContent(text="hello")]),
+            ],
+        )
+        assert len(ctx.messages) == 2
+
+    def test_agent_end_event_typed_messages(self):
+        msg = UserMessage(content=[TextContent(text="hi")])
+        event = AgentEndEvent(messages=[msg])
+        assert event.messages[0].role == "user"
+
+    def test_turn_end_event_typed_message(self):
+        msg = AssistantMessage(content=[TextContent(text="done")])
+        event = TurnEndEvent(message=msg, tool_results=[])
+        assert event.message.role == "assistant"
+
+    def test_message_start_event_typed(self):
+        msg = UserMessage(content=[TextContent(text="hi")])
+        event = MessageStartEvent(message=msg)
+        assert event.message.role == "user"

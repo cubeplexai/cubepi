@@ -17,6 +17,7 @@ from cubepi.agent.types import (
 )
 from cubepi.providers.base import (
     AssistantMessage,
+    Message,
     Model,
     Provider,
     StreamOptions,
@@ -33,7 +34,7 @@ async def _emit(emit_fn: Callable, event: Any) -> None:
 
 async def run_agent_loop(
     *,
-    prompts: list[Any],
+    prompts: list[Message],
     context: AgentContext,
     provider: Provider,
     model: Model,
@@ -48,8 +49,8 @@ async def run_agent_loop(
     stream_options: StreamOptions | None = None,
     tool_execution: str = "parallel",
     system_prompt: str | None = None,
-) -> list[Any]:
-    new_messages: list[Any] = list(prompts)
+) -> list[Message]:
+    new_messages: list[Message] = list(prompts)
     current_context = AgentContext(
         system_prompt=system_prompt
         if system_prompt is not None
@@ -99,11 +100,11 @@ async def run_agent_loop_continue(
     stream_options: StreamOptions | None = None,
     tool_execution: str = "parallel",
     system_prompt: str | None = None,
-) -> list[Any]:
+) -> list[Message]:
     if not context.messages:
         raise ValueError("Cannot continue: no messages in context")
 
-    new_messages: list[Any] = []
+    new_messages: list[Message] = []
     current_context = AgentContext(
         system_prompt=system_prompt
         if system_prompt is not None
@@ -137,7 +138,7 @@ async def run_agent_loop_continue(
 async def _run_loop(
     *,
     current_context: AgentContext,
-    new_messages: list[Any],
+    new_messages: list[Message],
     provider: Provider,
     model: Model,
     convert_to_llm: Callable,

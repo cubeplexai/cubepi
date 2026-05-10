@@ -32,26 +32,22 @@ from cubepi.providers.base import (
 TMessage = TypeVar("TMessage")
 
 
-def _default_convert_to_llm(messages: list[Any]) -> list[Message]:
-    return [
-        m
-        for m in messages
-        if hasattr(m, "role") and m.role in ("user", "assistant", "tool_result")
-    ]
+def _default_convert_to_llm(messages: list[Message]) -> list[Message]:
+    return list(messages)
 
 
 class _MessageQueue:
     def __init__(self, mode: str = "one-at-a-time") -> None:
         self.mode = mode
-        self._messages: list[Any] = []
+        self._messages: list[Message] = []
 
-    def enqueue(self, message: Any) -> None:
+    def enqueue(self, message: Message) -> None:
         self._messages.append(message)
 
     def has_items(self) -> bool:
         return len(self._messages) > 0
 
-    def drain(self) -> list[Any]:
+    def drain(self) -> list[Message]:
         if self.mode == "all":
             drained = self._messages[:]
             self._messages = []
@@ -74,10 +70,10 @@ class AgentState:
     )
     thinking: ThinkingLevel = "off"
     is_streaming: bool = False
-    streaming_message: Any = None
+    streaming_message: Message | None = None
     error_message: str | None = None
     _tools: list[AgentTool] = field(default_factory=list)
-    _messages: list[Any] = field(default_factory=list)
+    _messages: list[Message] = field(default_factory=list)
     _pending_tool_calls: set[str] = field(default_factory=set)
 
     @property
@@ -89,11 +85,11 @@ class AgentState:
         self._tools = list(value)
 
     @property
-    def messages(self) -> list[Any]:
+    def messages(self) -> list[Message]:
         return list(self._messages)
 
     @messages.setter
-    def messages(self, value: list[Any]) -> None:
+    def messages(self, value: list[Message]) -> None:
         self._messages = list(value)
 
     @property
@@ -114,7 +110,7 @@ class Agent(Generic[TMessage]):
         system_prompt: str = "",
         tools: list[AgentTool] | None = None,
         thinking: ThinkingLevel = "off",
-        convert_to_llm: Callable | None = None,
+        convert_to_llm: Callable[[list[Message]], list[Message]] | None = None,
         transform_context: Callable | None = None,
         before_tool_call: Callable | None = None,
         after_tool_call: Callable | None = None,
@@ -162,10 +158,10 @@ class Agent(Generic[TMessage]):
             self._listeners.remove(listener) if listener in self._listeners else None
         )
 
-    def steer(self, message: Any) -> None:
+    def steer(self, message: Message) -> None:
         self._steering_queue.enqueue(message)
 
-    def follow_up(self, message: Any) -> None:
+    def follow_up(self, message: Message) -> None:
         self._follow_up_queue.enqueue(message)
 
     def abort(self) -> None:
@@ -185,7 +181,7 @@ class Agent(Generic[TMessage]):
         self._steering_queue.clear()
         self._follow_up_queue.clear()
 
-    async def prompt(self, message: str | Any | list[Any]) -> None:
+    async def prompt(self, message: str | Message | list[Message]) -> None:
         if self._state.is_streaming:
             raise RuntimeError(
                 "Agent is already processing a prompt. "
@@ -213,7 +209,7 @@ class Agent(Generic[TMessage]):
             raise RuntimeError("No messages to continue from")
 
         last = self._state._messages[-1]
-        if hasattr(last, "role") and last.role == "assistant":
+        if isinstance(last, AssistantMessage):
             # Check for queued messages
             steering = self._steering_queue.drain()
             if steering:
@@ -237,7 +233,7 @@ class Agent(Generic[TMessage]):
             on_response=self.on_response,
         )
 
-    async def _run_prompt(self, messages: list[Any]) -> None:
+    async def _run_prompt(self, messages: list[Message]) -> None:
         await self._run_with_lifecycle(
             lambda signal: run_agent_loop(
                 prompts=messages,
@@ -278,7 +274,7 @@ class Agent(Generic[TMessage]):
 
     @staticmethod
     def _make_async_drain(queue: _MessageQueue) -> Callable:
-        async def _drain() -> list[Any]:
+        async def _drain() -> list[Message]:
             return queue.drain()
 
         return _drain
@@ -344,12 +340,7 @@ class Agent(Generic[TMessage]):
             }
         elif event.type == "turn_end":
             msg = event.message
-            if (
-                hasattr(msg, "role")
-                and msg.role == "assistant"
-                and hasattr(msg, "error_message")
-                and msg.error_message
-            ):
+            if isinstance(msg, AssistantMessage) and msg.error_message:
                 self._state.error_message = msg.error_message
         elif event.type == "agent_end":
             self._state.streaming_message = None
