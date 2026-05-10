@@ -335,6 +335,167 @@ class TestOpenAIProviderHooks:
 
 
 # ---------------------------------------------------------------------------
+# OpenAIResponsesProvider hook integration
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAIResponsesProviderHooks:
+    async def test_on_payload_called_with_kwargs(self):
+        """on_payload receives the payload dict and model before the API call."""
+        from cubepi.providers.openai_responses import OpenAIResponsesProvider
+        from cubepi.providers.base import TextContent, UserMessage
+
+        captured_payloads: list[tuple[dict, Model]] = []
+
+        def on_payload(payload: dict, model: Model) -> None:
+            captured_payloads.append((payload.copy(), model))
+            return None
+
+        # Build a mock streaming response that emits response.completed
+        mock_completed_event = MagicMock()
+        mock_completed_event.type = "response.completed"
+        mock_completed_event.response = MagicMock()
+        mock_completed_event.response.usage = MagicMock(
+            input_tokens=10,
+            output_tokens=5,
+            input_tokens_details=None,
+        )
+        mock_completed_event.response.status = "completed"
+        mock_completed_event.response.id = "resp_123"
+
+        async def _aiter():
+            yield mock_completed_event
+
+        mock_response = _aiter()
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.responses.create = AsyncMock(return_value=mock_response)
+
+            provider = OpenAIResponsesProvider(api_key="test")
+            provider._client = mock_client
+
+            model = _model()
+            ms = await provider.stream(
+                model,
+                [UserMessage(content=[TextContent(text="hi")])],
+                options=StreamOptions(on_payload=on_payload),
+            )
+            async for _ in ms:
+                pass
+
+        assert len(captured_payloads) == 1
+        payload, recv_model = captured_payloads[0]
+        assert payload["model"] == "test-model"
+        assert "input" in payload
+        assert recv_model is model
+
+    async def test_on_payload_replaces_kwargs(self):
+        """When on_payload returns a dict, that dict replaces the payload."""
+        from cubepi.providers.openai_responses import OpenAIResponsesProvider
+        from cubepi.providers.base import TextContent, UserMessage
+
+        def on_payload(payload: dict, model: Model) -> dict:
+            payload["temperature"] = 0.7
+            return payload
+
+        mock_completed_event = MagicMock()
+        mock_completed_event.type = "response.completed"
+        mock_completed_event.response = MagicMock()
+        mock_completed_event.response.usage = MagicMock(
+            input_tokens=10,
+            output_tokens=5,
+            input_tokens_details=None,
+        )
+        mock_completed_event.response.status = "completed"
+        mock_completed_event.response.id = "resp_123"
+
+        async def _aiter():
+            yield mock_completed_event
+
+        mock_response = _aiter()
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.responses.create = AsyncMock(return_value=mock_response)
+
+            provider = OpenAIResponsesProvider(api_key="test")
+            provider._client = mock_client
+
+            ms = await provider.stream(
+                _model(),
+                [UserMessage(content=[TextContent(text="hi")])],
+                options=StreamOptions(on_payload=on_payload),
+            )
+            async for _ in ms:
+                pass
+
+        call_kwargs = mock_client.responses.create.call_args
+        assert call_kwargs is not None
+        assert call_kwargs[1]["temperature"] == 0.7
+
+    async def test_on_response_called_when_http_response_available(self):
+        """on_response is invoked with HTTP metadata after the API call."""
+        from cubepi.providers.openai_responses import OpenAIResponsesProvider
+        from cubepi.providers.base import TextContent, UserMessage
+
+        captured_responses: list[tuple[ProviderResponse, Model]] = []
+
+        def on_response(resp: ProviderResponse, model: Model) -> None:
+            captured_responses.append((resp, model))
+
+        mock_completed_event = MagicMock()
+        mock_completed_event.type = "response.completed"
+        mock_completed_event.response = MagicMock()
+        mock_completed_event.response.usage = MagicMock(
+            input_tokens=10,
+            output_tokens=5,
+            input_tokens_details=None,
+        )
+        mock_completed_event.response.status = "completed"
+        mock_completed_event.response.id = "resp_123"
+
+        # Use a MagicMock with __aiter__ so we can attach .response
+        mock_stream = MagicMock()
+
+        async def _aiter_impl():
+            yield mock_completed_event
+
+        mock_stream.__aiter__ = MagicMock(return_value=_aiter_impl().__aiter__())
+
+        # Attach a fake HTTP response to the stream object
+        mock_http = MagicMock()
+        mock_http.status_code = 200
+        mock_http.headers = {"x-request-id": "req_abc"}
+        mock_stream.response = mock_http
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.responses.create = AsyncMock(return_value=mock_stream)
+
+            provider = OpenAIResponsesProvider(api_key="test")
+            provider._client = mock_client
+
+            model = _model()
+            ms = await provider.stream(
+                model,
+                [UserMessage(content=[TextContent(text="hi")])],
+                options=StreamOptions(on_response=on_response),
+            )
+            async for _ in ms:
+                pass
+
+        assert len(captured_responses) == 1
+        resp, recv_model = captured_responses[0]
+        assert resp.status == 200
+        assert resp.headers == {"x-request-id": "req_abc"}
+        assert recv_model is model
+
+
+# ---------------------------------------------------------------------------
 # Protocol conformance
 # ---------------------------------------------------------------------------
 

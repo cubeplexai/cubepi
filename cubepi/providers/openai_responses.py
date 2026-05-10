@@ -11,6 +11,7 @@ from cubepi.providers.base import (
     Message,
     MessageStream,
     Model,
+    ProviderResponse,
     StreamEvent,
     StreamOptions,
     TextContent,
@@ -21,6 +22,8 @@ from cubepi.providers.base import (
     ToolResultMessage,
     Usage,
     UserMessage,
+    invoke_on_payload,
+    invoke_on_response,
 )
 
 # Map cubepi ThinkingLevel to OpenAI reasoning.effort values.
@@ -97,7 +100,22 @@ class OpenAIResponsesProvider:
 
         async def _produce() -> None:
             try:
+                nonlocal kwargs
+                kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
+
                 response = await self._client.responses.create(**kwargs)
+
+                # Invoke on_response with HTTP metadata if available
+                http_response = getattr(response, "response", None)
+                if http_response is not None:
+                    await invoke_on_response(
+                        opts.on_response,
+                        ProviderResponse(
+                            status=http_response.status_code,
+                            headers=dict(http_response.headers),
+                        ),
+                        model,
+                    )
                 partial = AssistantMessage(
                     content=[],
                     usage=Usage(),
