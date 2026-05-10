@@ -205,7 +205,9 @@ async def _run_loop(
                     current_context.messages.append(result)
                     new_messages.append(result)
 
-            await emit_event(emit, TurnEndEvent(message=message, tool_results=tool_results))
+            await emit_event(
+                emit, TurnEndEvent(message=message, tool_results=tool_results)
+            )
 
             if should_stop_after_turn:
                 stop_ctx = ShouldStopAfterTurnContext(
