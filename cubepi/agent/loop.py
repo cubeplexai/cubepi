@@ -14,6 +14,7 @@ from cubepi.agent.types import (
     ShouldStopAfterTurnContext,
     TurnEndEvent,
     TurnStartEvent,
+    emit_event,
 )
 from cubepi.providers.base import (
     AssistantMessage,
@@ -23,12 +24,6 @@ from cubepi.providers.base import (
     ToolCall,
     ToolResultMessage,
 )
-
-
-async def _emit(emit_fn: Callable, event: Any) -> None:
-    result = emit_fn(event)
-    if asyncio.iscoroutine(result):
-        await result
 
 
 async def run_agent_loop(
@@ -58,11 +53,11 @@ async def run_agent_loop(
         tools=context.tools,
     )
 
-    await _emit(emit, AgentStartEvent())
-    await _emit(emit, TurnStartEvent())
+    await emit_event(emit, AgentStartEvent())
+    await emit_event(emit, TurnStartEvent())
     for prompt in prompts:
-        await _emit(emit, MessageStartEvent(message=prompt))
-        await _emit(emit, MessageEndEvent(message=prompt))
+        await emit_event(emit, MessageStartEvent(message=prompt))
+        await emit_event(emit, MessageEndEvent(message=prompt))
 
     await _run_loop(
         current_context=current_context,
@@ -112,8 +107,8 @@ async def run_agent_loop_continue(
         tools=context.tools,
     )
 
-    await _emit(emit, AgentStartEvent())
-    await _emit(emit, TurnStartEvent())
+    await emit_event(emit, AgentStartEvent())
+    await emit_event(emit, TurnStartEvent())
 
     await _run_loop(
         current_context=current_context,
@@ -169,7 +164,7 @@ async def _run_loop(
 
         while has_more_tool_calls:
             if not first_turn:
-                await _emit(emit, TurnStartEvent())
+                await emit_event(emit, TurnStartEvent())
             else:
                 first_turn = False
 
@@ -185,8 +180,8 @@ async def _run_loop(
             new_messages.append(message)
 
             if message.stop_reason in ("error", "aborted"):
-                await _emit(emit, TurnEndEvent(message=message, tool_results=[]))
-                await _emit(emit, AgentEndEvent(messages=new_messages))
+                await emit_event(emit, TurnEndEvent(message=message, tool_results=[]))
+                await emit_event(emit, AgentEndEvent(messages=new_messages))
                 return
 
             tool_calls = [c for c in message.content if isinstance(c, ToolCall)]
@@ -210,7 +205,7 @@ async def _run_loop(
                     current_context.messages.append(result)
                     new_messages.append(result)
 
-            await _emit(emit, TurnEndEvent(message=message, tool_results=tool_results))
+            await emit_event(emit, TurnEndEvent(message=message, tool_results=tool_results))
 
             if should_stop_after_turn:
                 stop_ctx = ShouldStopAfterTurnContext(
@@ -220,7 +215,7 @@ async def _run_loop(
                     new_messages=new_messages,
                 )
                 if await should_stop_after_turn(stop_ctx):
-                    await _emit(emit, AgentEndEvent(messages=new_messages))
+                    await emit_event(emit, AgentEndEvent(messages=new_messages))
                     return
 
             # Check for steering messages after tool execution
@@ -228,8 +223,8 @@ async def _run_loop(
                 steering = await get_steering_messages() or []
                 if steering:
                     for msg in steering:
-                        await _emit(emit, MessageStartEvent(message=msg))
-                        await _emit(emit, MessageEndEvent(message=msg))
+                        await emit_event(emit, MessageStartEvent(message=msg))
+                        await emit_event(emit, MessageEndEvent(message=msg))
                         current_context.messages.append(msg)
                         new_messages.append(msg)
 
@@ -238,8 +233,8 @@ async def _run_loop(
             follow_ups = await get_follow_up_messages() or []
             if follow_ups:
                 for msg in follow_ups:
-                    await _emit(emit, MessageStartEvent(message=msg))
-                    await _emit(emit, MessageEndEvent(message=msg))
+                    await emit_event(emit, MessageStartEvent(message=msg))
+                    await emit_event(emit, MessageEndEvent(message=msg))
                     current_context.messages.append(msg)
                     new_messages.append(msg)
                 first_turn = False
@@ -247,7 +242,7 @@ async def _run_loop(
 
         break
 
-    await _emit(emit, AgentEndEvent(messages=new_messages))
+    await emit_event(emit, AgentEndEvent(messages=new_messages))
 
 
 async def _stream_assistant_response(
@@ -288,7 +283,7 @@ async def _stream_assistant_response(
             if partial_message:
                 context.messages.append(partial_message)
                 added_partial = True
-                await _emit(
+                await emit_event(
                     emit,
                     MessageStartEvent(message=partial_message.model_copy(deep=True)),
                 )
@@ -307,7 +302,7 @@ async def _stream_assistant_response(
             if partial_message and event.partial:
                 partial_message = event.partial
                 context.messages[-1] = partial_message
-                await _emit(
+                await emit_event(
                     emit,
                     MessageUpdateEvent(
                         message=partial_message.model_copy(deep=True),
@@ -322,8 +317,8 @@ async def _stream_assistant_response(
             else:
                 context.messages.append(final_message)
             if not added_partial:
-                await _emit(emit, MessageStartEvent(message=final_message))
-            await _emit(emit, MessageEndEvent(message=final_message))
+                await emit_event(emit, MessageStartEvent(message=final_message))
+            await emit_event(emit, MessageEndEvent(message=final_message))
             return final_message
 
     # Fallback: stream ended without done/error event
@@ -332,6 +327,6 @@ async def _stream_assistant_response(
         context.messages[-1] = final_message
     else:
         context.messages.append(final_message)
-        await _emit(emit, MessageStartEvent(message=final_message))
-    await _emit(emit, MessageEndEvent(message=final_message))
+        await emit_event(emit, MessageStartEvent(message=final_message))
+    await emit_event(emit, MessageEndEvent(message=final_message))
     return final_message

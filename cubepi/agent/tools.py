@@ -18,6 +18,7 @@ from cubepi.agent.types import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
+    emit_event,
 )
 from cubepi.providers.base import (
     AssistantMessage,
@@ -66,12 +67,6 @@ def _make_tool_result_message(finalized: _FinalizedOutcome) -> ToolResultMessage
         is_error=finalized.is_error,
         timestamp=time.time(),
     )
-
-
-async def _emit(emit_fn: Callable, event: Any) -> None:
-    result = emit_fn(event)
-    if asyncio.iscoroutine(result):
-        await result
 
 
 async def _prepare_tool_call(
@@ -131,7 +126,7 @@ async def _execute_prepared(
             prepared.tool_call.id,
             prepared.args,
             signal=signal,
-            on_update=lambda partial: _emit(
+            on_update=lambda partial: emit_event(
                 emit_fn,
                 ToolExecutionUpdateEvent(
                     tool_call_id=prepared.tool_call.id,
@@ -256,7 +251,7 @@ async def _execute_sequential(
     messages: list[ToolResultMessage] = []
 
     for tc in tool_calls:
-        await _emit(
+        await emit_event(
             emit_fn,
             ToolExecutionStartEvent(
                 tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
@@ -285,7 +280,7 @@ async def _execute_sequential(
                 signal,
             )
 
-        await _emit(
+        await emit_event(
             emit_fn,
             ToolExecutionEndEvent(
                 tool_call_id=tc.id,
@@ -295,8 +290,8 @@ async def _execute_sequential(
             ),
         )
         tool_msg = _make_tool_result_message(finalized)
-        await _emit(emit_fn, MessageStartEvent(message=tool_msg))
-        await _emit(emit_fn, MessageEndEvent(message=tool_msg))
+        await emit_event(emit_fn, MessageStartEvent(message=tool_msg))
+        await emit_event(emit_fn, MessageEndEvent(message=tool_msg))
         finalized_list.append(finalized)
         messages.append(tool_msg)
 
@@ -315,7 +310,7 @@ async def _execute_parallel(
     entries: list[_FinalizedOutcome | asyncio.Task] = []
 
     for tc in tool_calls:
-        await _emit(
+        await emit_event(
             emit_fn,
             ToolExecutionStartEvent(
                 tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
@@ -332,7 +327,7 @@ async def _execute_parallel(
                 result=preparation.result,
                 is_error=preparation.is_error,
             )
-            await _emit(
+            await emit_event(
                 emit_fn,
                 ToolExecutionEndEvent(
                     tool_call_id=tc.id,
@@ -355,7 +350,7 @@ async def _execute_parallel(
                     after_tool_call,
                     signal,
                 )
-                await _emit(
+                await emit_event(
                     emit_fn,
                     ToolExecutionEndEvent(
                         tool_call_id=prep.tool_call.id,
@@ -378,8 +373,8 @@ async def _execute_parallel(
     messages: list[ToolResultMessage] = []
     for finalized in finalized_list:
         tool_msg = _make_tool_result_message(finalized)
-        await _emit(emit_fn, MessageStartEvent(message=tool_msg))
-        await _emit(emit_fn, MessageEndEvent(message=tool_msg))
+        await emit_event(emit_fn, MessageStartEvent(message=tool_msg))
+        await emit_event(emit_fn, MessageEndEvent(message=tool_msg))
         messages.append(tool_msg)
 
     return ToolCallBatch(messages=messages, terminate=_should_terminate(finalized_list))
