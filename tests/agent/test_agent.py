@@ -1,6 +1,8 @@
 import asyncio
 
-from cubepi.agent.agent import Agent
+import pytest
+
+from cubepi.agent.agent import Agent, _MessageQueue
 from cubepi.agent.types import AgentTool
 from cubepi.providers.base import (
     AssistantMessage,
@@ -284,4 +286,248 @@ class TestAgentResume:
             for m in agent.state.messages
         )
         assert has_follow_up
+        assert isinstance(agent.state.messages[-1], AssistantMessage)
+
+    async def test_resume_drains_steering_queue_before_follow_up(self):
+        """resume() should drain the steering queue first when the last
+        message is from the assistant."""
+        provider = FauxProvider()
+        provider.set_responses(
+            [
+                faux_assistant_message("Initial"),
+                faux_assistant_message("Steered"),
+            ]
+        )
+        agent = Agent(provider=provider, model=make_model())
+
+        await agent.prompt("hello")
+        agent.steer(UserMessage(content=[TextContent(text="steer-msg")]))
+        await agent.resume()
+
+        has_steer = any(
+            isinstance(m, UserMessage)
+            and any(
+                isinstance(c, TextContent) and c.text == "steer-msg" for c in m.content
+            )
+            for m in agent.state.messages
+        )
+        assert has_steer
+        assert isinstance(agent.state.messages[-1], AssistantMessage)
+
+    async def test_resume_raises_on_assistant_last_with_empty_queues(self):
+        """resume() raises RuntimeError when the last message is from the
+        assistant and both steering and follow-up queues are empty."""
+        provider = FauxProvider()
+        provider.set_responses([faux_assistant_message("done")])
+        agent = Agent(provider=provider, model=make_model())
+
+        await agent.prompt("hello")
+
+        with pytest.raises(RuntimeError, match="Cannot continue from message role"):
+            await agent.resume()
+
+
+class TestMessageQueueAllMode:
+    def test_drain_returns_all_messages_at_once(self):
+        q = _MessageQueue(mode="all")
+        m1 = UserMessage(content=[TextContent(text="a")])
+        m2 = UserMessage(content=[TextContent(text="b")])
+        m3 = UserMessage(content=[TextContent(text="c")])
+
+        q.enqueue(m1)
+        q.enqueue(m2)
+        q.enqueue(m3)
+
+        drained = q.drain()
+        assert drained == [m1, m2, m3]
+        assert not q.has_items()
+
+    def test_drain_returns_empty_when_no_items(self):
+        q = _MessageQueue(mode="all")
+        assert q.drain() == []
+
+    def test_has_items_reflects_state(self):
+        q = _MessageQueue(mode="all")
+        assert not q.has_items()
+        q.enqueue(UserMessage(content=[TextContent(text="x")]))
+        assert q.has_items()
+
+    def test_clear_removes_all(self):
+        q = _MessageQueue(mode="all")
+        q.enqueue(UserMessage(content=[TextContent(text="a")]))
+        q.enqueue(UserMessage(content=[TextContent(text="b")]))
+        q.clear()
+        assert not q.has_items()
+        assert q.drain() == []
+
+
+class TestAgentStatePendingToolCalls:
+    def test_setter_makes_a_copy(self):
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=make_model())
+
+        original = {"call-1", "call-2"}
+        agent.state.pending_tool_calls = original
+
+        retrieved = agent.state.pending_tool_calls
+        assert retrieved == {"call-1", "call-2"}
+        # Must be a distinct set, not the same object
+        assert retrieved is not original
+
+
+class TestAgentReset:
+    async def test_reset_clears_state_after_prompt(self):
+        provider = FauxProvider()
+        provider.set_responses([faux_assistant_message("response")])
+        agent = Agent(provider=provider, model=make_model())
+
+        await agent.prompt("hello")
+        assert len(agent.state.messages) > 0
+
+        agent.reset()
+
+        assert agent.state.messages == []
+        assert agent.state.is_streaming is False
+        assert agent.state.streaming_message is None
+        assert agent.state.pending_tool_calls == set()
+        assert agent.state.error_message is None
+
+    async def test_reset_clears_queues(self):
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=make_model())
+
+        agent.steer(UserMessage(content=[TextContent(text="steer")]))
+        agent.follow_up(UserMessage(content=[TextContent(text="follow")]))
+
+        agent.reset()
+
+        # After reset, queues should be empty — drain returns nothing
+        assert agent._steering_queue.drain() == []
+        assert agent._follow_up_queue.drain() == []
+
+
+class TestAgentAbortSignal:
+    async def test_abort_sets_signal_during_active_run(self):
+        barrier = asyncio.Event()
+        provider = FauxProvider()
+
+        async def slow_stream(*args, **kwargs):
+            from cubepi.providers.base import MessageStream, StreamEvent
+
+            ms = MessageStream()
+
+            async def produce():
+                await barrier.wait()
+                msg = faux_assistant_message("ok")
+                ms.push(StreamEvent(type="done"))
+                ms.set_result(msg)
+
+            asyncio.create_task(produce())
+            return ms
+
+        provider.stream = slow_stream
+        agent = Agent(provider=provider, model=make_model())
+
+        task = asyncio.create_task(agent.prompt("hello"))
+        await asyncio.sleep(0.02)
+
+        assert agent._active_signal is not None
+        assert not agent._active_signal.is_set()
+
+        agent.abort()
+        assert agent._active_signal.is_set()
+
+        barrier.set()
+        await task
+
+
+class TestAgentWaitForIdle:
+    async def test_returns_immediately_when_no_active_run(self):
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=make_model())
+
+        # No active run, _active_done is None — should return immediately
+        await agent.wait_for_idle()
+
+    async def test_waits_until_prompt_completes(self):
+        barrier = asyncio.Event()
+        provider = FauxProvider()
+
+        async def slow_stream(*args, **kwargs):
+            from cubepi.providers.base import MessageStream, StreamEvent
+
+            ms = MessageStream()
+
+            async def produce():
+                await barrier.wait()
+                msg = faux_assistant_message("ok")
+                ms.push(StreamEvent(type="done"))
+                ms.set_result(msg)
+
+            asyncio.create_task(produce())
+            return ms
+
+        provider.stream = slow_stream
+        agent = Agent(provider=provider, model=make_model())
+
+        prompt_task = asyncio.create_task(agent.prompt("hello"))
+        await asyncio.sleep(0.02)
+
+        idle_resolved = False
+
+        async def wait():
+            nonlocal idle_resolved
+            await agent.wait_for_idle()
+            idle_resolved = True
+
+        wait_task = asyncio.create_task(wait())
+        await asyncio.sleep(0.02)
+        assert not idle_resolved
+
+        barrier.set()
+        await prompt_task
+        await wait_task
+        assert idle_resolved
+
+
+class TestAgentPromptInputTypes:
+    async def test_prompt_with_message_object(self):
+        provider = FauxProvider()
+        provider.set_responses([faux_assistant_message("response")])
+        agent = Agent(provider=provider, model=make_model())
+
+        msg = UserMessage(content=[TextContent(text="direct message")])
+        await agent.prompt(msg)
+
+        has_direct = any(
+            isinstance(m, UserMessage)
+            and any(
+                isinstance(c, TextContent) and c.text == "direct message"
+                for c in m.content
+            )
+            for m in agent.state.messages
+        )
+        assert has_direct
+        assert isinstance(agent.state.messages[-1], AssistantMessage)
+
+    async def test_prompt_with_list_of_messages(self):
+        provider = FauxProvider()
+        provider.set_responses([faux_assistant_message("response")])
+        agent = Agent(provider=provider, model=make_model())
+
+        msgs = [
+            UserMessage(content=[TextContent(text="first")]),
+            UserMessage(content=[TextContent(text="second")]),
+        ]
+        await agent.prompt(msgs)
+
+        texts = [
+            c.text
+            for m in agent.state.messages
+            if isinstance(m, UserMessage)
+            for c in m.content
+            if isinstance(c, TextContent)
+        ]
+        assert "first" in texts
+        assert "second" in texts
         assert isinstance(agent.state.messages[-1], AssistantMessage)
