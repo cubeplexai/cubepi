@@ -172,7 +172,9 @@ class OpenAIProvider:
                                     )
                                 )
                                 tc_content_index = len(partial.content) - 1
-                                tool_calls_in_progress[idx]["content_index"] = str(tc_content_index)
+                                tool_calls_in_progress[idx]["content_index"] = str(
+                                    tc_content_index
+                                )
                                 ms.push(
                                     StreamEvent(
                                         type="toolcall_start",
@@ -188,7 +190,9 @@ class OpenAIProvider:
                                     StreamEvent(
                                         type="toolcall_delta",
                                         delta=tc_delta.function.arguments,
-                                        content_index=int(tool_calls_in_progress[idx]["content_index"]),
+                                        content_index=int(
+                                            tool_calls_in_progress[idx]["content_index"]
+                                        ),
                                         partial=partial.model_copy(deep=True),
                                     )
                                 )

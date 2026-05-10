@@ -42,7 +42,11 @@ class TestContentIndexThinkingAndText:
     async def test_thinking_then_text_content_index(self):
         provider = FauxProvider()
         provider.set_responses(
-            [faux_assistant_message([faux_thinking("let me think"), faux_text("answer")])]
+            [
+                faux_assistant_message(
+                    [faux_thinking("let me think"), faux_text("answer")]
+                )
+            ]
         )
 
         stream = await provider.stream(_make_model(), [])
@@ -55,18 +59,14 @@ class TestContentIndexThinkingAndText:
         ]
         assert len(thinking_events) >= 3
         for e in thinking_events:
-            assert (
-                e.content_index == 0
-            ), f"{e.type} had content_index={e.content_index}"
+            assert e.content_index == 0, f"{e.type} had content_index={e.content_index}"
 
         text_events = [
             e for e in events if e.type in ("text_start", "text_delta", "text_end")
         ]
         assert len(text_events) >= 3
         for e in text_events:
-            assert (
-                e.content_index == 1
-            ), f"{e.type} had content_index={e.content_index}"
+            assert e.content_index == 1, f"{e.type} had content_index={e.content_index}"
 
 
 class TestContentIndexTextAndToolCall:
@@ -77,7 +77,10 @@ class TestContentIndexTextAndToolCall:
         provider.set_responses(
             [
                 faux_assistant_message(
-                    [faux_text("searching"), faux_tool_call("search", {"q": "test"}, id="tc-1")],
+                    [
+                        faux_text("searching"),
+                        faux_tool_call("search", {"q": "test"}, id="tc-1"),
+                    ],
                     stop_reason="tool_use",
                 )
             ]
@@ -91,9 +94,7 @@ class TestContentIndexTextAndToolCall:
         ]
         assert len(text_events) >= 3
         for e in text_events:
-            assert (
-                e.content_index == 0
-            ), f"{e.type} had content_index={e.content_index}"
+            assert e.content_index == 0, f"{e.type} had content_index={e.content_index}"
 
         tool_events = [
             e
@@ -102,6 +103,4 @@ class TestContentIndexTextAndToolCall:
         ]
         assert len(tool_events) >= 3
         for e in tool_events:
-            assert (
-                e.content_index == 1
-            ), f"{e.type} had content_index={e.content_index}"
+            assert e.content_index == 1, f"{e.type} had content_index={e.content_index}"
