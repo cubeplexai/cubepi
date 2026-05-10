@@ -3,6 +3,7 @@ import asyncio
 from cubepi.agent.agent import Agent
 from cubepi.agent.types import AgentTool
 from cubepi.providers.base import (
+    AssistantMessage,
     Model,
     TextContent,
     UserMessage,
@@ -276,14 +277,11 @@ class TestAgentResume:
         await agent.resume()
 
         has_follow_up = any(
-            hasattr(m, "content")
-            and hasattr(m, "role")
-            and m.role == "user"
+            isinstance(m, UserMessage)
             and any(
-                hasattr(c, "text") and c.text == "follow-up"
-                for c in (m.content if isinstance(m.content, list) else [])
+                isinstance(c, TextContent) and c.text == "follow-up" for c in m.content
             )
             for m in agent.state.messages
         )
         assert has_follow_up
-        assert agent.state.messages[-1].role == "assistant"
+        assert isinstance(agent.state.messages[-1], AssistantMessage)
