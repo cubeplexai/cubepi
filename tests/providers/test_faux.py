@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import patch
 
 from cubepi.providers.base import (
     Model,
@@ -9,6 +10,7 @@ from cubepi.providers.base import (
 )
 from cubepi.providers.faux import (
     FauxProvider,
+    _can_accept_extended_args,
     faux_assistant_message,
     faux_text,
     faux_thinking,
@@ -639,3 +641,300 @@ class TestFauxProviderPromptCache:
         cache = provider.prompt_cache
         cache["injected"] = "value"
         assert "injected" not in provider.prompt_cache
+
+
+class TestCanAcceptExtendedArgs:
+    """Tests for _can_accept_extended_args edge cases (lines 147-148)."""
+
+    def test_returns_false_when_signature_raises_value_error(self):
+        """When inspect.signature raises ValueError, should return False."""
+        with patch(
+            "cubepi.providers.faux.inspect.signature", side_effect=ValueError("boom")
+        ):
+            assert _can_accept_extended_args(lambda: None) is False
+
+    def test_returns_false_when_signature_raises_type_error(self):
+        """When inspect.signature raises TypeError, should return False."""
+        with patch(
+            "cubepi.providers.faux.inspect.signature", side_effect=TypeError("boom")
+        ):
+            assert _can_accept_extended_args(lambda: None) is False
+
+
+class TestFauxProviderProduceExceptionHandling:
+    """Tests for the _produce exception handler (lines 279-290)."""
+
+    def _make_model(self):
+        return Model(id="faux-1", provider="faux")
+
+    async def test_factory_raising_exception_produces_error_result(self):
+        """When a factory raises an Exception, _produce catches it and
+        produces an error AssistantMessage."""
+
+        def bad_factory(messages, model):
+            raise RuntimeError("factory exploded")
+
+        provider = FauxProvider()
+        provider.set_responses([bad_factory])
+        model = self._make_model()
+
+        stream = await provider.stream(model, [])
+        events = [e async for e in stream]
+        result = await stream.result()
+
+        assert result.stop_reason == "error"
+        assert "factory exploded" in (result.error_message or "")
+        assert any(e.type == "error" for e in events)
+
+    async def test_factory_raising_base_exception_reraises(self):
+        """When a factory raises a BaseException (not Exception),
+        _produce catches it, sets an error result, and re-raises.
+        The re-raised exception surfaces as the task exception."""
+
+        class CustomBaseException(BaseException):
+            pass
+
+        def bad_factory(messages, model):
+            raise CustomBaseException("base boom")
+
+        provider = FauxProvider()
+        provider.set_responses([bad_factory])
+        model = self._make_model()
+
+        stream = await provider.stream(model, [])
+        _ = [e async for e in stream]
+        result = await stream.result()
+
+        # The BaseException path still sets an error result
+        assert result.stop_reason == "error"
+        assert "base boom" in (result.error_message or "")
+
+
+class TestFauxProviderAbortDuringBlocks:
+    """Tests for abort signal checks during block iteration and chunk streaming."""
+
+    def _make_model(self):
+        return Model(id="faux-1", provider="faux")
+
+    async def test_abort_between_blocks(self):
+        """Abort signal set between blocks triggers the block-level abort
+        check (lines 318-325).
+
+        Strategy: directly call _stream_with_deltas with a pre-constructed
+        message and set the signal synchronously during the 'thinking_end'
+        push via a patched MessageStream.push, so it's set before the
+        for-block check runs for the next block.
+        """
+        from cubepi.providers.base import MessageStream
+
+        provider = FauxProvider(token_size_min=100, token_size_max=100)
+        signal = asyncio.Event()
+
+        message = faux_assistant_message([faux_thinking("ok"), faux_text("answer")])
+
+        ms = MessageStream()
+
+        original_push = ms.push
+
+        def push_and_set_signal(event):
+            original_push(event)
+            if event.type == "thinking_end":
+                signal.set()
+
+        ms.push = push_and_set_signal  # type: ignore[assignment]
+
+        await provider._stream_with_deltas(ms, message, signal)
+
+        result = await ms.result()
+        assert result.stop_reason == "aborted"
+
+    async def test_abort_during_thinking_chunks(self):
+        """Abort signal set while thinking deltas are being streamed
+        (lines 340-347)."""
+        # Use long thinking text to ensure multiple chunks
+        long_thinking = "a" * 200
+        provider = FauxProvider(token_size_min=1, token_size_max=1)
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [faux_thinking(long_thinking), faux_text("answer")]
+                )
+            ]
+        )
+        model = self._make_model()
+        signal = asyncio.Event()
+
+        stream = await provider.stream(model, [], options=StreamOptions(signal=signal))
+
+        events = []
+        thinking_delta_count = 0
+        async for event in stream:
+            events.append(event)
+            if event.type == "thinking_delta":
+                thinking_delta_count += 1
+                # Abort after a few thinking deltas
+                if thinking_delta_count >= 3:
+                    signal.set()
+
+        result = await stream.result()
+        assert result.stop_reason == "aborted"
+        assert any(e.type == "error" for e in events)
+        # We should have some thinking deltas but not all of them
+        assert thinking_delta_count >= 3
+        # The text block should NOT have started
+        event_types = [e.type for e in events]
+        assert "text_start" not in event_types
+
+    async def test_abort_during_tool_call_chunks(self):
+        """Abort signal set while tool call deltas are being streamed
+        (lines 425-432)."""
+        # Use a large arguments dict to produce multiple chunks
+        large_args = {f"key_{i}": f"value_{i}" for i in range(20)}
+        provider = FauxProvider(token_size_min=1, token_size_max=1)
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [faux_tool_call("search", large_args, id="tc-1")],
+                    stop_reason="tool_use",
+                )
+            ]
+        )
+        model = self._make_model()
+        signal = asyncio.Event()
+
+        stream = await provider.stream(model, [], options=StreamOptions(signal=signal))
+
+        events = []
+        toolcall_delta_count = 0
+        async for event in stream:
+            events.append(event)
+            if event.type == "toolcall_delta":
+                toolcall_delta_count += 1
+                # Abort after a few tool call deltas
+                if toolcall_delta_count >= 3:
+                    signal.set()
+
+        result = await stream.result()
+        assert result.stop_reason == "aborted"
+        assert any(e.type == "error" for e in events)
+        assert toolcall_delta_count >= 3
+        # Tool call should NOT have ended normally
+        event_types = [e.type for e in events]
+        assert "toolcall_end" not in event_types
+
+    async def test_abort_during_text_then_tool_blocks(self):
+        """Abort during text block prevents tool call block from starting."""
+        long_text = "word " * 100
+        provider = FauxProvider(token_size_min=1, token_size_max=1)
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [
+                        faux_text(long_text),
+                        faux_tool_call("search", {"q": "test"}, id="tc-1"),
+                    ],
+                    stop_reason="tool_use",
+                )
+            ]
+        )
+        model = self._make_model()
+        signal = asyncio.Event()
+
+        stream = await provider.stream(model, [], options=StreamOptions(signal=signal))
+
+        events = []
+        text_delta_count = 0
+        async for event in stream:
+            events.append(event)
+            if event.type == "text_delta":
+                text_delta_count += 1
+                if text_delta_count >= 3:
+                    signal.set()
+
+        result = await stream.result()
+        assert result.stop_reason == "aborted"
+        # Tool call block should never start
+        event_types = [e.type for e in events]
+        assert "toolcall_start" not in event_types
+
+
+class TestFauxProviderCacheTokenCalculation:
+    """Tests for cache token calculation logic (lines 185-216)."""
+
+    def _make_model(self):
+        return Model(id="faux-1", provider="faux")
+
+    async def test_cache_usage_first_call_structure(self):
+        """First call: input_tokens == prompt_tokens, cache_write == prompt_tokens,
+        cache_read == 0."""
+        provider = FauxProvider()
+        provider.set_responses([faux_assistant_message("hello")])
+        model = self._make_model()
+
+        stream = await provider.stream(model, [], system_prompt="system prompt here")
+        _ = [e async for e in stream]
+        result = await stream.result()
+
+        usage = result.usage
+        assert usage is not None
+        assert usage.cache_read_tokens == 0
+        assert usage.cache_write_tokens > 0
+        assert usage.input_tokens > 0
+        assert usage.output_tokens > 0
+        # On first call, input_tokens should equal the total prompt tokens
+        # because there's nothing in the cache
+        assert usage.input_tokens == usage.cache_write_tokens
+
+    async def test_cache_usage_second_call_prefix_match(self):
+        """Second call with identical context: cache_read covers the full prompt,
+        input_tokens is reduced, cache_write is minimal."""
+        provider = FauxProvider()
+        provider.set_responses(
+            [faux_assistant_message("first"), faux_assistant_message("second")]
+        )
+        model = self._make_model()
+        msgs = [UserMessage(content=[TextContent(text="hello")])]
+
+        # First call
+        s1 = await provider.stream(model, msgs, system_prompt="sys")
+        _ = [e async for e in s1]
+        await s1.result()
+
+        # Second call with exact same context
+        s2 = await provider.stream(model, msgs, system_prompt="sys")
+        _ = [e async for e in s2]
+        r2 = await s2.result()
+
+        assert r2.usage is not None
+        # Full prefix match: all prompt tokens come from cache
+        assert r2.usage.cache_read_tokens > 0
+        assert r2.usage.cache_write_tokens == 0
+        assert r2.usage.input_tokens == 0
+
+    async def test_cache_usage_partial_prefix_change(self):
+        """When messages grow, the prefix still matches and cache_read is partial."""
+        provider = FauxProvider()
+        provider.set_responses(
+            [faux_assistant_message("first"), faux_assistant_message("second")]
+        )
+        model = self._make_model()
+
+        # First call: one message
+        msgs1 = [UserMessage(content=[TextContent(text="hello")])]
+        s1 = await provider.stream(model, msgs1, system_prompt="sys")
+        _ = [e async for e in s1]
+
+        # Second call: same prefix + additional message
+        msgs2 = [
+            UserMessage(content=[TextContent(text="hello")]),
+            UserMessage(content=[TextContent(text="world")]),
+        ]
+        s2 = await provider.stream(model, msgs2, system_prompt="sys")
+        _ = [e async for e in s2]
+        r2 = await s2.result()
+
+        assert r2.usage is not None
+        # Should have partial cache read (the common prefix)
+        assert r2.usage.cache_read_tokens > 0
+        # Should have cache write for the new part
+        assert r2.usage.cache_write_tokens > 0
