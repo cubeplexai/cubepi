@@ -143,6 +143,80 @@ class TestParallelExecution:
         assert batch.messages[0].tool_call_id == "t1"
         assert batch.messages[1].tool_call_id == "t2"
 
+    async def test_parallel_produces_results_for_multiple_calls(self):
+        tool = make_echo_tool()
+        ctx = make_context([tool])
+        msg = make_assistant_msg(
+            [
+                ToolCall(id="t1", name="echo", arguments={"value": "alpha"}),
+                ToolCall(id="t2", name="echo", arguments={"value": "beta"}),
+            ]
+        )
+
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="parallel", emit=lambda e: None
+        )
+
+        assert len(batch.messages) == 2
+        assert batch.messages[0].tool_call_id == "t1"
+        assert not batch.messages[0].is_error
+        assert "alpha" in batch.messages[0].content[0].text
+        assert batch.messages[1].tool_call_id == "t2"
+        assert not batch.messages[1].is_error
+        assert "beta" in batch.messages[1].content[0].text
+
+    async def test_parallel_with_blocked_and_normal_tool(self):
+        """One tool is blocked by before_tool_call, the other executes normally."""
+        tool = make_echo_tool()
+        ctx = make_context([tool])
+        msg = make_assistant_msg(
+            [
+                ToolCall(id="t1", name="echo", arguments={"value": "blocked_one"}),
+                ToolCall(id="t2", name="echo", arguments={"value": "allowed"}),
+            ]
+        )
+
+        async def before(ctx_arg, *, signal=None):
+            if ctx_arg.tool_call.id == "t1":
+                return BeforeToolCallResult(block=True, reason="not allowed")
+            return None
+
+        batch = await execute_tool_calls(
+            ctx,
+            msg,
+            tool_execution="parallel",
+            before_tool_call=before,
+            emit=lambda e: None,
+        )
+
+        assert len(batch.messages) == 2
+        # First tool was blocked
+        assert batch.messages[0].is_error
+        assert "not allowed" in batch.messages[0].content[0].text
+        # Second tool executed normally
+        assert not batch.messages[1].is_error
+        assert "allowed" in batch.messages[1].content[0].text
+
+    async def test_parallel_tool_execute_exception(self):
+        """Tool execution exception in parallel mode produces error result."""
+
+        async def failing_execute(tool_call_id, params, *, signal=None, on_update=None):
+            raise RuntimeError("parallel boom")
+
+        tool = make_echo_tool(execute_fn=failing_execute)
+        ctx = make_context([tool])
+        msg = make_assistant_msg(
+            [ToolCall(id="t1", name="echo", arguments={"value": "hi"})]
+        )
+
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="parallel", emit=lambda e: None
+        )
+
+        assert len(batch.messages) == 1
+        assert batch.messages[0].is_error
+        assert "parallel boom" in batch.messages[0].content[0].text
+
     async def test_sequential_tool_forces_sequential_mode(self):
         order = []
 
@@ -192,6 +266,28 @@ class TestBeforeToolCall:
         assert batch.messages[0].is_error
         assert "Blocked by test" in batch.messages[0].content[0].text
 
+    async def test_before_tool_call_exception_returns_error(self):
+        tool = make_echo_tool()
+        ctx = make_context([tool])
+        msg = make_assistant_msg(
+            [ToolCall(id="t1", name="echo", arguments={"value": "hi"})]
+        )
+
+        async def before(ctx_arg, *, signal=None):
+            raise RuntimeError("hook exploded")
+
+        batch = await execute_tool_calls(
+            ctx,
+            msg,
+            tool_execution="sequential",
+            before_tool_call=before,
+            emit=lambda e: None,
+        )
+
+        assert len(batch.messages) == 1
+        assert batch.messages[0].is_error
+        assert "hook exploded" in batch.messages[0].content[0].text
+
 
 class TestAfterToolCall:
     async def test_override_result(self):
@@ -217,6 +313,63 @@ class TestAfterToolCall:
 
         assert batch.messages[0].content[0].text == "overridden"
         assert batch.terminate is True
+
+    async def test_after_tool_call_exception_returns_error(self):
+        tool = make_echo_tool()
+        ctx = make_context([tool])
+        msg = make_assistant_msg(
+            [ToolCall(id="t1", name="echo", arguments={"value": "hi"})]
+        )
+
+        async def after(ctx_arg, *, signal=None):
+            raise RuntimeError("after hook failed")
+
+        batch = await execute_tool_calls(
+            ctx,
+            msg,
+            tool_execution="sequential",
+            after_tool_call=after,
+            emit=lambda e: None,
+        )
+
+        assert len(batch.messages) == 1
+        assert batch.messages[0].is_error
+        assert "after hook failed" in batch.messages[0].content[0].text
+
+
+class TestToolExecutionError:
+    async def test_tool_execute_exception_returns_error(self):
+        async def failing_execute(tool_call_id, params, *, signal=None, on_update=None):
+            raise RuntimeError("execution boom")
+
+        tool = make_echo_tool(execute_fn=failing_execute)
+        ctx = make_context([tool])
+        msg = make_assistant_msg(
+            [ToolCall(id="t1", name="echo", arguments={"value": "hi"})]
+        )
+
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="sequential", emit=lambda e: None
+        )
+
+        assert len(batch.messages) == 1
+        assert batch.messages[0].is_error
+        assert "execution boom" in batch.messages[0].content[0].text
+
+    async def test_invalid_parameters_returns_error(self):
+        tool = make_echo_tool()
+        ctx = make_context([tool])
+        # EchoParams requires a 'value' string; passing wrong type triggers validation error
+        msg = make_assistant_msg(
+            [ToolCall(id="t1", name="echo", arguments={"wrong_key": 123})]
+        )
+
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="sequential", emit=lambda e: None
+        )
+
+        assert len(batch.messages) == 1
+        assert batch.messages[0].is_error
 
 
 class TestTermination:
