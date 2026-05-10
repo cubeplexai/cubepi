@@ -18,8 +18,8 @@ from cubepi.agent.types import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
-    emit_event,
 )
+from cubepi.utils import emit_event
 from cubepi.providers.base import (
     AssistantMessage,
     TextContent,

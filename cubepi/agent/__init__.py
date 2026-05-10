@@ -22,8 +22,8 @@ from cubepi.agent.types import (
     ToolExecutionUpdateEvent,
     TurnEndEvent,
     TurnStartEvent,
-    emit_event,
 )
+from cubepi.utils import emit_event
 
 __all__ = [
     "Agent",
