@@ -240,7 +240,7 @@ class StreamOptions(BaseModel):
     on_response: OnResponseCallback | None = None
 
 
-async def _invoke_on_payload(
+async def invoke_on_payload(
     callback: OnPayloadCallback | None,
     payload: dict,
     model: Model,
@@ -254,7 +254,7 @@ async def _invoke_on_payload(
     return result if isinstance(result, dict) else payload
 
 
-async def _invoke_on_response(
+async def invoke_on_response(
     callback: OnResponseCallback | None,
     response: ProviderResponse,
     model: Model,

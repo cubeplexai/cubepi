@@ -10,8 +10,8 @@ from cubepi.providers.base import (
     Model,
     ProviderResponse,
     StreamOptions,
-    _invoke_on_payload,
-    _invoke_on_response,
+    invoke_on_payload,
+    invoke_on_response,
 )
 
 
@@ -43,26 +43,26 @@ class TestProviderResponse:
 
 
 # ---------------------------------------------------------------------------
-# _invoke_on_payload helper
+# invoke_on_payload helper
 # ---------------------------------------------------------------------------
 
 
 class TestInvokeOnPayload:
     async def test_none_callback_returns_original(self):
         payload = {"model": "test"}
-        result = await _invoke_on_payload(None, payload, _model())
+        result = await invoke_on_payload(None, payload, _model())
         assert result is payload
 
     async def test_sync_callback_returning_dict_replaces(self):
         replacement = {"model": "replaced"}
-        result = await _invoke_on_payload(
+        result = await invoke_on_payload(
             lambda p, m: replacement, {"model": "original"}, _model()
         )
         assert result is replacement
 
     async def test_sync_callback_returning_none_keeps_original(self):
         original = {"model": "original"}
-        result = await _invoke_on_payload(lambda p, m: None, original, _model())
+        result = await invoke_on_payload(lambda p, m: None, original, _model())
         assert result is original
 
     async def test_async_callback_returning_dict_replaces(self):
@@ -71,7 +71,7 @@ class TestInvokeOnPayload:
         async def cb(p: dict, m: Model) -> dict:
             return replacement
 
-        result = await _invoke_on_payload(cb, {"model": "original"}, _model())
+        result = await invoke_on_payload(cb, {"model": "original"}, _model())
         assert result is replacement
 
     async def test_async_callback_returning_none_keeps_original(self):
@@ -80,7 +80,7 @@ class TestInvokeOnPayload:
         async def cb(p: dict, m: Model) -> None:
             return None
 
-        result = await _invoke_on_payload(cb, original, _model())
+        result = await invoke_on_payload(cb, original, _model())
         assert result is original
 
     async def test_callback_receives_correct_args(self):
@@ -92,21 +92,21 @@ class TestInvokeOnPayload:
 
         payload = {"model": "test-model"}
         model = _model()
-        await _invoke_on_payload(cb, payload, model)
+        await invoke_on_payload(cb, payload, model)
         assert len(received) == 1
         assert received[0][0] is payload
         assert received[0][1] is model
 
 
 # ---------------------------------------------------------------------------
-# _invoke_on_response helper
+# invoke_on_response helper
 # ---------------------------------------------------------------------------
 
 
 class TestInvokeOnResponse:
     async def test_none_callback_is_noop(self):
         # Should not raise
-        await _invoke_on_response(None, ProviderResponse(status=200), _model())
+        await invoke_on_response(None, ProviderResponse(status=200), _model())
 
     async def test_sync_callback_called(self):
         received: list[tuple[ProviderResponse, Model]] = []
@@ -116,7 +116,7 @@ class TestInvokeOnResponse:
 
         resp = ProviderResponse(status=200, headers={"h": "v"})
         model = _model()
-        await _invoke_on_response(cb, resp, model)
+        await invoke_on_response(cb, resp, model)
         assert len(received) == 1
         assert received[0][0] is resp
         assert received[0][1] is model
@@ -128,7 +128,7 @@ class TestInvokeOnResponse:
             received.append(r)
 
         resp = ProviderResponse(status=200)
-        await _invoke_on_response(cb, resp, _model())
+        await invoke_on_response(cb, resp, _model())
         assert len(received) == 1
         assert received[0] is resp
 
