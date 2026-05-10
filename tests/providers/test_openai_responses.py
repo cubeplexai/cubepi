@@ -147,10 +147,12 @@ class TestBuildInput:
 
 class TestOpenAIResponsesImageConversion:
     def test_user_message_with_image(self):
-        msg = UserMessage(content=[
-            TextContent(text="Describe this"),
-            ImageContent(source="imgdata", media_type="image/jpeg"),
-        ])
+        msg = UserMessage(
+            content=[
+                TextContent(text="Describe this"),
+                ImageContent(source="imgdata", media_type="image/jpeg"),
+            ]
+        )
         result = OpenAIResponsesProvider._build_input([msg])
         assert len(result) == 1
         assert result[0]["role"] == "user"
