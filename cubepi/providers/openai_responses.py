@@ -105,7 +105,11 @@ class OpenAIResponsesProvider:
             try:
                 response = await self._client.responses.create(**kwargs)
                 partial = AssistantMessage(
-                    content=[], usage=Usage(), timestamp=time.time()
+                    content=[],
+                    usage=Usage(),
+                    timestamp=time.time(),
+                    provider_id=model.provider,
+                    model_id=model.id,
                 )
                 ms.push(
                     StreamEvent(type="start", partial=partial.model_copy(deep=True))
@@ -407,6 +411,9 @@ class OpenAIResponsesProvider:
                             update={
                                 "usage": usage,
                                 "stop_reason": stop_reason,
+                                "response_id": getattr(resp, "id", None)
+                                if resp
+                                else None,
                             }
                         )
                         ms.push(StreamEvent(type="done"))
