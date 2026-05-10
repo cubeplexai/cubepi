@@ -171,6 +171,19 @@ class MessageStream:
         self._result_future: asyncio.Future[AssistantMessage] = (
             asyncio.get_running_loop().create_future()
         )
+        self._producer_task: asyncio.Task | None = None
+
+    def attach_task(self, task: asyncio.Task) -> None:
+        self._producer_task = task
+        task.add_done_callback(self._on_task_done)
+
+    def _on_task_done(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc and not self._result_future.done():
+            self._result_future.set_exception(exc)
+            self._queue.put_nowait(None)
 
     def push(self, event: StreamEvent) -> None:
         self._queue.put_nowait(event)
