@@ -1,6 +1,7 @@
 import asyncio
 
 from cubepi.providers.base import (
+    Model,
     StreamOptions,
     TextContent,
     ToolDefinition,
@@ -290,6 +291,27 @@ class TestFauxProvider:
         s2 = await provider.stream(model, [])
         _ = [e async for e in s2]
         assert provider.call_count == 2
+
+    async def test_provider_metadata_set(self):
+        provider = FauxProvider()
+        provider.set_responses([faux_assistant_message("hello")])
+        model = Model(id="faux-1", provider="faux")
+        stream = await provider.stream(model, [])
+        _ = [e async for e in stream]
+        result = await stream.result()
+        assert result.provider_id == "faux"
+        assert result.model_id == "faux-1"
+
+    async def test_provider_metadata_on_partial_events(self):
+        provider = FauxProvider()
+        provider.set_responses([faux_assistant_message("hello")])
+        model = Model(id="faux-1", provider="faux")
+        stream = await provider.stream(model, [])
+        events = [e async for e in stream]
+        start_event = next(e for e in events if e.type == "start")
+        assert start_event.partial is not None
+        assert start_event.partial.provider_id == "faux"
+        assert start_event.partial.model_id == "faux-1"
 
 
 class TestFauxProviderExtendedFactory:

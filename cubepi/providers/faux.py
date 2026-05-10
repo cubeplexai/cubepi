@@ -267,7 +267,13 @@ class FauxProvider:
                 cache_usage = self._compute_cache_usage(
                     system_prompt, tools, messages, base_usage
                 )
-                resolved = resolved.model_copy(update={"usage": cache_usage})
+                resolved = resolved.model_copy(
+                    update={
+                        "usage": cache_usage,
+                        "provider_id": model.provider,
+                        "model_id": model.id,
+                    }
+                )
 
                 await self._stream_with_deltas(ms, resolved, opts.signal)
             except BaseException as exc:
@@ -297,6 +303,8 @@ class FauxProvider:
             stop_reason=message.stop_reason,
             usage=message.usage,
             timestamp=message.timestamp,
+            provider_id=message.provider_id,
+            model_id=message.model_id,
         )
 
         if signal and signal.is_set():
