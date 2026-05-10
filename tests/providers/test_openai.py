@@ -49,10 +49,12 @@ class TestOpenAIMessageConversion:
 
 class TestOpenAIImageConversion:
     def test_user_message_with_image(self):
-        msg = UserMessage(content=[
-            TextContent(text="What's in this image?"),
-            ImageContent(source="base64data", media_type="image/png"),
-        ])
+        msg = UserMessage(
+            content=[
+                TextContent(text="What's in this image?"),
+                ImageContent(source="base64data", media_type="image/png"),
+            ]
+        )
         result = OpenAIProvider._convert_message(msg)
         assert result["role"] == "user"
         assert isinstance(result["content"], list)
