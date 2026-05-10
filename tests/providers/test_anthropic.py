@@ -1,6 +1,18 @@
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
 from cubepi.providers.anthropic import AnthropicProvider, CacheRetention
 from cubepi.providers.base import (
+    ImageContent,
+    Model,
+    StreamOptions,
     TextContent,
+    ThinkingContent,
     ToolCall,
     ToolDefinition,
     UserMessage,
@@ -238,3 +250,802 @@ class TestCacheControlOnTools:
         # With retention="none", no tool should have cache_control
         for tool in api_tools:
             assert "cache_control" not in tool
+
+
+# ---------------------------------------------------------------------------
+# Streaming tests (with mocked Anthropic client)
+# ---------------------------------------------------------------------------
+
+
+def _anthropic_model(*, reasoning: bool = False, max_tokens: int = 8192) -> Model:
+    return Model(
+        id="claude-sonnet-4-20250514" if not reasoning else "claude-sonnet-4-20250514",
+        provider="anthropic",
+        api="anthropic",
+        reasoning=reasoning,
+        max_tokens=max_tokens,
+    )
+
+
+def _make_event(type: str, **kwargs) -> SimpleNamespace:
+    """Create a mock Anthropic streaming event."""
+    return SimpleNamespace(type=type, **kwargs)
+
+
+def _make_content_block(type: str, **kwargs) -> SimpleNamespace:
+    """Create a mock content block (for content_block_start events)."""
+    return SimpleNamespace(type=type, **kwargs)
+
+
+def _make_final_message(
+    *,
+    id: str = "msg_123",
+    content: list | None = None,
+    stop_reason: str = "end_turn",
+    input_tokens: int = 10,
+    output_tokens: int = 20,
+    cache_read_input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
+) -> SimpleNamespace:
+    """Create a mock Anthropic Message returned by get_final_message()."""
+    return SimpleNamespace(
+        id=id,
+        content=content or [],
+        stop_reason=stop_reason,
+        usage=SimpleNamespace(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_input_tokens=cache_read_input_tokens,
+            cache_creation_input_tokens=cache_creation_input_tokens,
+        ),
+    )
+
+
+class _MockAnthropicStream:
+    """Mock for the async context manager returned by client.messages.stream().
+
+    When used as ``async with client.messages.stream(**kw) as stream:``, the
+    ``__aenter__`` returns *self*.  The instance is async-iterable over a
+    pre-defined list of SDK events, and exposes ``.response`` and
+    ``.get_final_message()`` like the real SDK stream.
+    """
+
+    def __init__(
+        self,
+        events: list,
+        final_message: SimpleNamespace | None = None,
+        status_code: int = 200,
+        headers: dict | None = None,
+    ) -> None:
+        self._events = events
+        self._final_message = final_message or _make_final_message()
+        self.response = SimpleNamespace(
+            status_code=status_code,
+            headers=headers or {"x-request-id": "req-abc"},
+        )
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def __aiter__(self):
+        return self._iter_events()
+
+    async def _iter_events(self):
+        for ev in self._events:
+            yield ev
+
+    def get_final_message(self):
+        return self._final_message
+
+
+def _inject_mock_stream(
+    provider: AnthropicProvider, mock_stream: _MockAnthropicStream
+) -> MagicMock:
+    """Replace provider._client with a mock whose messages.stream returns *mock_stream*."""
+    mock_client = MagicMock()
+    mock_client.messages = MagicMock()
+    mock_client.messages.stream = MagicMock(return_value=mock_stream)
+    provider._client = mock_client
+    return mock_client
+
+
+class TestAnthropicStreamText:
+    """Test text streaming end-to-end."""
+
+    @pytest.mark.asyncio
+    async def test_stream_simple_text(self):
+        events = [
+            _make_event(
+                "content_block_start",
+                index=0,
+                content_block=_make_content_block("text"),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(text="Hello "),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(text="world!"),
+            ),
+            _make_event("content_block_stop", index=0),
+        ]
+        final = _make_final_message(
+            content=[SimpleNamespace(type="text", text="Hello world!")],
+            stop_reason="end_turn",
+            input_tokens=10,
+            output_tokens=5,
+        )
+        mock_stream = _MockAnthropicStream(events, final)
+
+        provider = _make_provider("none")
+        _inject_mock_stream(provider, mock_stream)
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model, [UserMessage(content=[TextContent(text="hi")])]
+        )
+
+        stream_events = []
+        async for event in ms:
+            stream_events.append(event)
+
+        result = await ms.result()
+
+        event_types = [e.type for e in stream_events]
+        assert "start" in event_types
+        assert "text_start" in event_types
+        assert "text_delta" in event_types
+        assert "text_end" in event_types
+        assert "done" in event_types
+
+        # Check that the text deltas accumulated correctly in partial
+        text_deltas = [e for e in stream_events if e.type == "text_delta"]
+        assert len(text_deltas) == 2
+        assert text_deltas[0].delta == "Hello "
+        assert text_deltas[1].delta == "world!"
+
+        # Check final message
+        assert result.stop_reason == "stop"
+        assert len(result.content) == 1
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "Hello world!"
+
+        # Check usage
+        assert result.usage is not None
+        assert result.usage.input_tokens == 10
+        assert result.usage.output_tokens == 5
+
+        # Check metadata
+        assert result.response_id == "msg_123"
+        assert result.provider_id == "anthropic"
+        assert result.model_id == model.id
+
+
+class TestAnthropicStreamThinking:
+    """Test thinking + text streaming."""
+
+    @pytest.mark.asyncio
+    async def test_stream_thinking_then_text(self):
+        events = [
+            # Thinking block
+            _make_event(
+                "content_block_start",
+                index=0,
+                content_block=_make_content_block("thinking"),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(thinking="Let me think..."),
+            ),
+            _make_event("content_block_stop", index=0),
+            # Text block
+            _make_event(
+                "content_block_start",
+                index=1,
+                content_block=_make_content_block("text"),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=1,
+                delta=SimpleNamespace(text="Answer"),
+            ),
+            _make_event("content_block_stop", index=1),
+        ]
+        final = _make_final_message(
+            content=[
+                SimpleNamespace(type="thinking", thinking="Let me think..."),
+                SimpleNamespace(type="text", text="Answer"),
+            ],
+            stop_reason="end_turn",
+        )
+        mock_stream = _MockAnthropicStream(events, final)
+
+        provider = _make_provider("none")
+        _inject_mock_stream(provider, mock_stream)
+
+        model = _anthropic_model(reasoning=True)
+        ms = await provider.stream(
+            model,
+            [UserMessage(content=[TextContent(text="think about this")])],
+            options=StreamOptions(thinking="medium"),
+        )
+
+        stream_events = []
+        async for event in ms:
+            stream_events.append(event)
+
+        result = await ms.result()
+
+        event_types = [e.type for e in stream_events]
+        assert "thinking_start" in event_types
+        assert "thinking_delta" in event_types
+        assert "thinking_end" in event_types
+        assert "text_start" in event_types
+        assert "text_delta" in event_types
+        assert "text_end" in event_types
+
+        # Check content blocks
+        assert len(result.content) == 2
+        assert isinstance(result.content[0], ThinkingContent)
+        assert result.content[0].thinking == "Let me think..."
+        assert isinstance(result.content[1], TextContent)
+        assert result.content[1].text == "Answer"
+
+
+class TestAnthropicStreamToolCall:
+    """Test tool use streaming."""
+
+    @pytest.mark.asyncio
+    async def test_stream_tool_call(self):
+        events = [
+            _make_event(
+                "content_block_start",
+                index=0,
+                content_block=_make_content_block(
+                    "tool_use", id="toolu_abc", name="search"
+                ),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(partial_json='{"q": '),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(partial_json='"test"}'),
+            ),
+            _make_event("content_block_stop", index=0),
+        ]
+        final = _make_final_message(
+            content=[
+                SimpleNamespace(
+                    type="tool_use",
+                    id="toolu_abc",
+                    name="search",
+                    input={"q": "test"},
+                ),
+            ],
+            stop_reason="tool_use",
+        )
+        mock_stream = _MockAnthropicStream(events, final)
+
+        provider = _make_provider("none")
+        _inject_mock_stream(provider, mock_stream)
+
+        tools = [
+            ToolDefinition(
+                name="search",
+                description="Search the web",
+                parameters={
+                    "type": "object",
+                    "properties": {"q": {"type": "string"}},
+                },
+            )
+        ]
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model,
+            [UserMessage(content=[TextContent(text="search for test")])],
+            tools=tools,
+        )
+
+        stream_events = []
+        async for event in ms:
+            stream_events.append(event)
+
+        result = await ms.result()
+
+        event_types = [e.type for e in stream_events]
+        assert "toolcall_start" in event_types
+        assert "toolcall_delta" in event_types
+        assert "toolcall_end" in event_types
+
+        assert result.stop_reason == "tool_use"
+        assert len(result.content) == 1
+        assert isinstance(result.content[0], ToolCall)
+        assert result.content[0].name == "search"
+        assert result.content[0].id == "toolu_abc"
+        assert result.content[0].arguments == {"q": "test"}
+
+
+class TestAnthropicStreamKwargsBuilding:
+    """Verify kwargs sent to the Anthropic SDK."""
+
+    @pytest.mark.asyncio
+    async def test_system_prompt_in_kwargs(self):
+        """When system_prompt is provided, kwargs['system'] should be set with cache_control."""
+        events = []
+        final = _make_final_message(content=[])
+        mock_stream = _MockAnthropicStream(events, final)
+
+        provider = _make_provider("short")
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model,
+            [UserMessage(content=[TextContent(text="hi")])],
+            system_prompt="You are helpful.",
+        )
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        call_kwargs = mock_client.messages.stream.call_args[1]
+        assert "system" in call_kwargs
+        system_blocks = call_kwargs["system"]
+        assert len(system_blocks) == 1
+        assert system_blocks[0]["type"] == "text"
+        assert system_blocks[0]["text"] == "You are helpful."
+        assert system_blocks[0]["cache_control"] == {"type": "ephemeral"}
+
+    @pytest.mark.asyncio
+    async def test_system_prompt_no_cache_with_retention_none(self):
+        """With cache_retention='none', system prompt should not have cache_control."""
+        events = []
+        final = _make_final_message(content=[])
+        mock_stream = _MockAnthropicStream(events, final)
+
+        provider = _make_provider("none")
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model,
+            [UserMessage(content=[TextContent(text="hi")])],
+            system_prompt="You are helpful.",
+        )
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        call_kwargs = mock_client.messages.stream.call_args[1]
+        system_blocks = call_kwargs["system"]
+        assert "cache_control" not in system_blocks[0]
+
+    @pytest.mark.asyncio
+    async def test_tools_in_kwargs_with_cache_control(self):
+        """When tools are provided, the last tool should get cache_control."""
+        events = []
+        final = _make_final_message(content=[])
+        mock_stream = _MockAnthropicStream(events, final)
+
+        provider = _make_provider("short")
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        tools = [
+            ToolDefinition(
+                name="search",
+                description="Search",
+                parameters={"type": "object", "properties": {}},
+            ),
+            ToolDefinition(
+                name="fetch",
+                description="Fetch",
+                parameters={"type": "object", "properties": {}},
+            ),
+        ]
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model,
+            [UserMessage(content=[TextContent(text="hi")])],
+            tools=tools,
+        )
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        call_kwargs = mock_client.messages.stream.call_args[1]
+        api_tools = call_kwargs["tools"]
+        assert len(api_tools) == 2
+        assert "cache_control" not in api_tools[0]
+        assert api_tools[1]["cache_control"] == {"type": "ephemeral"}
+
+    @pytest.mark.asyncio
+    async def test_thinking_in_kwargs(self):
+        """When thinking is enabled, kwargs['thinking'] should be set."""
+        events = []
+        final = _make_final_message(content=[])
+        mock_stream = _MockAnthropicStream(events, final)
+
+        provider = _make_provider("none")
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        model = _anthropic_model(reasoning=True)
+        ms = await provider.stream(
+            model,
+            [UserMessage(content=[TextContent(text="think")])],
+            options=StreamOptions(thinking="high"),
+        )
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        call_kwargs = mock_client.messages.stream.call_args[1]
+        assert "thinking" in call_kwargs
+        assert call_kwargs["thinking"]["type"] == "enabled"
+        assert call_kwargs["thinking"]["budget_tokens"] > 0
+
+    @pytest.mark.asyncio
+    async def test_no_thinking_when_off(self):
+        """When thinking is 'off', kwargs should not contain 'thinking'."""
+        events = []
+        final = _make_final_message(content=[])
+        mock_stream = _MockAnthropicStream(events, final)
+
+        provider = _make_provider("none")
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model,
+            [UserMessage(content=[TextContent(text="hi")])],
+            options=StreamOptions(thinking="off"),
+        )
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        call_kwargs = mock_client.messages.stream.call_args[1]
+        assert "thinking" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_on_response_callback_invoked(self):
+        """The on_response callback should receive HTTP metadata from the stream."""
+        events = []
+        final = _make_final_message(content=[])
+        mock_stream = _MockAnthropicStream(
+            events, final, status_code=200, headers={"x-request-id": "req-xyz"}
+        )
+
+        provider = _make_provider("none")
+        _inject_mock_stream(provider, mock_stream)
+
+        captured = {}
+
+        async def on_response(resp, model):
+            captured["status"] = resp.status
+            captured["headers"] = resp.headers
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model,
+            [UserMessage(content=[TextContent(text="hi")])],
+            options=StreamOptions(on_response=on_response),
+        )
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        assert captured["status"] == 200
+        assert captured["headers"]["x-request-id"] == "req-xyz"
+
+
+class TestAnthropicStreamAbort:
+    """Test abort signal handling."""
+
+    @pytest.mark.asyncio
+    async def test_abort_signal(self):
+        signal = asyncio.Event()
+        signal.set()  # Already aborted
+
+        events = [
+            _make_event(
+                "content_block_start",
+                index=0,
+                content_block=_make_content_block("text"),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(text="Hello"),
+            ),
+        ]
+        final = _make_final_message(content=[])
+        mock_stream = _MockAnthropicStream(events, final)
+
+        provider = _make_provider("none")
+        _inject_mock_stream(provider, mock_stream)
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model,
+            [UserMessage(content=[TextContent(text="hi")])],
+            options=StreamOptions(signal=signal),
+        )
+
+        stream_events = []
+        async for event in ms:
+            stream_events.append(event)
+
+        result = await ms.result()
+        assert result.stop_reason == "aborted"
+        assert result.error_message == "Request was aborted"
+
+        event_types = [e.type for e in stream_events]
+        assert "error" in event_types
+
+
+class TestAnthropicStreamError:
+    """Test error handling in the streaming loop."""
+
+    @pytest.mark.asyncio
+    async def test_exception_produces_error_result(self):
+        """When the SDK raises Exception, we get an error result."""
+        provider = _make_provider("none")
+        mock_client = MagicMock()
+        mock_client.messages = MagicMock()
+        mock_client.messages.stream = MagicMock(side_effect=RuntimeError("API down"))
+        provider._client = mock_client
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model, [UserMessage(content=[TextContent(text="hi")])]
+        )
+
+        stream_events = []
+        async for event in ms:
+            stream_events.append(event)
+
+        result = await ms.result()
+        assert result.stop_reason == "error"
+        assert "API down" in (result.error_message or "")
+
+        event_types = [e.type for e in stream_events]
+        assert "error" in event_types
+
+    @pytest.mark.asyncio
+    async def test_base_exception_reraises(self):
+        """When the SDK raises BaseException (not Exception), it should be re-raised on the task."""
+
+        class _FatalError(BaseException):
+            """Custom BaseException that won't disrupt the test runner."""
+
+        provider = _make_provider("none")
+        mock_client = MagicMock()
+        mock_client.messages = MagicMock()
+        mock_client.messages.stream = MagicMock(side_effect=_FatalError("fatal"))
+        provider._client = mock_client
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model, [UserMessage(content=[TextContent(text="hi")])]
+        )
+
+        stream_events = []
+        async for event in ms:
+            stream_events.append(event)
+
+        result = await ms.result()
+        assert result.stop_reason == "error"
+        assert "fatal" in (result.error_message or "")
+
+        # The BaseException re-raise path (line 157) causes the task to fail.
+        # We verify the task completed with the re-raised exception.
+        task = ms._producer_task
+        assert task is not None
+        assert task.done()
+        with pytest.raises(_FatalError):
+            task.result()
+
+
+class TestAnthropicConvertResponse:
+    """Test _convert_response with all block types."""
+
+    def test_text_block(self):
+        response = _make_final_message(
+            id="msg_resp",
+            content=[SimpleNamespace(type="text", text="Hello")],
+            stop_reason="end_turn",
+            input_tokens=5,
+            output_tokens=3,
+            cache_read_input_tokens=2,
+            cache_creation_input_tokens=1,
+        )
+        model = _anthropic_model()
+        result = AnthropicProvider._convert_response(response, model)
+
+        assert len(result.content) == 1
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "Hello"
+        assert result.stop_reason == "stop"
+        assert result.usage.input_tokens == 5
+        assert result.usage.output_tokens == 3
+        assert result.usage.cache_read_tokens == 2
+        assert result.usage.cache_write_tokens == 1
+        assert result.response_id == "msg_resp"
+        assert result.provider_id == "anthropic"
+        assert result.model_id == model.id
+
+    def test_thinking_block(self):
+        response = _make_final_message(
+            content=[SimpleNamespace(type="thinking", thinking="reasoning...")],
+            stop_reason="end_turn",
+        )
+        model = _anthropic_model()
+        result = AnthropicProvider._convert_response(response, model)
+
+        assert len(result.content) == 1
+        assert isinstance(result.content[0], ThinkingContent)
+        assert result.content[0].thinking == "reasoning..."
+
+    def test_tool_use_block(self):
+        response = _make_final_message(
+            content=[
+                SimpleNamespace(
+                    type="tool_use",
+                    id="toolu_xyz",
+                    name="search",
+                    input={"q": "test"},
+                ),
+            ],
+            stop_reason="tool_use",
+        )
+        model = _anthropic_model()
+        result = AnthropicProvider._convert_response(response, model)
+
+        assert len(result.content) == 1
+        assert isinstance(result.content[0], ToolCall)
+        assert result.content[0].id == "toolu_xyz"
+        assert result.content[0].name == "search"
+        assert result.content[0].arguments == {"q": "test"}
+        assert result.stop_reason == "tool_use"
+
+    def test_max_tokens_stop_reason(self):
+        response = _make_final_message(
+            content=[SimpleNamespace(type="text", text="truncated")],
+            stop_reason="max_tokens",
+        )
+        model = _anthropic_model()
+        result = AnthropicProvider._convert_response(response, model)
+        assert result.stop_reason == "length"
+
+    def test_unknown_stop_reason_passes_through(self):
+        response = _make_final_message(
+            content=[SimpleNamespace(type="text", text="x")],
+            stop_reason="some_new_reason",
+        )
+        model = _anthropic_model()
+        result = AnthropicProvider._convert_response(response, model)
+        assert result.stop_reason == "some_new_reason"
+
+    def test_mixed_content_blocks(self):
+        response = _make_final_message(
+            content=[
+                SimpleNamespace(type="thinking", thinking="hmm"),
+                SimpleNamespace(type="text", text="answer"),
+                SimpleNamespace(
+                    type="tool_use", id="t1", name="run", input={"cmd": "ls"}
+                ),
+            ],
+            stop_reason="tool_use",
+        )
+        model = _anthropic_model()
+        result = AnthropicProvider._convert_response(response, model)
+
+        assert len(result.content) == 3
+        assert isinstance(result.content[0], ThinkingContent)
+        assert isinstance(result.content[1], TextContent)
+        assert isinstance(result.content[2], ToolCall)
+
+    def test_cache_tokens_default_to_zero(self):
+        """When cache token attributes are missing, they should default to 0."""
+        response = SimpleNamespace(
+            id="msg_1",
+            content=[SimpleNamespace(type="text", text="hi")],
+            stop_reason="end_turn",
+            usage=SimpleNamespace(
+                input_tokens=5,
+                output_tokens=3,
+                # No cache_read_input_tokens or cache_creation_input_tokens
+            ),
+        )
+        model = _anthropic_model()
+        result = AnthropicProvider._convert_response(response, model)
+        assert result.usage.cache_read_tokens == 0
+        assert result.usage.cache_write_tokens == 0
+
+
+class TestAnthropicConvertMessageExtended:
+    """Test _convert_message for ImageContent, ThinkingContent, and unknown types."""
+
+    def test_image_content(self):
+        msg = UserMessage(
+            content=[
+                TextContent(text="Describe this"),
+                ImageContent(source="base64data", media_type="image/png"),
+            ]
+        )
+        result = AnthropicProvider._convert_message(msg)
+
+        assert result["role"] == "user"
+        assert len(result["content"]) == 2
+        assert result["content"][0] == {"type": "text", "text": "Describe this"}
+        assert result["content"][1] == {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "base64data",
+            },
+        }
+
+    def test_thinking_content_in_assistant(self):
+        msg = AssistantMessage(
+            content=[
+                ThinkingContent(thinking="let me think"),
+                TextContent(text="answer"),
+            ]
+        )
+        result = AnthropicProvider._convert_message(msg)
+
+        assert result["role"] == "assistant"
+        assert len(result["content"]) == 2
+        assert result["content"][0] == {"type": "thinking", "thinking": "let me think"}
+        assert result["content"][1] == {"type": "text", "text": "answer"}
+
+    def test_unknown_message_type_fallback(self):
+        """A message type that is not User/Assistant/ToolResult should produce empty user content."""
+
+        # Create a mock message that is none of the known types
+        class UnknownMessage:
+            role = "unknown"
+            content = []
+
+        result = AnthropicProvider._convert_message(UnknownMessage())  # type: ignore[arg-type]
+        assert result == {"role": "user", "content": []}
+
+
+class TestAnthropicApplyMessageCacheControlEdge:
+    """Test _apply_message_cache_control edge case: empty content (line 186)."""
+
+    CACHE_CONTROL = {"type": "ephemeral"}
+
+    def test_empty_content_list_is_noop(self):
+        """Message with empty content list should be skipped (line 186)."""
+        msgs = [{"role": "user", "content": []}]
+        AnthropicProvider._apply_message_cache_control(msgs, self.CACHE_CONTROL)
+        # Content should still be empty, no crash
+        assert msgs[0]["content"] == []
+
+    def test_none_content_is_noop(self):
+        """Message with no 'content' key should be skipped."""
+        msgs = [{"role": "user"}]
+        AnthropicProvider._apply_message_cache_control(msgs, self.CACHE_CONTROL)
+        assert "content" not in msgs[0] or msgs[0].get("content") is None
+
+    def test_content_is_falsy_but_present(self):
+        """Message with content=None should be skipped."""
+        msgs = [{"role": "user", "content": None}]
+        AnthropicProvider._apply_message_cache_control(msgs, self.CACHE_CONTROL)
+        assert msgs[0]["content"] is None
