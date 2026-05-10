@@ -14,8 +14,8 @@ from cubepi.agent.types import (
     ShouldStopAfterTurnContext,
     TurnEndEvent,
     TurnStartEvent,
-    emit_event,
 )
+from cubepi.utils import emit_event
 from cubepi.providers.base import (
     AssistantMessage,
     Model,
@@ -154,8 +154,8 @@ async def _run_loop(
         pending = await get_steering_messages() or []
         if pending:
             for msg in pending:
-                await _emit(emit, MessageStartEvent(message=msg))
-                await _emit(emit, MessageEndEvent(message=msg))
+                await emit_event(emit, MessageStartEvent(message=msg))
+                await emit_event(emit, MessageEndEvent(message=msg))
                 current_context.messages.append(msg)
                 new_messages.append(msg)
 
