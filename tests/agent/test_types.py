@@ -175,3 +175,14 @@ class TestTypedMessages:
         msg = UserMessage(content=[TextContent(text="hi")])
         event = MessageStartEvent(message=msg)
         assert event.message.role == "user"
+
+    def test_turn_end_event_typed_tool_results(self):
+        msg = AssistantMessage(content=[TextContent(text="done")])
+        tr = ToolResultMessage(
+            tool_call_id="t1",
+            tool_name="search",
+            content=[TextContent(text="result")],
+        )
+        event = TurnEndEvent(message=msg, tool_results=[tr])
+        assert len(event.tool_results) == 1
+        assert event.tool_results[0].role == "tool_result"
