@@ -261,12 +261,15 @@ class AnthropicProvider:
     ) -> None:
         etype = getattr(event, "type", "")
         if etype == "content_block_start":
+            idx = getattr(event, "index", len(partial.content))
             block = event.content_block
             if block.type == "text":
                 partial.content.append(TextContent(text=""))
                 ms.push(
                     StreamEvent(
-                        type="text_start", partial=partial.model_copy(deep=True)
+                        type="text_start",
+                        content_index=idx,
+                        partial=partial.model_copy(deep=True),
                     )
                 )
             elif block.type == "thinking":
@@ -274,6 +277,7 @@ class AnthropicProvider:
                 ms.push(
                     StreamEvent(
                         type="thinking_start",
+                        content_index=idx,
                         partial=partial.model_copy(deep=True),
                     )
                 )
@@ -284,10 +288,12 @@ class AnthropicProvider:
                 ms.push(
                     StreamEvent(
                         type="toolcall_start",
+                        content_index=idx,
                         partial=partial.model_copy(deep=True),
                     )
                 )
         elif etype == "content_block_delta":
+            idx = getattr(event, "index", len(partial.content) - 1)
             delta = event.delta
             if hasattr(delta, "text"):
                 if partial.content and isinstance(partial.content[-1], TextContent):
@@ -298,6 +304,7 @@ class AnthropicProvider:
                     StreamEvent(
                         type="text_delta",
                         delta=delta.text,
+                        content_index=idx,
                         partial=partial.model_copy(deep=True),
                     )
                 )
@@ -310,6 +317,7 @@ class AnthropicProvider:
                     StreamEvent(
                         type="thinking_delta",
                         delta=delta.thinking,
+                        content_index=idx,
                         partial=partial.model_copy(deep=True),
                     )
                 )
@@ -318,16 +326,19 @@ class AnthropicProvider:
                     StreamEvent(
                         type="toolcall_delta",
                         delta=delta.partial_json,
+                        content_index=idx,
                         partial=partial.model_copy(deep=True),
                     )
                 )
         elif etype == "content_block_stop":
+            idx = getattr(event, "index", len(partial.content) - 1)
             if partial.content:
                 last = partial.content[-1]
                 if isinstance(last, TextContent):
                     ms.push(
                         StreamEvent(
                             type="text_end",
+                            content_index=idx,
                             partial=partial.model_copy(deep=True),
                         )
                     )
@@ -335,6 +346,7 @@ class AnthropicProvider:
                     ms.push(
                         StreamEvent(
                             type="thinking_end",
+                            content_index=idx,
                             partial=partial.model_copy(deep=True),
                         )
                     )
@@ -342,6 +354,7 @@ class AnthropicProvider:
                     ms.push(
                         StreamEvent(
                             type="toolcall_end",
+                            content_index=idx,
                             partial=partial.model_copy(deep=True),
                         )
                     )

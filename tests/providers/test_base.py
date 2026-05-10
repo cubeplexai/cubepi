@@ -104,6 +104,16 @@ class TestMessageTypes:
         assert td.name == "search"
 
 
+class TestStreamEvent:
+    def test_content_index_default_none(self):
+        event = StreamEvent(type="text_delta", delta="hi")
+        assert event.content_index is None
+
+    def test_content_index_set(self):
+        event = StreamEvent(type="text_start", content_index=0)
+        assert event.content_index == 0
+
+
 class TestMessageStream:
     async def test_stream_iteration_and_result(self):
         stream = MessageStream()
