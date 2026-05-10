@@ -155,6 +155,7 @@ class TestAnthropicProviderHooks:
         mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
         mock_stream.__aexit__ = AsyncMock(return_value=False)
         mock_stream.__aiter__ = MagicMock(return_value=iter([]))
+        mock_stream.response = MagicMock(status_code=200, headers={})
 
         final_msg = MagicMock()
         final_msg.content = [MagicMock(type="text", text="hello")]
@@ -204,6 +205,7 @@ class TestAnthropicProviderHooks:
         mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
         mock_stream.__aexit__ = AsyncMock(return_value=False)
         mock_stream.__aiter__ = MagicMock(return_value=iter([]))
+        mock_stream.response = MagicMock(status_code=200, headers={})
 
         final_msg = MagicMock()
         final_msg.content = [MagicMock(type="text", text="ok")]

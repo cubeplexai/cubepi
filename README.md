@@ -1,5 +1,11 @@
 # cubepi
 
+[![CI](https://github.com/cubeplexai/cubepi/actions/workflows/ci.yml/badge.svg)](https://github.com/cubeplexai/cubepi/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/cubeplexai/cubepi/graph/badge.svg)](https://codecov.io/gh/cubeplexai/cubepi)
+[![PyPI](https://img.shields.io/pypi/v/cubepi)](https://pypi.org/project/cubepi/)
+[![Python](https://img.shields.io/pypi/pyversions/cubepi)](https://pypi.org/project/cubepi/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 Pythonic async-native agent framework. Built to replace [langgraph](https://github.com/langchain-ai/langgraph) with something simpler, faster, and easier to reason about.
 
 Inspired by [pi-agent-core](https://github.com/anthropics/pi-agent-core) (TypeScript), redesigned for Python.

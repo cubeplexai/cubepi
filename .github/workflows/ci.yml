@@ -27,7 +27,14 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Run tests
-        run: uv run pytest tests/ -v --cov=cubepi --cov-report=term-missing
+        run: uv run pytest tests/ -v --cov=cubepi --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.13'
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
 
       - name: Check import
         run: uv run python -c "import cubepi; print(cubepi.__all__)"
