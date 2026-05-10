@@ -22,6 +22,7 @@ from cubepi.agent.types import (
     ToolExecutionUpdateEvent,
     TurnEndEvent,
     TurnStartEvent,
+    emit_event,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     "ToolExecutionUpdateEvent",
     "TurnEndEvent",
     "TurnStartEvent",
+    "emit_event",
 ]

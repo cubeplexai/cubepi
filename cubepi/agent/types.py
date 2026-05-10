@@ -168,3 +168,9 @@ AgentEvent = (
 AgentEventSink = Callable[[AgentEvent], Awaitable[None]]
 
 AgentListener = Callable[[AgentEvent, asyncio.Event | None], Awaitable[None] | None]
+
+
+async def emit_event(emit_fn: Callable, event: AgentEvent) -> None:
+    result = emit_fn(event)
+    if asyncio.iscoroutine(result):
+        await result
