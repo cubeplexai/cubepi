@@ -184,3 +184,22 @@ class TestMessageStreamTaskTracking:
         ms.attach_task(task)
         with pytest.raises(RuntimeError, match="producer died"):
             await ms.result()
+
+
+class TestAssistantMessageMetadata:
+    def test_default_metadata_fields(self):
+        msg = AssistantMessage(content=[])
+        assert msg.provider_id == ""
+        assert msg.model_id == ""
+        assert msg.response_id is None
+
+    def test_metadata_fields_set(self):
+        msg = AssistantMessage(
+            content=[],
+            provider_id="anthropic",
+            model_id="claude-sonnet-4-20250514",
+            response_id="msg_abc123",
+        )
+        assert msg.provider_id == "anthropic"
+        assert msg.model_id == "claude-sonnet-4-20250514"
+        assert msg.response_id == "msg_abc123"

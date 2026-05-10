@@ -125,6 +125,9 @@ class AssistantMessage(BaseModel):
     error_message: str | None = None
     usage: Usage | None = None
     timestamp: float | None = None
+    provider_id: str = ""
+    model_id: str = ""
+    response_id: str | None = None
 
 
 class ToolResultMessage(BaseModel):

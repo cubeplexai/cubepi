@@ -109,7 +109,11 @@ class AnthropicProvider:
                         )
 
                     partial = AssistantMessage(
-                        content=[], usage=Usage(), timestamp=time.time()
+                        content=[],
+                        usage=Usage(),
+                        timestamp=time.time(),
+                        provider_id=model.provider,
+                        model_id=model.id,
                     )
                     ms.push(
                         StreamEvent(type="start", partial=partial.model_copy(deep=True))
@@ -135,7 +139,7 @@ class AnthropicProvider:
                         self._handle_event(event, partial, ms)
 
                     final_msg = stream.get_final_message()
-                    result = self._convert_response(final_msg)
+                    result = self._convert_response(final_msg, model)
                     ms.push(StreamEvent(type="done"))
                     ms.set_result(result)
 
@@ -360,7 +364,7 @@ class AnthropicProvider:
                     )
 
     @staticmethod
-    def _convert_response(response: Any) -> AssistantMessage:
+    def _convert_response(response: Any, model: Model) -> AssistantMessage:
         content: list[Any] = []
         for block in response.content:
             if block.type == "text":
@@ -392,4 +396,7 @@ class AnthropicProvider:
                 or 0,
             ),
             timestamp=time.time(),
+            provider_id=model.provider,
+            model_id=model.id,
+            response_id=getattr(response, "id", None),
         )

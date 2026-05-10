@@ -85,7 +85,11 @@ class OpenAIProvider:
                     )
 
                 partial = AssistantMessage(
-                    content=[], usage=Usage(), timestamp=time.time()
+                    content=[],
+                    usage=Usage(),
+                    timestamp=time.time(),
+                    provider_id=model.provider,
+                    model_id=model.id,
                 )
                 ms.push(
                     StreamEvent(type="start", partial=partial.model_copy(deep=True))
@@ -95,8 +99,12 @@ class OpenAIProvider:
                 tool_calls_in_progress: dict[int, dict[str, Any]] = {}
                 text_started = False
                 text_content_index = 0
+                response_id: str | None = None
 
                 async for chunk in response:
+                    if response_id is None and getattr(chunk, "id", None):
+                        response_id = chunk.id
+                        partial.response_id = response_id
                     if opts.signal and opts.signal.is_set():
                         aborted = partial.model_copy(
                             update={
