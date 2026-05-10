@@ -304,6 +304,43 @@ class TestAgentLoop:
         roles = [m.role for m in messages]
         assert roles == ["user", "assistant", "tool_result"]
 
+    async def test_steering_messages_polled_before_first_turn(self):
+        provider = FauxProvider()
+        provider.set_responses([faux_assistant_message("Got it")])
+
+        context = AgentContext(system_prompt="", messages=[], tools=[])
+        call_count = 0
+
+        async def get_steering():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return [make_user_message("steering hint")]
+            return []
+
+        events: list[AgentEvent] = []
+        messages = await run_agent_loop(
+            prompts=[make_user_message("Hello")],
+            context=context,
+            provider=provider,
+            model=make_model(),
+            convert_to_llm=identity_converter,
+            get_steering_messages=get_steering,
+            emit=lambda e: events.append(e),
+        )
+
+        # Messages should be: initial prompt, steering message, assistant response
+        roles = [m.role for m in messages]
+        assert roles == ["user", "user", "assistant"]
+
+        # Verify event ordering: message_end events should reflect
+        # initial prompt -> steering message -> assistant response
+        message_ends = [e for e in events if e.type == "message_end"]
+        assert len(message_ends) == 3
+        assert message_ends[0].message.role == "user"  # initial prompt
+        assert message_ends[1].message.role == "user"  # steering message
+        assert message_ends[2].message.role == "assistant"  # response
+
     async def test_error_stop_reason_ends_loop(self):
         provider = FauxProvider()
         provider.set_responses(
