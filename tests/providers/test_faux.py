@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from cubepi.providers.base import (
     Model,
+    StreamEvent,
     StreamOptions,
     TextContent,
     ToolDefinition,
@@ -709,6 +710,11 @@ class TestFauxProviderProduceExceptionHandling:
         assert result.stop_reason == "error"
         assert "base boom" in (result.error_message or "")
 
+        # The re-raised BaseException surfaces on the producer task
+        assert stream._producer_task is not None
+        assert stream._producer_task.done()
+        assert isinstance(stream._producer_task.exception(), CustomBaseException)
+
 
 class TestFauxProviderAbortDuringBlocks:
     """Tests for abort signal checks during block iteration and chunk streaming."""
@@ -749,112 +755,121 @@ class TestFauxProviderAbortDuringBlocks:
         assert result.stop_reason == "aborted"
 
     async def test_abort_during_thinking_chunks(self):
-        """Abort signal set while thinking deltas are being streamed
-        (lines 340-347)."""
-        # Use long thinking text to ensure multiple chunks
+        """Abort signal set while thinking deltas are being streamed.
+
+        Uses push-patching to set the signal synchronously in the producer,
+        avoiding consumer-side races.
+        """
+        from cubepi.providers.base import MessageStream
+
         long_thinking = "a" * 200
         provider = FauxProvider(token_size_min=1, token_size_max=1)
-        provider.set_responses(
-            [
-                faux_assistant_message(
-                    [faux_thinking(long_thinking), faux_text("answer")]
-                )
-            ]
-        )
-        model = self._make_model()
         signal = asyncio.Event()
 
-        stream = await provider.stream(model, [], options=StreamOptions(signal=signal))
+        message = faux_assistant_message(
+            [faux_thinking(long_thinking), faux_text("answer")]
+        )
 
-        events = []
+        ms = MessageStream()
+        original_push = ms.push
         thinking_delta_count = 0
-        async for event in stream:
-            events.append(event)
+
+        def push_and_abort(event):
+            nonlocal thinking_delta_count
+            original_push(event)
             if event.type == "thinking_delta":
                 thinking_delta_count += 1
-                # Abort after a few thinking deltas
                 if thinking_delta_count >= 3:
                     signal.set()
 
-        result = await stream.result()
+        ms.push = push_and_abort  # type: ignore[assignment]
+
+        await provider._stream_with_deltas(ms, message, signal)
+
+        result = await ms.result()
         assert result.stop_reason == "aborted"
-        assert any(e.type == "error" for e in events)
-        # We should have some thinking deltas but not all of them
         assert thinking_delta_count >= 3
-        # The text block should NOT have started
-        event_types = [e.type for e in events]
+        event_types = [e.type for e in ms._queue._queue if isinstance(e, StreamEvent)]
         assert "text_start" not in event_types
 
     async def test_abort_during_tool_call_chunks(self):
-        """Abort signal set while tool call deltas are being streamed
-        (lines 425-432)."""
-        # Use a large arguments dict to produce multiple chunks
+        """Abort signal set while tool call deltas are being streamed.
+
+        Uses push-patching to set the signal synchronously in the producer,
+        avoiding consumer-side races.
+        """
+        from cubepi.providers.base import MessageStream
+
         large_args = {f"key_{i}": f"value_{i}" for i in range(20)}
         provider = FauxProvider(token_size_min=1, token_size_max=1)
-        provider.set_responses(
-            [
-                faux_assistant_message(
-                    [faux_tool_call("search", large_args, id="tc-1")],
-                    stop_reason="tool_use",
-                )
-            ]
-        )
-        model = self._make_model()
         signal = asyncio.Event()
 
-        stream = await provider.stream(model, [], options=StreamOptions(signal=signal))
+        message = faux_assistant_message(
+            [faux_tool_call("search", large_args, id="tc-1")],
+            stop_reason="tool_use",
+        )
 
-        events = []
+        ms = MessageStream()
+        original_push = ms.push
         toolcall_delta_count = 0
-        async for event in stream:
-            events.append(event)
+
+        def push_and_abort(event):
+            nonlocal toolcall_delta_count
+            original_push(event)
             if event.type == "toolcall_delta":
                 toolcall_delta_count += 1
-                # Abort after a few tool call deltas
                 if toolcall_delta_count >= 3:
                     signal.set()
 
-        result = await stream.result()
+        ms.push = push_and_abort  # type: ignore[assignment]
+
+        await provider._stream_with_deltas(ms, message, signal)
+
+        result = await ms.result()
         assert result.stop_reason == "aborted"
-        assert any(e.type == "error" for e in events)
         assert toolcall_delta_count >= 3
-        # Tool call should NOT have ended normally
-        event_types = [e.type for e in events]
+        event_types = [e.type for e in ms._queue._queue if isinstance(e, StreamEvent)]
         assert "toolcall_end" not in event_types
 
     async def test_abort_during_text_then_tool_blocks(self):
-        """Abort during text block prevents tool call block from starting."""
+        """Abort during text block prevents tool call block from starting.
+
+        Uses push-patching to set the signal synchronously in the producer,
+        avoiding consumer-side races.
+        """
+        from cubepi.providers.base import MessageStream
+
         long_text = "word " * 100
         provider = FauxProvider(token_size_min=1, token_size_max=1)
-        provider.set_responses(
-            [
-                faux_assistant_message(
-                    [
-                        faux_text(long_text),
-                        faux_tool_call("search", {"q": "test"}, id="tc-1"),
-                    ],
-                    stop_reason="tool_use",
-                )
-            ]
-        )
-        model = self._make_model()
         signal = asyncio.Event()
 
-        stream = await provider.stream(model, [], options=StreamOptions(signal=signal))
+        message = faux_assistant_message(
+            [
+                faux_text(long_text),
+                faux_tool_call("search", {"q": "test"}, id="tc-1"),
+            ],
+            stop_reason="tool_use",
+        )
 
-        events = []
+        ms = MessageStream()
+        original_push = ms.push
         text_delta_count = 0
-        async for event in stream:
-            events.append(event)
+
+        def push_and_abort(event):
+            nonlocal text_delta_count
+            original_push(event)
             if event.type == "text_delta":
                 text_delta_count += 1
                 if text_delta_count >= 3:
                     signal.set()
 
-        result = await stream.result()
+        ms.push = push_and_abort  # type: ignore[assignment]
+
+        await provider._stream_with_deltas(ms, message, signal)
+
+        result = await ms.result()
         assert result.stop_reason == "aborted"
-        # Tool call block should never start
-        event_types = [e.type for e in events]
+        event_types = [e.type for e in ms._queue._queue if isinstance(e, StreamEvent)]
         assert "toolcall_start" not in event_types
 
 
