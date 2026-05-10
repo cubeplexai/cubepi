@@ -50,3 +50,13 @@ class TestMemoryCheckpointer:
 
         assert d1.messages[0].content[0].text == "t1"
         assert d2.messages[0].content[0].text == "t2"
+
+    async def test_save_extra_creates_thread(self):
+        """save_extra on a thread that has never been used should create an entry."""
+        cp = MemoryCheckpointer()
+        await cp.save_extra("new-thread", {"key": "value"})
+
+        data = await cp.load("new-thread")
+        assert data is not None
+        assert data.messages == []
+        assert data.extra == {"key": "value"}
