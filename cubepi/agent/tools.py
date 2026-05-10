@@ -62,6 +62,7 @@ def _make_tool_result_message(finalized: _FinalizedOutcome) -> ToolResultMessage
         tool_call_id=finalized.tool_call.id,
         tool_name=finalized.tool_call.name,
         content=finalized.result.content,
+        details=finalized.result.details,
         is_error=finalized.is_error,
         timestamp=time.time(),
     )

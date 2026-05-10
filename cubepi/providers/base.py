@@ -132,6 +132,7 @@ class ToolResultMessage(BaseModel):
     tool_call_id: str
     tool_name: str
     content: list[Content]
+    details: Any = None
     is_error: bool = False
     timestamp: float | None = None
 

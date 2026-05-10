@@ -279,3 +279,27 @@ class TestToolEvents:
         start_idx = types.index("tool_execution_start")
         end_idx = types.index("tool_execution_end")
         assert start_idx < end_idx
+
+
+class TestToolResultDetails:
+    async def test_details_propagated_to_tool_result_message(self):
+        async def execute_with_details(
+            tool_call_id, params, *, signal=None, on_update=None
+        ):
+            return AgentToolResult(
+                content=[TextContent(text="result")],
+                details={"execution_time": 42},
+            )
+
+        tool = make_echo_tool(execute_fn=execute_with_details)
+        ctx = make_context([tool])
+        msg = make_assistant_msg(
+            [ToolCall(id="t1", name="echo", arguments={"value": "hi"})]
+        )
+
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="sequential", emit=lambda e: None
+        )
+
+        assert len(batch.messages) == 1
+        assert batch.messages[0].details == {"execution_time": 42}
