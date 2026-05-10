@@ -9,6 +9,7 @@ from cubepi.utils.json_parse import parse_streaming_json
 
 from cubepi.providers.base import (
     AssistantMessage,
+    ImageContent,
     Message,
     MessageStream,
     Model,
@@ -265,6 +266,22 @@ class OpenAIProvider:
     @staticmethod
     def _convert_message(msg: Message) -> dict[str, Any]:
         if isinstance(msg, UserMessage):
+            has_image = any(isinstance(c, ImageContent) for c in msg.content)
+            if has_image:
+                parts: list[dict[str, Any]] = []
+                for c in msg.content:
+                    if isinstance(c, TextContent):
+                        parts.append({"type": "text", "text": c.text})
+                    elif isinstance(c, ImageContent):
+                        parts.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{c.media_type};base64,{c.source}"
+                                },
+                            }
+                        )
+                return {"role": "user", "content": parts}
             text_parts = [c.text for c in msg.content if isinstance(c, TextContent)]
             return {"role": "user", "content": "\n".join(text_parts)}
 

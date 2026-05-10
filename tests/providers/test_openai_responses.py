@@ -10,6 +10,7 @@ import pytest
 
 from cubepi.providers.base import (
     AssistantMessage,
+    ImageContent,
     Model,
     StreamOptions,
     TextContent,
@@ -142,6 +143,24 @@ class TestBuildInput:
         assert result[1]["type"] == "message"
         assert result[2]["type"] == "function_call"
         assert result[3]["type"] == "function_call_output"
+
+
+class TestOpenAIResponsesImageConversion:
+    def test_user_message_with_image(self):
+        msg = UserMessage(content=[
+            TextContent(text="Describe this"),
+            ImageContent(source="imgdata", media_type="image/jpeg"),
+        ])
+        result = OpenAIResponsesProvider._build_input([msg])
+        assert len(result) == 1
+        assert result[0]["role"] == "user"
+        content = result[0]["content"]
+        assert len(content) == 2
+        assert content[0] == {"type": "input_text", "text": "Describe this"}
+        assert content[1] == {
+            "type": "input_image",
+            "image_url": "data:image/jpeg;base64,imgdata",
+        }
 
 
 class TestConvertTool:
