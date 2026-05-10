@@ -21,8 +21,8 @@ from cubepi.providers.base import (
     ToolResultMessage,
     Usage,
     UserMessage,
-    _invoke_on_payload,
-    _invoke_on_response,
+    invoke_on_payload,
+    invoke_on_response,
 )
 
 
@@ -67,14 +67,14 @@ class OpenAIProvider:
         async def _produce() -> None:
             try:
                 nonlocal kwargs
-                kwargs = await _invoke_on_payload(opts.on_payload, kwargs, model)
+                kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
 
                 response = await self._client.chat.completions.create(**kwargs)
 
                 # Invoke on_response with HTTP metadata if available
                 http_response = getattr(response, "response", None)
                 if http_response is not None:
-                    await _invoke_on_response(
+                    await invoke_on_response(
                         opts.on_response,
                         ProviderResponse(
                             status=http_response.status_code,

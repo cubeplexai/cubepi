@@ -77,13 +77,7 @@ class OpenAIResponsesProvider:
 
         if system_prompt:
             role = "developer" if model.reasoning else "system"
-            kwargs["instructions"] = system_prompt
-            # The instructions param uses system/developer role implicitly.
-            # For explicit role control, prepend to input instead.
             kwargs["input"] = [{"role": role, "content": system_prompt}] + api_input
-
-            # Remove instructions since we use input-based system prompt
-            del kwargs["instructions"]
 
         if tools:
             kwargs["tools"] = [self._convert_tool(t) for t in tools]

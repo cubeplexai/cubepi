@@ -21,8 +21,8 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
     adjust_max_tokens_for_thinking,
-    _invoke_on_payload,
-    _invoke_on_response,
+    invoke_on_payload,
+    invoke_on_response,
 )
 from cubepi.providers.models import clamp_thinking_level
 
@@ -93,13 +93,13 @@ class AnthropicProvider:
         async def _produce() -> None:
             try:
                 nonlocal kwargs
-                kwargs = await _invoke_on_payload(opts.on_payload, kwargs, model)
+                kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
 
                 async with self._client.messages.stream(**kwargs) as stream:
                     # Invoke on_response with HTTP metadata if available
                     http_response = getattr(stream, "response", None)
                     if http_response is not None:
-                        await _invoke_on_response(
+                        await invoke_on_response(
                             opts.on_response,
                             ProviderResponse(
                                 status=http_response.status_code,
