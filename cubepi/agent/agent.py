@@ -19,7 +19,10 @@ from cubepi.providers.base import (
     AssistantMessage,
     Message,
     Model,
+    OnPayloadCallback,
+    OnResponseCallback,
     Provider,
+    StreamOptions,
     TextContent,
     ThinkingLevel,
     Usage,
@@ -116,6 +119,8 @@ class Agent(Generic[TMessage]):
         before_tool_call: Callable | None = None,
         after_tool_call: Callable | None = None,
         should_stop_after_turn: Callable | None = None,
+        on_payload: OnPayloadCallback | None = None,
+        on_response: OnResponseCallback | None = None,
         steering_mode: str = "one-at-a-time",
         follow_up_mode: str = "one-at-a-time",
         tool_execution: str = "parallel",
@@ -135,6 +140,8 @@ class Agent(Generic[TMessage]):
         self.before_tool_call = before_tool_call
         self.after_tool_call = after_tool_call
         self.should_stop_after_turn = should_stop_after_turn
+        self.on_payload = on_payload
+        self.on_response = on_response
         self.tool_execution = tool_execution
         self.checkpointer = checkpointer
         self.thread_id = thread_id
@@ -222,6 +229,14 @@ class Agent(Generic[TMessage]):
 
         await self._run_continuation()
 
+    def _build_stream_options(self, signal: asyncio.Event) -> StreamOptions:
+        return StreamOptions(
+            thinking=self._state.thinking,
+            signal=signal,
+            on_payload=self.on_payload,
+            on_response=self.on_response,
+        )
+
     async def _run_prompt(self, messages: list[Any]) -> None:
         await self._run_with_lifecycle(
             lambda signal: run_agent_loop(
@@ -236,9 +251,8 @@ class Agent(Generic[TMessage]):
                 should_stop_after_turn=self.should_stop_after_turn,
                 get_steering_messages=self._make_async_drain(self._steering_queue),
                 get_follow_up_messages=self._make_async_drain(self._follow_up_queue),
-                thinking=self._state.thinking,
+                stream_options=self._build_stream_options(signal),
                 tool_execution=self.tool_execution,
-                signal=signal,
                 emit=lambda e: self._process_event(e),
             )
         )
@@ -256,9 +270,8 @@ class Agent(Generic[TMessage]):
                 should_stop_after_turn=self.should_stop_after_turn,
                 get_steering_messages=self._make_async_drain(self._steering_queue),
                 get_follow_up_messages=self._make_async_drain(self._follow_up_queue),
-                thinking=self._state.thinking,
+                stream_options=self._build_stream_options(signal),
                 tool_execution=self.tool_execution,
-                signal=signal,
                 emit=lambda e: self._process_event(e),
             )
         )

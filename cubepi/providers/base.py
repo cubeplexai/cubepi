@@ -13,7 +13,7 @@ from typing import (
     runtime_checkable,
 )
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 
@@ -210,6 +210,18 @@ OnResponseCallback = Callable[["ProviderResponse", Model], Awaitable[None] | Non
 """Optional callback invoked after an HTTP response is received."""
 
 
+class StreamOptions(BaseModel):
+    """Options bag for Provider.stream(), transparent to the agent loop."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    thinking: ThinkingLevel = "off"
+    thinking_budgets: ThinkingBudgets | None = None
+    signal: asyncio.Event | None = None
+    on_payload: OnPayloadCallback | None = None
+    on_response: OnResponseCallback | None = None
+
+
 async def _invoke_on_payload(
     callback: OnPayloadCallback | None,
     payload: dict,
@@ -246,9 +258,5 @@ class Provider(Protocol):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
-        thinking: ThinkingLevel = "off",
-        thinking_budgets: ThinkingBudgets | None = None,
-        signal: asyncio.Event | None = None,
-        on_payload: OnPayloadCallback | None = None,
-        on_response: OnResponseCallback | None = None,
+        options: StreamOptions | None = None,
     ) -> MessageStream: ...

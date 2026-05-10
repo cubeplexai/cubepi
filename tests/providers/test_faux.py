@@ -1,6 +1,11 @@
 import asyncio
 
-from cubepi.providers.base import TextContent, ToolDefinition, UserMessage
+from cubepi.providers.base import (
+    StreamOptions,
+    TextContent,
+    ToolDefinition,
+    UserMessage,
+)
 from cubepi.providers.faux import (
     FauxProvider,
     faux_assistant_message,
@@ -196,7 +201,7 @@ class TestFauxProvider:
         signal = asyncio.Event()
         signal.set()
 
-        stream = await provider.stream(model, [], signal=signal)
+        stream = await provider.stream(model, [], options=StreamOptions(signal=signal))
         _ = [e async for e in stream]
         result = await stream.result()
 
@@ -216,7 +221,7 @@ class TestFauxProvider:
         model = self._make_model()
         signal = asyncio.Event()
 
-        stream = await provider.stream(model, [], signal=signal)
+        stream = await provider.stream(model, [], options=StreamOptions(signal=signal))
 
         events = []
         count = 0

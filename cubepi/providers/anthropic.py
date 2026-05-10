@@ -10,14 +10,11 @@ from cubepi.providers.base import (
     Message,
     MessageStream,
     Model,
-    OnPayloadCallback,
-    OnResponseCallback,
     ProviderResponse,
     StreamEvent,
+    StreamOptions,
     TextContent,
-    ThinkingBudgets,
     ThinkingContent,
-    ThinkingLevel,
     ToolCall,
     ToolDefinition,
     ToolResultMessage,
@@ -51,14 +48,11 @@ class AnthropicProvider:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
-        thinking: ThinkingLevel = "off",
-        thinking_budgets: ThinkingBudgets | None = None,
-        signal: asyncio.Event | None = None,
-        on_payload: OnPayloadCallback | None = None,
-        on_response: OnResponseCallback | None = None,
+        options: StreamOptions | None = None,
     ) -> MessageStream:
+        opts = options or StreamOptions()
         ms = MessageStream()
-        thinking = clamp_thinking_level(model, thinking)
+        thinking = clamp_thinking_level(model, opts.thinking)
 
         cache_control = self._get_cache_control()
         api_messages = [self._convert_message(m) for m in messages]
@@ -69,7 +63,7 @@ class AnthropicProvider:
             base_max_tokens=model.max_tokens,
             model_max_tokens=model.context_window,
             reasoning_level=thinking,
-            custom_budgets=thinking_budgets,
+            custom_budgets=opts.thinking_budgets,
         )
 
         kwargs: dict[str, Any] = {
@@ -99,14 +93,14 @@ class AnthropicProvider:
         async def _produce() -> None:
             try:
                 nonlocal kwargs
-                kwargs = await _invoke_on_payload(on_payload, kwargs, model)
+                kwargs = await _invoke_on_payload(opts.on_payload, kwargs, model)
 
                 async with self._client.messages.stream(**kwargs) as stream:
                     # Invoke on_response with HTTP metadata if available
                     http_response = getattr(stream, "response", None)
                     if http_response is not None:
                         await _invoke_on_response(
-                            on_response,
+                            opts.on_response,
                             ProviderResponse(
                                 status=http_response.status_code,
                                 headers=dict(http_response.headers),
@@ -122,7 +116,7 @@ class AnthropicProvider:
                     )
 
                     async for event in stream:
-                        if signal and signal.is_set():
+                        if opts.signal and opts.signal.is_set():
                             aborted = partial.model_copy(
                                 update={
                                     "stop_reason": "aborted",

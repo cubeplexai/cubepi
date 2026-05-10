@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from cubepi.providers.base import (
     Model,
     ProviderResponse,
+    StreamOptions,
     _invoke_on_payload,
     _invoke_on_response,
 )
@@ -178,7 +179,7 @@ class TestAnthropicProviderHooks:
             ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="hi")])],
-                on_payload=on_payload,
+                options=StreamOptions(on_payload=on_payload),
             )
             # Drain stream to let _produce run
             async for _ in ms:
@@ -226,7 +227,7 @@ class TestAnthropicProviderHooks:
             ms = await provider.stream(
                 _model(),
                 [UserMessage(content=[TextContent(text="hi")])],
-                on_payload=on_payload,
+                options=StreamOptions(on_payload=on_payload),
             )
             async for _ in ms:
                 pass
@@ -283,7 +284,7 @@ class TestOpenAIProviderHooks:
             ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="hi")])],
-                on_payload=on_payload,
+                options=StreamOptions(on_payload=on_payload),
             )
             async for _ in ms:
                 pass
@@ -323,7 +324,7 @@ class TestOpenAIProviderHooks:
             ms = await provider.stream(
                 _model(),
                 [UserMessage(content=[TextContent(text="hi")])],
-                on_payload=on_payload,
+                options=StreamOptions(on_payload=on_payload),
             )
             async for _ in ms:
                 pass
@@ -339,13 +340,11 @@ class TestOpenAIProviderHooks:
 
 
 class TestProtocolConformance:
-    def test_provider_protocol_accepts_hooks(self):
-        """The Provider protocol's stream method includes on_payload and on_response."""
+    def test_provider_protocol_accepts_options(self):
+        """The Provider protocol's stream method includes options."""
         from cubepi.providers.base import Provider
 
         sig = inspect.signature(Provider.stream)
         params = sig.parameters
-        assert "on_payload" in params
-        assert "on_response" in params
-        assert params["on_payload"].default is None
-        assert params["on_response"].default is None
+        assert "options" in params
+        assert params["options"].default is None

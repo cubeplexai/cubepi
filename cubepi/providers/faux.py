@@ -13,10 +13,9 @@ from cubepi.providers.base import (
     MessageStream,
     Model,
     StreamEvent,
+    StreamOptions,
     TextContent,
-    ThinkingBudgets,
     ThinkingContent,
-    ThinkingLevel,
     ToolCall,
     ToolDefinition,
     Usage,
@@ -223,12 +222,9 @@ class FauxProvider:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
-        thinking: ThinkingLevel = "off",
-        thinking_budgets: ThinkingBudgets | None = None,
-        signal: asyncio.Event | None = None,
-        on_payload: Any = None,
-        on_response: Any = None,
+        options: StreamOptions | None = None,
     ) -> MessageStream:
+        opts = options or StreamOptions()
         ms = MessageStream()
         self.call_count += 1
 
@@ -273,7 +269,7 @@ class FauxProvider:
                 )
                 resolved = resolved.model_copy(update={"usage": cache_usage})
 
-                await self._stream_with_deltas(ms, resolved, signal)
+                await self._stream_with_deltas(ms, resolved, opts.signal)
             except BaseException as exc:
                 error_msg = AssistantMessage(
                     content=[],

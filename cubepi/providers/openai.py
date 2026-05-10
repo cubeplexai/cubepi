@@ -12,13 +12,10 @@ from cubepi.providers.base import (
     Message,
     MessageStream,
     Model,
-    OnPayloadCallback,
-    OnResponseCallback,
     ProviderResponse,
     StreamEvent,
+    StreamOptions,
     TextContent,
-    ThinkingBudgets,
-    ThinkingLevel,
     ToolCall,
     ToolDefinition,
     ToolResultMessage,
@@ -27,7 +24,6 @@ from cubepi.providers.base import (
     _invoke_on_payload,
     _invoke_on_response,
 )
-from cubepi.providers.models import clamp_thinking_level
 
 
 class OpenAIProvider:
@@ -50,14 +46,10 @@ class OpenAIProvider:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
-        thinking: ThinkingLevel = "off",
-        thinking_budgets: ThinkingBudgets | None = None,
-        signal: asyncio.Event | None = None,
-        on_payload: OnPayloadCallback | None = None,
-        on_response: OnResponseCallback | None = None,
+        options: StreamOptions | None = None,
     ) -> MessageStream:
+        opts = options or StreamOptions()
         ms = MessageStream()
-        thinking = clamp_thinking_level(model, thinking)
 
         api_messages: list[dict[str, Any]] = []
         if system_prompt:
@@ -75,7 +67,7 @@ class OpenAIProvider:
         async def _produce() -> None:
             try:
                 nonlocal kwargs
-                kwargs = await _invoke_on_payload(on_payload, kwargs, model)
+                kwargs = await _invoke_on_payload(opts.on_payload, kwargs, model)
 
                 response = await self._client.chat.completions.create(**kwargs)
 
@@ -83,7 +75,7 @@ class OpenAIProvider:
                 http_response = getattr(response, "response", None)
                 if http_response is not None:
                     await _invoke_on_response(
-                        on_response,
+                        opts.on_response,
                         ProviderResponse(
                             status=http_response.status_code,
                             headers=dict(http_response.headers),
@@ -103,7 +95,7 @@ class OpenAIProvider:
                 text_started = False
 
                 async for chunk in response:
-                    if signal and signal.is_set():
+                    if opts.signal and opts.signal.is_set():
                         aborted = partial.model_copy(
                             update={
                                 "stop_reason": "aborted",

@@ -11,6 +11,7 @@ from cubepi.providers.base import (
     MessageStream,
     Model,
     StreamEvent,
+    StreamOptions,
     TextContent,
     ThinkingContent,
     ThinkingLevel,
@@ -60,9 +61,9 @@ class OpenAIResponsesProvider:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
-        thinking: ThinkingLevel = "off",
-        signal: asyncio.Event | None = None,
+        options: StreamOptions | None = None,
     ) -> MessageStream:
+        opts = options or StreamOptions()
         ms = MessageStream()
 
         api_input = self._build_input(messages)
@@ -88,7 +89,7 @@ class OpenAIResponsesProvider:
             kwargs["tools"] = [self._convert_tool(t) for t in tools]
 
         # Configure reasoning effort for reasoning models
-        effort = _THINKING_TO_EFFORT.get(thinking)
+        effort = _THINKING_TO_EFFORT.get(opts.thinking)
         if model.reasoning and effort is not None:
             kwargs["reasoning"] = {
                 "effort": effort,
@@ -118,7 +119,7 @@ class OpenAIResponsesProvider:
                 active_tool_item_id: str | None = None
 
                 async for event in response:
-                    if signal and signal.is_set():
+                    if opts.signal and opts.signal.is_set():
                         aborted = partial.model_copy(
                             update={
                                 "stop_reason": "aborted",

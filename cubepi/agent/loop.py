@@ -19,7 +19,7 @@ from cubepi.providers.base import (
     AssistantMessage,
     Model,
     Provider,
-    ThinkingLevel,
+    StreamOptions,
     ToolCall,
     ToolResultMessage,
 )
@@ -45,9 +45,8 @@ async def run_agent_loop(
     should_stop_after_turn: Callable | None = None,
     get_steering_messages: Callable | None = None,
     get_follow_up_messages: Callable | None = None,
-    thinking: ThinkingLevel = "off",
+    stream_options: StreamOptions | None = None,
     tool_execution: str = "parallel",
-    signal: asyncio.Event | None = None,
     system_prompt: str | None = None,
 ) -> list[Any]:
     new_messages: list[Any] = list(prompts)
@@ -77,9 +76,8 @@ async def run_agent_loop(
         should_stop_after_turn=should_stop_after_turn,
         get_steering_messages=get_steering_messages,
         get_follow_up_messages=get_follow_up_messages,
-        thinking=thinking,
+        stream_options=stream_options,
         tool_execution=tool_execution,
-        signal=signal,
         emit=emit,
     )
     return new_messages
@@ -98,9 +96,8 @@ async def run_agent_loop_continue(
     should_stop_after_turn: Callable | None = None,
     get_steering_messages: Callable | None = None,
     get_follow_up_messages: Callable | None = None,
-    thinking: ThinkingLevel = "off",
+    stream_options: StreamOptions | None = None,
     tool_execution: str = "parallel",
-    signal: asyncio.Event | None = None,
     system_prompt: str | None = None,
 ) -> list[Any]:
     if not context.messages:
@@ -130,9 +127,8 @@ async def run_agent_loop_continue(
         should_stop_after_turn=should_stop_after_turn,
         get_steering_messages=get_steering_messages,
         get_follow_up_messages=get_follow_up_messages,
-        thinking=thinking,
+        stream_options=stream_options,
         tool_execution=tool_execution,
-        signal=signal,
         emit=emit,
     )
     return new_messages
@@ -151,11 +147,11 @@ async def _run_loop(
     should_stop_after_turn: Callable | None,
     get_steering_messages: Callable | None,
     get_follow_up_messages: Callable | None,
-    thinking: ThinkingLevel,
+    stream_options: StreamOptions | None,
     tool_execution: str,
-    signal: asyncio.Event | None,
     emit: Callable,
 ) -> None:
+    opts = stream_options or StreamOptions()
     first_turn = True
 
     while True:
@@ -173,8 +169,7 @@ async def _run_loop(
                 model,
                 convert_to_llm,
                 transform_context,
-                thinking,
-                signal,
+                opts,
                 emit,
             )
             new_messages.append(message)
@@ -195,7 +190,7 @@ async def _run_loop(
                     tool_execution=tool_execution,
                     before_tool_call=before_tool_call,
                     after_tool_call=after_tool_call,
-                    signal=signal,
+                    signal=opts.signal,
                     emit=emit,
                 )
                 tool_results = batch.messages
@@ -251,13 +246,12 @@ async def _stream_assistant_response(
     model: Model,
     convert_to_llm: Callable,
     transform_context: Callable | None,
-    thinking: ThinkingLevel,
-    signal: asyncio.Event | None,
+    options: StreamOptions,
     emit: Callable,
 ) -> AssistantMessage:
     messages = context.messages
     if transform_context:
-        messages = await transform_context(messages, signal=signal)
+        messages = await transform_context(messages, signal=options.signal)
 
     llm_messages = convert_to_llm(messages)
     if asyncio.iscoroutine(llm_messages):
@@ -272,8 +266,7 @@ async def _stream_assistant_response(
         llm_messages,
         system_prompt=context.system_prompt,
         tools=tools_defs,
-        thinking=thinking,
-        signal=signal,
+        options=options,
     )
 
     partial_message: AssistantMessage | None = None

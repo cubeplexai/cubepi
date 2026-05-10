@@ -11,6 +11,7 @@ import pytest
 from cubepi.providers.base import (
     AssistantMessage,
     Model,
+    StreamOptions,
     TextContent,
     ThinkingContent,
     ToolCall,
@@ -351,7 +352,7 @@ class TestStreamThinking:
             ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="think about this")])],
-                thinking="medium",
+                options=StreamOptions(thinking="medium"),
             )
 
             stream_events = []
@@ -611,7 +612,7 @@ class TestStreamAbort:
             ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="hi")])],
-                signal=signal,
+                options=StreamOptions(signal=signal),
             )
 
             stream_events = []
@@ -753,7 +754,7 @@ class TestReasoningParams:
             ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="think")])],
-                thinking="high",
+                options=StreamOptions(thinking="high"),
             )
 
             # Consume the stream to ensure the background task has run
@@ -798,7 +799,7 @@ class TestReasoningParams:
             ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="hi")])],
-                thinking="off",
+                options=StreamOptions(thinking="off"),
             )
             async for _ in ms:
                 pass
