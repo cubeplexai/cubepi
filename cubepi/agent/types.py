@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from cubepi.providers.base import (
     AssistantMessage,
     Content,
+    Message,
     StreamEvent,
     ToolCall,
     ToolDefinition,
@@ -46,7 +47,7 @@ class AgentTool(Generic[TParams]):
 @dataclass
 class AgentContext:
     system_prompt: str
-    messages: list[Any]
+    messages: list[Message]
     tools: list[AgentTool] | None = None
 
 
@@ -88,7 +89,7 @@ class ShouldStopAfterTurnContext:
     message: AssistantMessage
     tool_results: list[ToolResultMessage]
     context: AgentContext
-    new_messages: list[Any]
+    new_messages: list[Message]
 
 
 # --- Event types (11 total, matching pi) ---
@@ -100,7 +101,7 @@ class AgentStartEvent(BaseModel):
 
 class AgentEndEvent(BaseModel):
     type: Literal["agent_end"] = "agent_end"
-    messages: list[Any]
+    messages: list[Message]
 
 
 class TurnStartEvent(BaseModel):
@@ -109,24 +110,24 @@ class TurnStartEvent(BaseModel):
 
 class TurnEndEvent(BaseModel):
     type: Literal["turn_end"] = "turn_end"
-    message: Any
+    message: AssistantMessage
     tool_results: list[ToolResultMessage]
 
 
 class MessageStartEvent(BaseModel):
     type: Literal["message_start"] = "message_start"
-    message: Any
+    message: Message
 
 
 class MessageUpdateEvent(BaseModel):
     type: Literal["message_update"] = "message_update"
-    message: Any
+    message: AssistantMessage
     stream_event: StreamEvent
 
 
 class MessageEndEvent(BaseModel):
     type: Literal["message_end"] = "message_end"
-    message: Any
+    message: Message
 
 
 class ToolExecutionStartEvent(BaseModel):
