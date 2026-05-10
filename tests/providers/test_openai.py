@@ -1,6 +1,7 @@
 from cubepi.providers.openai import OpenAIProvider
 from cubepi.providers.base import (
     AssistantMessage,
+    ImageContent,
     TextContent,
     ToolCall,
     ToolDefinition,
@@ -44,6 +45,29 @@ class TestOpenAIMessageConversion:
         assert result["role"] == "tool"
         assert result["tool_call_id"] == "tc-1"
         assert result["content"] == "result"
+
+
+class TestOpenAIImageConversion:
+    def test_user_message_with_image(self):
+        msg = UserMessage(content=[
+            TextContent(text="What's in this image?"),
+            ImageContent(source="base64data", media_type="image/png"),
+        ])
+        result = OpenAIProvider._convert_message(msg)
+        assert result["role"] == "user"
+        assert isinstance(result["content"], list)
+        assert len(result["content"]) == 2
+        assert result["content"][0] == {"type": "text", "text": "What's in this image?"}
+        assert result["content"][1] == {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,base64data"},
+        }
+
+    def test_user_message_text_only_stays_simple(self):
+        msg = UserMessage(content=[TextContent(text="hello")])
+        result = OpenAIProvider._convert_message(msg)
+        assert result["role"] == "user"
+        assert result["content"] == "hello"
 
 
 class TestOpenAIToolConversion:

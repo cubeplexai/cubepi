@@ -7,6 +7,7 @@ from typing import Any
 
 from cubepi.providers.base import (
     AssistantMessage,
+    ImageContent,
     Message,
     MessageStream,
     Model,
@@ -471,6 +472,13 @@ class OpenAIResponsesProvider:
                 for c in msg.content:
                     if isinstance(c, TextContent):
                         content.append({"type": "input_text", "text": c.text})
+                    elif isinstance(c, ImageContent):
+                        content.append(
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:{c.media_type};base64,{c.source}",
+                            }
+                        )
                 if content:
                     api_input.append({"role": "user", "content": content})
 
