@@ -283,7 +283,7 @@ class FauxProvider:
                 if not isinstance(exc, Exception):
                     raise
 
-        asyncio.create_task(_produce())
+        ms.attach_task(asyncio.create_task(_produce()))
         return ms
 
     async def _stream_with_deltas(

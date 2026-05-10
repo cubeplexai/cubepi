@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from cubepi.providers.base import (
     AssistantMessage,
     ImageContent,
@@ -147,3 +149,28 @@ class TestMessageStream:
 
         result = await stream.result()
         assert result.stop_reason == "error"
+
+
+class TestMessageStreamTaskTracking:
+    async def test_attach_task_stores_reference(self):
+        ms = MessageStream()
+
+        async def dummy():
+            ms.push(StreamEvent(type="done"))
+            ms.set_result(AssistantMessage(content=[]))
+
+        task = asyncio.create_task(dummy())
+        ms.attach_task(task)
+        assert ms._producer_task is task
+        await task
+
+    async def test_result_propagates_task_exception(self):
+        ms = MessageStream()
+
+        async def failing():
+            raise RuntimeError("producer died before pushing error")
+
+        task = asyncio.create_task(failing())
+        ms.attach_task(task)
+        with pytest.raises(RuntimeError, match="producer died"):
+            await ms.result()

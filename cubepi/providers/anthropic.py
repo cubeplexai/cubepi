@@ -152,7 +152,7 @@ class AnthropicProvider:
                 if not isinstance(exc, Exception):
                     raise
 
-        asyncio.create_task(_produce())
+        ms.attach_task(asyncio.create_task(_produce()))
         return ms
 
     def _get_cache_control(self) -> dict[str, str] | None:

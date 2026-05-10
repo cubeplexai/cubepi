@@ -440,7 +440,7 @@ class OpenAIResponsesProvider:
                 if not isinstance(exc, Exception):
                     raise
 
-        asyncio.create_task(_produce())
+        ms.attach_task(asyncio.create_task(_produce()))
         return ms
 
     @staticmethod
