@@ -201,6 +201,12 @@ class Agent(Generic[TMessage]):
         else:
             messages = [message]
 
+        # Restore history from checkpointer if this is first prompt
+        if self.checkpointer and self.thread_id and not self._state._messages:
+            data = await self.checkpointer.load(self.thread_id)
+            if data and data.messages:
+                self._state._messages = list(data.messages)
+
         await self._run_prompt(messages)
 
     async def resume(self) -> None:
@@ -334,6 +340,8 @@ class Agent(Generic[TMessage]):
         elif event.type == "message_end":
             self._state.streaming_message = None
             self._state._messages.append(event.message)
+            if self.checkpointer and self.thread_id:
+                await self.checkpointer.append(self.thread_id, [event.message])
         elif event.type == "tool_execution_start":
             self._state._pending_tool_calls = self._state._pending_tool_calls | {
                 event.tool_call_id
