@@ -54,6 +54,7 @@ async def run_agent_loop(
         else context.system_prompt,
         messages=list(context.messages) + list(prompts),
         tools=context.tools,
+        extra=context.extra,
     )
 
     await emit_event(emit, AgentStartEvent())
@@ -112,6 +113,7 @@ async def run_agent_loop_continue(
         else context.system_prompt,
         messages=list(context.messages),
         tools=context.tools,
+        extra=context.extra,
     )
 
     await emit_event(emit, AgentStartEvent())
@@ -192,6 +194,8 @@ async def _run_loop(
             new_messages.append(message)
 
             if message.stop_reason in ("error", "aborted"):
+                # Emit message_end before turn/agent end events.
+                await emit_event(emit, MessageEndEvent(message=message))
                 await emit_event(emit, TurnEndEvent(message=message, tool_results=[]))
                 await emit_event(emit, AgentEndEvent(messages=new_messages))
                 return
@@ -199,6 +203,8 @@ async def _run_loop(
             # Apply after_model_response hook if configured.
             # The hook returns a TurnAction that can mutate the response,
             # inject messages, or change control flow.
+            # message_end is deferred until here so that a mutated response
+            # is what gets persisted via Agent._process_event.
             skip_tool_execution = False
             if after_model_response is not None:
                 turn_action = await after_model_response(
@@ -210,18 +216,18 @@ async def _run_loop(
                     if turn_action.response is not None:
                         # Replace both the local variable and the copy in
                         # context.messages that _stream_assistant_response appended.
-                        # NOTE: text_delta/message_update events have already been
-                        # emitted for the original response; downstream consumers
-                        # may see the original streamed content followed by the
-                        # replaced message in context. This is a known limitation.
                         message = turn_action.response
                         new_messages[-1] = message
                         if current_context.messages and isinstance(
                             current_context.messages[-1], AssistantMessage
                         ):
                             current_context.messages[-1] = message
+                    # Emit message_end now — message reflects any hook mutation.
+                    await emit_event(emit, MessageEndEvent(message=message))
                     if turn_action.inject_messages:
                         for inj in turn_action.inject_messages:
+                            await emit_event(emit, MessageStartEvent(message=inj))
+                            await emit_event(emit, MessageEndEvent(message=inj))
                             current_context.messages.append(inj)
                             new_messages.append(inj)
                     if turn_action.decision == "stop":
@@ -238,6 +244,12 @@ async def _run_loop(
                         )
                         skip_tool_execution = True
                     # decision == "natural" falls through to normal tool handling
+                else:
+                    # Hook returned None — emit message_end with unmodified message.
+                    await emit_event(emit, MessageEndEvent(message=message))
+            else:
+                # No hook configured — emit message_end directly.
+                await emit_event(emit, MessageEndEvent(message=message))
 
             if skip_tool_execution:
                 has_more_tool_calls = True
@@ -384,7 +396,9 @@ async def _stream_assistant_response(
                 context.messages.append(final_message)
             if not added_partial:
                 await emit_event(emit, MessageStartEvent(message=final_message))
-            await emit_event(emit, MessageEndEvent(message=final_message))
+            # message_end is intentionally NOT emitted here; the caller (_run_loop)
+            # emits it after running after_model_response so the persisted message
+            # reflects any hook mutation.
             return final_message
 
     # Fallback: stream ended without done/error event
@@ -394,5 +408,5 @@ async def _stream_assistant_response(
     else:
         context.messages.append(final_message)
         await emit_event(emit, MessageStartEvent(message=final_message))
-    await emit_event(emit, MessageEndEvent(message=final_message))
+    # message_end deferred to caller — see comment above.
     return final_message
