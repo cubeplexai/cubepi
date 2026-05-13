@@ -143,7 +143,8 @@ class OpenAIProvider:
                                 getattr(u, "prompt_tokens_details", None),
                                 "cached_tokens",
                                 0,
-                            ) or 0,
+                            )
+                            or 0,
                         )
 
                     if response_id is None and getattr(chunk, "id", None):
