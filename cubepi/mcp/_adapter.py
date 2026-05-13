@@ -83,7 +83,11 @@ def make_mcp_agent_tool(
         # not incremental), but we accept them for signature compatibility
         # with cubepi's agent loop.
         del tool_call_id, on_update
-        args_dict = args.model_dump(exclude_none=True) if hasattr(args, "model_dump") else dict(args)
+        args_dict = (
+            args.model_dump(exclude_none=True)
+            if hasattr(args, "model_dump")
+            else dict(args)
+        )
         result = await call_remote(name, args_dict)
         content_blocks: list[Content] = []
         for c in result.get("content", []):

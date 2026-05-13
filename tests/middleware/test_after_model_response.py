@@ -311,10 +311,12 @@ async def test_turn_action_inject_messages_persist(tmp_path) -> None:
 
     cp = MemoryCheckpointer()
     provider = FauxProvider()
-    provider.set_responses([
-        faux_assistant_message("first"),
-        faux_assistant_message("second"),
-    ])
+    provider.set_responses(
+        [
+            faux_assistant_message("first"),
+            faux_assistant_message("second"),
+        ]
+    )
     agent = Agent(
         provider=provider,
         model=Model(id="test", provider="faux"),
