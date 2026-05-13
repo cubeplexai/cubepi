@@ -13,7 +13,7 @@ from typing import (
     runtime_checkable,
 )
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 
@@ -116,6 +116,7 @@ class UserMessage(BaseModel):
     role: Literal["user"] = "user"
     content: list[Content]
     timestamp: float | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AssistantMessage(BaseModel):
@@ -128,16 +129,18 @@ class AssistantMessage(BaseModel):
     provider_id: str = ""
     model_id: str = ""
     response_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolResultMessage(BaseModel):
     role: Literal["tool_result"] = "tool_result"
     tool_call_id: str
-    tool_name: str
+    tool_name: str = ""
     content: list[Content]
     details: Any = None
     is_error: bool = False
     timestamp: float | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 Message = UserMessage | AssistantMessage | ToolResultMessage
