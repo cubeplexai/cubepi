@@ -294,7 +294,7 @@ class Agent(Generic[TMessage]):
             system_prompt=self._state.system_prompt,
             messages=list(self._state._messages),
             tools=list(self._state._tools),
-            extra=dict(self._extra),
+            extra=self._extra,
         )
 
     async def _run_with_lifecycle(self, executor: Callable) -> None:
