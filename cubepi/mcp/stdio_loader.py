@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from cubepi.agent.types import AgentTool
@@ -26,7 +27,8 @@ async def load_mcp_tools_stdio(
         args: argv for the server process
         env: environment variables (passed to subprocess)
         cwd: working directory for the subprocess
-        timeout: per-call timeout (not currently enforced strictly)
+        timeout: per-call wall-clock timeout for initialize/list/call awaits.
+            A hung server raises asyncio.TimeoutError instead of blocking forever.
     """
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -41,14 +43,16 @@ async def load_mcp_tools_stdio(
     async def _call_remote(tool_name: str, args_dict: dict[str, Any]) -> dict[str, Any]:
         async with stdio_client(server_params) as streams:
             async with ClientSession(*streams) as session:
-                await session.initialize()
-                resp = await session.call_tool(tool_name, args_dict)
+                await asyncio.wait_for(session.initialize(), timeout=timeout)
+                resp = await asyncio.wait_for(
+                    session.call_tool(tool_name, args_dict), timeout=timeout
+                )
                 return _serialize_call_tool_response(resp)
 
     async with stdio_client(server_params) as streams:
         async with ClientSession(*streams) as session:
-            await session.initialize()
-            tools_resp = await session.list_tools()
+            await asyncio.wait_for(session.initialize(), timeout=timeout)
+            tools_resp = await asyncio.wait_for(session.list_tools(), timeout=timeout)
             tool_descs = tools_resp.tools
 
     return [
@@ -63,11 +67,30 @@ async def load_mcp_tools_stdio(
 
 
 def _serialize_call_tool_response(resp: Any) -> dict[str, Any]:
-    content = []
+    """Normalize mcp SDK CallToolResult → dict for adapter.
+
+    Mirrors http_loader._serialize_call_tool_response so both transports
+    feed the adapter identically.
+    """
+    content: list[dict[str, Any]] = []
     for c in resp.content or []:
-        if getattr(c, "type", None) == "text":
+        ctype = getattr(c, "type", None)
+        if ctype == "text":
             content.append({"type": "text", "text": c.text})
-    return {
+        elif ctype == "image":
+            content.append(
+                {
+                    "type": "image",
+                    "data": getattr(c, "data", ""),
+                    "mimeType": getattr(c, "mimeType", "")
+                    or getattr(c, "media_type", ""),
+                }
+            )
+    out: dict[str, Any] = {
         "content": content,
         "isError": bool(getattr(resp, "isError", False)),
     }
+    structured = getattr(resp, "structuredContent", None)
+    if structured is not None:
+        out["structuredContent"] = structured
+    return out

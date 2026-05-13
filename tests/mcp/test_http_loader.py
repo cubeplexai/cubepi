@@ -5,6 +5,7 @@ test runs without a real MCP server. End-to-end against a live server is
 gated behind CUBEPI_TEST_MCP_HTTP_URL.
 """
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -87,7 +88,8 @@ async def test_load_mcp_tools_http_lists_and_calls_tool(monkeypatch) -> None:
     call_resp = SimpleNamespace(
         content=[
             SimpleNamespace(type="text", text="hello"),
-            SimpleNamespace(type="image", data="ignored"),  # non-text dropped
+            SimpleNamespace(type="image", data="base64payload", mimeType="image/png"),
+            SimpleNamespace(type="resource", uri="ignored"),  # unsupported → dropped
         ],
         isError=False,
     )
@@ -119,10 +121,15 @@ async def test_load_mcp_tools_http_lists_and_calls_tool(monkeypatch) -> None:
     assert len(sessions) == 2
     assert sessions[1].calls == [("search", {"query": "cats"})]
 
-    # only the text content block survives serialization
-    assert len(result.content) == 1
+    # text + image preserved; unsupported "resource" dropped
+    from cubepi.providers.base import ImageContent
+
+    assert len(result.content) == 2
     assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == "hello"
+    assert isinstance(result.content[1], ImageContent)
+    assert result.content[1].source == "base64payload"
+    assert result.content[1].media_type == "image/png"
     assert result.is_error is None
 
 
@@ -155,6 +162,31 @@ async def test_load_mcp_tools_http_propagates_is_error(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_mcp_tools_http_preserves_structured_content(monkeypatch) -> None:
+    """structuredContent flows through to AgentToolResult.details."""
+    from cubepi.mcp import load_mcp_tools_http
+
+    tools_resp = [
+        SimpleNamespace(
+            name="weather",
+            description="",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+    call_resp = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="73F")],
+        isError=False,
+        structuredContent={"temp_f": 73, "conditions": "clear"},
+    )
+    _install_fake_transport(monkeypatch, tools=tools_resp, call_response=call_resp)
+
+    tools = await load_mcp_tools_http("https://mcp.example/sse")
+    args = tools[0].parameters()
+    result = await tools[0].execute("tc-sc", args, signal=None, on_update=None)
+    assert result.details["structuredContent"] == {"temp_f": 73, "conditions": "clear"}
+
+
+@pytest.mark.asyncio
 async def test_load_mcp_tools_http_handles_empty_content(monkeypatch) -> None:
     """resp.content == None should not break the serializer."""
     from cubepi.mcp import load_mcp_tools_http
@@ -173,6 +205,44 @@ async def test_load_mcp_tools_http_handles_empty_content(monkeypatch) -> None:
     args = tools[0].parameters()
     result = await tools[0].execute("tc-3", args, signal=None, on_update=None)
     assert result.content == []
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_http_initialize_timeout(monkeypatch) -> None:
+    """A session that hangs on initialize must raise TimeoutError, not block."""
+    from cubepi.mcp import load_mcp_tools_http
+
+    class _HangingSession:
+        def __init__(self, *streams):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def initialize(self):
+            await asyncio.sleep(10)  # forever, from the test's perspective
+
+        async def list_tools(self):  # pragma: no cover - never reached
+            return SimpleNamespace(tools=[])
+
+        async def call_tool(self, *a, **k):  # pragma: no cover - never reached
+            return SimpleNamespace(content=[], isError=False)
+
+    import mcp
+    import mcp.client.sse as sse_mod
+
+    @asynccontextmanager
+    async def fake_sse_client(url, *, headers=None, timeout=None):
+        yield ("r", "w")
+
+    monkeypatch.setattr(sse_mod, "sse_client", fake_sse_client)
+    monkeypatch.setattr(mcp, "ClientSession", _HangingSession)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await load_mcp_tools_http("https://mcp.example/sse", timeout=0.05)
 
 
 @pytest.mark.asyncio
