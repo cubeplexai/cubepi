@@ -68,7 +68,7 @@ class OpenAIProvider:
             api_messages.append(
                 {
                     "role": "system",
-                    "content": [{"type": "text", "text": system_prompt}],
+                    "content": system_prompt,
                 }
             )
         api_messages.extend(self._convert_message(m) for m in messages)
