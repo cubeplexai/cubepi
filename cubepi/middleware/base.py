@@ -1,6 +1,23 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from dataclasses import dataclass, field
+from typing import Any, Callable, Literal
+
+from cubepi.providers.base import AssistantMessage, Message
+
+
+@dataclass
+class TurnAction:
+    """Directs the agent loop's next step after a model response.
+
+    Composition (chain): each middleware sees previous middleware's
+    TurnAction. Last middleware's value wins for response and decision.
+    inject_messages concatenates across the chain.
+    """
+
+    response: AssistantMessage | None = None
+    inject_messages: list[Message] = field(default_factory=list)
+    decision: Literal["natural", "stop", "loop_to_model"] = "natural"
 
 
 class Middleware:
@@ -25,6 +42,15 @@ class Middleware:
         raise NotImplementedError
 
     async def should_stop_after_turn(self, ctx: Any) -> bool:
+        raise NotImplementedError
+
+    async def after_model_response(
+        self,
+        response: AssistantMessage,
+        ctx: Any,  # AgentContext — avoid circular import
+        *,
+        signal: Any = None,
+    ) -> TurnAction | None:
         raise NotImplementedError
 
 
@@ -103,5 +129,31 @@ def compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]:
             return False
 
         hooks["should_stop_after_turn"] = composed_stop
+
+    amr_chain = [m for m in middlewares if _has_method(m, "after_model_response")]
+    if amr_chain:
+
+        async def composed_amr(response, ctx, *, signal=None):
+            current_response = response
+            all_inject: list[Message] = []
+            last_decision: Literal["natural", "stop", "loop_to_model"] = "natural"
+            for mw in amr_chain:
+                result = await mw.after_model_response(
+                    current_response, ctx, signal=signal
+                )
+                if result is None:
+                    continue
+                if result.response is not None:
+                    current_response = result.response
+                if result.inject_messages:
+                    all_inject.extend(result.inject_messages)
+                last_decision = result.decision
+            return TurnAction(
+                response=current_response,
+                inject_messages=all_inject,
+                decision=last_decision,
+            )
+
+        hooks["after_model_response"] = composed_amr
 
     return hooks
