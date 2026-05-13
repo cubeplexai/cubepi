@@ -51,6 +51,86 @@ def test_schema_to_model_boolean_and_number() -> None:
     assert instance.rate == 1.5
 
 
+def test_schema_to_model_preserves_enum() -> None:
+    """enum becomes Literal — invalid values rejected by Pydantic."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "unit": {"type": "string", "enum": ["c", "f"]},
+        },
+        "required": ["unit"],
+    }
+    M = mcp_schema_to_pydantic_model(tool_name="weather", input_schema=schema)
+    assert M(unit="c").unit == "c"
+    with pytest.raises(Exception):  # noqa: BLE001 - Pydantic ValidationError
+        M(unit="kelvin")
+
+
+def test_schema_to_model_preserves_string_constraints() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$",
+                "minLength": 3,
+                "maxLength": 3,
+                "description": "ISO airport code",
+            },
+        },
+        "required": ["code"],
+    }
+    M = mcp_schema_to_pydantic_model(tool_name="ap", input_schema=schema)
+    assert M(code="SFO").code == "SFO"
+    with pytest.raises(Exception):
+        M(code="sfo")  # lowercase fails pattern
+    with pytest.raises(Exception):
+        M(code="TOOLONG")  # exceeds maxLength
+    assert M.model_fields["code"].description == "ISO airport code"
+
+
+def test_schema_to_model_preserves_numeric_bounds() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "exclusiveMinimum": 0,
+            },
+        },
+        "required": ["limit"],
+    }
+    M = mcp_schema_to_pydantic_model(tool_name="pg", input_schema=schema)
+    assert M(limit=50).limit == 50
+    with pytest.raises(Exception):
+        M(limit=0)
+    with pytest.raises(Exception):
+        M(limit=101)
+
+
+def test_schema_to_model_preserves_array_size() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "maxItems": 3,
+            },
+        },
+        "required": ["tags"],
+    }
+    M = mcp_schema_to_pydantic_model(tool_name="tag", input_schema=schema)
+    assert M(tags=["a", "b"]).tags == ["a", "b"]
+    with pytest.raises(Exception):
+        M(tags=[])
+    with pytest.raises(Exception):
+        M(tags=["a", "b", "c", "d"])
+
+
 def test_schema_to_model_unknown_type_becomes_any() -> None:
     """An unrecognized JSON Schema type falls back to typing.Any."""
     from typing import Any
