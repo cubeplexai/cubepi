@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from cubepi.providers.base import (
     AssistantMessage,
@@ -29,17 +29,47 @@ from cubepi.providers.models import clamp_thinking_level
 CacheRetention = Literal["short", "long", "none"]
 
 
+@runtime_checkable
+class CacheMarkerPolicy(Protocol):
+    """Policy controlling where Anthropic cache_control markers are inserted.
+
+    See `cubepi/docs/specs/2026-05-13-cubepi-cubebox-readiness-design.md` § D3.
+    """
+
+    def mark_system(self) -> bool: ...
+    def mark_last_tool(self) -> bool: ...
+    def message_breakpoint_indices(
+        self,
+        messages: list[Message],
+    ) -> list[int]: ...
+
+
+class DefaultCacheMarkerPolicy:
+    """Preserves cubepi v0.2 behavior: system + last message + last tool."""
+
+    def mark_system(self) -> bool:
+        return True
+
+    def mark_last_tool(self) -> bool:
+        return True
+
+    def message_breakpoint_indices(self, messages: list[Message]) -> list[int]:
+        return [len(messages) - 1] if messages else []
+
+
 class AnthropicProvider:
     def __init__(
         self,
         *,
         api_key: str | None = None,
         cache_retention: CacheRetention = "short",
+        cache_policy: CacheMarkerPolicy | None = None,
     ) -> None:
         import anthropic
 
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._cache_retention = cache_retention
+        self._cache_policy: CacheMarkerPolicy = cache_policy or DefaultCacheMarkerPolicy()
 
     async def stream(
         self,
@@ -57,7 +87,8 @@ class AnthropicProvider:
         cache_control = self._get_cache_control()
         api_messages = [self._convert_message(m) for m in messages]
         if cache_control:
-            self._apply_message_cache_control(api_messages, cache_control)
+            indices = self._cache_policy.message_breakpoint_indices(messages)
+            self._apply_indices_markers(api_messages, indices, cache_control)
 
         max_tokens, thinking_budget = adjust_max_tokens_for_thinking(
             base_max_tokens=model.max_tokens,
@@ -76,12 +107,16 @@ class AnthropicProvider:
                 {
                     "type": "text",
                     "text": system_prompt,
-                    **({"cache_control": cache_control} if cache_control else {}),
+                    **(
+                        {"cache_control": cache_control}
+                        if cache_control and self._cache_policy.mark_system()
+                        else {}
+                    ),
                 }
             ]
         if tools:
             api_tools = [self._convert_tool(t) for t in tools]
-            if cache_control and api_tools:
+            if cache_control and api_tools and self._cache_policy.mark_last_tool():
                 api_tools[-1]["cache_control"] = cache_control
             kwargs["tools"] = api_tools
         if thinking != "off" and thinking_budget > 0:
@@ -166,6 +201,26 @@ class AnthropicProvider:
         if self._cache_retention == "long":
             cc["ttl"] = "1h"
         return cc
+
+    def _apply_indices_markers(
+        self,
+        api_messages: list[dict[str, Any]],
+        indices: list[int],
+        cache_control: dict[str, str],
+    ) -> None:
+        """Apply cache_control to the last content block of each indexed message."""
+        for idx in indices:
+            if 0 <= idx < len(api_messages):
+                msg = api_messages[idx]
+                content = msg.get("content")
+                if isinstance(content, list) and content:
+                    last_block = content[-1]
+                    if isinstance(last_block, dict):
+                        content[-1] = {**last_block, "cache_control": cache_control}
+                elif isinstance(content, str):
+                    msg["content"] = [
+                        {"type": "text", "text": content, "cache_control": cache_control}
+                    ]
 
     @staticmethod
     def _apply_message_cache_control(
