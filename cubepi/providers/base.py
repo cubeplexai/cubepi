@@ -135,7 +135,7 @@ class AssistantMessage(BaseModel):
 class ToolResultMessage(BaseModel):
     role: Literal["tool_result"] = "tool_result"
     tool_call_id: str
-    tool_name: str = ""
+    tool_name: str
     content: list[Content]
     details: Any = None
     is_error: bool = False
