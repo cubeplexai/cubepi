@@ -103,19 +103,19 @@ class AnthropicProvider:
             "model": model.id,
             "messages": api_messages,
             "max_tokens": max_tokens,
+            "temperature": model.temperature,
         }
         if system_prompt:
-            kwargs["system"] = [
-                {
-                    "type": "text",
-                    "text": system_prompt,
-                    **(
-                        {"cache_control": cache_control}
-                        if cache_control and self._cache_policy.mark_system()
-                        else {}
-                    ),
-                }
-            ]
+            if cache_control and self._cache_policy.mark_system():
+                kwargs["system"] = [
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": cache_control,
+                    }
+                ]
+            else:
+                kwargs["system"] = system_prompt
         if tools:
             api_tools = [self._convert_tool(t) for t in tools]
             if cache_control and api_tools and self._cache_policy.mark_last_tool():
@@ -175,7 +175,7 @@ class AnthropicProvider:
 
                         self._handle_event(event, partial, ms)
 
-                    final_msg = stream.get_final_message()
+                    final_msg = await stream.get_final_message()
                     result = self._convert_response(final_msg, model)
                     ms.push(StreamEvent(type="done"))
                     ms.set_result(result)
