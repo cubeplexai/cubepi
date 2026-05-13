@@ -39,8 +39,10 @@ def test_provider_uses_custom_policy() -> None:
     class _NoSystem:
         def mark_system(self) -> bool:
             return False
+
         def mark_last_tool(self) -> bool:
             return False
+
         def message_breakpoint_indices(self, messages):
             return []
 
@@ -55,7 +57,9 @@ def test_apply_indices_markers_marks_specified_indices() -> None:
         {"role": "user", "content": [{"type": "text", "text": "a"}]},
         {"role": "user", "content": [{"type": "text", "text": "b"}]},
     ]
-    p._apply_indices_markers(api_messages, indices=[0], cache_control={"type": "ephemeral"})
+    p._apply_indices_markers(
+        api_messages, indices=[0], cache_control={"type": "ephemeral"}
+    )
     assert api_messages[0]["content"][-1].get("cache_control") == {"type": "ephemeral"}
     # message 1 untouched
     assert "cache_control" not in api_messages[1]["content"][-1]
@@ -67,7 +71,9 @@ def test_apply_indices_markers_converts_string_content() -> None:
     api_messages = [
         {"role": "user", "content": "plain string"},
     ]
-    p._apply_indices_markers(api_messages, indices=[0], cache_control={"type": "ephemeral"})
+    p._apply_indices_markers(
+        api_messages, indices=[0], cache_control={"type": "ephemeral"}
+    )
     assert isinstance(api_messages[0]["content"], list)
     assert api_messages[0]["content"][0] == {
         "type": "text",
@@ -79,11 +85,14 @@ def test_apply_indices_markers_converts_string_content() -> None:
 @pytest.mark.asyncio
 async def test_custom_policy_drives_message_marker_placement() -> None:
     """Custom policy that marks index 0 should result in marker on first message, not last."""
+
     class _FirstOnly:
         def mark_system(self) -> bool:
             return False
+
         def mark_last_tool(self) -> bool:
             return False
+
         def message_breakpoint_indices(self, messages):
             return [0] if messages else []
 

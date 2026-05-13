@@ -128,10 +128,12 @@ async def test_agent_stops_when_middleware_returns_stop() -> None:
     """decision='stop' terminates after the first model response."""
     provider = FauxProvider()
     # Two responses queued; second should never fire because we stop after first.
-    provider.set_responses([
-        faux_assistant_message("first"),
-        faux_assistant_message("should not fire"),
-    ])
+    provider.set_responses(
+        [
+            faux_assistant_message("first"),
+            faux_assistant_message("should not fire"),
+        ]
+    )
     agent = Agent(
         model=Model(id="test", provider="faux"),
         provider=provider,
@@ -147,10 +149,12 @@ async def test_agent_stops_when_middleware_returns_stop() -> None:
 async def test_agent_loops_when_middleware_returns_loop_to_model() -> None:
     """decision='loop_to_model' re-invokes the model with inject_messages."""
     provider = FauxProvider()
-    provider.set_responses([
-        faux_assistant_message("first"),
-        faux_assistant_message("second"),
-    ])
+    provider.set_responses(
+        [
+            faux_assistant_message("first"),
+            faux_assistant_message("second"),
+        ]
+    )
 
     call_count = 0
 
@@ -161,9 +165,7 @@ async def test_agent_loops_when_middleware_returns_loop_to_model() -> None:
             if call_count == 1:
                 return TurnAction(
                     decision="loop_to_model",
-                    inject_messages=[
-                        UserMessage(content=[TextContent(text="retry")])
-                    ],
+                    inject_messages=[UserMessage(content=[TextContent(text="retry")])],
                 )
             return None
 

@@ -11,6 +11,7 @@ import pytest
 def test_import_http_loader() -> None:
     """Loader function is importable from the public module path."""
     from cubepi.mcp import load_mcp_tools_http
+
     assert callable(load_mcp_tools_http)
 
 
@@ -22,6 +23,7 @@ async def test_load_mcp_tools_http_against_test_server() -> None:
         pytest.skip("Set CUBEPI_TEST_MCP_HTTP_URL to run this test")
 
     from cubepi.mcp import load_mcp_tools_http
+
     tools = await load_mcp_tools_http(server_url)
     assert len(tools) > 0
     first = tools[0]

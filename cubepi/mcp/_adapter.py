@@ -1,4 +1,5 @@
 """MCP tool descriptor → cubepi.AgentTool adapter."""
+
 from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
@@ -67,7 +68,8 @@ def make_mcp_agent_tool(
         {"content": [{"type": "text", "text": ...}, ...], "isError": bool}
     """
     parameters_model = mcp_schema_to_pydantic_model(
-        tool_name=name, input_schema=input_schema,
+        tool_name=name,
+        input_schema=input_schema,
     )
 
     async def _execute(args) -> AgentToolResult:

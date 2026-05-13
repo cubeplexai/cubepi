@@ -1,4 +1,5 @@
 """OpenAIProvider OSS reasoning extraction + payload_quirks tests (D4)."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -445,7 +446,9 @@ class TestPayloadQuirks:
         """payload_quirks parameter is accepted and stored."""
         with patch("openai.AsyncOpenAI") as mock_openai:
             mock_openai.return_value = MagicMock()
-            p = OpenAIProvider(api_key="x", payload_quirks=["max_completion_tokens_alias"])
+            p = OpenAIProvider(
+                api_key="x", payload_quirks=["max_completion_tokens_alias"]
+            )
             assert "max_completion_tokens_alias" in p._payload_quirks
 
     def test_constructor_default_empty_quirks(self):

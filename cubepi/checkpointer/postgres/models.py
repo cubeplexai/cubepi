@@ -5,6 +5,7 @@ so downstreams can compose it into alembic regardless of which ORM
 they use. SQLAlchemy 2.0 declarative is the chosen style for cubepi
 internal definitions.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -35,7 +36,9 @@ class CubepiThread(CubepiBase):
     )
     forked_at_seq: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)
     extra: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'{}'::jsonb"),
     )
     created_at: Mapped[_dt.datetime] = mapped_column(
         sa.TIMESTAMP(timezone=True),

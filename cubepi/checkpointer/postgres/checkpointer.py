@@ -3,6 +3,7 @@
 Append-only message log + per-thread KV (extra). Uses asyncpg pool +
 msgpack payload encoding. Schema version verified on context entry.
 """
+
 from __future__ import annotations
 
 import json
@@ -156,7 +157,8 @@ class PostgresCheckpointer:
             async with conn.transaction():
                 # Per-thread advisory lock for monotonic seq allocation
                 await conn.execute(
-                    "SELECT pg_advisory_xact_lock(hashtext($1))", thread_id,
+                    "SELECT pg_advisory_xact_lock(hashtext($1))",
+                    thread_id,
                 )
                 # Lazy thread row creation
                 await conn.execute(
@@ -164,23 +166,30 @@ class PostgresCheckpointer:
                     "VALUES ($1) ON CONFLICT DO NOTHING",
                     thread_id,
                 )
-                last_seq = await conn.fetchval(
-                    "SELECT COALESCE(MAX(seq), 0) FROM cubepi_messages "
-                    "WHERE thread_id = $1",
-                    thread_id,
-                ) or 0
+                last_seq = (
+                    await conn.fetchval(
+                        "SELECT COALESCE(MAX(seq), 0) FROM cubepi_messages "
+                        "WHERE thread_id = $1",
+                        thread_id,
+                    )
+                    or 0
+                )
 
                 rows = []
                 for i, m in enumerate(messages):
                     seq = last_seq + i + 1
-                    payload = msgpack.packb(m.model_dump(mode="json"), use_bin_type=True)
-                    rows.append((
-                        thread_id,
-                        seq,
-                        _role_of(m),
-                        json.dumps(m.metadata),
-                        payload,
-                    ))
+                    payload = msgpack.packb(
+                        m.model_dump(mode="json"), use_bin_type=True
+                    )
+                    rows.append(
+                        (
+                            thread_id,
+                            seq,
+                            _role_of(m),
+                            json.dumps(m.metadata),
+                            payload,
+                        )
+                    )
                 await conn.executemany(
                     "INSERT INTO cubepi_messages "
                     "(thread_id, seq, role, metadata, payload) "

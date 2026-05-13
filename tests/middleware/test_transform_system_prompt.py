@@ -36,8 +36,10 @@ async def test_chain_order_preserved() -> None:
 
 def test_no_middleware_hook_absent() -> None:
     """If no middleware implements transform_system_prompt, the hook is not in the dict."""
+
     class Plain(Middleware):
         pass
+
     hooks = compose_middleware([Plain()])
     assert "transform_system_prompt" not in hooks
 
@@ -85,7 +87,9 @@ async def test_agent_without_middleware_passes_system_prompt_unchanged() -> None
 
     async def _capturing_stream(self, model, messages, *, system_prompt="", **kw):  # type: ignore[override]
         received.append(system_prompt)
-        return await orig_stream(self, model, messages, system_prompt=system_prompt, **kw)
+        return await orig_stream(
+            self, model, messages, system_prompt=system_prompt, **kw
+        )
 
     provider = FauxProvider()
     provider.set_responses([faux_assistant_message("ok")])

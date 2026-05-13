@@ -69,7 +69,9 @@ class AnthropicProvider:
 
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._cache_retention = cache_retention
-        self._cache_policy: CacheMarkerPolicy = cache_policy or DefaultCacheMarkerPolicy()
+        self._cache_policy: CacheMarkerPolicy = (
+            cache_policy or DefaultCacheMarkerPolicy()
+        )
 
     async def stream(
         self,
@@ -219,7 +221,11 @@ class AnthropicProvider:
                         content[-1] = {**last_block, "cache_control": cache_control}
                 elif isinstance(content, str):
                     msg["content"] = [
-                        {"type": "text", "text": content, "cache_control": cache_control}
+                        {
+                            "type": "text",
+                            "text": content,
+                            "cache_control": cache_control,
+                        }
                     ]
 
     @staticmethod

@@ -4,6 +4,7 @@ Uses the mcp SDK's server primitives. Advertises one 'echo' tool.
 
 Run as: python -m tests.mcp._fake_stdio_server
 """
+
 import asyncio
 
 

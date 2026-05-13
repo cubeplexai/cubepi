@@ -1,4 +1,5 @@
 """stdio transport MCP tool loader."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -31,7 +32,10 @@ async def load_mcp_tools_stdio(
     from mcp.client.stdio import stdio_client
 
     server_params = StdioServerParameters(
-        command=command, args=args, env=env, cwd=cwd,
+        command=command,
+        args=args,
+        env=env,
+        cwd=cwd,
     )
 
     async def _call_remote(tool_name: str, args_dict: dict[str, Any]) -> dict[str, Any]:
@@ -60,7 +64,7 @@ async def load_mcp_tools_stdio(
 
 def _serialize_call_tool_response(resp: Any) -> dict[str, Any]:
     content = []
-    for c in (resp.content or []):
+    for c in resp.content or []:
         if getattr(c, "type", None) == "text":
             content.append({"type": "text", "text": c.text})
     return {

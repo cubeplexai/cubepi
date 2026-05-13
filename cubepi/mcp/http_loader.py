@@ -1,4 +1,5 @@
 """HTTP/SSE transport MCP tool loader."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -48,7 +49,7 @@ async def load_mcp_tools_http(
 def _serialize_call_tool_response(resp: Any) -> dict[str, Any]:
     """Normalize mcp SDK CallToolResult → dict for adapter."""
     content = []
-    for c in (resp.content or []):
+    for c in resp.content or []:
         if getattr(c, "type", None) == "text":
             content.append({"type": "text", "text": c.text})
     return {

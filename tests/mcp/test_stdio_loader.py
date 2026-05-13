@@ -7,6 +7,7 @@ import pytest
 
 def test_import_stdio_loader() -> None:
     from cubepi.mcp import load_mcp_tools_stdio
+
     assert callable(load_mcp_tools_stdio)
 
 
@@ -27,5 +28,6 @@ async def test_stdio_loader_against_fake_server() -> None:
     result = await echo.execute(args)
     assert len(result.content) == 1
     from cubepi.providers.base import TextContent
+
     assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == "hello"

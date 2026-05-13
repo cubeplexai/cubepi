@@ -94,6 +94,7 @@ async def test_make_mcp_agent_tool_routes_to_call_remote() -> None:
     assert called == {"name": "search", "args": {"query": "cats"}}
     assert len(result.content) == 1
     from cubepi.providers.base import TextContent
+
     assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == "result"
 
@@ -111,4 +112,6 @@ async def test_make_mcp_agent_tool_carries_raw_response_in_details() -> None:
     )
     args = tool.parameters()
     result = await tool.execute(args)
-    assert result.details == {"raw_mcp_response": {"content": [], "isError": True, "errorMessage": "boom"}}
+    assert result.details == {
+        "raw_mcp_response": {"content": [], "isError": True, "errorMessage": "boom"}
+    }
