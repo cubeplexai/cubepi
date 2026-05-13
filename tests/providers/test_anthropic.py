@@ -337,7 +337,7 @@ class _MockAnthropicStream:
         for ev in self._events:
             yield ev
 
-    def get_final_message(self):
+    async def get_final_message(self):
         return self._final_message
 
 
