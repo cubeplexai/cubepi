@@ -135,10 +135,11 @@ class Agent(Generic[TMessage]):
         )
         if tools:
             self._state.tools = tools
-        self.convert_to_llm = convert_to_llm or _default_convert_to_llm
-
         # Compose middleware hooks, then let explicit callables override.
         _mw_hooks = compose_middleware(middleware or [])
+        self.convert_to_llm = (
+            convert_to_llm or _mw_hooks.get("convert_to_llm") or _default_convert_to_llm
+        )
         self.transform_context = transform_context or _mw_hooks.get("transform_context")
         self.transform_system_prompt = transform_system_prompt or _mw_hooks.get(
             "transform_system_prompt"

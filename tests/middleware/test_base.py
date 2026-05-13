@@ -166,6 +166,33 @@ class TestShouldStopAfterTurn:
         assert result is False
 
 
+class TestAgentMiddlewareWiring:
+    """Agent must honor middleware-supplied hooks when no explicit override is given."""
+
+    async def test_agent_uses_middleware_convert_to_llm(self):
+        """Middleware-declared convert_to_llm must be wired up by Agent."""
+        from cubepi import Agent, Model
+        from cubepi.providers.faux import FauxProvider, faux_assistant_message
+
+        captured: dict = {}
+
+        class MarkConvert(Middleware):
+            async def convert_to_llm(self, messages):
+                captured["called"] = True
+                captured["count"] = len(messages)
+                return list(messages)
+
+        provider = FauxProvider()
+        provider.set_responses([faux_assistant_message("ok")])
+        agent = Agent(
+            model=Model(id="test", provider="faux"),
+            provider=provider,
+            middleware=[MarkConvert()],
+        )
+        await agent.prompt("hi")
+        assert captured.get("called") is True
+
+
 class TestPartialMiddleware:
     async def test_middleware_with_only_some_hooks(self):
         class OnlyTransform(Middleware):
