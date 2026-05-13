@@ -72,6 +72,8 @@ class OpenAIProvider:
             "model": model.id,
             "messages": api_messages,
             "stream": True,
+            "max_tokens": model.max_tokens,
+            "temperature": model.temperature,
         }
         if tools:
             kwargs["tools"] = [self._convert_tool(t) for t in tools]
