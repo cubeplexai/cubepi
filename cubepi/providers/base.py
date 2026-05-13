@@ -82,6 +82,7 @@ class Model(BaseModel):
     reasoning: bool = False
     context_window: int = 200_000
     max_tokens: int = 8192
+    temperature: float = 0.7
     cost: ModelCost | None = None
     thinking_level_map: dict[str, str | None] | None = None
 

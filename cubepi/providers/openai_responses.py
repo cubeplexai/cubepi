@@ -98,6 +98,11 @@ class OpenAIResponsesProvider:
         if model.max_tokens:
             kwargs["max_output_tokens"] = model.max_tokens
 
+        # Forward temperature for non-reasoning models; reasoning models don't
+        # support temperature on the Responses API.
+        if not model.reasoning:
+            kwargs["temperature"] = model.temperature
+
         async def _produce() -> None:
             try:
                 nonlocal kwargs
