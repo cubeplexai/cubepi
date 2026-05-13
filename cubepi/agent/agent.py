@@ -142,6 +142,8 @@ class Agent(Generic[TMessage]):
         self.checkpointer = checkpointer
         self.thread_id = thread_id
 
+        self._extra: dict[str, Any] = {}
+
         self._steering_queue = _MessageQueue(steering_mode)
         self._follow_up_queue = _MessageQueue(follow_up_mode)
         self._listeners: list[Callable] = []
@@ -197,11 +199,13 @@ class Agent(Generic[TMessage]):
         else:
             messages = [message]
 
-        # Restore history from checkpointer if this is first prompt
+        # Restore history and extra from checkpointer if this is first prompt
         if self.checkpointer and self.thread_id and not self._state._messages:
             data = await self.checkpointer.load(self.thread_id)
-            if data and data.messages:
-                self._state._messages = list(data.messages)
+            if data:
+                if data.messages:
+                    self._state._messages = list(data.messages)
+                self._extra = dict(data.extra)
 
         await self._run_prompt(messages)
 
@@ -290,6 +294,7 @@ class Agent(Generic[TMessage]):
             system_prompt=self._state.system_prompt,
             messages=list(self._state._messages),
             tools=list(self._state._tools),
+            extra=dict(self._extra),
         )
 
     async def _run_with_lifecycle(self, executor: Callable) -> None:
@@ -352,6 +357,8 @@ class Agent(Generic[TMessage]):
                 self._state.error_message = msg.error_message
         elif event.type == "agent_end":
             self._state.streaming_message = None
+            if self.checkpointer and self.thread_id:
+                await self.checkpointer.save_extra(self.thread_id, self._extra)
 
         await self._emit_to_listeners(event)
 
