@@ -1,6 +1,5 @@
 from cubepi.checkpointer.base import Checkpointer, CheckpointData
 from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.checkpointer.sqlite import SQLiteCheckpointer
 
 
 def __getattr__(name: str) -> object:
@@ -8,6 +7,10 @@ def __getattr__(name: str) -> object:
         from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
 
         return PostgresCheckpointer
+    if name == "SQLiteCheckpointer":
+        from cubepi.checkpointer.sqlite import SQLiteCheckpointer
+
+        return SQLiteCheckpointer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
