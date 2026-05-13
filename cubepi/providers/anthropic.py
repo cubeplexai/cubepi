@@ -62,12 +62,16 @@ class AnthropicProvider:
         self,
         *,
         api_key: str | None = None,
+        base_url: str | None = None,
         cache_retention: CacheRetention = "short",
         cache_policy: CacheMarkerPolicy | None = None,
     ) -> None:
         import anthropic
 
-        self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        kwargs: dict[str, Any] = {"api_key": api_key}
+        if base_url is not None:
+            kwargs["base_url"] = base_url
+        self._client = anthropic.AsyncAnthropic(**kwargs)
         self._cache_retention = cache_retention
         self._cache_policy: CacheMarkerPolicy = (
             cache_policy or DefaultCacheMarkerPolicy()
