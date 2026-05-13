@@ -36,6 +36,7 @@ async def run_agent_loop(
     convert_to_llm: Callable,
     emit: Callable,
     transform_context: Callable | None = None,
+    transform_system_prompt: Callable | None = None,
     before_tool_call: Callable | None = None,
     after_tool_call: Callable | None = None,
     should_stop_after_turn: Callable | None = None,
@@ -67,6 +68,7 @@ async def run_agent_loop(
         model=model,
         convert_to_llm=convert_to_llm,
         transform_context=transform_context,
+        transform_system_prompt=transform_system_prompt,
         before_tool_call=before_tool_call,
         after_tool_call=after_tool_call,
         should_stop_after_turn=should_stop_after_turn,
@@ -87,6 +89,7 @@ async def run_agent_loop_continue(
     convert_to_llm: Callable,
     emit: Callable,
     transform_context: Callable | None = None,
+    transform_system_prompt: Callable | None = None,
     before_tool_call: Callable | None = None,
     after_tool_call: Callable | None = None,
     should_stop_after_turn: Callable | None = None,
@@ -118,6 +121,7 @@ async def run_agent_loop_continue(
         model=model,
         convert_to_llm=convert_to_llm,
         transform_context=transform_context,
+        transform_system_prompt=transform_system_prompt,
         before_tool_call=before_tool_call,
         after_tool_call=after_tool_call,
         should_stop_after_turn=should_stop_after_turn,
@@ -138,6 +142,7 @@ async def _run_loop(
     model: Model,
     convert_to_llm: Callable,
     transform_context: Callable | None,
+    transform_system_prompt: Callable | None,
     before_tool_call: Callable | None,
     after_tool_call: Callable | None,
     should_stop_after_turn: Callable | None,
@@ -175,6 +180,7 @@ async def _run_loop(
                 model,
                 convert_to_llm,
                 transform_context,
+                transform_system_prompt,
                 opts,
                 emit,
             )
@@ -254,6 +260,7 @@ async def _stream_assistant_response(
     model: Model,
     convert_to_llm: Callable,
     transform_context: Callable | None,
+    transform_system_prompt: Callable | None,
     options: StreamOptions,
     emit: Callable,
 ) -> AssistantMessage:
@@ -269,10 +276,14 @@ async def _stream_assistant_response(
     if context.tools:
         tools_defs = [t.to_definition() for t in context.tools]
 
+    sp = context.system_prompt
+    if transform_system_prompt:
+        sp = await transform_system_prompt(sp, signal=options.signal)
+
     stream = await provider.stream(
         model,
         llm_messages,
-        system_prompt=context.system_prompt,
+        system_prompt=sp,
         tools=tools_defs,
         options=options,
     )

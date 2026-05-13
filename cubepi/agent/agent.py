@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, TypeVar
 
 from cubepi.agent.loop import run_agent_loop, run_agent_loop_continue
+from cubepi.middleware.base import Middleware, compose_middleware
 from cubepi.agent.types import (
     AgentContext,
     AgentEndEvent,
@@ -112,6 +113,7 @@ class Agent(Generic[TMessage]):
         thinking: ThinkingLevel = "off",
         convert_to_llm: Callable[[list[Message]], list[Message]] | None = None,
         transform_context: Callable | None = None,
+        transform_system_prompt: Callable | None = None,
         before_tool_call: Callable | None = None,
         after_tool_call: Callable | None = None,
         should_stop_after_turn: Callable | None = None,
@@ -122,6 +124,7 @@ class Agent(Generic[TMessage]):
         tool_execution: str = "parallel",
         checkpointer: Any = None,
         thread_id: str | None = None,
+        middleware: list[Middleware] | None = None,
     ) -> None:
         self._provider = provider
         self._state = AgentState(
@@ -132,10 +135,18 @@ class Agent(Generic[TMessage]):
         if tools:
             self._state.tools = tools
         self.convert_to_llm = convert_to_llm or _default_convert_to_llm
-        self.transform_context = transform_context
-        self.before_tool_call = before_tool_call
-        self.after_tool_call = after_tool_call
-        self.should_stop_after_turn = should_stop_after_turn
+
+        # Compose middleware hooks, then let explicit callables override.
+        _mw_hooks = compose_middleware(middleware or [])
+        self.transform_context = transform_context or _mw_hooks.get("transform_context")
+        self.transform_system_prompt = transform_system_prompt or _mw_hooks.get(
+            "transform_system_prompt"
+        )
+        self.before_tool_call = before_tool_call or _mw_hooks.get("before_tool_call")
+        self.after_tool_call = after_tool_call or _mw_hooks.get("after_tool_call")
+        self.should_stop_after_turn = should_stop_after_turn or _mw_hooks.get(
+            "should_stop_after_turn"
+        )
         self.on_payload = on_payload
         self.on_response = on_response
         self.tool_execution = tool_execution
@@ -252,6 +263,7 @@ class Agent(Generic[TMessage]):
                 model=self._state.model,
                 convert_to_llm=self.convert_to_llm,
                 transform_context=self.transform_context,
+                transform_system_prompt=self.transform_system_prompt,
                 before_tool_call=self.before_tool_call,
                 after_tool_call=self.after_tool_call,
                 should_stop_after_turn=self.should_stop_after_turn,
@@ -271,6 +283,7 @@ class Agent(Generic[TMessage]):
                 model=self._state.model,
                 convert_to_llm=self.convert_to_llm,
                 transform_context=self.transform_context,
+                transform_system_prompt=self.transform_system_prompt,
                 before_tool_call=self.before_tool_call,
                 after_tool_call=self.after_tool_call,
                 should_stop_after_turn=self.should_stop_after_turn,
