@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any
+from typing import Any, Literal
 
 from cubepi.utils.json_parse import parse_streaming_json
 
@@ -17,6 +17,7 @@ from cubepi.providers.base import (
     StreamEvent,
     StreamOptions,
     TextContent,
+    ThinkingContent,
     ToolCall,
     ToolDefinition,
     ToolResultMessage,
@@ -29,7 +30,11 @@ from cubepi.providers.base import (
 
 class OpenAIProvider:
     def __init__(
-        self, *, api_key: str | None = None, base_url: str | None = None
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        payload_quirks: list[Literal["max_completion_tokens_alias"]] | None = None,
     ) -> None:
         import openai
 
@@ -39,6 +44,7 @@ class OpenAIProvider:
         if base_url:
             kwargs["base_url"] = base_url
         self._client = openai.AsyncOpenAI(**kwargs)
+        self._payload_quirks: set[str] = set(payload_quirks or [])
 
     async def stream(
         self,
@@ -70,6 +76,10 @@ class OpenAIProvider:
                 nonlocal kwargs
                 kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
 
+                if "max_completion_tokens_alias" in self._payload_quirks:
+                    if "max_completion_tokens" in kwargs:
+                        kwargs["max_tokens"] = kwargs.pop("max_completion_tokens")
+
                 response = await self._client.chat.completions.create(**kwargs)
 
                 # Invoke on_response with HTTP metadata if available
@@ -100,6 +110,8 @@ class OpenAIProvider:
                 text_started = False
                 text_content_index = 0
                 response_id: str | None = None
+                thinking_started = False
+                thinking_content_index: int | None = None
 
                 async for chunk in response:
                     if response_id is None and getattr(chunk, "id", None):
@@ -124,6 +136,59 @@ class OpenAIProvider:
                     delta = chunk.choices[0].delta if chunk.choices else None
                     if not delta:
                         continue
+
+                    # OSS reasoning extraction: priority order is
+                    #   1. delta.reasoning_content (DeepSeek/Qwen/DouBao)
+                    #   2. delta.reasoning         (vLLM)
+                    #   3. delta.reasoning_details (MiniMax)
+                    reasoning_delta: str | None = None
+                    rc = getattr(delta, "reasoning_content", None)
+                    if rc:
+                        reasoning_delta = rc
+                    else:
+                        r = getattr(delta, "reasoning", None)
+                        if r:
+                            reasoning_delta = r
+                        else:
+                            rds = getattr(delta, "reasoning_details", None)
+                            if rds:
+                                parts: list[str] = []
+                                for d in rds:
+                                    if hasattr(d, "text"):
+                                        text = d.text
+                                    elif isinstance(d, dict):
+                                        text = d.get("text")
+                                    else:
+                                        text = None
+                                    if text:
+                                        parts.append(text)
+                                if parts:
+                                    reasoning_delta = "".join(parts)
+
+                    if reasoning_delta:
+                        if not thinking_started:
+                            partial.content.append(ThinkingContent(thinking=""))
+                            thinking_content_index = len(partial.content) - 1
+                            ms.push(
+                                StreamEvent(
+                                    type="thinking_start",
+                                    content_index=thinking_content_index,
+                                    partial=partial.model_copy(deep=True),
+                                )
+                            )
+                            thinking_started = True
+                        existing = partial.content[thinking_content_index].thinking  # type: ignore[union-attr]
+                        partial.content[thinking_content_index] = ThinkingContent(
+                            thinking=existing + reasoning_delta
+                        )
+                        ms.push(
+                            StreamEvent(
+                                type="thinking_delta",
+                                delta=reasoning_delta,
+                                content_index=thinking_content_index,
+                                partial=partial.model_copy(deep=True),
+                            )
+                        )
 
                     if delta.content:
                         if not text_started:
@@ -210,6 +275,16 @@ class OpenAIProvider:
                         chunk.choices[0].finish_reason if chunk.choices else None
                     )
                     if finish_reason:
+                        if thinking_started:
+                            ms.push(
+                                StreamEvent(
+                                    type="thinking_end",
+                                    content_index=thinking_content_index,
+                                    partial=partial.model_copy(deep=True),
+                                )
+                            )
+                            thinking_started = False
+
                         if text_started:
                             ms.push(
                                 StreamEvent(
