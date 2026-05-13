@@ -25,7 +25,7 @@ async def test_stdio_loader_against_fake_server() -> None:
     assert echo.name == "echo"
 
     args = echo.parameters(text="hello")
-    result = await echo.execute(args)
+    result = await echo.execute("tc-stdio-1", args, signal=None, on_update=None)
     assert len(result.content) == 1
     from cubepi.providers.base import TextContent
 

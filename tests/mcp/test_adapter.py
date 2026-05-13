@@ -90,7 +90,8 @@ async def test_make_mcp_agent_tool_routes_to_call_remote() -> None:
     assert tool.description == "Search the web"
 
     args = tool.parameters(query="cats")
-    result = await tool.execute(args)
+    # Use the production signature: tool_call_id positional, then args, then keyword-only
+    result = await tool.execute("test-call-id-1", args, signal=None, on_update=None)
     assert called == {"name": "search", "args": {"query": "cats"}}
     assert len(result.content) == 1
     from cubepi.providers.base import TextContent
@@ -111,7 +112,40 @@ async def test_make_mcp_agent_tool_carries_raw_response_in_details() -> None:
         call_remote=_fake_call,
     )
     args = tool.parameters()
-    result = await tool.execute(args)
+    result = await tool.execute("test-call-id-2", args, signal=None, on_update=None)
     assert result.details == {
         "raw_mcp_response": {"content": [], "isError": True, "errorMessage": "boom"}
     }
+    # isError from MCP response must be reflected on AgentToolResult
+    assert result.is_error is True
+
+
+@pytest.mark.asyncio
+async def test_make_mcp_agent_tool_omits_none_optional_args() -> None:
+    """Optional schema field absent from args → omitted from call (not sent as null)."""
+    captured: dict = {}
+
+    async def _fake_call(name, args):
+        captured["args"] = args
+        return {"content": [], "isError": False}
+
+    tool = make_mcp_agent_tool(
+        name="search",
+        description="",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer"},
+            },
+            "required": ["query"],
+        },
+        call_remote=_fake_call,
+    )
+    args = tool.parameters(query="cats")  # limit not passed
+    await tool.execute("tc-3", args, signal=None, on_update=None)
+    # Critical: 'limit' must NOT appear in args (not even as null)
+    assert "limit" not in captured["args"], (
+        f"Optional field not provided should be omitted, got: {captured['args']!r}"
+    )
+    assert captured["args"] == {"query": "cats"}

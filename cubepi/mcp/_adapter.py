@@ -72,8 +72,18 @@ def make_mcp_agent_tool(
         input_schema=input_schema,
     )
 
-    async def _execute(args) -> AgentToolResult:
-        args_dict = args.model_dump() if hasattr(args, "model_dump") else dict(args)
+    async def _execute(
+        tool_call_id: str,
+        args,
+        *,
+        signal=None,
+        on_update=None,
+    ) -> AgentToolResult:
+        # tool_call_id and on_update are unused by MCP semantics (MCP RPC is
+        # not incremental), but we accept them for signature compatibility
+        # with cubepi's agent loop.
+        del tool_call_id, on_update
+        args_dict = args.model_dump(exclude_none=True) if hasattr(args, "model_dump") else dict(args)
         result = await call_remote(name, args_dict)
         content_blocks: list[Content] = []
         for c in result.get("content", []):
@@ -82,6 +92,7 @@ def make_mcp_agent_tool(
         return AgentToolResult(
             content=content_blocks,
             details={"raw_mcp_response": result},
+            is_error=True if result.get("isError") else None,
         )
 
     return AgentTool(

@@ -23,6 +23,7 @@ TMessage = TypeVar("TMessage")
 class AgentToolResult(BaseModel):
     content: list[Content]
     details: Any = None
+    is_error: bool | None = None
     terminate: bool | None = None
 
 
