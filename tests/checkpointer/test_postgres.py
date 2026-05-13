@@ -15,6 +15,10 @@ def test_models_import() -> None:
     )
     assert EXPECTED_SCHEMA_VERSION == 1
     assert PARTITION_COUNT == 64
+    # All three model classes are reachable via the public model module
+    assert CubepiThread.__tablename__ == "cubepi_threads"
+    assert CubepiMessage.__tablename__ == "cubepi_messages"
+    assert CubepiSchemaVersion.__tablename__ == "cubepi_schema_version"
     # All three tables registered on cubepi_metadata
     assert "cubepi_threads" in cubepi_metadata.tables
     assert "cubepi_messages" in cubepi_metadata.tables

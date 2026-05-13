@@ -4,7 +4,6 @@ import pytest
 
 from cubepi.providers.anthropic import (
     AnthropicProvider,
-    CacheMarkerPolicy,
     DefaultCacheMarkerPolicy,
 )
 from cubepi.providers.base import Message, TextContent, UserMessage
