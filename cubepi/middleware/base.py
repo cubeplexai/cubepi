@@ -16,6 +16,14 @@ class Middleware:
     async def after_tool_call(self, ctx: Any, *, signal=None) -> Any:
         raise NotImplementedError
 
+    async def transform_system_prompt(
+        self,
+        system_prompt: str,
+        *,
+        signal=None,
+    ) -> str:
+        raise NotImplementedError
+
     async def should_stop_after_turn(self, ctx: Any) -> bool:
         raise NotImplementedError
 
@@ -73,6 +81,17 @@ def compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]:
             return last_result
 
         hooks["after_tool_call"] = composed_after
+
+    sp_chain = [m for m in middlewares if _has_method(m, "transform_system_prompt")]
+    if sp_chain:
+
+        async def composed_sp(system_prompt, *, signal=None):
+            result = system_prompt
+            for mw in sp_chain:
+                result = await mw.transform_system_prompt(result, signal=signal)
+            return result
+
+        hooks["transform_system_prompt"] = composed_sp
 
     stop_chain = [m for m in middlewares if _has_method(m, "should_stop_after_turn")]
     if stop_chain:
