@@ -176,3 +176,56 @@ class TestPartialMiddleware:
         assert "transform_context" in hooks
         assert "convert_to_llm" not in hooks
         assert "before_tool_call" not in hooks
+
+
+class TestBaseMiddlewareDefaults:
+    """Each base Middleware method raises NotImplementedError if invoked directly.
+
+    These default bodies are never reached through compose_middleware (it
+    filters them out via _has_method), so we exercise them explicitly to
+    guarantee the contract: subclasses must override what they declare.
+    """
+
+    async def test_transform_context_raises(self):
+        import pytest
+
+        with pytest.raises(NotImplementedError):
+            await Middleware().transform_context([], signal=None)
+
+    async def test_convert_to_llm_raises(self):
+        import pytest
+
+        with pytest.raises(NotImplementedError):
+            await Middleware().convert_to_llm([])
+
+    async def test_before_tool_call_raises(self):
+        import pytest
+
+        with pytest.raises(NotImplementedError):
+            await Middleware().before_tool_call(None, signal=None)
+
+    async def test_after_tool_call_raises(self):
+        import pytest
+
+        with pytest.raises(NotImplementedError):
+            await Middleware().after_tool_call(None, signal=None)
+
+    async def test_transform_system_prompt_raises(self):
+        import pytest
+
+        with pytest.raises(NotImplementedError):
+            await Middleware().transform_system_prompt("hello", signal=None)
+
+    async def test_should_stop_after_turn_raises(self):
+        import pytest
+
+        with pytest.raises(NotImplementedError):
+            await Middleware().should_stop_after_turn(None)
+
+    async def test_after_model_response_raises(self):
+        import pytest
+
+        with pytest.raises(NotImplementedError):
+            await Middleware().after_model_response(
+                AssistantMessage(content=[]), None, signal=None
+            )

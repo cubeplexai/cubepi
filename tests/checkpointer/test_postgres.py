@@ -3,6 +3,9 @@
 Full E2E tests are in D1.3 once PostgresCheckpointer is implemented.
 """
 
+import asyncpg
+import pytest
+
 
 def test_models_import() -> None:
     from cubepi.checkpointer.postgres.models import (
@@ -106,12 +109,55 @@ def test_schema_mismatch_without_hint() -> None:
     assert "actual=1" in str(err)
 
 
+def test_role_of_known_message_types() -> None:
+    """_role_of maps each concrete Message subclass to its role string."""
+    from cubepi.checkpointer.postgres.checkpointer import _role_of
+    from cubepi.providers.base import (
+        AssistantMessage,
+        TextContent,
+        ToolResultMessage,
+        Usage,
+        UserMessage,
+    )
+
+    assert _role_of(UserMessage(content=[TextContent(text="x")])) == "user"
+    assert (
+        _role_of(AssistantMessage(content=[TextContent(text="x")], usage=Usage()))
+        == "assistant"
+    )
+    tr = ToolResultMessage(
+        tool_call_id="tc-1",
+        tool_name="t",
+        content=[TextContent(text="ok")],
+    )
+    assert _role_of(tr) == "tool"
+
+
+def test_role_of_rejects_unknown_message_type() -> None:
+    """_role_of raises for anything that isn't User/Assistant/ToolResult."""
+    from cubepi.checkpointer.postgres.checkpointer import _role_of
+
+    class FakeMessage:
+        pass
+
+    with pytest.raises(TypeError, match="unknown Message type"):
+        _role_of(FakeMessage())  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_append_empty_messages_is_noop() -> None:
+    """append([]) returns early without touching the pool — no DB needed."""
+    from cubepi.checkpointer.postgres import PostgresCheckpointer
+
+    cp = PostgresCheckpointer("postgresql://unreachable-host/none")
+    # Pool intentionally never created — early return must precede the assert.
+    assert cp._pool is None
+    await cp.append("thread-x", [])
+
+
 # ---------------------------------------------------------------------------
 # D1.3 E2E tests — require a real Postgres instance
 # ---------------------------------------------------------------------------
-
-import asyncpg  # noqa: E402
-import pytest  # noqa: E402
 
 
 async def _setup_schema(dsn: str) -> None:
