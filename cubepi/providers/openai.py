@@ -444,45 +444,86 @@ class OpenAIProvider:
         *,
         defs: dict[str, Any] | None = None,
         top: bool = True,
+        strip_title: bool = True,
+        in_any_of: bool = False,
     ) -> Any:
         """Normalise a Pydantic model_json_schema() output to match langchain-openai's format.
 
-        langchain-openai strips ``title`` everywhere, strips the top-level
-        ``description`` (model class docstring, not field-level description),
-        removes ``$defs``, and inlines ``$ref`` references so the schema is
-        self-contained.  Matching this format is required for byte-stream parity
-        with the LangGraph runtime (OpenAI-compatible auto-cache hashes raw bytes).
+        langchain-openai strips ``title`` from property-level fields and the top-level
+        schema, but preserves ``title`` inside ``anyOf`` items (e.g. enum class names
+        like ``"title": "MemoryScope"`` from Optional[SomeEnum] fields). It also strips
+        the top-level ``description`` (class docstring) and resolves ``$defs``/``$ref``
+        so the schema is self-contained.  Matching this format is required for
+        byte-stream parity with the LangGraph runtime (OpenAI-compatible auto-cache
+        hashes raw bytes).
         """
+        N = OpenAIProvider._normalise_tool_schema  # local alias for brevity
+
         if isinstance(schema, dict):
             # Collect $defs at top level so we can resolve $refs below.
             if top and "$defs" in schema:
                 defs = schema["$defs"]
 
-            # $ref resolution: replace the whole dict with the inlined definition.
+            # $ref resolution: inline the definition.
+            # Title kept only when we're inside an anyOf (enum option);
+            # stripped otherwise (e.g. TypedDict in "items").
             if "$ref" in schema:
                 ref_name = schema["$ref"].split("/")[-1]
                 if defs and ref_name in defs:
-                    return OpenAIProvider._normalise_tool_schema(
-                        defs[ref_name], defs=defs, top=False
+                    return N(
+                        defs[ref_name],
+                        defs=defs,
+                        top=False,
+                        strip_title=not in_any_of,
+                        in_any_of=False,
                     )
-                # Unknown ref — leave as-is (shouldn't happen with pydantic).
+                # Unknown ref — leave as-is.
                 return schema
 
             result: dict[str, Any] = {}
             for k, v in schema.items():
-                if k == "title":
-                    continue  # Strip all title fields.
+                if k == "title" and strip_title:
+                    continue  # Strip at property / top level; keep inside anyOf defs.
                 if k == "$defs":
-                    continue  # Replaced by inline resolution; remove from output.
+                    continue  # Removed after $ref resolution.
                 if k == "description" and top:
-                    continue  # Strip class-level docstring from top-level schema.
-                result[k] = OpenAIProvider._normalise_tool_schema(
-                    v, defs=defs, top=False
-                )
+                    continue  # Strip class docstring from top-level schema only.
+                if k == "properties" and isinstance(v, dict):
+                    # Named fields: always strip the pydantic-generated title.
+                    result[k] = {
+                        pname: N(
+                            pschema,
+                            defs=defs,
+                            top=False,
+                            strip_title=True,
+                            in_any_of=False,
+                        )
+                        for pname, pschema in v.items()
+                    }
+                elif k == "anyOf" and isinstance(v, list):
+                    # anyOf items: keep title so enum class names survive.
+                    result[k] = [
+                        N(item, defs=defs, top=False, strip_title=True, in_any_of=True)
+                        for item in v
+                    ]
+                else:
+                    result[k] = N(
+                        v,
+                        defs=defs,
+                        top=False,
+                        strip_title=strip_title,
+                        in_any_of=False,
+                    )
             return result
         elif isinstance(schema, list):
             return [
-                OpenAIProvider._normalise_tool_schema(item, defs=defs, top=False)
+                N(
+                    item,
+                    defs=defs,
+                    top=False,
+                    strip_title=strip_title,
+                    in_any_of=in_any_of,
+                )
                 for item in schema
             ]
         return schema
