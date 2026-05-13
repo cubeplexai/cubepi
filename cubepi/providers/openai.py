@@ -35,6 +35,8 @@ class OpenAIProvider:
         api_key: str | None = None,
         base_url: str | None = None,
         payload_quirks: list[Literal["max_completion_tokens_alias"]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         import openai
 
@@ -43,8 +45,11 @@ class OpenAIProvider:
             kwargs["api_key"] = api_key
         if base_url:
             kwargs["base_url"] = base_url
+        if extra_headers:
+            kwargs["default_headers"] = extra_headers
         self._client = openai.AsyncOpenAI(**kwargs)
         self._payload_quirks: set[str] = set(payload_quirks or [])
+        self._extra_body: dict[str, Any] = extra_body or {}
 
     async def stream(
         self,
@@ -80,6 +85,17 @@ class OpenAIProvider:
                     if "max_completion_tokens" in kwargs:
                         kwargs["max_tokens"] = kwargs.pop("max_completion_tokens")
 
+                # Merge instance-level extra_body into the request kwargs.
+                # Provider-config extra_body (e.g. {"enable_thinking": false}) is
+                # applied here so callers don't need to use on_payload for simple cases.
+                if self._extra_body and "extra_body" not in kwargs:
+                    kwargs["extra_body"] = dict(self._extra_body)
+                elif self._extra_body:
+                    kwargs["extra_body"] = {**self._extra_body, **kwargs["extra_body"]}
+
+                # Request per-stream usage so we can populate AssistantMessage.usage.
+                kwargs.setdefault("stream_options", {})["include_usage"] = True
+
                 response = await self._client.chat.completions.create(**kwargs)
 
                 # Invoke on_response with HTTP metadata if available
@@ -114,6 +130,20 @@ class OpenAIProvider:
                 thinking_content_index: int | None = None
 
                 async for chunk in response:
+                    # Usage-only chunk (stream_options.include_usage=True sends a
+                    # trailing chunk with no choices and usage populated).
+                    if getattr(chunk, "usage", None) is not None:
+                        u = chunk.usage
+                        partial.usage = Usage(
+                            input_tokens=getattr(u, "prompt_tokens", 0) or 0,
+                            output_tokens=getattr(u, "completion_tokens", 0) or 0,
+                            cache_read_tokens=getattr(
+                                getattr(u, "prompt_tokens_details", None),
+                                "cached_tokens",
+                                0,
+                            ) or 0,
+                        )
+
                     if response_id is None and getattr(chunk, "id", None):
                         response_id = chunk.id
                         partial.response_id = response_id
@@ -316,16 +346,18 @@ class OpenAIProvider:
                             "tool_calls": "tool_use",
                             "length": "length",
                         }
-                        final = partial.model_copy(
+                        # Build final now but do NOT emit yet — OpenAI sends a
+                        # trailing usage-only chunk after finish_reason when
+                        # stream_options.include_usage=True. Let the loop
+                        # exhaust so the usage block above captures it before
+                        # we close the stream.
+                        partial = partial.model_copy(
                             update={
                                 "stop_reason": stop_map.get(
                                     finish_reason, finish_reason
                                 ),
                             }
                         )
-                        ms.push(StreamEvent(type="done"))
-                        ms.set_result(final)
-                        return
 
                 ms.push(StreamEvent(type="done"))
                 ms.set_result(partial)
