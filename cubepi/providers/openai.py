@@ -65,10 +65,12 @@ class OpenAIProvider:
 
         api_messages: list[dict[str, Any]] = []
         if system_prompt:
-            api_messages.append({
-                "role": "system",
-                "content": [{"type": "text", "text": system_prompt}],
-            })
+            api_messages.append(
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": system_prompt}],
+                }
+            )
         api_messages.extend(self._convert_message(m) for m in messages)
 
         kwargs: dict[str, Any] = {
@@ -474,7 +476,9 @@ class OpenAIProvider:
                     continue  # Replaced by inline resolution; remove from output.
                 if k == "description" and top:
                     continue  # Strip class-level docstring from top-level schema.
-                result[k] = OpenAIProvider._normalise_tool_schema(v, defs=defs, top=False)
+                result[k] = OpenAIProvider._normalise_tool_schema(
+                    v, defs=defs, top=False
+                )
             return result
         elif isinstance(schema, list):
             return [
