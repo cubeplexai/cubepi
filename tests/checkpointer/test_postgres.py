@@ -79,6 +79,18 @@ def test_write_schema_version_op_includes_expected_version() -> None:
     assert "ON CONFLICT" in sql
 
 
+def test_write_schema_version_op_clears_stale_rows() -> None:
+    """A prior version's row must be removed so _verify_schema sees the new one."""
+    from cubepi.checkpointer.postgres.alembic_helpers import write_schema_version_op
+
+    sql = write_schema_version_op()
+    # Must DELETE rows whose version is not the expected one before INSERT.
+    assert "DELETE FROM cubepi_schema_version" in sql
+    assert "WHERE version <> 1" in sql
+    # And the DELETE must come before the INSERT in the statement order.
+    assert sql.index("DELETE") < sql.index("INSERT")
+
+
 def test_schema_uninitialized_is_schema_error() -> None:
     from cubepi.checkpointer.postgres.exceptions import (
         CubepiSchemaError,
