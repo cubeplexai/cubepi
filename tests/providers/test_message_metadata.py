@@ -21,7 +21,7 @@ def test_assistant_message_default_metadata_is_empty_dict() -> None:
 
 
 def test_tool_result_message_default_metadata_is_empty_dict() -> None:
-    msg = ToolResultMessage(content=[], tool_call_id="tc-1")
+    msg = ToolResultMessage(content=[], tool_call_id="tc-1", tool_name="test_tool")
     assert msg.metadata == {}
 
 
