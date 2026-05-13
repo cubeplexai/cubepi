@@ -37,6 +37,7 @@ async def run_agent_loop(
     emit: Callable,
     transform_context: Callable | None = None,
     transform_system_prompt: Callable | None = None,
+    after_model_response: Callable | None = None,
     before_tool_call: Callable | None = None,
     after_tool_call: Callable | None = None,
     should_stop_after_turn: Callable | None = None,
@@ -69,6 +70,7 @@ async def run_agent_loop(
         convert_to_llm=convert_to_llm,
         transform_context=transform_context,
         transform_system_prompt=transform_system_prompt,
+        after_model_response=after_model_response,
         before_tool_call=before_tool_call,
         after_tool_call=after_tool_call,
         should_stop_after_turn=should_stop_after_turn,
@@ -90,6 +92,7 @@ async def run_agent_loop_continue(
     emit: Callable,
     transform_context: Callable | None = None,
     transform_system_prompt: Callable | None = None,
+    after_model_response: Callable | None = None,
     before_tool_call: Callable | None = None,
     after_tool_call: Callable | None = None,
     should_stop_after_turn: Callable | None = None,
@@ -122,6 +125,7 @@ async def run_agent_loop_continue(
         convert_to_llm=convert_to_llm,
         transform_context=transform_context,
         transform_system_prompt=transform_system_prompt,
+        after_model_response=after_model_response,
         before_tool_call=before_tool_call,
         after_tool_call=after_tool_call,
         should_stop_after_turn=should_stop_after_turn,
@@ -143,6 +147,7 @@ async def _run_loop(
     convert_to_llm: Callable,
     transform_context: Callable | None,
     transform_system_prompt: Callable | None,
+    after_model_response: Callable | None,
     before_tool_call: Callable | None,
     after_tool_call: Callable | None,
     should_stop_after_turn: Callable | None,
@@ -190,6 +195,53 @@ async def _run_loop(
                 await emit_event(emit, TurnEndEvent(message=message, tool_results=[]))
                 await emit_event(emit, AgentEndEvent(messages=new_messages))
                 return
+
+            # Apply after_model_response hook if configured.
+            # The hook returns a TurnAction that can mutate the response,
+            # inject messages, or change control flow.
+            skip_tool_execution = False
+            if after_model_response is not None:
+                turn_action = await after_model_response(
+                    message,
+                    current_context,
+                    signal=opts.signal,
+                )
+                if turn_action is not None:
+                    if turn_action.response is not None:
+                        # Replace both the local variable and the copy in
+                        # context.messages that _stream_assistant_response appended.
+                        # NOTE: text_delta/message_update events have already been
+                        # emitted for the original response; downstream consumers
+                        # may see the original streamed content followed by the
+                        # replaced message in context. This is a known limitation.
+                        message = turn_action.response
+                        new_messages[-1] = message
+                        if current_context.messages and isinstance(
+                            current_context.messages[-1], AssistantMessage
+                        ):
+                            current_context.messages[-1] = message
+                    if turn_action.inject_messages:
+                        for inj in turn_action.inject_messages:
+                            current_context.messages.append(inj)
+                            new_messages.append(inj)
+                    if turn_action.decision == "stop":
+                        await emit_event(
+                            emit, TurnEndEvent(message=message, tool_results=[])
+                        )
+                        await emit_event(emit, AgentEndEvent(messages=new_messages))
+                        return
+                    if turn_action.decision == "loop_to_model":
+                        # Skip tool execution; re-invoke the model on next iteration.
+                        # inject_messages are already appended to context above.
+                        await emit_event(
+                            emit, TurnEndEvent(message=message, tool_results=[])
+                        )
+                        skip_tool_execution = True
+                    # decision == "natural" falls through to normal tool handling
+
+            if skip_tool_execution:
+                has_more_tool_calls = True
+                continue
 
             tool_calls = [c for c in message.content if isinstance(c, ToolCall)]
             tool_results: list[ToolResultMessage] = []
