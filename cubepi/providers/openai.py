@@ -65,7 +65,10 @@ class OpenAIProvider:
 
         api_messages: list[dict[str, Any]] = []
         if system_prompt:
-            api_messages.append({"role": "system", "content": system_prompt})
+            api_messages.append({
+                "role": "system",
+                "content": [{"type": "text", "text": system_prompt}],
+            })
         api_messages.extend(self._convert_message(m) for m in messages)
 
         kwargs: dict[str, Any] = {
@@ -434,12 +437,59 @@ class OpenAIProvider:
         return {"role": "user", "content": ""}
 
     @staticmethod
+    def _normalise_tool_schema(
+        schema: Any,
+        *,
+        defs: dict[str, Any] | None = None,
+        top: bool = True,
+    ) -> Any:
+        """Normalise a Pydantic model_json_schema() output to match langchain-openai's format.
+
+        langchain-openai strips ``title`` everywhere, strips the top-level
+        ``description`` (model class docstring, not field-level description),
+        removes ``$defs``, and inlines ``$ref`` references so the schema is
+        self-contained.  Matching this format is required for byte-stream parity
+        with the LangGraph runtime (OpenAI-compatible auto-cache hashes raw bytes).
+        """
+        if isinstance(schema, dict):
+            # Collect $defs at top level so we can resolve $refs below.
+            if top and "$defs" in schema:
+                defs = schema["$defs"]
+
+            # $ref resolution: replace the whole dict with the inlined definition.
+            if "$ref" in schema:
+                ref_name = schema["$ref"].split("/")[-1]
+                if defs and ref_name in defs:
+                    return OpenAIProvider._normalise_tool_schema(
+                        defs[ref_name], defs=defs, top=False
+                    )
+                # Unknown ref — leave as-is (shouldn't happen with pydantic).
+                return schema
+
+            result: dict[str, Any] = {}
+            for k, v in schema.items():
+                if k == "title":
+                    continue  # Strip all title fields.
+                if k == "$defs":
+                    continue  # Replaced by inline resolution; remove from output.
+                if k == "description" and top:
+                    continue  # Strip class-level docstring from top-level schema.
+                result[k] = OpenAIProvider._normalise_tool_schema(v, defs=defs, top=False)
+            return result
+        elif isinstance(schema, list):
+            return [
+                OpenAIProvider._normalise_tool_schema(item, defs=defs, top=False)
+                for item in schema
+            ]
+        return schema
+
+    @staticmethod
     def _convert_tool(td: ToolDefinition) -> dict[str, Any]:
         return {
             "type": "function",
             "function": {
                 "name": td.name,
                 "description": td.description,
-                "parameters": td.parameters,
+                "parameters": OpenAIProvider._normalise_tool_schema(td.parameters),
             },
         }
