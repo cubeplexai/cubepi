@@ -17,9 +17,26 @@ def pg_dsn() -> str:
     )
 
 
+@pytest_asyncio.fixture(scope="session")
+async def _pg_available(pg_dsn: str) -> bool:
+    """Quick probe — connection refused → skip Postgres tests."""
+    try:
+        conn = await asyncpg.connect(pg_dsn, timeout=2.0)
+        await conn.close()
+        return True
+    except (asyncpg.PostgresError, OSError, ConnectionError):
+        return False
+
+
 @pytest_asyncio.fixture
-async def clean_db(pg_dsn: str):
+async def clean_db(pg_dsn: str, _pg_available: bool):
     """Create a fresh database for each test; drop after."""
+    if not _pg_available:
+        pytest.skip(
+            "Postgres not available for E2E tests; set CUBEPI_TEST_PG_DSN "
+            "to a working DSN to enable."
+        )
+
     db_name = f"cubepi_test_{secrets.token_hex(6)}"
     admin = await asyncpg.connect(pg_dsn)
     try:
