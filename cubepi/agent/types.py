@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
@@ -49,6 +49,7 @@ class AgentContext:
     system_prompt: str
     messages: list[Message]
     tools: list[AgentTool] | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 # --- Hook context types ---
