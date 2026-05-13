@@ -2,6 +2,7 @@
 
 import pytest
 
+from cubepi import Agent, Model
 from cubepi.agent.types import AgentContext
 from cubepi.middleware.base import Middleware, TurnAction, compose_middleware
 from cubepi.providers.base import (
@@ -10,6 +11,7 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
 )
+from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
 
 def _mk_response(text: str = "hi") -> AssistantMessage:
@@ -119,3 +121,81 @@ def test_no_middleware_hook_absent() -> None:
 
     hooks = compose_middleware([Plain()])
     assert "after_model_response" not in hooks
+
+
+@pytest.mark.asyncio
+async def test_agent_stops_when_middleware_returns_stop() -> None:
+    """decision='stop' terminates after the first model response."""
+    provider = FauxProvider()
+    # Two responses queued; second should never fire because we stop after first.
+    provider.set_responses([
+        faux_assistant_message("first"),
+        faux_assistant_message("should not fire"),
+    ])
+    agent = Agent(
+        model=Model(id="test", provider="faux"),
+        provider=provider,
+        middleware=[_Stop()],
+    )
+    await agent.prompt("hi")
+    # Only the first response was consumed; one remains in the queue.
+    assert provider.call_count == 1
+    assert provider.pending_response_count == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_loops_when_middleware_returns_loop_to_model() -> None:
+    """decision='loop_to_model' re-invokes the model with inject_messages."""
+    provider = FauxProvider()
+    provider.set_responses([
+        faux_assistant_message("first"),
+        faux_assistant_message("second"),
+    ])
+
+    call_count = 0
+
+    class _LoopOnce(Middleware):
+        async def after_model_response(self, response, ctx, *, signal=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return TurnAction(
+                    decision="loop_to_model",
+                    inject_messages=[
+                        UserMessage(content=[TextContent(text="retry")])
+                    ],
+                )
+            return None
+
+    agent = Agent(
+        model=Model(id="test", provider="faux"),
+        provider=provider,
+        middleware=[_LoopOnce()],
+    )
+    await agent.prompt("hi")
+    # Both responses consumed: provider called twice.
+    assert provider.call_count == 2
+    # Hook ran twice: once forced loop, once natural.
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_no_middleware_natural_flow() -> None:
+    """Without after_model_response middleware, natural flow proceeds."""
+    provider = FauxProvider()
+    provider.set_responses([faux_assistant_message("ok")])
+    agent = Agent(
+        model=Model(id="test", provider="faux"),
+        provider=provider,
+    )
+
+    events: list[str] = []
+
+    def _listener(event, signal):
+        events.append(event.type)
+
+    agent.subscribe(_listener)
+    await agent.prompt("hi")
+    # Natural flow: agent_end fires and no second provider call.
+    assert "agent_end" in events
+    assert provider.call_count == 1

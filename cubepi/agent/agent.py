@@ -114,6 +114,7 @@ class Agent(Generic[TMessage]):
         convert_to_llm: Callable[[list[Message]], list[Message]] | None = None,
         transform_context: Callable | None = None,
         transform_system_prompt: Callable | None = None,
+        after_model_response: Callable | None = None,
         before_tool_call: Callable | None = None,
         after_tool_call: Callable | None = None,
         should_stop_after_turn: Callable | None = None,
@@ -141,6 +142,9 @@ class Agent(Generic[TMessage]):
         self.transform_context = transform_context or _mw_hooks.get("transform_context")
         self.transform_system_prompt = transform_system_prompt or _mw_hooks.get(
             "transform_system_prompt"
+        )
+        self.after_model_response = after_model_response or _mw_hooks.get(
+            "after_model_response"
         )
         self.before_tool_call = before_tool_call or _mw_hooks.get("before_tool_call")
         self.after_tool_call = after_tool_call or _mw_hooks.get("after_tool_call")
@@ -264,6 +268,7 @@ class Agent(Generic[TMessage]):
                 convert_to_llm=self.convert_to_llm,
                 transform_context=self.transform_context,
                 transform_system_prompt=self.transform_system_prompt,
+                after_model_response=self.after_model_response,
                 before_tool_call=self.before_tool_call,
                 after_tool_call=self.after_tool_call,
                 should_stop_after_turn=self.should_stop_after_turn,
@@ -284,6 +289,7 @@ class Agent(Generic[TMessage]):
                 convert_to_llm=self.convert_to_llm,
                 transform_context=self.transform_context,
                 transform_system_prompt=self.transform_system_prompt,
+                after_model_response=self.after_model_response,
                 before_tool_call=self.before_tool_call,
                 after_tool_call=self.after_tool_call,
                 should_stop_after_turn=self.should_stop_after_turn,
