@@ -1,5 +1,8 @@
 """Message.metadata field tests (D5)."""
 
+import tempfile
+from pathlib import Path
+
 import pytest
 from cubepi.providers.base import (
     AssistantMessage,
@@ -8,6 +11,7 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
 )
+from cubepi.checkpointer import MemoryCheckpointer, SQLiteCheckpointer
 
 
 def test_user_message_default_metadata_is_empty_dict() -> None:
@@ -47,3 +51,31 @@ def test_metadata_serializes_to_dict_in_model_dump() -> None:
     )
     dumped = msg.model_dump()
     assert dumped["metadata"] == {"k": "v"}
+
+
+@pytest.mark.asyncio
+async def test_memory_checkpointer_preserves_metadata() -> None:
+    cp = MemoryCheckpointer()
+    msg = UserMessage(
+        content=[TextContent(text="hi")],
+        metadata={"k": "v", "nested": {"a": 1}},
+    )
+    await cp.append("t1", [msg])
+    loaded = await cp.load("t1")
+    assert loaded is not None
+    assert loaded.messages[0].metadata == {"k": "v", "nested": {"a": 1}}
+
+
+@pytest.mark.asyncio
+async def test_sqlite_checkpointer_preserves_metadata() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "test.db"
+        async with SQLiteCheckpointer(str(path)) as cp:
+            msg = UserMessage(
+                content=[TextContent(text="hi")],
+                metadata={"k": "v", "nested": {"a": 1}},
+            )
+            await cp.append("t1", [msg])
+            loaded = await cp.load("t1")
+        assert loaded is not None
+        assert loaded.messages[0].metadata == {"k": "v", "nested": {"a": 1}}
