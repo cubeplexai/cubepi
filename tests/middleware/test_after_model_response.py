@@ -182,6 +182,38 @@ async def test_agent_loops_when_middleware_returns_loop_to_model() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_direct_hook_returning_none_emits_message_end() -> None:
+    """When after_model_response is passed directly (bypassing compose) and
+    returns None, the loop still emits message_end via the dedicated branch."""
+    provider = FauxProvider()
+    provider.set_responses([faux_assistant_message("ok")])
+
+    hook_calls: list[AssistantMessage] = []
+
+    async def _hook(response, ctx, *, signal=None):
+        hook_calls.append(response)
+        return None
+
+    agent = Agent(
+        model=Model(id="test", provider="faux"),
+        provider=provider,
+        after_model_response=_hook,
+    )
+
+    events: list[str] = []
+
+    def _listener(event, signal):
+        events.append(event.type)
+
+    agent.subscribe(_listener)
+    await agent.prompt("hi")
+
+    assert len(hook_calls) == 1
+    assert events.count("message_end") >= 1
+    assert "agent_end" in events
+
+
+@pytest.mark.asyncio
 async def test_agent_no_middleware_natural_flow() -> None:
     """Without after_model_response middleware, natural flow proceeds."""
     provider = FauxProvider()

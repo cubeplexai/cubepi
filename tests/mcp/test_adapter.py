@@ -51,6 +51,26 @@ def test_schema_to_model_boolean_and_number() -> None:
     assert instance.rate == 1.5
 
 
+def test_schema_to_model_unknown_type_becomes_any() -> None:
+    """An unrecognized JSON Schema type falls back to typing.Any."""
+    from typing import Any
+
+    schema = {
+        "type": "object",
+        "properties": {
+            # Neither a known scalar nor array/object — must hit the Any fallback.
+            "weird": {"type": "totally-not-a-real-type"},
+        },
+        "required": [],
+    }
+    M = mcp_schema_to_pydantic_model(tool_name="x", input_schema=schema)
+    # Field accepts arbitrary values because its type is Any.
+    instance = M(weird={"anything": [1, 2, 3]})
+    assert instance.weird == {"anything": [1, 2, 3]}
+    annotations = M.model_fields["weird"].annotation
+    assert annotations is Any
+
+
 def test_schema_to_model_object_field_becomes_dict() -> None:
     schema = {
         "type": "object",

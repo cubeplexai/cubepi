@@ -4,7 +4,7 @@ import tempfile
 import pytest
 
 from cubepi.checkpointer.sqlite import SQLiteCheckpointer
-from cubepi.providers.base import TextContent, UserMessage
+from cubepi.providers.base import TextContent, ToolResultMessage, UserMessage
 
 
 @pytest.fixture
@@ -81,6 +81,24 @@ class TestSQLiteCheckpointer:
             assert data is not None
             assert data.messages == []
             assert data.extra == {"key": "value"}
+
+    async def test_round_trip_tool_result_message(self, db_path):
+        """ToolResultMessage round-trips through the tool_result deserializer branch."""
+        async with SQLiteCheckpointer(db_path) as cp:
+            tool_msg = ToolResultMessage(
+                tool_call_id="tc-1",
+                tool_name="search",
+                content=[TextContent(text="result")],
+            )
+            await cp.append("thread-1", [tool_msg])
+
+            data = await cp.load("thread-1")
+            assert data is not None
+            assert len(data.messages) == 1
+            loaded = data.messages[0]
+            assert isinstance(loaded, ToolResultMessage)
+            assert loaded.tool_call_id == "tc-1"
+            assert loaded.content[0].text == "result"
 
     async def test_deserialize_unknown_role(self, db_path):
         """A message with an unknown role should be returned as a plain dict."""
