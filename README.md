@@ -1,4 +1,8 @@
-# cubepi
+<p align="center">
+  <img src="assets/brand/cubepi-logo.svg" alt="cubepi logo" width="160">
+</p>
+
+<h1 align="center">cubepi</h1>
 
 [![CI](https://github.com/cubeplexai/cubepi/actions/workflows/ci.yml/badge.svg)](https://github.com/cubeplexai/cubepi/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/cubeplexai/cubepi/graph/badge.svg)](https://codecov.io/gh/cubeplexai/cubepi)
