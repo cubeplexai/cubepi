@@ -99,7 +99,14 @@ class OpenAIProvider:
                     kwargs["extra_body"] = {**self._extra_body, **kwargs["extra_body"]}
 
                 # Request per-stream usage so we can populate AssistantMessage.usage.
-                kwargs.setdefault("stream_options", {})["include_usage"] = True
+                # Only set ``include_usage`` if the caller hasn't already
+                # configured it via on_payload — some OpenAI-compatible
+                # backends reject ``stream_options`` entirely, so callers
+                # need to be able to opt out by setting it to False (or
+                # removing the key).
+                so = kwargs.setdefault("stream_options", {})
+                if "include_usage" not in so:
+                    so["include_usage"] = True
 
                 response = await self._client.chat.completions.create(**kwargs)
 
@@ -139,15 +146,23 @@ class OpenAIProvider:
                     # trailing chunk with no choices and usage populated).
                     if getattr(chunk, "usage", None) is not None:
                         u = chunk.usage
-                        partial.usage = Usage(
-                            input_tokens=getattr(u, "prompt_tokens", 0) or 0,
-                            output_tokens=getattr(u, "completion_tokens", 0) or 0,
-                            cache_read_tokens=getattr(
+                        prompt_tokens = getattr(u, "prompt_tokens", 0) or 0
+                        cached_tokens = (
+                            getattr(
                                 getattr(u, "prompt_tokens_details", None),
                                 "cached_tokens",
                                 0,
                             )
-                            or 0,
+                            or 0
+                        )
+                        # ``input_tokens`` is the uncached prompt portion; the
+                        # cached prefix is reported separately. This matches
+                        # the Responses/faux providers' accounting so cost
+                        # aggregation across providers doesn't double-count.
+                        partial.usage = Usage(
+                            input_tokens=max(prompt_tokens - cached_tokens, 0),
+                            output_tokens=getattr(u, "completion_tokens", 0) or 0,
+                            cache_read_tokens=cached_tokens,
                         )
 
                     if response_id is None and getattr(chunk, "id", None):
@@ -468,13 +483,38 @@ class OpenAIProvider:
             if "$ref" in schema:
                 ref_name = schema["$ref"].split("/")[-1]
                 if defs and ref_name in defs:
-                    return N(
+                    resolved = N(
                         defs[ref_name],
                         defs=defs,
                         top=False,
                         strip_title=not in_any_of,
                         in_any_of=False,
                     )
+                    # JSON Schema 2020-12 allows sibling keys alongside
+                    # $ref; Pydantic emits ``description`` / ``default`` /
+                    # validators on Optional[Enum] fields, etc. Merge them
+                    # onto the resolved definition so field-level metadata
+                    # isn't silently dropped when we inline.
+                    siblings = {
+                        k: v
+                        for k, v in schema.items()
+                        if k != "$ref" and not (k == "title" and not in_any_of)
+                    }
+                    if siblings and isinstance(resolved, dict):
+                        merged: dict[str, Any] = dict(resolved)
+                        for k, v in siblings.items():
+                            merged.setdefault(
+                                k,
+                                N(
+                                    v,
+                                    defs=defs,
+                                    top=False,
+                                    strip_title=not in_any_of,
+                                    in_any_of=False,
+                                ),
+                            )
+                        return merged
+                    return resolved
                 # Unknown ref — leave as-is.
                 return schema
 
