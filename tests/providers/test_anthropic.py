@@ -1049,3 +1049,25 @@ class TestAnthropicApplyMessageCacheControlEdge:
         msgs = [{"role": "user", "content": None}]
         AnthropicProvider._apply_message_cache_control(msgs, self.CACHE_CONTROL)
         assert msgs[0]["content"] is None
+
+
+class TestAnthropicBaseUrl:
+    """Constructor base_url branch (line 73)."""
+
+    def test_base_url_forwarded_to_async_anthropic(self):
+        from unittest.mock import patch as _patch
+
+        with _patch("anthropic.AsyncAnthropic") as mock_anthropic:
+            mock_anthropic.return_value = MagicMock()
+            AnthropicProvider(api_key="x", base_url="https://proxy.example/anthropic")
+            assert mock_anthropic.call_args.kwargs.get("base_url") == (
+                "https://proxy.example/anthropic"
+            )
+
+    def test_no_base_url_omits_kwarg(self):
+        from unittest.mock import patch as _patch
+
+        with _patch("anthropic.AsyncAnthropic") as mock_anthropic:
+            mock_anthropic.return_value = MagicMock()
+            AnthropicProvider(api_key="x")
+            assert "base_url" not in mock_anthropic.call_args.kwargs
