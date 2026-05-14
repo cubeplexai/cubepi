@@ -107,8 +107,14 @@ class AnthropicProvider:
             "model": model.id,
             "messages": api_messages,
             "max_tokens": max_tokens,
-            "temperature": model.temperature,
         }
+        # Anthropic disallows temperature modifications when extended
+        # thinking is enabled — see
+        # https://platform.claude.com/docs/en/build-with-claude/extended-thinking#feature-compatibility
+        # The provider request will fail with thinking on if we send a
+        # non-default temperature, so skip the field unless thinking is off.
+        if thinking == "off":
+            kwargs["temperature"] = model.temperature
         if system_prompt:
             if cache_control and self._cache_policy.mark_system():
                 kwargs["system"] = [
