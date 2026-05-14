@@ -259,3 +259,202 @@ def test_normalise_works_on_pydantic_generated_schema() -> None:
     # Property titles stripped.
     for prop in out["properties"].values():
         assert "title" not in prop
+
+
+# ---------------------------------------------------------------------------
+# Codex review #5 — input_tokens excludes cached_tokens (cache-hit accounting)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_usage_subtracts_cached_tokens_from_input() -> None:
+    """``input_tokens`` is the uncached portion; cached prefix reported
+    separately, matching Responses/faux accounting (avoids double-count
+    in cubebox cost aggregation)."""
+    usage_chunk = SimpleNamespace(
+        id="x",
+        choices=[],
+        usage=SimpleNamespace(
+            prompt_tokens=1000,
+            completion_tokens=50,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=800),
+        ),
+    )
+    final = _make_chunk(finish_reason="stop")
+
+    with patch("openai.AsyncOpenAI") as mock_openai:
+        client = MagicMock()
+        mock_openai.return_value = client
+        client.chat = MagicMock()
+        client.chat.completions = MagicMock()
+
+        async def create(**_):
+            return _async_iter([usage_chunk, final])
+
+        client.chat.completions.create = create
+
+        provider = OpenAIProvider(api_key="x")
+        provider._client = client
+
+        ms = await provider.stream(
+            _model(),
+            [UserMessage(content=[TextContent(text="hi")])],
+        )
+        async for _ in ms:
+            pass
+        msg = await ms.result()
+
+    assert msg.usage.input_tokens == 200  # 1000 - 800
+    assert msg.usage.cache_read_tokens == 800
+    assert msg.usage.output_tokens == 50
+
+
+@pytest.mark.asyncio
+async def test_usage_no_cached_field_input_tokens_is_full_prompt() -> None:
+    """No prompt_tokens_details → cached_tokens=0, input_tokens=prompt_tokens."""
+    usage_chunk = SimpleNamespace(
+        id="x",
+        choices=[],
+        usage=SimpleNamespace(
+            prompt_tokens=200,
+            completion_tokens=10,
+            prompt_tokens_details=None,
+        ),
+    )
+    final = _make_chunk(finish_reason="stop")
+
+    with patch("openai.AsyncOpenAI") as mock_openai:
+        client = MagicMock()
+        mock_openai.return_value = client
+        client.chat = MagicMock()
+        client.chat.completions = MagicMock()
+
+        async def create(**_):
+            return _async_iter([usage_chunk, final])
+
+        client.chat.completions.create = create
+
+        provider = OpenAIProvider(api_key="x")
+        provider._client = client
+
+        ms = await provider.stream(
+            _model(),
+            [UserMessage(content=[TextContent(text="hi")])],
+        )
+        async for _ in ms:
+            pass
+        msg = await ms.result()
+
+    assert msg.usage.input_tokens == 200
+    assert msg.usage.cache_read_tokens == 0
+
+
+# ---------------------------------------------------------------------------
+# Codex review #6 — on_payload may opt out of stream_options.include_usage
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_payload_can_disable_include_usage() -> None:
+    """Caller-supplied ``stream_options.include_usage=False`` must survive
+    the default-inject step."""
+    captured: dict[str, Any] = {}
+
+    async def on_payload(payload, model):
+        payload["stream_options"] = {"include_usage": False}
+        return payload
+
+    with patch("openai.AsyncOpenAI") as mock_openai:
+        client = MagicMock()
+        mock_openai.return_value = client
+        client.chat = MagicMock()
+        client.chat.completions = MagicMock()
+
+        async def capture(**kwargs):
+            captured.update(kwargs)
+            return _async_iter([_make_chunk(finish_reason="stop")])
+
+        client.chat.completions.create = capture
+
+        provider = OpenAIProvider(api_key="x")
+        provider._client = client
+
+        ms = await provider.stream(
+            _model(),
+            [UserMessage(content=[TextContent(text="hi")])],
+            options=StreamOptions(on_payload=on_payload),
+        )
+        async for _ in ms:
+            pass
+        await ms.result()
+
+    assert captured["stream_options"] == {"include_usage": False}
+
+
+@pytest.mark.asyncio
+async def test_default_adds_include_usage_when_not_set() -> None:
+    """Without on_payload customization, default adds include_usage=True."""
+    captured: dict[str, Any] = {}
+    with patch("openai.AsyncOpenAI") as mock_openai:
+        client = MagicMock()
+        mock_openai.return_value = client
+        client.chat = MagicMock()
+        client.chat.completions = MagicMock()
+
+        async def capture(**kwargs):
+            captured.update(kwargs)
+            return _async_iter([_make_chunk(finish_reason="stop")])
+
+        client.chat.completions.create = capture
+
+        provider = OpenAIProvider(api_key="x")
+        provider._client = client
+
+        ms = await provider.stream(
+            _model(),
+            [UserMessage(content=[TextContent(text="hi")])],
+        )
+        async for _ in ms:
+            pass
+        await ms.result()
+
+    assert captured["stream_options"] == {"include_usage": True}
+
+
+# ---------------------------------------------------------------------------
+# Codex review #7 — preserve sibling metadata when $ref-resolving
+# ---------------------------------------------------------------------------
+
+
+def test_normalise_ref_resolution_preserves_sibling_description() -> None:
+    """Pydantic emits ``$ref`` alongside ``description`` / ``default`` on
+    Optional[Enum] fields; both must survive inlining."""
+    schema = {
+        "$defs": {"Color": {"title": "Color", "enum": ["r", "g"], "type": "string"}},
+        "properties": {
+            "c": {
+                "$ref": "#/$defs/Color",
+                "description": "primary colour",
+                "default": "r",
+            }
+        },
+    }
+    out = OpenAIProvider._normalise_tool_schema(schema)
+    resolved = out["properties"]["c"]
+    assert resolved["enum"] == ["r", "g"]
+    assert resolved["description"] == "primary colour"
+    assert resolved["default"] == "r"
+
+
+def test_normalise_ref_resolution_resolved_def_wins_on_key_collision() -> None:
+    """If both $def and sibling supply the same key, the $def value wins
+    (sibling is treated as additional metadata, not an override)."""
+    schema = {
+        "$defs": {"X": {"type": "string", "description": "from def"}},
+        "properties": {
+            "x": {"$ref": "#/$defs/X", "description": "from sibling"},
+        },
+    }
+    out = OpenAIProvider._normalise_tool_schema(schema)
+    # setdefault means the def's value sticks.
+    assert out["properties"]["x"]["description"] == "from def"
