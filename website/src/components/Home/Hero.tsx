@@ -31,7 +31,7 @@ export default function Hero() {
           <code>{installCmd}</code>
           <kbd className={styles.kbd}>⌘C</kbd>
         </button>
-        <Link className={`${styles.cta} ${styles.ctaGhost}`} to="/docs/next/getting-started/quick-start">
+        <Link className={`${styles.cta} ${styles.ctaGhost}`} to="/docs/getting-started/quick-start">
           Quick Start →
           <kbd className={styles.kbd}>G Q</kbd>
         </Link>
