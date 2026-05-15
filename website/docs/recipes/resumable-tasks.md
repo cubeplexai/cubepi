@@ -121,11 +121,22 @@ async def main(thread_id: str, initial_prompt: str | None):
         agent.subscribe(lambda e, s=None: None)
 
         if initial_prompt:
-            # Fresh run.
+            # Fresh run. prompt() auto-loads history on first call before
+            # appending the new user message.
             await agent.prompt(initial_prompt)
         else:
-            # Resume.  If the last message is an assistant message with no
-            # follow-up queued, this will raise; otherwise it picks up.
+            # Resume. agent.resume() does NOT auto-load — only prompt() does.
+            # Hydrate the agent state manually first.
+            data = await cp.load(thread_id)
+            if data is None:
+                raise RuntimeError(f"No saved state for thread {thread_id!r}")
+            agent.state.messages = list(data.messages)
+            # `extra` is restored too; it's private on Agent, so use the
+            # checkpointer's view if your middleware reads it.
+
+            # Resume picks up from the last persisted message:
+            #   ToolResultMessage / UserMessage → re-invokes the model
+            #   AssistantMessage with no queued steer/follow_up → raises
             await agent.resume()
 
 
@@ -150,13 +161,15 @@ python resume.py job-1
 ## The three resume scenarios in code
 
 ```python
-async def smart_resume(agent):
-    msgs = agent.state.messages
-    if not msgs:
-        # Brand-new conversation. Caller must prompt.
-        return False
+async def smart_resume(agent, cp, thread_id):
+    # resume() doesn't auto-load — hydrate the agent first if its state is empty.
+    if not agent.state.messages:
+        data = await cp.load(thread_id)
+        if data is None or not data.messages:
+            return False           # nothing to resume from
+        agent.state.messages = list(data.messages)
 
-    last = msgs[-1]
+    last = agent.state.messages[-1]
     last_role = type(last).__name__
 
     if last_role == "AssistantMessage":
@@ -197,6 +210,10 @@ tool args. That's what `transcode_video` above does with `JOB_DIR`.
 - **`resume()` after an assistant message with no queue** — Raises.
   Either prompt the user for the next message or call `prompt()`
   fresh.
+- **`resume()` on a fresh agent** — Raises `No messages to continue
+  from`. `resume()` does not auto-load from the checkpointer; only
+  `prompt()` does. Hydrate manually with `agent.state.messages =
+  (await cp.load(thread_id)).messages` first.
 - **Forgetting the signal check inside the tool** — A long
   `await asyncio.sleep(...)` or a `for ... in stream` that ignores
   `signal.is_set()` won't honour `abort`. Drop a check inside any
