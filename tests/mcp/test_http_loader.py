@@ -1,8 +1,9 @@
 """HTTP MCP loader tests (D2.2).
 
-The loader's transport (`sse_client` + `ClientSession`) is mocked so the
-test runs without a real MCP server. End-to-end against a live server is
-gated behind CUBEPI_TEST_MCP_HTTP_URL.
+The loader's transport (`sse_client` / `streamablehttp_client` +
+`ClientSession`) is mocked so the test runs without a real MCP server.
+End-to-end against a live server is gated behind
+``CUBEPI_TEST_MCP_HTTP_URL``.
 """
 
 import asyncio
@@ -47,16 +48,48 @@ class _FakeSession:
 
 
 def _install_fake_transport(monkeypatch, *, tools, call_response):
+    """Patch both transport clients; return per-transport call recorders.
+
+    The loader picks the transport at runtime, so we patch both
+    ``mcp.client.sse.sse_client`` and
+    ``mcp.client.streamable_http.streamablehttp_client``. Tests can assert
+    on whichever recorder corresponds to the transport under test.
+    """
     import mcp
     import mcp.client.sse as sse_mod
+    import mcp.client.streamable_http as sh_mod
 
     sessions: list[_FakeSession] = []
     sse_calls: list[dict] = []
+    sh_calls: list[dict] = []
 
     @asynccontextmanager
-    async def fake_sse_client(url, *, headers=None, timeout=None):
-        sse_calls.append({"url": url, "headers": headers, "timeout": timeout})
+    async def fake_sse_client(
+        url, *, headers=None, timeout=None, sse_read_timeout=None
+    ):
+        sse_calls.append(
+            {
+                "url": url,
+                "headers": headers,
+                "timeout": timeout,
+                "sse_read_timeout": sse_read_timeout,
+            }
+        )
         yield ("read-stream-stub", "write-stream-stub")
+
+    @asynccontextmanager
+    async def fake_streamablehttp_client(
+        url, *, headers=None, timeout=None, sse_read_timeout=None
+    ):
+        sh_calls.append(
+            {
+                "url": url,
+                "headers": headers,
+                "timeout": timeout,
+                "sse_read_timeout": sse_read_timeout,
+            }
+        )
+        yield ("read-stream-stub", "write-stream-stub", lambda: None)
 
     def fake_client_session(*streams):
         sess = _FakeSession(*streams, tools=tools, call_response=call_response)
@@ -64,8 +97,9 @@ def _install_fake_transport(monkeypatch, *, tools, call_response):
         return sess
 
     monkeypatch.setattr(sse_mod, "sse_client", fake_sse_client)
+    monkeypatch.setattr(sh_mod, "streamablehttp_client", fake_streamablehttp_client)
     monkeypatch.setattr(mcp, "ClientSession", fake_client_session)
-    return sessions, sse_calls
+    return sessions, sse_calls, sh_calls
 
 
 @pytest.mark.asyncio
@@ -93,7 +127,7 @@ async def test_load_mcp_tools_http_lists_and_calls_tool(monkeypatch) -> None:
         ],
         isError=False,
     )
-    sessions, sse_calls = _install_fake_transport(
+    sessions, sse_calls, sh_calls = _install_fake_transport(
         monkeypatch, tools=tools_resp, call_response=call_resp
     )
 
@@ -107,10 +141,13 @@ async def test_load_mcp_tools_http_lists_and_calls_tool(monkeypatch) -> None:
     tool = tools[0]
     assert tool.name == "search"
     assert tool.description == "Search the web"
+    # Default transport is sse — streamable_http must not be touched.
+    assert sh_calls == []
     assert sse_calls[0] == {
         "url": "https://mcp.example/sse",
         "headers": {"x-test": "1"},
         "timeout": 12.5,
+        "sse_read_timeout": 12.5,
     }
     assert sessions[0].initialized is True
 
@@ -208,6 +245,70 @@ async def test_load_mcp_tools_http_handles_empty_content(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_mcp_tools_http_streamable_transport(monkeypatch) -> None:
+    """transport="streamable_http" dispatches to streamablehttp_client.
+
+    Regression gate: cubepi previously hard-coded ``sse_client`` for every
+    URL. A streamable_http server accepts the SSE GET but never pushes
+    the legacy ``endpoint`` event, so the agent would hang in
+    ``session.initialize()`` until the per-op timeout fired. Now both
+    discovery and per-tool ``call_tool`` must go through the matching
+    streamable_http client.
+    """
+    from cubepi.mcp import load_mcp_tools_http
+
+    tools_resp = [
+        SimpleNamespace(
+            name="search",
+            description="",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+    call_resp = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="ok")], isError=False
+    )
+    sessions, sse_calls, sh_calls = _install_fake_transport(
+        monkeypatch, tools=tools_resp, call_response=call_resp
+    )
+
+    tools = await load_mcp_tools_http(
+        "https://mcp.example/mcp",
+        headers={"authorization": "Bearer x"},
+        timeout=7.5,
+        transport="streamable_http",
+    )
+
+    # Discovery used streamable_http (sse must not be touched).
+    assert sse_calls == []
+    assert sh_calls[0] == {
+        "url": "https://mcp.example/mcp",
+        "headers": {"authorization": "Bearer x"},
+        "timeout": 7.5,
+        "sse_read_timeout": 7.5,
+    }
+    assert len(sessions) == 1
+
+    # Per-tool call_tool must reuse the same transport so the call path
+    # cannot regress to the wrong wire format.
+    args = tools[0].parameters()
+    await tools[0].execute("tc-sh", args, signal=None, on_update=None)
+    assert sse_calls == []
+    assert len(sh_calls) == 2  # one for list_tools, one for call_tool
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_http_rejects_unknown_transport() -> None:
+    """Unknown transport raises ValueError; we do not silently fall back."""
+    from cubepi.mcp import load_mcp_tools_http
+
+    with pytest.raises(ValueError, match="unsupported MCP transport"):
+        await load_mcp_tools_http(
+            "https://mcp.example/sse",
+            transport="websocket",  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.asyncio
 async def test_load_mcp_tools_http_initialize_timeout(monkeypatch) -> None:
     """A session that hangs on initialize must raise TimeoutError, not block."""
     from cubepi.mcp import load_mcp_tools_http
@@ -235,7 +336,9 @@ async def test_load_mcp_tools_http_initialize_timeout(monkeypatch) -> None:
     import mcp.client.sse as sse_mod
 
     @asynccontextmanager
-    async def fake_sse_client(url, *, headers=None, timeout=None):
+    async def fake_sse_client(
+        url, *, headers=None, timeout=None, sse_read_timeout=None
+    ):
         yield ("r", "w")
 
     monkeypatch.setattr(sse_mod, "sse_client", fake_sse_client)
