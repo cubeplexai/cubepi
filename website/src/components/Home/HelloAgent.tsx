@@ -45,7 +45,7 @@ export default function HelloAgent() {
         <p className={styles.lede}>
           A single async function loop. One <code>Provider</code>, one <code>AgentTool</code>, and you're streaming.
         </p>
-        <Link to="/getting-started/quick-start" className={styles.link}>
+        <Link to="/next/getting-started/quick-start" className={styles.link}>
           Full quick-start →
         </Link>
       </div>
