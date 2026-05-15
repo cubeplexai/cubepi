@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/cubepi-logo.svg" alt="cubepi logo" width="160">
+  <img src="https://raw.githubusercontent.com/cubeplexai/cubepi/main/assets/brand/cubepi-logo.svg" alt="cubepi logo" width="160">
 </p>
 
 <h1 align="center">cubepi</h1>

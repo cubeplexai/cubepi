@@ -10,10 +10,10 @@
 
   <rect width="512" height="512" fill="#ffffff"/>
 
-  <path class="ink" d="M317 117 L452 183 L300 252 L176 183 Z"/>
-  <path class="ink" d="M171 198 L288 263 L288 432 L171 365 Z"/>
-  <path class="ink" d="M411 346 L453 365 L453 376 L308 446 L303 442 L303 395 Z"/>
+  <path class="ink" d="M261 117 L396 183 L244 252 L120 183 Z"/>
+  <path class="ink" d="M115 198 L232 263 L232 432 L115 365 Z"/>
+  <path class="ink" d="M355 346 L397 365 L397 376 L252 446 L247 442 L247 395 Z"/>
 
-  <rect class="accent" x="343" y="268" width="26" height="74" rx="12"/>
-  <rect class="accent" x="407" y="247" width="26" height="76" rx="12"/>
+  <rect class="accent" x="287" y="268" width="26" height="74" rx="12"/>
+  <rect class="accent" x="351" y="247" width="26" height="76" rx="12"/>
 </svg>
