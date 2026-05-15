@@ -10,9 +10,10 @@ const classicOptions: ClassicOptions = {
   docs: {
     sidebarPath: './sidebars.ts',
     editUrl: 'https://github.com/cubeplexai/cubepi/edit/main/website/',
-    lastVersion: 'current',
+    lastVersion: '0.3',
     versions: {
       current: { label: 'Next 🚧', path: 'next', banner: 'unreleased' },
+      '0.3':   { label: '0.3 (latest)', path: '' },
     },
   },
   blog: false,
@@ -59,7 +60,7 @@ const config: Config = {
         { type: 'doc', docId: 'getting-started/installation', label: 'Docs', position: 'left' },
         { type: 'doc', docId: 'api/index', label: 'API', position: 'left' },
         { type: 'doc', docId: 'recipes/weather-agent', label: 'Recipes', position: 'left' },
-        // { type: 'docsVersionDropdown', position: 'right' }, // enabled in T21
+        { type: 'docsVersionDropdown', position: 'right' },
         { type: 'localeDropdown', position: 'right' },
         { href: 'https://github.com/cubeplexai/cubepi', label: 'GitHub', position: 'right' },
       ],
