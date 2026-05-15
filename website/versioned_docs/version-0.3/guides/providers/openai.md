@@ -157,8 +157,17 @@ provider.
 ## Common pitfalls
 
 - **`stream_options.include_usage` rejected** — Some compatibles
-  reject the whole `stream_options` field. Override via `on_payload`
-  to delete it before send.
+  reject the whole `stream_options` field. **`on_payload` cannot fix
+  this**: cubepi 0.3 calls `kwargs.setdefault("stream_options", {})`
+  *after* your callback runs, so deleting the key in `on_payload` is
+  silently undone. Workarounds:
+  - Subclass `OpenAIProvider` and override `stream()` to skip the
+    `setdefault` for your backend.
+  - Set `include_usage=False` in `on_payload` (the field still goes
+    out, but is usually accepted as a no-op even by strict
+    backends).
+  - Open an issue against cubepi to add a `payload_quirks` entry
+    such as `"no_stream_options"` for native opt-out.
 - **Thinking events but no `thinking_*` events** — Your backend
   surfaces reasoning under a non-standard field. Either add a fourth
   branch via PR or transcode it with `on_payload`.

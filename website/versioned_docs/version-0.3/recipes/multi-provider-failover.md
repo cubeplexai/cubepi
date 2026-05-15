@@ -16,15 +16,19 @@ crashing the agent. We'll wrap both providers behind a single
 ```python title="failover.py"
 import asyncio
 import logging
+import time
 from typing import Sequence
 
 from cubepi.providers.base import (
+    AssistantMessage,
     Message,
     MessageStream,
     Model,
     Provider,
+    StreamEvent,
     StreamOptions,
     ToolDefinition,
+    Usage,
 )
 from cubepi.providers.anthropic import AnthropicProvider
 from cubepi.providers.openai import OpenAIProvider
@@ -33,7 +37,18 @@ log = logging.getLogger(__name__)
 
 
 class FailoverProvider:
-    """Try a primary provider; fall back to others on retryable errors."""
+    """Try providers in order; fall over on construction or first-event errors.
+
+    Built-in providers swallow API/network errors and surface them as
+    `StreamEvent(type="error")` on the returned stream — never as exceptions
+    out of `provider.stream()`. So we peek at the first event from each
+    inner stream and only commit to it once we see a non-error event.
+
+    Limitation: errors that arrive *after* the first event (e.g. mid-stream
+    rate limit, server disconnect) are forwarded to the agent as-is.
+    Fully replaying a half-streamed turn against a fallback provider would
+    require buffering the whole turn — out of scope here.
+    """
 
     def __init__(self, primary_pair: tuple[Provider, Model], *fallbacks: tuple[Provider, Model]) -> None:
         self._chain: list[tuple[Provider, Model]] = [primary_pair, *fallbacks]
@@ -47,28 +62,64 @@ class FailoverProvider:
         tools: list[ToolDefinition] | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
-        # `model` is the agent's selected Model — we ignore it and use the
-        # one paired with each provider in the chain.
-        last_exc: BaseException | None = None
+        last_error: str | None = None
+
         for provider, mapped_model in self._chain:
+            # Construction-time failures (rare — most stay inside the producer task).
             try:
-                stream = await provider.stream(
+                inner = await provider.stream(
                     mapped_model,
                     messages,
                     system_prompt=system_prompt,
                     tools=tools,
                     options=options,
                 )
-                # Peek at the first event to validate the stream actually started.
-                # If the provider produces a stream object but errors on first chunk,
-                # we want to fall through.
-                return stream
             except Exception as e:
-                log.warning("provider %s failed: %s — trying fallback", mapped_model.provider, e)
-                last_exc = e
+                log.warning("provider %s failed at construction: %s", mapped_model.provider, e)
+                last_error = repr(e)
                 continue
 
-        raise RuntimeError(f"all providers exhausted; last error: {last_exc!r}")
+            # Peek at the first event to learn whether the stream is healthy.
+            iterator = inner.__aiter__()
+            try:
+                first = await iterator.__anext__()
+            except StopAsyncIteration:
+                last_error = "stream ended before producing any events"
+                continue
+
+            if first.type == "error":
+                log.warning("provider %s errored on first event: %s",
+                            mapped_model.provider, first.error_message)
+                last_error = first.error_message or "stream error"
+                continue
+
+            # Healthy — commit to this provider. Forward `first` plus the rest
+            # through a fresh outer MessageStream so the caller sees a complete
+            # stream starting at the start event.
+            outer = MessageStream()
+
+            async def _forward(first_event=first, src=iterator, src_stream=inner):
+                try:
+                    outer.push(first_event)
+                    async for ev in src:
+                        outer.push(ev)
+                    final = await src_stream.result()
+                    outer.set_result(final)
+                except Exception as exc:
+                    fallback_msg = AssistantMessage(
+                        content=[],
+                        stop_reason="error",
+                        error_message=str(exc),
+                        usage=Usage(),
+                        timestamp=time.time(),
+                    )
+                    outer.push(StreamEvent(type="error", error_message=str(exc)))
+                    outer.set_result(fallback_msg)
+
+            outer.attach_task(asyncio.create_task(_forward()))
+            return outer
+
+        raise RuntimeError(f"all providers exhausted; last error: {last_error!r}")
 ```
 
 ## Use it
@@ -114,27 +165,30 @@ asyncio.run(main())
 
 ## What about smarter failover policies?
 
-The example above falls back on **any** exception. That's the right
-behaviour for `RateLimitError`, `APIConnectionError`, or 5xx — but
-arguably wrong for `BadRequestError` (your code is wrong; the next
-provider will fail the same way).
+The example above falls back on **any** error event. That's fine for
+`RateLimitError`, `APIConnectionError`, or 5xx — but arguably wrong for
+`BadRequestError` (your code is wrong; the next provider will fail the
+same way).
 
-Tighten the catch:
+The first-event `error_message` comes from `str(exc)` on the
+underlying SDK exception. Filter on substrings, or — better — wrap each
+provider's `_produce` to tag the error category:
 
 ```python
-import anthropic, openai
+NON_RETRYABLE_HINTS = ("bad request", "invalid_request_error", "401", "403")
 
-RETRYABLE = (
-    anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.APIStatusError,
-    openai.RateLimitError, openai.APIConnectionError, openai.APIStatusError,
-)
-
-# Inside the loop:
-except RETRYABLE as e:
-    ...
-except Exception:
-    raise   # not retryable
+if first.type == "error":
+    msg = (first.error_message or "").lower()
+    if any(h in msg for h in NON_RETRYABLE_HINTS):
+        raise RuntimeError(f"non-retryable error from {mapped_model.provider}: {msg}")
+    last_error = first.error_message
+    continue
 ```
+
+A more robust approach is to fork the built-in providers and re-raise
+specific SDK exceptions from `_produce` so they reach `provider.stream()`
+as real Python exceptions — but that's a larger change against
+cubepi itself.
 
 ## Adding circuit breaking
 
@@ -187,9 +241,14 @@ for that pattern.
 - **Different cost** — Failover from Anthropic to OpenAI changes
   per-token cost. Track which provider answered (via `on_response` or
   `AssistantMessage.provider_id`) and bill accordingly.
-- **Streaming consistency** — The wrapper passes streams through
-  unchanged, so consumers see the same `StreamEvent` shape regardless
-  of which provider answered.
+- **Streaming consistency** — The wrapper forwards events through a
+  fresh `MessageStream`, so consumers see the same `StreamEvent` shape
+  regardless of which provider answered. The original `start` event
+  comes from the inner provider unchanged.
+- **Mid-stream errors aren't recovered** — Once we've seen a healthy
+  first event, the wrapper commits to that provider. If it errors
+  halfway through a long response, the agent sees the error. Full
+  mid-stream replay would require buffering — out of scope here.
 
 ## See also
 
