@@ -49,14 +49,21 @@ uv add cubepi[sqlite,postgres,mcp]
 
 ```python
 import asyncio
+from pydantic import BaseModel
 from cubepi import Agent, AgentTool, Model
+from cubepi.agent.types import AgentToolResult
 from cubepi.providers.anthropic import AnthropicProvider
+from cubepi.providers.base import TextContent
 
 provider = AnthropicProvider(api_key="sk-...")
 
-def get_weather(city: str) -> str:
-    """Get current weather for a city."""
-    return f"72°F and sunny in {city}"
+class GetWeatherParams(BaseModel):
+    city: str
+
+async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
+    return AgentToolResult(
+        content=[TextContent(text=f"72°F and sunny in {params.city}")]
+    )
 
 agent = Agent(
     provider=provider,
@@ -65,11 +72,7 @@ agent = Agent(
         AgentTool(
             name="get_weather",
             description="Get current weather for a city",
-            parameters={
-                "type": "object",
-                "properties": {"city": {"type": "string"}},
-                "required": ["city"],
-            },
+            parameters=GetWeatherParams,
             execute=get_weather,
         ),
     ],
@@ -131,21 +134,26 @@ faux.set_responses(["Hello!", "How can I help?"])
 
 ### Tools
 
-Declare tools with a name, JSON Schema parameters, and a sync or async execute function. The framework handles argument parsing, parallel execution, and error wrapping.
+Declare tools with a name, a Pydantic model for parameters, and an async `execute` returning `AgentToolResult`. The framework handles JSON Schema derivation, argument parsing, parallel execution, and error wrapping.
 
 ```python
+from pydantic import BaseModel
 from cubepi import AgentTool
+from cubepi.agent.types import AgentToolResult
+from cubepi.providers.base import TextContent
+
+class SearchParams(BaseModel):
+    query: str
+
+async def execute(tool_call_id, params: SearchParams, *, signal=None, on_update=None):
+    return AgentToolResult(content=[TextContent(text=f"Results for: {params.query}")])
 
 tool = AgentTool(
     name="search",
     description="Search the web",
-    parameters={
-        "type": "object",
-        "properties": {"query": {"type": "string"}},
-        "required": ["query"],
-    },
-    execute=lambda query: f"Results for: {query}",
-    sequential=False,  # allow parallel execution (default)
+    parameters=SearchParams,
+    execute=execute,
+    execution_mode="parallel",  # or "sequential"
 )
 ```
 
