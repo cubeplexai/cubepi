@@ -1,0 +1,9 @@
+.section { max-width: 1080px; margin: 0 auto 64px; padding: 0 24px; }
+.h2 { font-family: 'Inter Tight'; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; color: var(--ink-7); margin-bottom: 12px; }
+.table { border: 1px solid var(--ink-5); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.row { display: grid; grid-template-columns: 96px 1fr auto; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--ink-5); }
+.row:last-child { border-bottom: 0; }
+.tool { font-family: 'JetBrains Mono'; font-size: 12px; color: var(--ink-7); text-transform: uppercase; letter-spacing: 0.06em; }
+.cmd { font-family: 'JetBrains Mono'; font-size: 13px; color: var(--ink-12); background: var(--ink-3); padding: 6px 10px; border: 1px solid var(--ink-5); border-radius: 5px; }
+.copy { font-size: 11px; padding: 4px 10px; border: 1px solid var(--ink-5); background: var(--surface); color: var(--ink-9); border-radius: 4px; cursor: pointer; }
+.copy:hover { background: var(--ink-3); color: var(--ink-11); }
