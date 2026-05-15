@@ -59,7 +59,8 @@ def get_weather(city: str) -> str:
     return f"72°F and sunny in {city}"
 
 agent = Agent(
-    model=Model(provider=provider, model="claude-sonnet-4-5-20250929"),
+    provider=provider,
+    model=Model(id="claude-sonnet-4-5-20250929", provider="anthropic"),
     tools=[
         AgentTool(
             name="get_weather",
@@ -75,14 +76,12 @@ agent = Agent(
     system_prompt="You are a helpful weather assistant.",
 )
 
-async def main():
-    stream = await agent.prompt("What's the weather in Tokyo?")
-    async for event in stream:
-        if event.type == "text_delta":
-            print(event.delta, end="", flush=True)
-    print()
+def on_event(event, signal=None):
+    if event.type == "text_delta":
+        print(event.delta, end="", flush=True)
 
-asyncio.run(main())
+agent.subscribe(on_event)
+asyncio.run(agent.prompt("What's the weather in Tokyo?"))
 ```
 
 ## Architecture
@@ -215,8 +214,9 @@ provider.set_responses([
     faux_assistant_message("Here are the results..."),
 ])
 
-agent = Agent(model=Model(provider=provider, model="test"), tools=[search_tool])
-stream = await agent.prompt("Search for python")
+agent = Agent(provider=provider, model=Model(id="test", provider="faux"), tools=[search_tool])
+agent.subscribe(lambda event, signal=None: None)  # subscribe before prompt to receive events
+await agent.prompt("Search for python")
 # Streams realistic deltas — content_block_start, text_delta, etc.
 ```
 

@@ -14,7 +14,8 @@ def get_weather(city: str) -> str:
     return f"72°F and sunny in {city}"
 
 agent = Agent(
-    model=Model(provider=provider, model="claude-sonnet-4-5-20250929"),
+    provider=provider,
+    model=Model(id="claude-sonnet-4-5-20250929", provider="anthropic"),
     tools=[AgentTool(
         name="get_weather",
         description="Get current weather for a city",
@@ -28,13 +29,12 @@ agent = Agent(
     system_prompt="You are a helpful weather assistant.",
 )
 
-async def main():
-    stream = await agent.prompt("What's the weather in Tokyo?")
-    async for event in stream:
-        if event.type == "text_delta":
-            print(event.delta, end="", flush=True)
+def on_event(event, signal=None):
+    if event.type == "text_delta":
+        print(event.delta, end="", flush=True)
 
-asyncio.run(main())
+agent.subscribe(on_event)
+asyncio.run(agent.prompt("What's the weather in Tokyo?"))
 `;
 
 export default function HelloAgent() {
