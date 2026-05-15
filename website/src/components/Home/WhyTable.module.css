@@ -1,0 +1,9 @@
+.section { max-width: 1080px; margin: 0 auto 64px; padding: 0 24px; }
+.h2 { font-family: 'Inter Tight'; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; color: var(--ink-7); margin-bottom: 16px; }
+.tableWrap { overflow-x: auto; border: 1px solid var(--ink-5); border-radius: 8px; background: var(--surface); }
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th, .table td { padding: 12px 16px; border-bottom: 1px solid var(--ink-5); text-align: left; vertical-align: top; line-height: 1.55; }
+.table tr:last-child td { border-bottom: 0; }
+.table th { font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-7); background: var(--ink-3); }
+.label { font-weight: 500; color: var(--ink-12); width: 22%; }
+.us { color: var(--ink-12); font-family: 'JetBrains Mono'; font-size: 12.5px; }
