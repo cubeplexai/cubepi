@@ -89,14 +89,50 @@ def collect_public_symbols(module) -> list:
 
 
 def render_signature(name: str, parameters: list, returns: str | None) -> str:
-    parts = []
-    for pname, ptype, pdefault in parameters:
-        s = pname
-        if ptype:
-            s += f": {ptype}"
+    """Render a Python signature with positional/keyword-only markers.
+
+    Accepts tuples of length 3 — `(name, type, default)` — or length 4 —
+    `(name, type, default, kind)`. `kind` is the griffe ParameterKind string
+    ("positional_only", "positional_or_keyword", "var_positional",
+    "keyword_only", "var_keyword"); if omitted the param renders without
+    any kind-specific marker, preserving older callers.
+    """
+    parts: list[str] = []
+    seen_var_positional = False
+    seen_keyword_only_marker = False
+    seen_positional_only = False
+    pending_positional_only_marker = False
+    for p in parameters:
+        kind = p[3] if len(p) >= 4 else None
+        pname, ptype, pdefault = p[0], p[1], p[2]
+
+        if kind == "positional_only":
+            seen_positional_only = True
+        elif seen_positional_only and not pending_positional_only_marker:
+            parts.append("/")
+            pending_positional_only_marker = True
+
+        if kind == "var_positional":
+            rendered = f"*{pname}"
+            seen_var_positional = True
+        elif kind == "var_keyword":
+            rendered = f"**{pname}"
+        elif kind == "keyword_only":
+            if not seen_var_positional and not seen_keyword_only_marker:
+                parts.append("*")
+                seen_keyword_only_marker = True
+            rendered = pname
+        else:
+            rendered = pname
+
+        if ptype and kind not in ("var_positional", "var_keyword"):
+            rendered += f": {ptype}"
+        elif ptype:
+            rendered += f": {ptype}"  # *args: T or **kwargs: T
         if pdefault:
-            s += f" = {pdefault}"
-        parts.append(s)
+            rendered += f" = {pdefault}"
+        parts.append(rendered)
+
     sig = f"{name}({', '.join(parts)})"
     if returns:
         sig += f" -> {returns}"
@@ -197,7 +233,13 @@ def _params_of(symbol) -> list:
         # griffe's default is a sentinel or None; treat None as "no default"
         default = getattr(p, "default", None)
         pdefault = str(default) if default is not None else None
-        out.append((pname, ptype, pdefault))
+        # ParameterKind enum → bare string ("keyword_only", "var_positional", …).
+        # NOTE: griffe's ParameterKind.value uses human-readable forms with
+        # hyphens and spaces ("keyword-only", "positional or keyword"); .name
+        # is the underscored canonical form we compare against in render_signature.
+        kind_attr = getattr(p, "kind", None)
+        kind = getattr(kind_attr, "name", None) or (str(kind_attr) if kind_attr else None)
+        out.append((pname, ptype, pdefault, kind))
     return out
 
 

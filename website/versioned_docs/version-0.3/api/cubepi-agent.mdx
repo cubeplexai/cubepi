@@ -12,7 +12,7 @@ hide_table_of_contents: false
 _class_
 
 ```python
-Agent(self, provider: Provider, model: Model, system_prompt: str = '', tools: list[AgentTool] | None = None, thinking: ThinkingLevel = 'off', convert_to_llm: Callable[[list[Message]], list[Message]] | None = None, transform_context: Callable | None = None, transform_system_prompt: Callable | None = None, after_model_response: Callable | None = None, before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, should_stop_after_turn: Callable | None = None, on_payload: OnPayloadCallback | None = None, on_response: OnResponseCallback | None = None, steering_mode: str = 'one-at-a-time', follow_up_mode: str = 'one-at-a-time', tool_execution: str = 'parallel', checkpointer: Any = None, thread_id: str | None = None, middleware: list[Middleware] | None = None)
+Agent(self, *, provider: Provider, model: Model, system_prompt: str = '', tools: list[AgentTool] | None = None, thinking: ThinkingLevel = 'off', convert_to_llm: Callable[[list[Message]], list[Message]] | None = None, transform_context: Callable | None = None, transform_system_prompt: Callable | None = None, after_model_response: Callable | None = None, before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, should_stop_after_turn: Callable | None = None, on_payload: OnPayloadCallback | None = None, on_response: OnResponseCallback | None = None, steering_mode: str = 'one-at-a-time', follow_up_mode: str = 'one-at-a-time', tool_execution: str = 'parallel', checkpointer: Any = None, thread_id: str | None = None, middleware: list[Middleware] | None = None)
 ```
 
 
@@ -36,7 +36,7 @@ AgentState(self, system_prompt: str = '', model: Model = (lambda: Model(id='unkn
 _function_
 
 ```python
-run_agent_loop(prompts: list[Message], context: AgentContext, provider: Provider, model: Model, convert_to_llm: Callable, emit: Callable, transform_context: Callable | None = None, transform_system_prompt: Callable | None = None, after_model_response: Callable | None = None, before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, should_stop_after_turn: Callable | None = None, get_steering_messages: Callable | None = None, get_follow_up_messages: Callable | None = None, stream_options: StreamOptions | None = None, tool_execution: str = 'parallel', system_prompt: str | None = None) -> list[Message]
+run_agent_loop(*, prompts: list[Message], context: AgentContext, provider: Provider, model: Model, convert_to_llm: Callable, emit: Callable, transform_context: Callable | None = None, transform_system_prompt: Callable | None = None, after_model_response: Callable | None = None, before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, should_stop_after_turn: Callable | None = None, get_steering_messages: Callable | None = None, get_follow_up_messages: Callable | None = None, stream_options: StreamOptions | None = None, tool_execution: str = 'parallel', system_prompt: str | None = None) -> list[Message]
 ```
 
 
@@ -48,7 +48,7 @@ run_agent_loop(prompts: list[Message], context: AgentContext, provider: Provider
 _function_
 
 ```python
-run_agent_loop_continue(context: AgentContext, provider: Provider, model: Model, convert_to_llm: Callable, emit: Callable, transform_context: Callable | None = None, transform_system_prompt: Callable | None = None, after_model_response: Callable | None = None, before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, should_stop_after_turn: Callable | None = None, get_steering_messages: Callable | None = None, get_follow_up_messages: Callable | None = None, stream_options: StreamOptions | None = None, tool_execution: str = 'parallel', system_prompt: str | None = None) -> list[Message]
+run_agent_loop_continue(*, context: AgentContext, provider: Provider, model: Model, convert_to_llm: Callable, emit: Callable, transform_context: Callable | None = None, transform_system_prompt: Callable | None = None, after_model_response: Callable | None = None, before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, should_stop_after_turn: Callable | None = None, get_steering_messages: Callable | None = None, get_follow_up_messages: Callable | None = None, stream_options: StreamOptions | None = None, tool_execution: str = 'parallel', system_prompt: str | None = None) -> list[Message]
 ```
 
 
@@ -60,7 +60,7 @@ run_agent_loop_continue(context: AgentContext, provider: Provider, model: Model,
 _function_
 
 ```python
-execute_tool_calls(context: AgentContext, assistant_message: AssistantMessage, tool_execution: str = 'parallel', before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, signal: asyncio.Event | None = None, emit: Callable) -> ToolCallBatch
+execute_tool_calls(context: AgentContext, assistant_message: AssistantMessage, *, tool_execution: str = 'parallel', before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, signal: asyncio.Event | None = None, emit: Callable) -> ToolCallBatch
 ```
 
 

@@ -225,7 +225,7 @@ to leave at least ``min_output_tokens`` (1024) for output.
 _class_
 
 ```python
-FauxProvider(self, tokens_per_second: float | None = None, token_size_min: int = 3, token_size_max: int = 5)
+FauxProvider(self, *, tokens_per_second: float | None = None, token_size_min: int = 3, token_size_max: int = 5)
 ```
 
 
@@ -237,7 +237,7 @@ FauxProvider(self, tokens_per_second: float | None = None, token_size_min: int =
 _function_
 
 ```python
-faux_assistant_message(content: str | FauxContentBlock | list[FauxContentBlock], stop_reason: str = 'stop', error_message: str | None = None) -> AssistantMessage
+faux_assistant_message(content: str | FauxContentBlock | list[FauxContentBlock], *, stop_reason: str = 'stop', error_message: str | None = None) -> AssistantMessage
 ```
 
 
@@ -273,7 +273,7 @@ faux_thinking(thinking: str) -> ThinkingContent
 _function_
 
 ```python
-faux_tool_call(name: str, arguments: dict[str, Any], id: str | None = None) -> ToolCall
+faux_tool_call(name: str, arguments: dict[str, Any], *, id: str | None = None) -> ToolCall
 ```
 
 

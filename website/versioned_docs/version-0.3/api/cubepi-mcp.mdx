@@ -12,7 +12,7 @@ hide_table_of_contents: false
 _function_
 
 ```python
-load_mcp_tools_http(server_url: str, headers: dict[str, str] | None = None, timeout: float = 30.0) -> list[AgentTool]
+load_mcp_tools_http(server_url: str, *, headers: dict[str, str] | None = None, timeout: float = 30.0) -> list[AgentTool]
 ```
 
 Connect to an HTTP/SSE MCP server, discover tools, return AgentTools.
@@ -32,7 +32,7 @@ accepts the connection but stalls on protocol messages still aborts.
 _function_
 
 ```python
-load_mcp_tools_stdio(command: str, args: list[str], env: dict[str, str] | None = None, cwd: str | None = None, timeout: float = 30.0) -> list[AgentTool]
+load_mcp_tools_stdio(command: str, args: list[str], *, env: dict[str, str] | None = None, cwd: str | None = None, timeout: float = 30.0) -> list[AgentTool]
 ```
 
 Spawn a stdio MCP server subprocess, discover tools, return AgentTools.

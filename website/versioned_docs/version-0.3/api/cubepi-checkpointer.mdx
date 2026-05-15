@@ -44,7 +44,7 @@ MemoryCheckpointer(self)
 _class_
 
 ```python
-PostgresCheckpointer(self, dsn: str, min_pool_size: int = 1, max_pool_size: int = 10)
+PostgresCheckpointer(self, dsn: str, *, min_pool_size: int = 1, max_pool_size: int = 10)
 ```
 
 Checkpointer backed by PostgreSQL.
