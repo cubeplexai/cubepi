@@ -1,0 +1,6 @@
+.section { max-width: 1080px; margin: 0 auto 64px; padding: 0 24px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 40px; align-items: start; }
+.h2 { font-family: 'Inter Tight'; font-size: 24px; letter-spacing: -0.015em; color: var(--ink-12); margin: 0 0 12px; }
+.lede { font-size: 14px; color: var(--ink-9); line-height: 1.55; margin: 0 0 16px; }
+.link { font-size: 13px; color: var(--accent); }
+.right :global(.theme-code-block) { margin: 0; }
+@media (max-width: 768px) { .section { grid-template-columns: 1fr; gap: 16px; } }
