@@ -56,9 +56,9 @@ const config: Config = {
       title: 'CubePi',
       logo: { alt: 'CubePi logo', src: 'img/brand/cubepi-logo.svg' },
       items: [
-        // { to: '/getting-started/installation', label: 'Docs', position: 'left' }, // re-enabled in T7
-        // { to: '/api/', label: 'API', position: 'left' }, // re-enabled in T7
-        // { to: '/recipes/', label: 'Recipes', position: 'left' }, // re-enabled in T7
+        { type: 'doc', docId: 'getting-started/installation', label: 'Docs', position: 'left' },
+        { type: 'doc', docId: 'api/index', label: 'API', position: 'left' },
+        { type: 'doc', docId: 'recipes/weather-agent', label: 'Recipes', position: 'left' },
         // { type: 'docsVersionDropdown', position: 'right' }, // enabled in T21
         { type: 'localeDropdown', position: 'right' },
         { href: 'https://github.com/cubeplexai/cubepi', label: 'GitHub', position: 'right' },

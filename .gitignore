@@ -33,4 +33,4 @@ website/.docusaurus/
 website/build/
 website/node_modules/
 website/docs/api/*.mdx
-!website/docs/api/_index.mdx
+!website/docs/api/index.mdx
