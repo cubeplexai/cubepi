@@ -62,11 +62,16 @@ agent_end
 
 ```python
 def on_event(event, signal=None):
-    if event.type == "text_delta":
-        print(event.delta, end="", flush=True)
+    if event.type == "message_update" and event.stream_event.type == "text_delta":
+        print(event.stream_event.delta, end="", flush=True)
 
 unsubscribe = agent.subscribe(on_event)
 ```
+
+`agent.subscribe(...)` 永远不会收到 `event.type == "text_delta"`
+的事件 —— 那是 *provider* 事件的 type。Agent 把每个 provider 事件
+都包成 `MessageUpdateEvent`,原事件挂在 `event.stream_event` 上。
+所以要同时匹配外层和内层。
 
 Listener 可以是同步或异步,异步的会被 await。第二个参数是 run 级别
 的 `asyncio.Event`(abort signal)—— 你可以查 `signal.is_set()` 判断

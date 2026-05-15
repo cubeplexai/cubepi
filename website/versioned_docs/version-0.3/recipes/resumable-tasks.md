@@ -77,6 +77,15 @@ async def transcode_video(tool_call_id, params: TranscodeParams, *, signal=None,
         content=[TextContent(text=f"Transcoded to {output}.")],
         details={"output_path": output},
     )
+
+
+transcode_tool = AgentTool(
+    name="transcode_video",
+    description="Transcode a video file. Idempotent — safe to retry.",
+    parameters=TranscodeParams,
+    execute=transcode_video,
+    execution_mode="sequential",  # one transcode at a time
+)
 ```
 
 Now if the process dies during `run_ffmpeg`, the next agent run sees
@@ -96,7 +105,7 @@ from cubepi import Agent, Model
 from cubepi.checkpointer import SQLiteCheckpointer
 from cubepi.providers.anthropic import AnthropicProvider
 
-from tools import transcode_video  # the idempotent tool from above
+from tools import transcode_tool   # the wrapped AgentTool from above
 
 
 async def main(thread_id: str, initial_prompt: str | None):
@@ -105,7 +114,7 @@ async def main(thread_id: str, initial_prompt: str | None):
             provider=AnthropicProvider(api_key=os.environ["ANTHROPIC_API_KEY"]),
             model=Model(id="claude-sonnet-4-5-20250929", provider="anthropic"),
             system_prompt="You orchestrate video transcoding jobs.",
-            tools=[transcode_video],
+            tools=[transcode_tool],
             checkpointer=cp,
             thread_id=thread_id,
         )

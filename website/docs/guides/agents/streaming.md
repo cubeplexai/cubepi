@@ -65,11 +65,16 @@ agent_end
 
 ```python
 def on_event(event, signal=None):
-    if event.type == "text_delta":
-        print(event.delta, end="", flush=True)
+    if event.type == "message_update" and event.stream_event.type == "text_delta":
+        print(event.stream_event.delta, end="", flush=True)
 
 unsubscribe = agent.subscribe(on_event)
 ```
+
+`agent.subscribe(...)` never receives an event whose top-level `.type`
+equals `"text_delta"` — that's a *provider* event type. The agent
+wraps every provider event in a `MessageUpdateEvent` and tucks the
+original under `event.stream_event`. Match on both fields, as above.
 
 Listeners can be sync or async; async ones are awaited. The second
 argument is the run-level `asyncio.Event` (the abort signal) — you can
@@ -87,20 +92,19 @@ def on_event(event, signal=None):
             print(sub.delta, end="", flush=True)
 ```
 
-Equivalent shorter form, since `text_delta` is the inner provider
-event type and CubePi exposes the same `.type` and `.delta` on the
-event itself:
+Equivalent defensive form using `getattr`, since only
+`MessageUpdateEvent` carries a `stream_event` attribute:
 
 ```python
 def on_event(event, signal=None):
-    # message_update unwraps the inner stream_event onto the wrapper:
     if getattr(event, "stream_event", None) and event.stream_event.type == "text_delta":
         print(event.stream_event.delta, end="", flush=True)
 ```
 
 The shape that CubePi guarantees is the one in the table above
-(`message_update.stream_event.delta`). Code defensively against the
-inner type.
+(`MessageUpdateEvent.stream_event.delta`). Always match the outer
+event's `type == "message_update"` (or check `stream_event` exists)
+before reaching into `stream_event.type`.
 
 ## Provider `StreamEvent` types
 

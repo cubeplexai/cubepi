@@ -57,8 +57,8 @@ async def main():
 
     # 在 prompt() 之前订阅 —— 这是看到流式事件的关键。
     def on_event(event, signal=None):
-        if event.type == "text_delta":
-            print(event.delta, end="", flush=True)
+        if event.type == "message_update" and event.stream_event.type == "text_delta":
+            print(event.stream_event.delta, end="", flush=True)
         elif event.type == "agent_end":
             print()  # 末尾换行
 
