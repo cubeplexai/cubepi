@@ -16,7 +16,7 @@ Agent(self, provider: Provider, model: Model, system_prompt: str = '', tools: li
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/agent.py#L105)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/agent.py#L105)
 
 
 ### AgentState
@@ -28,7 +28,7 @@ AgentState(self, system_prompt: str = '', model: Model = (lambda: Model(id='unkn
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/agent.py#L66)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/agent.py#L66)
 
 
 ### run_agent_loop
@@ -40,7 +40,7 @@ run_agent_loop(prompts: list[Message], context: AgentContext, provider: Provider
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/loop.py#L30)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/loop.py#L30)
 
 
 ### run_agent_loop_continue
@@ -52,7 +52,7 @@ run_agent_loop_continue(context: AgentContext, provider: Provider, model: Model,
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/loop.py#L87)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/loop.py#L87)
 
 
 ### execute_tool_calls
@@ -64,7 +64,7 @@ execute_tool_calls(context: AgentContext, assistant_message: AssistantMessage, t
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/tools.py#L200)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/tools.py#L200)
 
 
 ### AfterToolCallContext
@@ -76,7 +76,7 @@ AfterToolCallContext(self, assistant_message: AssistantMessage, tool_call: ToolC
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L79)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L79)
 
 
 ### AfterToolCallResult
@@ -84,7 +84,7 @@ AfterToolCallContext(self, assistant_message: AssistantMessage, tool_call: ToolC
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L64)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L64)
 
 
 ### AgentContext
@@ -96,7 +96,7 @@ AgentContext(self, system_prompt: str, messages: list[Message], tools: list[Agen
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L48)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L48)
 
 
 ### AgentEndEvent
@@ -104,7 +104,7 @@ AgentContext(self, system_prompt: str, messages: list[Message], tools: list[Agen
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L104)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L104)
 
 
 ### AgentEvent
@@ -112,7 +112,7 @@ _class_
 _attribute_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L158)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L158)
 
 
 ### AgentListener
@@ -120,7 +120,7 @@ _attribute_
 _attribute_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L173)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L173)
 
 
 ### AgentStartEvent
@@ -128,7 +128,7 @@ _attribute_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L100)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L100)
 
 
 ### AgentTool
@@ -140,7 +140,7 @@ AgentTool(self, name: str, description: str, parameters: type[TParams], execute:
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L30)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L30)
 
 
 ### AgentToolResult
@@ -148,7 +148,7 @@ AgentTool(self, name: str, description: str, parameters: type[TParams], execute:
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L23)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L23)
 
 
 ### BeforeToolCallContext
@@ -160,7 +160,7 @@ BeforeToolCallContext(self, assistant_message: AssistantMessage, tool_call: Tool
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L71)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L71)
 
 
 ### BeforeToolCallResult
@@ -168,7 +168,7 @@ BeforeToolCallContext(self, assistant_message: AssistantMessage, tool_call: Tool
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L59)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L59)
 
 
 ### MessageEndEvent
@@ -176,7 +176,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L130)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L130)
 
 
 ### MessageStartEvent
@@ -184,7 +184,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L119)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L119)
 
 
 ### MessageUpdateEvent
@@ -192,7 +192,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L124)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L124)
 
 
 ### ShouldStopAfterTurnContext
@@ -204,7 +204,7 @@ ShouldStopAfterTurnContext(self, message: AssistantMessage, tool_results: list[T
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L89)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L89)
 
 
 ### ToolExecutionEndEvent
@@ -212,7 +212,7 @@ ShouldStopAfterTurnContext(self, message: AssistantMessage, tool_results: list[T
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L150)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L150)
 
 
 ### ToolExecutionStartEvent
@@ -220,7 +220,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L135)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L135)
 
 
 ### ToolExecutionUpdateEvent
@@ -228,7 +228,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L142)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L142)
 
 
 ### TurnEndEvent
@@ -236,7 +236,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L113)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L113)
 
 
 ### TurnStartEvent
@@ -244,7 +244,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/agent/types.py#L109)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L109)
 
 
 ### emit_event
@@ -256,7 +256,7 @@ emit_event(emit_fn: Callable, event: object) -> None
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/utils/emit.py#L7)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/utils/emit.py#L7)
 
 
 

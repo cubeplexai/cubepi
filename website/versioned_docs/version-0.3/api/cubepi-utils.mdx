@@ -16,7 +16,7 @@ emit_event(emit_fn: Callable, event: object) -> None
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/utils/emit.py#L7)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/utils/emit.py#L7)
 
 
 ### parse_streaming_json
@@ -33,12 +33,12 @@ Uses a 3-tier fallback:
   1. ``json.loads(text)``
   2. ``json.loads(repair_json(text))``
   3. Partial-parse: repair + close open braces/brackets/strings
-  4. ``{}`` as last resort
+  4. ``\{\}`` as last resort
 
-Always returns a *dict* (or at minimum ``{}``) so callers never need
+Always returns a *dict* (or at minimum ``\{\}``) so callers never need
 to handle parse failures.
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/utils/json_parse.py#L169)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/utils/json_parse.py#L169)
 
 
 ### repair_json
@@ -60,7 +60,7 @@ JSON string value.  Inside strings it:
   (e.g. ``\x`` becomes ``\\x``), making the output parseable.
 * Handles truncated backslash at end-of-string.
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/utils/json_parse.py#L39)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/utils/json_parse.py#L39)
 
 
 
