@@ -51,7 +51,7 @@ def test_emit_module_writes_generated_marker(tmp_path):
         module_name="cubepi.utils",
         sidebar_position=6,
         symbols=[],
-        commit_sha="abc1234",
+        source_ref="main",
     )
     body = module_path.read_text(encoding="utf-8")
     assert body.startswith("---\n")

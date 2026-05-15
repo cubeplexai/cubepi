@@ -24,7 +24,7 @@ The transport's own timeout bounds the SSE connection; we additionally
 wrap initialize/list/call awaits in asyncio.wait_for so a server that
 accepts the connection but stalls on protocol messages still aborts.
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/mcp/http_loader.py#L12)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/mcp/http_loader.py#L12)
 
 
 ### load_mcp_tools_stdio
@@ -50,7 +50,7 @@ simplicity, no process pooling).
 - `timeout` — per-call wall-clock timeout for initialize/list/call awaits.
         A hung server raises asyncio.TimeoutError instead of blocking forever.
 
-[source](https://github.com/cubeplexai/cubepi/blob/546375c8c986a00e2d3559a78f219fc426818c24/cubepi/mcp/stdio_loader.py#L12)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/mcp/stdio_loader.py#L12)
 
 
 
