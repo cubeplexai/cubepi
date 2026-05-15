@@ -1,30 +1,77 @@
-/**
- * Any CSS included here will be global. The classic template
- * bundles Infima by default. Infima is a CSS framework designed to
- * work well for content-centric websites.
- */
+/* ============== Fonts ============== */
+@font-face { font-family: 'Inter';        src: url('/fonts/Inter-Regular.woff2')        format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Inter';        src: url('/fonts/Inter-Medium.woff2')         format('woff2'); font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Inter';        src: url('/fonts/Inter-SemiBold.woff2')       format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Inter Tight';  src: url('/fonts/InterTight-SemiBold.woff2')  format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Medium.woff2')  format('woff2'); font-weight: 500; font-display: swap; }
 
-/* You can override the default Infima variables here. */
+/* ============== Operator tokens ============== */
 :root {
-  --ifm-color-primary: #2e8555;
-  --ifm-color-primary-dark: #29784c;
-  --ifm-color-primary-darker: #277148;
-  --ifm-color-primary-darkest: #205d3b;
-  --ifm-color-primary-light: #33925d;
-  --ifm-color-primary-lighter: #359962;
-  --ifm-color-primary-lightest: #3cad6e;
-  --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --ink-12: #0a0a0b;
+  --ink-11: #1f1f22;
+  --ink-9:  #52525b;
+  --ink-7:  #a1a1aa;
+  --ink-5:  #e4e4e7;
+  --ink-3:  #f4f4f5;
+  --ink-1:  #fafafa;
+  --surface: #ffffff;
+  --accent: #3b5bd9;
+  --accent-soft: #eef1fe;
+  --accent-ink: #1e3aa8;
+  --ok:   #16a34a;
+  --warn: #d97706;
+  --err:  #dc2626;
+
+  /* Docusaurus overrides */
+  --ifm-color-primary: var(--accent);
+  --ifm-color-primary-dark:        #2f4fc4;
+  --ifm-color-primary-darker:      #2c4abc;
+  --ifm-color-primary-darkest:     #243d9b;
+  --ifm-color-primary-light:       #5470de;
+  --ifm-color-primary-lighter:     #6a83e3;
+  --ifm-color-primary-lightest:    #93a6ec;
+  --ifm-background-color: var(--ink-1);
+  --ifm-background-surface-color: var(--surface);
+  --ifm-color-content: var(--ink-11);
+  --ifm-heading-color: var(--ink-12);
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, sans-serif;
+  --ifm-heading-font-family: 'Inter Tight', 'Inter', system-ui;
+  --ifm-font-family-monospace: 'JetBrains Mono', ui-monospace, monospace;
+  --ifm-font-size-base: 14px;
+  --ifm-line-height-base: 1.55;
+  --ifm-navbar-height: 56px;
+  --ifm-navbar-background-color: var(--surface);
+  --ifm-navbar-shadow: none;
+  --ifm-toc-border-color: var(--ink-5);
+  --ifm-hr-border-color: var(--ink-5);
+  --ifm-code-font-size: 92%;
+  --docusaurus-highlighted-code-line-bg: var(--ink-3);
 }
 
-/* For readability concerns, you should choose a lighter palette in dark mode. */
 [data-theme='dark'] {
-  --ifm-color-primary: #25c2a0;
-  --ifm-color-primary-dark: #21af90;
-  --ifm-color-primary-darker: #1fa588;
-  --ifm-color-primary-darkest: #1a8870;
-  --ifm-color-primary-light: #29d5b0;
-  --ifm-color-primary-lighter: #32d8b4;
-  --ifm-color-primary-lightest: #4fddbf;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --ink-12: #f4f4f5;
+  --ink-11: #e4e4e7;
+  --ink-9:  #a1a1aa;
+  --ink-7:  #71717a;
+  --ink-5:  #3f3f46;
+  --ink-3:  #27272a;
+  --ink-1:  #18181b;
+  --surface: #0a0a0b;
+  --accent: #6a83e3;
+  --accent-soft: #1e3aa820;
+  --accent-ink: #93a6ec;
+  --ifm-color-primary: var(--accent);
+  --ifm-background-color: var(--ink-1);
+  --ifm-background-surface-color: var(--surface);
 }
+
+html, body { font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+/* No shadows except modals (which Docusaurus does not use in docs). */
+.navbar { border-bottom: 1px solid var(--ink-5); }
+.menu__link, .navbar__link { font-weight: 500; }
+.menu__link--active, .navbar__link--active { color: var(--accent); }
+
+/* Tabular numerals globally in code and tables */
+code, pre, table td.num, .num { font-variant-numeric: tabular-nums; }
