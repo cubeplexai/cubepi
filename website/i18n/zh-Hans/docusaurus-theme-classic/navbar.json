@@ -1,0 +1,26 @@
+{
+  "title": {
+    "message": "CubePi",
+    "description": "The title in the navbar"
+  },
+  "logo.alt": {
+    "message": "CubePi logo",
+    "description": "The alt text of navbar logo"
+  },
+  "item.label.Docs": {
+    "message": "文档",
+    "description": "Navbar item with label Docs"
+  },
+  "item.label.API": {
+    "message": "API",
+    "description": "Navbar item with label API"
+  },
+  "item.label.Recipes": {
+    "message": "示例",
+    "description": "Navbar item with label Recipes"
+  },
+  "item.label.GitHub": {
+    "message": "GitHub",
+    "description": "Navbar item with label GitHub"
+  }
+}
