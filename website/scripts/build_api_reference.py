@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 import re
 import subprocess
@@ -29,15 +30,23 @@ def _is_public(name: str, parent_all: list[str] | None) -> bool:
 
 
 def collect_public_symbols(module) -> list:
-    """Return resolved Class/Function objects for the module's public surface."""
-    parent_all = None
-    # griffe Module may expose __all__ via .exports (sometimes a list, sometimes None)
+    """Return resolved Class/Function objects for the module's public surface.
+
+    Walks `module.members` first (eagerly imported symbols), then fills in any
+    names in `__all__` that griffe missed — typically lazy exports surfaced via
+    `__getattr__`. The lazy ones are resolved at runtime via importlib to find
+    their canonical dotted path, then loaded back through griffe so the rest of
+    the pipeline (signatures, docstrings, source links) works identically.
+    """
+    parent_all: list[str] | None = None
     if hasattr(module, "exports") and module.exports is not None:
         try:
             parent_all = list(module.exports)
         except TypeError:
             parent_all = None
+
     out = []
+    seen: set[str] = set()
     for member_name, member in module.members.items():
         if not _is_public(member_name, parent_all):
             continue
@@ -47,6 +56,36 @@ def collect_public_symbols(module) -> list:
             except AliasResolutionError:
                 continue
         out.append(member)
+        seen.add(member_name)
+
+    if parent_all:
+        missing = [n for n in parent_all if n not in seen]
+        if missing:
+            try:
+                runtime_mod = importlib.import_module(module.path)
+            except Exception as e:
+                print(f"[warn] cannot import {module.path} to resolve lazy exports: {e}",
+                      file=sys.stderr)
+                runtime_mod = None
+            if runtime_mod is not None:
+                for name in missing:
+                    try:
+                        obj = getattr(runtime_mod, name)
+                    except (AttributeError, ImportError) as e:
+                        print(f"[warn] {module.path}.{name} unresolvable ({e}); skipping",
+                              file=sys.stderr)
+                        continue
+                    real_module = getattr(obj, "__module__", None)
+                    qualname = getattr(obj, "__qualname__", None) or name
+                    if not real_module:
+                        continue
+                    try:
+                        target = griffe.load(f"{real_module}.{qualname}")
+                    except Exception as e:
+                        print(f"[warn] griffe.load({real_module}.{qualname}) failed: {e}",
+                              file=sys.stderr)
+                        continue
+                    out.append(target)
     return out
 
 
