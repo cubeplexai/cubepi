@@ -7,6 +7,55 @@ sidebar_position: 0
 
 # CubePi
 
-一个 Pythonic、原生异步的 Agent 框架。
+**CubePi** 是一个 Pythonic、原生异步的 Agent 框架——相对于
+[langgraph](https://github.com/langchain-ai/langgraph) 等 Agent 运行时，
+更精简、更易读的另一种思路。它把 Agent 建模为一个普通的 `async` 函数，
+而不是状态图；整个核心循环你五分钟就能读完。
 
-从 [快速开始](./getting-started/quick-start) 开始，或浏览 [API 参考](./api/) 。
+```bash
+pip install cubepi
+```
+
+然后跳到 [快速开始](./getting-started/quick-start)，五分钟内跑通一个
+能调用工具的 Agent。
+
+## 你能拿到什么
+
+- **普通 async 函数，不是图节点。** Agent 循环就是一个对消息轮次的
+  `while` 循环。你把工具写成 `async def` 函数，框架负责路由调用并并行
+  执行。
+- **统一的流式模式。** 所有 provider 都通过 `MessageStream` 产出
+  `StreamEvent`。你用 `async for` 迭代它。没有 callback 注册表，也没有
+  为文本和工具单独的 handler 类型。
+- **追加式检查点。** 每一轮只写入新消息，而不是整段对话历史。无论
+  会话多长，数据库 I/O 都是 O(1)——SQLite 适合个人开发,Postgres 适合
+  生产环境。
+- **原生多 provider。** Anthropic 和 OpenAI 开箱即用,通过 `Provider`
+  Protocol 接入。要新增一个 provider 只需要写一个类。
+- **五个 Hook 的中间件。** `transform_context`、`convert_to_llm`、
+  `before_tool_call`、`after_tool_call`、`should_stop_after_turn`——
+  每一个都有明确的组合规则。没有"节点执行顺序之谜"。
+- **MCP 加载器。** 指向任意
+  [Model Context Protocol](https://modelcontextprotocol.io) 服务器
+  （HTTP 或 stdio),就能拿回一组 `AgentTool`。
+
+## 接下来去哪儿
+
+| 如果你想… | 从这里开始 |
+|---|---|
+| 安装并跑通第一个 Agent | [入门 → 安装](./getting-started/installation) |
+| 理解骨架 | [入门 → 核心概念](./getting-started/core-concepts) |
+| 接入一个真实的工具 Agent | [指南 → 构建第一个 Agent](./guides/agents/first-agent) |
+| 跨重启保留对话 | [指南 → SQLite 检查点](./guides/checkpointing/sqlite) |
+| 查找某个具体符号 | [API 参考](./api/) |
+| 看完整的可运行示例 | [Recipes](./recipes/weather-agent) |
+| 从 langgraph Agent 迁移 | [迁移 → 来自 langgraph](./migration/from-langgraph) |
+
+## 状态
+
+CubePi 当前版本是 `v0.3.0` —— alpha。v0.3 的公开 API 已稳定,并冻结
+在 [`0.3` 文档快照](pathname:///) 中。右上角的 `next` 频道跟踪未发布
+的 main 分支。
+
+源代码、Issue 和讨论都在
+[GitHub](https://github.com/cubeplexai/cubepi)。
