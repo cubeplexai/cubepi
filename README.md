@@ -194,7 +194,7 @@ async with SQLiteCheckpointer("agent.db") as cp:
     agent = Agent(model=model, checkpointer=cp, thread_id="conv-1")
 
 # Postgres for production
-async with PostgresCheckpointer.from_dsn("postgresql://...") as cp:
+async with PostgresCheckpointer("postgresql://...") as cp:
     agent = Agent(model=model, checkpointer=cp, thread_id="conv-1")
 ```
 
