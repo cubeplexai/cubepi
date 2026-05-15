@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/cubeplexai/cubepi/main/assets/brand/cubepi-logo.svg" alt="cubepi logo" width="160">
+  <img src="https://raw.githubusercontent.com/cubeplexai/cubepi/main/assets/brand/cubepi-logo.svg" alt="CubePi logo" width="160">
 </p>
 
-<h1 align="center">cubepi</h1>
+<h1 align="center">CubePi</h1>
 
 [![CI](https://github.com/cubeplexai/cubepi/actions/workflows/ci.yml/badge.svg)](https://github.com/cubeplexai/cubepi/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/cubeplexai/cubepi/graph/badge.svg)](https://codecov.io/gh/cubeplexai/cubepi)
@@ -10,52 +10,37 @@
 [![Python](https://img.shields.io/pypi/pyversions/cubepi)](https://pypi.org/project/cubepi/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Pythonic async-native agent framework. Built to replace [langgraph](https://github.com/langchain-ai/langgraph) with something simpler, faster, and easier to reason about.
+A Pythonic, async-native agent framework — a leaner, more readable take on agent runtimes like [langgraph](https://github.com/langchain-ai/langgraph).
 
-Inspired by [pi-agent-core](https://github.com/anthropics/pi-agent-core) (TypeScript), redesigned for Python.
+## Why CubePi
 
-## Why cubepi
-
-### vs langgraph
-
-| | langgraph | cubepi |
+| | langgraph | CubePi |
 |---|---|---|
 | **Abstraction** | Graph nodes + edges + channels — you model your agent as a state machine | Plain async functions — `run_agent_loop` is a while loop you can read in 5 minutes |
 | **Streaming** | Callback-based, multiple handler types | `async for event in stream` — one pattern everywhere |
 | **Checkpointing** | Full snapshot per step — serializes entire message list on every channel change | Append-only — writes only new messages, O(1) DB I/O regardless of conversation length |
 | **Dependencies** | Pulls in langchain-core, langgraph-sdk, and transitive deps | 3 core deps: `pydantic`, `anthropic`, `openai` |
 | **Tool execution** | Tools are graph nodes with manual wiring | Declare tools as functions, framework handles routing and parallel execution |
-| **Multi-provider** | Via langchain chat model adapters | Native Provider protocol — Anthropic, OpenAI built in, add your own with one class |
+| **Multi-provider** | Via langchain chat model adapters | Native `Provider` protocol — Anthropic, OpenAI built in, add your own with one class |
 | **Middleware** | Graph-level middleware on node entry/exit | Agent-level middleware with 5 typed hooks and declarative composition rules |
 | **Observability** | LangSmith / Langfuse integration, full trace visualization | Events + middleware hooks — bring your own tracing |
-
-### vs pi-agent-core
-
-cubepi is a Python port of pi's architecture with Pythonic improvements:
-
-| | pi-agent-core | cubepi |
-|---|---|---|
-| **Language** | TypeScript | Python (async-native) |
-| **Type system** | Zod schemas | Pydantic v2 — validation, serialization, JSON Schema generation in one |
-| **Cancel signal** | `AbortSignal` (Web API) | `asyncio.Event` — same semantics, native to Python |
-| **Middleware** | Hooks only (callbacks on Agent) | Hooks + composable Middleware protocol with `compose_middleware()` |
-| **Checkpointing** | Not built in | Built-in `MemoryCheckpointer` + `SQLiteCheckpointer` |
-| **Test utility** | Internal test helpers | `FauxProvider` as public API — ship it, use it in your tests |
 
 ## Install
 
 ```bash
 pip install cubepi
 
-# With SQLite checkpointer
-pip install cubepi[sqlite]
+# Optional extras
+pip install cubepi[sqlite]     # SQLite checkpointer
+pip install cubepi[postgres]   # Postgres checkpointer
+pip install cubepi[mcp]        # MCP tool loaders
 ```
 
 Or with [uv](https://github.com/astral-sh/uv):
 
 ```bash
 uv add cubepi
-uv add cubepi[sqlite]
+uv add cubepi[sqlite,postgres,mcp]
 ```
 
 ## Quick Start
@@ -63,7 +48,7 @@ uv add cubepi[sqlite]
 ```python
 import asyncio
 from cubepi import Agent, AgentTool, Model
-from cubepi.providers import AnthropicProvider
+from cubepi.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(api_key="sk-...")
 
@@ -72,7 +57,7 @@ def get_weather(city: str) -> str:
     return f"72°F and sunny in {city}"
 
 agent = Agent(
-    model=Model(provider=provider, model="claude-sonnet-4-20250514"),
+    model=Model(provider=provider, model="claude-sonnet-4-5-20250929"),
     tools=[
         AgentTool(
             name="get_weather",
@@ -103,21 +88,24 @@ asyncio.run(main())
 ```
 cubepi/
 ├── providers/        # LLM provider abstraction
-│   ├── base.py       # Provider protocol, message types, MessageStream
-│   ├── anthropic.py  # Anthropic provider
-│   ├── openai.py     # OpenAI provider
-│   └── faux.py       # Test utility — pre-configured responses with realistic streaming
+│   ├── base.py             # Provider protocol, message types, MessageStream
+│   ├── anthropic.py        # Anthropic provider
+│   ├── openai.py           # OpenAI Chat Completions provider
+│   ├── openai_responses.py # OpenAI Responses provider
+│   └── faux.py             # Test utility — pre-configured responses with realistic streaming
 ├── agent/            # Agent runtime
 │   ├── agent.py      # Stateful Agent class
 │   ├── loop.py       # Stateless core loop (the actual algorithm)
 │   ├── tools.py      # Tool execution engine (sequential + parallel)
 │   └── types.py      # Events, AgentTool, AgentContext, hook types
-├── middleware/        # Composable middleware protocol
+├── middleware/       # Composable middleware protocol
 │   └── base.py       # 5 hooks with distinct composition rules
-└── checkpointer/     # Persistence
-    ├── base.py       # Checkpointer protocol
-    ├── memory.py     # In-memory (dev/test)
-    └── sqlite.py     # SQLite (lightweight persistence)
+├── checkpointer/     # Persistence
+│   ├── base.py       # Checkpointer protocol
+│   ├── memory.py     # In-memory (dev/test)
+│   ├── sqlite.py     # SQLite (lightweight persistence)
+│   └── postgres/     # Postgres (production persistence)
+└── mcp/              # MCP tool loaders (HTTP + stdio transports)
 ```
 
 ## Core Concepts
@@ -127,7 +115,9 @@ cubepi/
 Abstract LLM interaction behind a `Provider` protocol. All providers return `MessageStream` — an async iterator of `StreamEvent`s.
 
 ```python
-from cubepi.providers import AnthropicProvider, OpenAIProvider, FauxProvider
+from cubepi.providers.anthropic import AnthropicProvider
+from cubepi.providers.openai import OpenAIProvider
+from cubepi.providers import FauxProvider
 
 # Real providers
 anthropic = AnthropicProvider(api_key="...")
@@ -194,13 +184,17 @@ hooks = compose_middleware([LoggingMiddleware(), SafetyMiddleware()])
 Persist conversation state with append-only semantics:
 
 ```python
-from cubepi.checkpointer import MemoryCheckpointer, SQLiteCheckpointer
+from cubepi.checkpointer import MemoryCheckpointer, SQLiteCheckpointer, PostgresCheckpointer
 
 # In-memory for dev/test
 cp = MemoryCheckpointer()
 
 # SQLite for lightweight persistence
 async with SQLiteCheckpointer("agent.db") as cp:
+    agent = Agent(model=model, checkpointer=cp, thread_id="conv-1")
+
+# Postgres for production
+async with PostgresCheckpointer.from_dsn("postgresql://...") as cp:
     agent = Agent(model=model, checkpointer=cp, thread_id="conv-1")
 ```
 
@@ -228,7 +222,11 @@ stream = await agent.prompt("Search for python")
 
 - Python >= 3.11
 - Core: `pydantic`, `anthropic`, `openai`
-- Optional: `aiosqlite` (for `SQLiteCheckpointer`)
+- Optional: `aiosqlite` (`[sqlite]`), `asyncpg` + `sqlalchemy` + `msgpack` (`[postgres]`), `mcp` (`[mcp]`)
+
+## Credits
+
+Architecture inspired by [pi-agent-core](https://github.com/anthropics/pi-agent-core) (TypeScript); CubePi is an independent Python reimplementation with Pydantic v2, asyncio-native primitives, and built-in checkpointing.
 
 ## License
 
