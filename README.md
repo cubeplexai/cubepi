@@ -10,6 +10,8 @@
 [![Python](https://img.shields.io/pypi/pyversions/cubepi)](https://pypi.org/project/cubepi/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
+**Docs:** https://cubepi.pages.dev — Getting Started · API Reference · Recipes
+
 A Pythonic, async-native agent framework — a leaner, more readable take on agent runtimes like [langgraph](https://github.com/langchain-ai/langgraph).
 
 ## Why CubePi
