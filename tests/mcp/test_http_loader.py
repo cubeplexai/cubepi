@@ -280,11 +280,17 @@ async def test_load_mcp_tools_http_streamable_transport(monkeypatch) -> None:
 
     # Discovery used streamable_http (sse must not be touched).
     assert sse_calls == []
+    # streamablehttp_client expects ``timedelta`` on older mcp SDKs (1.8/1.9
+    # era) and ``float | timedelta`` on newer ones; we always pass a
+    # ``timedelta`` so the loader works on every release in our ``mcp>=1.0``
+    # dependency range.
+    from datetime import timedelta
+
     assert sh_calls[0] == {
         "url": "https://mcp.example/mcp",
         "headers": {"authorization": "Bearer x"},
-        "timeout": 7.5,
-        "sse_read_timeout": 7.5,
+        "timeout": timedelta(seconds=7.5),
+        "sse_read_timeout": timedelta(seconds=7.5),
     }
     assert len(sessions) == 1
 
