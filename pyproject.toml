@@ -33,6 +33,9 @@ postgres = [
 mcp = [
     "mcp>=1.0",
 ]
+docs = [
+    "griffe>=0.45",
+]
 
 [dependency-groups]
 dev = [
