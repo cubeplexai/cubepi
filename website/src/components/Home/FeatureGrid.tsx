@@ -38,12 +38,12 @@ const IconMcp: Icon = (p) => (
 );
 
 const CARDS = [
-  { Icon: IconBox,    title: 'Agents',        body: 'One async loop, fully typed events.',     href: '/guides/agents/first-agent' },
-  { Icon: IconStream, title: 'Streaming',     body: 'async for event in stream.',              href: '/guides/agents/streaming' },
-  { Icon: IconTool,   title: 'Tools',         body: 'Plain functions, parallel execution.',    href: '/guides/agents/tool-use' },
-  { Icon: IconPlug,   title: 'Providers',     body: 'Anthropic, OpenAI, or write your own.',   href: '/guides/providers/anthropic' },
-  { Icon: IconDisk,   title: 'Checkpointing', body: 'Append-only, O(1) per turn.',             href: '/guides/checkpointing/sqlite' },
-  { Icon: IconMcp,    title: 'MCP',           body: 'Load remote tools at startup.',           href: '/guides/mcp/loading' },
+  { Icon: IconBox,    title: 'Agents',        body: 'One async loop, fully typed events.',     href: '/next/guides/agents/first-agent' },
+  { Icon: IconStream, title: 'Streaming',     body: 'async for event in stream.',              href: '/next/guides/agents/streaming' },
+  { Icon: IconTool,   title: 'Tools',         body: 'Plain functions, parallel execution.',    href: '/next/guides/agents/tool-use' },
+  { Icon: IconPlug,   title: 'Providers',     body: 'Anthropic, OpenAI, or write your own.',   href: '/next/guides/providers/anthropic' },
+  { Icon: IconDisk,   title: 'Checkpointing', body: 'Append-only, O(1) per turn.',             href: '/next/guides/checkpointing/sqlite' },
+  { Icon: IconMcp,    title: 'MCP',           body: 'Load remote tools at startup.',           href: '/next/guides/mcp/loading' },
 ];
 
 export default function FeatureGrid() {
