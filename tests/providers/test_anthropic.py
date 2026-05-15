@@ -498,6 +498,11 @@ class TestAnthropicStreamThinking:
         assert isinstance(result.content[1], TextContent)
         assert result.content[1].text == "Answer"
 
+        # Timing fields set by start/end of the thinking block.
+        thinking = result.content[0]
+        assert thinking.started_at is not None and thinking.started_at > 0
+        assert thinking.duration_ms is not None and thinking.duration_ms >= 0
+
 
 class TestAnthropicStreamToolCall:
     """Test tool use streaming."""

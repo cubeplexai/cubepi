@@ -23,6 +23,7 @@ from cubepi.providers.base import (
     adjust_max_tokens_for_thinking,
     invoke_on_payload,
     invoke_on_response,
+    merge_thinking_timing,
 )
 from cubepi.providers.models import clamp_thinking_level
 
@@ -187,6 +188,7 @@ class AnthropicProvider:
 
                     final_msg = await stream.get_final_message()
                     result = self._convert_response(final_msg, model)
+                    result = merge_thinking_timing(result, partial)
                     ms.push(StreamEvent(type="done"))
                     ms.set_result(result)
 
@@ -348,7 +350,9 @@ class AnthropicProvider:
                     )
                 )
             elif block.type == "thinking":
-                partial.content.append(ThinkingContent(thinking=""))
+                partial.content.append(
+                    ThinkingContent(thinking="", started_at=time.time())
+                )
                 ms.push(
                     StreamEvent(
                         type="thinking_start",
@@ -385,8 +389,10 @@ class AnthropicProvider:
                 )
             elif hasattr(delta, "thinking"):
                 if partial.content and isinstance(partial.content[-1], ThinkingContent):
+                    prev = partial.content[-1]
                     partial.content[-1] = ThinkingContent(
-                        thinking=partial.content[-1].thinking + delta.thinking
+                        thinking=prev.thinking + delta.thinking,
+                        started_at=prev.started_at,
                     )
                 ms.push(
                     StreamEvent(
@@ -418,6 +424,12 @@ class AnthropicProvider:
                         )
                     )
                 elif isinstance(last, ThinkingContent):
+                    if last.started_at is not None:
+                        partial.content[-1] = ThinkingContent(
+                            thinking=last.thinking,
+                            started_at=last.started_at,
+                            duration_ms=int((time.time() - last.started_at) * 1000),
+                        )
                     ms.push(
                         StreamEvent(
                             type="thinking_end",

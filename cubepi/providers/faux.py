@@ -19,6 +19,7 @@ from cubepi.providers.base import (
     ToolCall,
     ToolDefinition,
     Usage,
+    merge_thinking_timing,
 )
 
 FauxContentBlock = TextContent | ThinkingContent | ToolCall
@@ -325,7 +326,9 @@ class FauxProvider:
                 return
 
             if isinstance(block, ThinkingContent):
-                partial.content.append(ThinkingContent(thinking=""))
+                partial.content.append(
+                    ThinkingContent(thinking="", started_at=time.time())
+                )
                 block_idx = len(partial.content) - 1
                 stream.push(
                     StreamEvent(
@@ -348,7 +351,8 @@ class FauxProvider:
                     last = partial.content[-1]
                     if isinstance(last, ThinkingContent):
                         partial.content[-1] = ThinkingContent(
-                            thinking=last.thinking + chunk
+                            thinking=last.thinking + chunk,
+                            started_at=last.started_at,
                         )
                     stream.push(
                         StreamEvent(
@@ -357,6 +361,13 @@ class FauxProvider:
                             content_index=block_idx,
                             partial=partial.model_copy(deep=True),
                         )
+                    )
+                last = partial.content[-1]
+                if isinstance(last, ThinkingContent) and last.started_at is not None:
+                    partial.content[-1] = ThinkingContent(
+                        thinking=last.thinking,
+                        started_at=last.started_at,
+                        duration_ms=int((time.time() - last.started_at) * 1000),
                     )
                 stream.push(
                     StreamEvent(
@@ -457,7 +468,7 @@ class FauxProvider:
             return
 
         stream.push(StreamEvent(type="done"))
-        stream.set_result(message)
+        stream.set_result(merge_thinking_timing(message, partial))
 
     async def _schedule_chunk(self, chunk: str) -> None:
         if not self._tokens_per_second or self._tokens_per_second <= 0:

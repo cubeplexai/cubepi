@@ -101,6 +101,8 @@ class ImageContent(BaseModel):
 class ThinkingContent(BaseModel):
     type: Literal["thinking"] = "thinking"
     thinking: str = ""
+    started_at: float | None = None
+    duration_ms: int | None = None
 
 
 Content = TextContent | ImageContent
@@ -145,6 +147,37 @@ class ToolResultMessage(BaseModel):
 
 
 Message = UserMessage | AssistantMessage | ToolResultMessage
+
+
+def merge_thinking_timing(
+    final: AssistantMessage, partial: AssistantMessage | None
+) -> AssistantMessage:
+    """Copy started_at/duration_ms from partial's ThinkingContent blocks onto
+    the corresponding blocks in final, matched by position.
+
+    The streaming partial carries timing captured at thinking_start/_end,
+    but the SDK's post-stream response object does not — so without this
+    merge the final persisted message would lose all reasoning timing.
+    """
+    if partial is None:
+        return final
+    merged: list[Any] = []
+    for idx, block in enumerate(final.content):
+        if isinstance(block, ThinkingContent):
+            src = partial.content[idx] if idx < len(partial.content) else None
+            if isinstance(src, ThinkingContent) and (
+                src.started_at is not None or src.duration_ms is not None
+            ):
+                merged.append(
+                    ThinkingContent(
+                        thinking=block.thinking,
+                        started_at=src.started_at,
+                        duration_ms=src.duration_ms,
+                    )
+                )
+                continue
+        merged.append(block)
+    return final.model_copy(update={"content": merged})
 
 
 class ToolDefinition(BaseModel):

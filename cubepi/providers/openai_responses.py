@@ -166,7 +166,9 @@ class OpenAIResponsesProvider:
                         if item.type == "reasoning":
                             current_item_type = "reasoning"
                             current_thinking = ""
-                            partial.content.append(ThinkingContent(thinking=""))
+                            partial.content.append(
+                                ThinkingContent(thinking="", started_at=time.time())
+                            )
                             current_content_index = len(partial.content) - 1
                             ms.push(
                                 StreamEvent(
@@ -225,7 +227,8 @@ class OpenAIResponsesProvider:
                                 partial.content[-1], ThinkingContent
                             ):
                                 partial.content[-1] = ThinkingContent(
-                                    thinking=current_thinking
+                                    thinking=current_thinking,
+                                    started_at=partial.content[-1].started_at,
                                 )
                             ms.push(
                                 StreamEvent(
@@ -243,7 +246,8 @@ class OpenAIResponsesProvider:
                                 partial.content[-1], ThinkingContent
                             ):
                                 partial.content[-1] = ThinkingContent(
-                                    thinking=current_thinking
+                                    thinking=current_thinking,
+                                    started_at=partial.content[-1].started_at,
                                 )
                             ms.push(
                                 StreamEvent(
@@ -262,7 +266,8 @@ class OpenAIResponsesProvider:
                                 partial.content[-1], ThinkingContent
                             ):
                                 partial.content[-1] = ThinkingContent(
-                                    thinking=current_thinking
+                                    thinking=current_thinking,
+                                    started_at=partial.content[-1].started_at,
                                 )
                             ms.push(
                                 StreamEvent(
@@ -337,8 +342,16 @@ class OpenAIResponsesProvider:
                             if partial.content and isinstance(
                                 partial.content[-1], ThinkingContent
                             ):
+                                prev = partial.content[-1]
+                                duration_ms = (
+                                    int((time.time() - prev.started_at) * 1000)
+                                    if prev.started_at is not None
+                                    else None
+                                )
                                 partial.content[-1] = ThinkingContent(
-                                    thinking=final_thinking
+                                    thinking=final_thinking,
+                                    started_at=prev.started_at,
+                                    duration_ms=duration_ms,
                                 )
                             ms.push(
                                 StreamEvent(

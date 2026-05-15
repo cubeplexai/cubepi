@@ -218,7 +218,9 @@ class OpenAIProvider:
 
                     if reasoning_delta:
                         if not thinking_started:
-                            partial.content.append(ThinkingContent(thinking=""))
+                            partial.content.append(
+                                ThinkingContent(thinking="", started_at=time.time())
+                            )
                             thinking_content_index = len(partial.content) - 1
                             ms.push(
                                 StreamEvent(
@@ -228,9 +230,10 @@ class OpenAIProvider:
                                 )
                             )
                             thinking_started = True
-                        existing = partial.content[thinking_content_index].thinking  # type: ignore[union-attr]
+                        prev_thinking = partial.content[thinking_content_index]
                         partial.content[thinking_content_index] = ThinkingContent(
-                            thinking=existing + reasoning_delta
+                            thinking=prev_thinking.thinking + reasoning_delta,  # type: ignore[union-attr]
+                            started_at=prev_thinking.started_at,  # type: ignore[union-attr]
                         )
                         ms.push(
                             StreamEvent(
@@ -327,6 +330,20 @@ class OpenAIProvider:
                     )
                     if finish_reason:
                         if thinking_started:
+                            tc_block = partial.content[thinking_content_index]
+                            if (
+                                isinstance(tc_block, ThinkingContent)
+                                and tc_block.started_at is not None
+                            ):
+                                partial.content[thinking_content_index] = (
+                                    ThinkingContent(
+                                        thinking=tc_block.thinking,
+                                        started_at=tc_block.started_at,
+                                        duration_ms=int(
+                                            (time.time() - tc_block.started_at) * 1000
+                                        ),
+                                    )
+                                )
                             ms.push(
                                 StreamEvent(
                                     type="thinking_end",
