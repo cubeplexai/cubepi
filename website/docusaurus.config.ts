@@ -46,7 +46,7 @@ const config: Config = {
 
   customFields: { POSTHOG_KEY, POSTHOG_HOST, GIT_SHA },
 
-  // clientModules: [require.resolve('./src/clientModules/posthog.ts')], // enabled in T17
+  clientModules: [require.resolve('./src/clientModules/posthog.ts')],
 
   presets: [['classic', classicOptions]],
 
