@@ -2,8 +2,12 @@ import type { Config } from '@docusaurus/types';
 import type { Options as ClassicOptions } from '@docusaurus/preset-classic';
 import { themes as prismThemes } from 'prism-react-renderer';
 
-const POSTHOG_KEY = process.env.POSTHOG_KEY ?? '';
-const POSTHOG_HOST = process.env.POSTHOG_HOST ?? 'https://us.i.posthog.com';
+// Use `||` not `??` here: GitHub Actions expands an unset secret to "" (an
+// empty string passes the nullish check, so `??` would leave api_host empty
+// and PostHog falls back to the current origin — sending POST /e/ to the
+// docs domain and hitting a 405 from Cloudflare Pages).
+const POSTHOG_KEY = process.env.POSTHOG_KEY || '';
+const POSTHOG_HOST = process.env.POSTHOG_HOST || 'https://us.i.posthog.com';
 const GIT_SHA = process.env.GITHUB_SHA?.slice(0, 7) ?? 'dev';
 
 const classicOptions: ClassicOptions = {
