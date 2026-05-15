@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Any, Literal
 
 from cubepi.agent.types import AgentTool
@@ -34,11 +35,17 @@ async def _open_session(
     if transport == "streamable_http":
         from mcp.client.streamable_http import streamablehttp_client
 
+        # streamablehttp_client's timeout signature drifted across mcp SDK
+        # versions: 1.8/1.9-era releases required ``timedelta`` and called
+        # ``.total_seconds()`` internally, while ~1.10+ accepts ``float |
+        # timedelta``. Passing a ``timedelta`` works on every version we
+        # declare in our ``mcp>=1.0`` floor, so we always convert here.
+        timeout_td = timedelta(seconds=timeout)
         async with streamablehttp_client(
             server_url,
             headers=headers,
-            timeout=timeout,
-            sse_read_timeout=timeout,
+            timeout=timeout_td,
+            sse_read_timeout=timeout_td,
         ) as (read_stream, write_stream, _get_session_id):
             async with ClientSession(read_stream, write_stream) as session:
                 yield session
