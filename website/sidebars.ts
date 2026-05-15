@@ -48,7 +48,14 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'API Reference',
       link: { type: 'doc', id: 'api/index' },
-      items: [],
+      items: [
+        'api/cubepi-agent',
+        'api/cubepi-providers',
+        'api/cubepi-checkpointer',
+        'api/cubepi-middleware',
+        'api/cubepi-mcp',
+        'api/cubepi-utils',
+      ],
     },
     {
       type: 'category',
