@@ -1,19 +1,22 @@
-// Placeholder home page — will be replaced by full implementation in T7/T16
-import type {ReactNode} from 'react';
-import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
+import React from 'react';
 import Layout from '@theme/Layout';
-import Heading from '@theme/Heading';
+import Hero from '@site/src/components/Home/Hero';
+import WhyTable from '@site/src/components/Home/WhyTable';
+import HelloAgent from '@site/src/components/Home/HelloAgent';
+import FeatureGrid from '@site/src/components/Home/FeatureGrid';
+import InstallMatrix from '@site/src/components/Home/InstallMatrix';
+import MetaBar from '@site/src/components/Home/MetaBar';
 
-export default function Home(): ReactNode {
-  const {siteConfig} = useDocusaurusContext();
+export default function Home(): JSX.Element {
   return (
-    <Layout
-      title={siteConfig.title}
-      description={siteConfig.tagline}>
-      <main style={{padding: '4rem 0', textAlign: 'center'}}>
-        <Heading as="h1">{siteConfig.title}</Heading>
-        <p>{siteConfig.tagline}</p>
-      </main>
+    <Layout title="CubePi — Pythonic async-native agent framework"
+            description="CubePi is a Pythonic, async-native agent framework. Plain async functions, append-only checkpointing, 3 core dependencies.">
+      <Hero />
+      <WhyTable />
+      <HelloAgent />
+      <FeatureGrid />
+      <InstallMatrix />
+      <MetaBar />
     </Layout>
   );
 }
