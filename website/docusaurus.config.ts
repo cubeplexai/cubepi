@@ -55,6 +55,16 @@ const config: Config = {
 
   presets: [['classic', classicOptions]],
 
+  plugins: [
+    [
+      '@docusaurus/plugin-google-gtag',
+      {
+        trackingID: 'G-NE2PDN0M91',
+        anonymizeIP: false,
+      },
+    ],
+  ],
+
   themeConfig: {
     image: 'img/brand/cubepi-social-preview.png',
     navbar: {
