@@ -270,6 +270,73 @@ class TestChunkListenerImmutability:
         )
 
 
+class TestResultPreservesCallerCancel:
+    async def test_result_propagates_caller_cancellation(self):
+        """MessageStream.result() must not swallow the CALLER's
+        CancelledError while it's waiting for the producer task to
+        finish its finally cleanup. The producer should also continue
+        running its listener cleanup despite the caller cancel
+        (asyncio.shield protects it)."""
+        provider = FauxProvider(tokens_per_second=200.0)
+        listener_ran = asyncio.Event()
+
+        async def slow_listener(body, model, exc):
+            # The producer's finally awaits this. Take long enough that
+            # the caller has time to cancel.
+            await asyncio.sleep(0.05)
+            listener_ran.set()
+
+        provider.subscribe_response(slow_listener)
+        provider.append_responses([faux_assistant_message("ok")])
+
+        ms = await provider.stream(MODEL, [UserMessage(content=[])])
+
+        # A task that awaits result(). We cancel it after set_result
+        # fires (i.e. while result() is still waiting on the producer).
+        async def waiter():
+            return await ms.result()
+
+        waiter_task = asyncio.create_task(waiter())
+        # Give the producer time to push 'done' and call set_result;
+        # waiter is then blocked on await asyncio.shield(producer_task).
+        await asyncio.sleep(0.02)
+        waiter_task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await waiter_task
+
+        # The shielded producer task should still complete its listener
+        # cleanup.
+        await ms._producer_task
+        assert listener_ran.is_set()
+
+
+class TestResponseListenerImmutability:
+    async def test_listener_mutation_does_not_leak_between_listeners(self):
+        """Each response listener gets its own body snapshot — a
+        mutating listener-A must not affect what listener-B observes."""
+        provider = FauxProvider()
+        b_saw_content: list = []
+
+        def redactor_a(body, model, exc):
+            if body is not None:
+                body["content"] = "REDACTED"
+                body["model"] = "REDACTED"
+
+        def observer_b(body, model, exc):
+            if body is not None:
+                b_saw_content.append(body.get("content"))
+
+        provider.subscribe_response(redactor_a)
+        provider.subscribe_response(observer_b)
+        await _run_once(provider, "preserved")
+
+        assert b_saw_content, "observer_b never received a body"
+        assert b_saw_content[0] != "REDACTED", (
+            "listener-A's body mutation leaked into listener-B's view"
+        )
+
+
 class TestRequestListenerImmutability:
     async def test_listener_mutation_does_not_leak_into_next_listener(self):
         """subscribe_request gets a defensive deep copy of the payload —

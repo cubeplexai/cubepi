@@ -230,11 +230,18 @@ class MessageStream:
         # the producer task (e.g. to read an aborted result set by an
         # internal helper); that path would deadlock.
         if task is not None and not task.done() and task is not asyncio.current_task():
+            # ``asyncio.shield`` lets the producer's finally (response
+            # listener cleanup) keep running independently if our caller
+            # is cancelled while we're waiting. We re-raise the caller's
+            # CancelledError so cooperative shutdown/timeouts still
+            # propagate; the producer continues unaffected.
             try:
-                await task
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                raise
             except BaseException:
-                # Producer error or cancellation — caller already has the
-                # result (or an error message synthesized by the provider).
+                # Producer raised — caller already has the result via the
+                # future. Swallow so result() returns the message.
                 pass
         return msg
 
@@ -359,21 +366,33 @@ async def _fire_chunk_listeners(
 async def _fire_request_listeners(
     listeners: list[Callable], payload: dict, model: "Model"
 ) -> None:
-    """Fire :func:`subscribe_request` listeners on a defensive deep copy
-    of the payload.
+    """Fire :func:`subscribe_request` listeners with **per-listener** deep
+    copies of the payload.
 
     ``subscribe_request`` is documented as an **observer** — the
     mutation hook is the per-call ``StreamOptions.on_payload`` slot,
-    which runs before this. Without the copy, a redacting/logging
-    listener that strips fields in place (``del payload["messages"]``)
-    would silently alter the dict the provider then sends over the
-    wire. The cost of one deepcopy per stream is negligible compared
-    to the actual HTTP call.
+    which runs before this. Two isolation properties matter here:
+
+    1. The dict the provider is about to send over the wire (the
+       caller's ``kwargs``) must not be mutated by any listener.
+    2. Multi-subscriber observability must be order-independent — one
+       listener redacting fields in place must not affect what later
+       listeners observe.
+
+    Both are achieved by giving each listener its own ``deepcopy``.
+    Cost: at most one deepcopy per registered listener per stream call,
+    which is negligible compared to the HTTP call itself.
     """
     if not listeners:
         return
-    snapshot = copy.deepcopy(payload)
-    await _fire_listeners(listeners, snapshot, model)
+    for cb in tuple(listeners):
+        try:
+            snapshot = copy.deepcopy(payload)
+            result = cb(snapshot, model)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:  # noqa: BLE001 — intentional broad catch
+            _log_listener_exception(cb, exc)
 
 
 async def _fire_response_listeners(
@@ -398,17 +417,48 @@ async def _fire_response_listeners(
     the await without running the callee — so synchronous listeners run
     inline and async listeners are scheduled as detached best-effort
     tasks. This is the same contract the cancellation tests pin.
+
+    In both paths, each listener receives its own ``deepcopy`` of
+    ``body`` so multi-subscriber observability is order-independent.
     """
     if not listeners:
         return
     if isinstance(exc, asyncio.CancelledError):
-        _fire_listeners_sync(listeners, body, model, exc)
+        _fire_listeners_sync_per_listener(listeners, body, model, exc)
         return
     for cb in tuple(listeners):
         try:
-            result = cb(body, model, exc)
+            snapshot = copy.deepcopy(body) if body is not None else None
+            result = cb(snapshot, model, exc)
             if inspect.isawaitable(result):
                 await result
+        except Exception as listener_exc:  # noqa: BLE001
+            _log_listener_exception(cb, listener_exc)
+
+
+def _fire_listeners_sync_per_listener(
+    listeners: list[Callable],
+    body: dict | None,
+    model: "Model",
+    exc: BaseException | None,
+) -> None:
+    """Sync fanout for response listeners on the cancellation path,
+    giving each listener its own deep copy of ``body``."""
+    if not listeners:
+        return
+    for cb in tuple(listeners):
+        try:
+            snapshot = copy.deepcopy(body) if body is not None else None
+            result = cb(snapshot, model, exc)
+            if inspect.isawaitable(result):
+                wrapped = _safe_run_coroutine(cb, result)
+                try:
+                    asyncio.create_task(wrapped)
+                except RuntimeError:
+                    wrapped.close()
+                    close = getattr(result, "close", None)
+                    if callable(close):
+                        close()
         except Exception as listener_exc:  # noqa: BLE001
             _log_listener_exception(cb, listener_exc)
 
