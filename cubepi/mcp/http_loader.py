@@ -125,12 +125,19 @@ async def load_mcp_tools_http(
         tools_resp = await asyncio.wait_for(session.list_tools(), timeout=timeout)
         tool_descs = tools_resp.tools
 
+    # Trace attribute sources for the CLIENT spans emitted per call.
+    address, port = _split_address(server_url)
+    protocol_version = _extract_protocol_version(init_result)
+
     tools = [
         make_mcp_agent_tool(
             name=desc.name,
             description=desc.description or "",
             input_schema=desc.inputSchema or {"type": "object", "properties": {}},
             call_remote=_call_remote,
+            server_address=address,
+            server_port=port,
+            protocol_version=protocol_version,
         )
         for desc in tool_descs
     ]
@@ -140,6 +147,32 @@ async def load_mcp_tools_http(
         server=server_info_from_init_result(init_result),
         tool_infos=tool_infos,
     )
+
+
+def _split_address(server_url: str) -> tuple[str | None, int | None]:
+    """Extract ``(host, port)`` from a server URL for the
+    ``server.address`` / ``server.port`` span attributes. Returns
+    ``(None, None)`` on parse failure.
+    """
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(server_url)
+        return parsed.hostname, parsed.port
+    except Exception:
+        return None, None
+
+
+def _extract_protocol_version(init_result: Any) -> str | None:
+    """Read ``protocolVersion`` off the MCP SDK initialize() result.
+
+    The SDK exposes it as ``init_result.protocolVersion``. Defensive
+    against future shape changes.
+    """
+    value = getattr(init_result, "protocolVersion", None)
+    if isinstance(value, str):
+        return value
+    return None
 
 
 def _serialize_call_tool_response(resp: Any) -> dict[str, Any]:

@@ -64,12 +64,18 @@ async def load_mcp_tools_stdio(
             tools_resp = await asyncio.wait_for(session.list_tools(), timeout=timeout)
             tool_descs = tools_resp.tools
 
+    # stdio has no network address; only protocol version is observable.
+    protocol_version = getattr(init_result, "protocolVersion", None)
+    if not isinstance(protocol_version, str):
+        protocol_version = None
+
     tools = [
         make_mcp_agent_tool(
             name=desc.name,
             description=desc.description or "",
             input_schema=desc.inputSchema or {"type": "object", "properties": {}},
             call_remote=_call_remote,
+            protocol_version=protocol_version,
         )
         for desc in tool_descs
     ]
