@@ -22,7 +22,7 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
     _fire_listeners,
-    _fire_listeners_sync,
+    _fire_response_listeners,
     adjust_max_tokens_for_thinking,
     invoke_on_payload,
     invoke_on_response,
@@ -231,7 +231,9 @@ class AnthropicProvider(BaseProvider):
                 if not isinstance(e, Exception):
                     raise
             finally:
-                _fire_listeners_sync(self._response_listeners, body, model, exc)
+                await _fire_response_listeners(
+                    self._response_listeners, body, model, exc
+                )
 
         ms.attach_task(asyncio.create_task(_produce()))
         return ms

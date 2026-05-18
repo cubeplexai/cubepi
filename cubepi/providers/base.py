@@ -213,7 +213,29 @@ class MessageStream:
         return item
 
     async def result(self) -> AssistantMessage:
-        return await self._result_future
+        """Return the final assistant message.
+
+        Blocks not just on the result future, but also on the producer
+        task's completion — the producer's ``finally`` block runs
+        :func:`_fire_response_listeners` (after ``set_result``), so
+        without waiting for the task, callers under ``asyncio.run``
+        teardown could exit before async response listeners have run.
+        Producer exceptions are NOT re-raised here; they were already
+        surfaced via the result future or the stream's error events.
+        """
+        msg = await self._result_future
+        task = self._producer_task
+        # Don't await ourselves — providers may call result() from inside
+        # the producer task (e.g. to read an aborted result set by an
+        # internal helper); that path would deadlock.
+        if task is not None and not task.done() and task is not asyncio.current_task():
+            try:
+                await task
+            except BaseException:
+                # Producer error or cancellation — caller already has the
+                # result (or an error message synthesized by the provider).
+                pass
+        return msg
 
 
 @dataclass
@@ -308,6 +330,43 @@ def _fire_listeners_sync(listeners: list[Callable], *args: Any) -> None:
                         close()
         except Exception as exc:  # noqa: BLE001 — intentional broad catch
             _log_listener_exception(cb, exc)
+
+
+async def _fire_response_listeners(
+    listeners: list[Callable],
+    body: dict | None,
+    model: "Model",
+    exc: BaseException | None,
+) -> None:
+    """Fire response listeners with the right strategy for each
+    termination path.
+
+    Normal completion (``exc is None``) or an in-stream exception that is
+    NOT a cancel: ``await`` each async listener inline so the producer
+    task doesn't end before the listener has run — important because
+    callers that use ``asyncio.run(main())`` will tear down the loop the
+    moment ``main()`` returns, cancelling any still-detached listener
+    task.
+
+    Producer task cancellation (``exc`` is :class:`asyncio.CancelledError`):
+    fall back to :func:`_fire_listeners_sync`. Awaiting inside a finally
+    block of a cancelled task is unreliable — the runtime may skip past
+    the await without running the callee — so synchronous listeners run
+    inline and async listeners are scheduled as detached best-effort
+    tasks. This is the same contract the cancellation tests pin.
+    """
+    if not listeners:
+        return
+    if isinstance(exc, asyncio.CancelledError):
+        _fire_listeners_sync(listeners, body, model, exc)
+        return
+    for cb in tuple(listeners):
+        try:
+            result = cb(body, model, exc)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as listener_exc:  # noqa: BLE001
+            _log_listener_exception(cb, listener_exc)
 
 
 async def _safe_run_coroutine(cb: Callable, coro: Any) -> None:

@@ -335,9 +335,12 @@ class TestAsyncListeners:
         assert len(seen) == 1
 
     async def test_async_response_listener_runs_through_normal_completion(self):
-        """In the normal-completion path, async response listeners are
-        scheduled as detached tasks by _fire_listeners_sync. Verify the
-        coroutine body actually runs."""
+        """On the normal-completion path, async response listeners are
+        awaited inline so the producer task does not end before the
+        listener body has run. This matters under `asyncio.run(main())`
+        where the loop tears down the instant `main()` returns —
+        detached listener tasks would otherwise be cancelled before they
+        execute."""
         provider = FauxProvider()
         ran = asyncio.Event()
 
@@ -347,9 +350,33 @@ class TestAsyncListeners:
 
         provider.subscribe_response(cb)
         await _run_once(provider, "ok")
-        # Give the detached task one tick to complete.
-        await asyncio.wait_for(ran.wait(), timeout=1.0)
+        # The producer task should have already awaited the listener;
+        # ran should be set the moment _run_once returns (no need to wait).
         assert ran.is_set()
+
+    async def test_async_response_listener_under_asyncio_run_teardown(self):
+        """Simulate the asyncio.run teardown race: caller awaits
+        stream.result() and then the function returns, mimicking a
+        program that exits via asyncio.run. The async response listener
+        must have completed by the time the producer task is done."""
+        provider = FauxProvider()
+        outcome: list = []
+
+        async def cb(body, model, exc):
+            # Yield then record — proves the coroutine actually progressed.
+            await asyncio.sleep(0)
+            outcome.append("ran")
+
+        provider.subscribe_response(cb)
+        provider.append_responses([faux_assistant_message("hi")])
+
+        ms = await provider.stream(MODEL, [UserMessage(content=[])])
+        result = await ms.result()
+        assert result.stop_reason == "stop"
+        # Wait for the producer task itself to finish — that's where the
+        # response listener is awaited inline now.
+        await ms._producer_task
+        assert outcome == ["ran"]
 
     async def test_async_response_listener_exception_does_not_bubble(self):
         """Per the _fire_listeners_sync contract, async listener exceptions

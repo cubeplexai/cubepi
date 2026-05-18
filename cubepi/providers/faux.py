@@ -21,7 +21,7 @@ from cubepi.providers.base import (
     ToolDefinition,
     Usage,
     _fire_listeners,
-    _fire_listeners_sync,
+    _fire_response_listeners,
     invoke_on_payload,
 )
 
@@ -392,9 +392,12 @@ class FauxProvider(BaseProvider):
                 if not isinstance(e, Exception):
                     raise
             finally:
-                # Sync fan-out: cancellation cannot prevent listener
-                # invocation. Async listeners become detached tasks.
-                _fire_listeners_sync(self._response_listeners, body, model, exc)
+                # Await async listeners inline on normal/exception paths so
+                # they finish before the producer task ends. On cancellation,
+                # _fire_response_listeners falls back to sync fanout.
+                await _fire_response_listeners(
+                    self._response_listeners, body, model, exc
+                )
 
         ms.attach_task(asyncio.create_task(_produce()))
         return ms
