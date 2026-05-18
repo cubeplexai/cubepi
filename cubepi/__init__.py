@@ -11,6 +11,7 @@ from cubepi.agent import (
 from cubepi.middleware import Middleware, compose_middleware
 from cubepi.providers import (
     AssistantMessage,
+    BaseProvider,
     Message,
     MessageStream,
     Model,
@@ -33,6 +34,7 @@ __all__ = [
     "AgentTool",
     "AgentToolResult",
     "AssistantMessage",
+    "BaseProvider",
     "Message",
     "MessageStream",
     "Middleware",
