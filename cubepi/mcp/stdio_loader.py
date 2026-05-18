@@ -5,8 +5,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from cubepi.agent.types import AgentTool
 from cubepi.mcp._adapter import make_mcp_agent_tool
+from cubepi.mcp.types import (
+    MCPDiscoveryResult,
+    server_info_from_init_result,
+    tool_info_from_desc,
+)
 
 
 async def load_mcp_tools_stdio(
@@ -16,8 +20,13 @@ async def load_mcp_tools_stdio(
     env: dict[str, str] | None = None,
     cwd: str | None = None,
     timeout: float = 30.0,
-) -> list[AgentTool]:
-    """Spawn a stdio MCP server subprocess, discover tools, return AgentTools.
+) -> MCPDiscoveryResult:
+    """Spawn a stdio MCP server subprocess and discover its tools + metadata.
+
+    Returns a :class:`MCPDiscoveryResult` with the same shape as
+    :func:`load_mcp_tools_http`: ``tools`` (executable AgentTools),
+    ``server`` (Implementation info from ``initialize``), and ``tool_infos``
+    (per-tool display metadata such as icons).
 
     Each returned tool's execute opens a fresh subprocess per call (v1
     simplicity, no process pooling).
@@ -51,11 +60,11 @@ async def load_mcp_tools_stdio(
 
     async with stdio_client(server_params) as streams:
         async with ClientSession(*streams) as session:
-            await asyncio.wait_for(session.initialize(), timeout=timeout)
+            init_result = await asyncio.wait_for(session.initialize(), timeout=timeout)
             tools_resp = await asyncio.wait_for(session.list_tools(), timeout=timeout)
             tool_descs = tools_resp.tools
 
-    return [
+    tools = [
         make_mcp_agent_tool(
             name=desc.name,
             description=desc.description or "",
@@ -64,6 +73,12 @@ async def load_mcp_tools_stdio(
         )
         for desc in tool_descs
     ]
+    tool_infos = [tool_info_from_desc(desc) for desc in tool_descs]
+    return MCPDiscoveryResult(
+        tools=tools,
+        server=server_info_from_init_result(init_result),
+        tool_infos=tool_infos,
+    )
 
 
 def _serialize_call_tool_response(resp: Any) -> dict[str, Any]:
