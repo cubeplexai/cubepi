@@ -79,6 +79,12 @@ GEN_AI_TOOL_CALL_RESULT = "gen_ai.tool.call.result"
 SERVER_ADDRESS = "server.address"
 SERVER_PORT = "server.port"
 
+# OpenAI provider-specific (semconv §openai)
+OPENAI_API_TYPE = "openai.api.type"  # "chat_completions" | "responses"
+OPENAI_REQUEST_SERVICE_TIER = "openai.request.service_tier"
+OPENAI_RESPONSE_SERVICE_TIER = "openai.response.service_tier"
+OPENAI_RESPONSE_SYSTEM_FINGERPRINT = "openai.response.system_fingerprint"
+
 # Error classification (CR on error)
 ERROR_TYPE = "error.type"
 

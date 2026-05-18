@@ -97,6 +97,10 @@ from cubepi.tracing.schema import (
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
+    OPENAI_API_TYPE,
+    OPENAI_REQUEST_SERVICE_TIER,
+    OPENAI_RESPONSE_SERVICE_TIER,
+    OPENAI_RESPONSE_SYSTEM_FINGERPRINT,
     OP_CHAT,
     OP_EXECUTE_TOOL,
     OP_INVOKE_AGENT,
@@ -538,6 +542,10 @@ class Recorder:
             if key in payload and payload[key] is not None:
                 attrs[attr] = payload[key]
 
+        # OpenAI provider-specific request fields (semconv §openai).
+        if payload.get("service_tier"):
+            attrs[OPENAI_REQUEST_SERVICE_TIER] = payload["service_tier"]
+
         # Thinking level on cubepi.* namespace.
         thinking = payload.get("thinking")
         if isinstance(thinking, dict) and thinking.get("type") == "enabled":
@@ -747,6 +755,14 @@ class Recorder:
                 span.set_attribute(GEN_AI_RESPONSE_ID, body["id"])
             if body.get("model"):
                 span.set_attribute(GEN_AI_RESPONSE_MODEL, body["model"])
+            # Provider-specific (semconv §openai).
+            span.set_attribute(OPENAI_API_TYPE, "chat_completions")
+            if body.get("system_fingerprint"):
+                span.set_attribute(
+                    OPENAI_RESPONSE_SYSTEM_FINGERPRINT, body["system_fingerprint"]
+                )
+            if body.get("service_tier"):
+                span.set_attribute(OPENAI_RESPONSE_SERVICE_TIER, body["service_tier"])
             return
         # OpenAI Responses-shaped body
         if body.get("object") == "response" or "output" in body:
@@ -759,6 +775,10 @@ class Recorder:
                 span.set_attribute(GEN_AI_RESPONSE_ID, body["id"])
             if body.get("model"):
                 span.set_attribute(GEN_AI_RESPONSE_MODEL, body["model"])
+            # Provider-specific (semconv §openai).
+            span.set_attribute(OPENAI_API_TYPE, "responses")
+            if body.get("service_tier"):
+                span.set_attribute(OPENAI_RESPONSE_SERVICE_TIER, body["service_tier"])
             return
         # Unknown shape — record what we can defensively.
         if isinstance(body.get("model"), str):

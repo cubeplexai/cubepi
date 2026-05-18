@@ -39,6 +39,9 @@ docs = [
 tracing = [
     "opentelemetry-sdk>=1.30",
 ]
+tracing-otlp = [
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
+]
 
 [dependency-groups]
 dev = [
