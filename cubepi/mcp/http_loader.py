@@ -109,8 +109,21 @@ async def load_mcp_tools_http(
     """
 
     async def _call_remote(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+        # When an MCP CLIENT span is current (cubepi.mcp._adapter wraps
+        # this call in ``mcp_client_span``), propagate the W3C
+        # ``traceparent`` header so an instrumented MCP server can
+        # continue the trace. The helper returns None when no recording
+        # span is active or OTel isn't installed; merge so caller-
+        # supplied headers aren't clobbered.
+        from cubepi.mcp._tracing import current_traceparent
+
+        call_headers = headers
+        tp = current_traceparent()
+        if tp is not None:
+            call_headers = {**(headers or {}), "traceparent": tp}
+
         async with _open_session(
-            server_url, headers=headers, timeout=timeout, transport=transport
+            server_url, headers=call_headers, timeout=timeout, transport=transport
         ) as session:
             await asyncio.wait_for(session.initialize(), timeout=timeout)
             resp = await asyncio.wait_for(

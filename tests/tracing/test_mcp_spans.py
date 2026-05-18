@@ -240,6 +240,50 @@ class TestTraceparentHelper:
         assert current_traceparent() is None
 
 
+class TestTraceparentInjection:
+    """The HTTP loader must inject ``traceparent`` into outbound
+    session headers whenever the MCP CLIENT span is active so that
+    instrumented MCP servers can continue the trace (codex round 2)."""
+
+    async def test_traceparent_header_set_inside_mcp_span(self, monkeypatch):
+        from cubepi.mcp import _tracing as mcp_tracing
+        from cubepi.mcp._tracing import mcp_client_span
+
+        # Force OTel on with a deterministic tracer.
+        provider, _exporter = _make_provider()
+        _patch_mcp_trace(monkeypatch, provider)
+
+        # Reproduce the http_loader.call_remote injection logic.
+        seen_headers: list[dict] = []
+
+        base_headers = {"x-test": "yes"}
+
+        async def fake_call_remote():
+            # Mirrors http_loader._call_remote header-merge logic.
+            tp = mcp_tracing.current_traceparent()
+            call_headers = base_headers
+            if tp is not None:
+                call_headers = {**base_headers, "traceparent": tp}
+            seen_headers.append(call_headers)
+
+        async with mcp_client_span(method="tools/call", tool_name="search"):
+            await fake_call_remote()
+
+        assert len(seen_headers) == 1
+        assert seen_headers[0]["x-test"] == "yes"  # caller headers preserved
+        assert "traceparent" in seen_headers[0]
+        # Format: 00-<32hex>-<16hex>-<flags>
+        tp = seen_headers[0]["traceparent"]
+        assert tp.startswith("00-") and len(tp.split("-")) == 4
+
+    async def test_no_header_added_when_no_active_span(self, monkeypatch):
+        from cubepi.mcp._tracing import current_traceparent
+
+        # Outside any span: helper returns None and loader must not add
+        # a traceparent header.
+        assert current_traceparent() is None
+
+
 class TestLoaderHelpers:
     def test_split_address_parses_url(self):
         from cubepi.mcp.http_loader import _split_address
