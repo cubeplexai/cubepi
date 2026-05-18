@@ -21,6 +21,8 @@ from cubepi.providers.base import (
     ToolDefinition,
     Usage,
     _fire_listeners,
+    _fire_listeners_sync,
+    invoke_on_payload,
 )
 
 FauxContentBlock = TextContent | ThinkingContent | ToolCall
@@ -295,14 +297,18 @@ class FauxProvider(BaseProvider):
             body: dict | None = None
             exc: BaseException | None = None
             try:
-                # Fire request listeners with a minimal payload (faux has no
-                # real wire payload). Tests assert this fires.
+                # Faux has no real wire payload, but we synthesize one for
+                # observability tests. Run it through StreamOptions.on_payload
+                # so the per-call mutator can produce a final dict before
+                # subscribe_request listeners observe it — same ordering
+                # contract as the real providers.
+                payload = {
+                    "model": model.id,
+                    "messages": [m.model_dump() for m in messages],
+                    "system_prompt": system_prompt,
+                }
+                payload = await invoke_on_payload(opts.on_payload, payload, model)
                 if self._request_listeners:
-                    payload = {
-                        "model": model.id,
-                        "messages": [m.model_dump() for m in messages],
-                        "system_prompt": system_prompt,
-                    }
                     await _fire_listeners(self._request_listeners, payload, model)
 
                 if step is None:
@@ -373,8 +379,9 @@ class FauxProvider(BaseProvider):
                 if not isinstance(e, Exception):
                     raise
             finally:
-                if self._response_listeners:
-                    await _fire_listeners(self._response_listeners, body, model, exc)
+                # Sync fan-out: cancellation cannot prevent listener
+                # invocation. Async listeners become detached tasks.
+                _fire_listeners_sync(self._response_listeners, body, model, exc)
 
         ms.attach_task(asyncio.create_task(_produce()))
         return ms

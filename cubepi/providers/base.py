@@ -257,9 +257,7 @@ finally block, after the stream terminates.
 Return value is ignored."""
 
 
-async def _fire_listeners(
-    listeners: list[Callable], *args: Any
-) -> None:
+async def _fire_listeners(listeners: list[Callable], *args: Any) -> None:
     """Invoke each listener with ``*args``. Listener return values and
     exceptions are ignored — a buggy listener must never crash the stream.
 
@@ -275,6 +273,31 @@ async def _fire_listeners(
             result = cb(*args)
             if inspect.isawaitable(result):
                 await result
+        except Exception as exc:  # noqa: BLE001 — intentional broad catch
+            _log_listener_exception(cb, exc)
+
+
+def _fire_listeners_sync(listeners: list[Callable], *args: Any) -> None:
+    """Synchronous variant of :func:`_fire_listeners`. Used in producer
+    ``finally`` blocks where awaiting another coroutine after a
+    cancellation is unreliable — the outer task is already cancelling, so
+    a subsequent ``await`` may not get a chance to run its callee's body.
+
+    Sync listeners are invoked directly. Async listeners are scheduled as
+    detached tasks (best-effort — completion is not guaranteed before the
+    event loop tears down). Use sync listeners when you need cancellation-
+    proof delivery of the response observation."""
+    if not listeners:
+        return
+    for cb in tuple(listeners):
+        try:
+            result = cb(*args)
+            if inspect.isawaitable(result):
+                try:
+                    asyncio.create_task(result)
+                except RuntimeError:
+                    # No running event loop (e.g. teardown) — drop.
+                    pass
         except Exception as exc:  # noqa: BLE001 — intentional broad catch
             _log_listener_exception(cb, exc)
 
@@ -405,9 +428,7 @@ class BaseProvider:
         self._chunk_listeners.append(cb)
         return lambda: _detach(self._chunk_listeners, cb)
 
-    def subscribe_response(
-        self, cb: OnResponseBodyCallback
-    ) -> Callable[[], None]:
+    def subscribe_response(self, cb: OnResponseBodyCallback) -> Callable[[], None]:
         """Register a persistent observer for assembled responses.
 
         Returns a detach callable.

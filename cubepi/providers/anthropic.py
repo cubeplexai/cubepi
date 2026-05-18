@@ -22,6 +22,7 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
     _fire_listeners,
+    _fire_listeners_sync,
     adjust_max_tokens_for_thinking,
     invoke_on_payload,
     invoke_on_response,
@@ -80,9 +81,7 @@ class AnthropicProvider(BaseProvider):
             cache_policy or DefaultCacheMarkerPolicy()
         )
 
-    async def _emit(
-        self, ms: MessageStream, event: StreamEvent, model: Model
-    ) -> None:
+    async def _emit(self, ms: MessageStream, event: StreamEvent, model: Model) -> None:
         """Push an event to the stream and fire chunk listeners in order.
 
         The synchronous guard on ``self._chunk_listeners`` makes the no-listener
@@ -183,7 +182,9 @@ class AnthropicProvider(BaseProvider):
                     )
                     await self._emit(
                         ms,
-                        StreamEvent(type="start", partial=partial.model_copy(deep=True)),
+                        StreamEvent(
+                            type="start", partial=partial.model_copy(deep=True)
+                        ),
                         model,
                     )
 
@@ -230,10 +231,7 @@ class AnthropicProvider(BaseProvider):
                 if not isinstance(e, Exception):
                     raise
             finally:
-                if self._response_listeners:
-                    await _fire_listeners(
-                        self._response_listeners, body, model, exc
-                    )
+                _fire_listeners_sync(self._response_listeners, body, model, exc)
 
         ms.attach_task(asyncio.create_task(_produce()))
         return ms
@@ -519,9 +517,7 @@ class AnthropicProvider(BaseProvider):
             usage_dict = {
                 "input_tokens": getattr(usage, "input_tokens", 0),
                 "output_tokens": getattr(usage, "output_tokens", 0),
-                "cache_read_input_tokens": getattr(
-                    usage, "cache_read_input_tokens", 0
-                )
+                "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0)
                 or 0,
                 "cache_creation_input_tokens": getattr(
                     usage, "cache_creation_input_tokens", 0

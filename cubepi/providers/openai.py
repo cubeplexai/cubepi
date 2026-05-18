@@ -25,6 +25,7 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
     _fire_listeners,
+    _fire_listeners_sync,
     invoke_on_payload,
     invoke_on_response,
 )
@@ -474,8 +475,7 @@ class OpenAIProvider(BaseProvider):
                 if not isinstance(e, Exception):
                     raise
             finally:
-                if self._response_listeners:
-                    await _fire_listeners(self._response_listeners, body, model, exc)
+                _fire_listeners_sync(self._response_listeners, body, model, exc)
 
         ms.attach_task(asyncio.create_task(_produce()))
         return ms
