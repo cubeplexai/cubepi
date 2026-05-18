@@ -132,6 +132,23 @@ async def mcp_client_span(
         span.end()
 
 
+def mark_span_mcp_error(span: Any, message: str) -> None:
+    """Mark an MCP CLIENT span as a protocol-level failure.
+
+    An MCP server can return a normal ``tools/call`` JSON-RPC response
+    with ``isError: true`` — the wire call succeeds but the tool
+    reports failure. Without this helper the CLIENT span would close
+    with UNSET status, hiding the failure in trace dashboards.
+
+    Pass the span yielded by :func:`mcp_client_span` (which may be
+    ``None`` when OTel isn't installed); no-op on None.
+    """
+    if span is None or not _OTEL_AVAILABLE:
+        return
+    span.set_status(Status(StatusCode.ERROR, message[:256]))
+    span.set_attribute(_ERROR_TYPE, "mcp.is_error")
+
+
 def current_traceparent() -> str | None:
     """Return a W3C ``traceparent`` string for the current span context,
     or ``None`` when there is no active recording span (or OTel is not

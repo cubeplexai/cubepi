@@ -209,6 +209,52 @@ class TestMCPClientSpan:
         assert not any(e.name == "exception" for e in span.events)
 
 
+class TestMCPIsErrorResponse:
+    """When an MCP server returns ``isError: true``, the CLIENT span
+    must reflect the protocol-level failure — codex round 4."""
+
+    async def test_iserror_response_marks_span_error(self, monkeypatch):
+        provider, exporter = _make_provider()
+        _patch_mcp_trace(monkeypatch, provider)
+
+        async def call_remote(name, args):
+            return {
+                "content": [{"type": "text", "text": "tool failed"}],
+                "isError": True,
+            }
+
+        tool = await _make_tool(call_remote)
+        result = await tool.execute("tc1", tool.parameters.model_validate({"q": "x"}))
+        # Adapter still surfaces is_error on the AgentToolResult.
+        assert result.is_error is True
+
+        mcp_spans = [s for s in exporter.spans if s.name.startswith("tools/call ")]
+        assert len(mcp_spans) == 1
+        span = mcp_spans[0]
+        assert span.status.status_code == StatusCode.ERROR
+        attrs = _attrs(span)
+        assert attrs["error.type"] == "mcp.is_error"
+
+    async def test_iserror_false_keeps_span_unset(self, monkeypatch):
+        provider, exporter = _make_provider()
+        _patch_mcp_trace(monkeypatch, provider)
+
+        async def call_remote(name, args):
+            return {
+                "content": [{"type": "text", "text": "ok"}],
+                "isError": False,
+            }
+
+        tool = await _make_tool(call_remote)
+        await tool.execute("tc1", tool.parameters.model_validate({"q": "x"}))
+
+        mcp_spans = [s for s in exporter.spans if s.name.startswith("tools/call ")]
+        assert len(mcp_spans) == 1
+        span = mcp_spans[0]
+        assert span.status.status_code == StatusCode.UNSET
+        assert "error.type" not in _attrs(span)
+
+
 class TestNoOpWhenOTelMissing:
     async def test_context_manager_yields_none_when_no_otel(self, monkeypatch):
         import cubepi.mcp._tracing as mcp_tracing

@@ -7,7 +7,7 @@ from typing import Any, Awaitable, Callable, Literal
 from pydantic import BaseModel, Field, create_model
 
 from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.mcp._tracing import mcp_client_span
+from cubepi.mcp._tracing import mark_span_mcp_error, mcp_client_span
 from cubepi.providers.base import Content, ImageContent, TextContent
 
 
@@ -149,8 +149,15 @@ def make_mcp_agent_tool(
             protocol_version=protocol_version,
             server_address=server_address,
             server_port=server_port,
-        ):
+        ) as span:
             result = await call_remote(name, args_dict)
+            # MCP server-reported tool failure (``isError: true``): the
+            # JSON-RPC call succeeded but the tool's logic failed. Mark
+            # the CLIENT span ERROR so backends count it as a failure,
+            # matching the cubepi.tool.is_error treatment for non-MCP
+            # tool spans.
+            if result.get("isError"):
+                mark_span_mcp_error(span, "MCP server returned isError")
         content_blocks: list[Content] = []
         for c in result.get("content", []):
             ctype = c.get("type")
