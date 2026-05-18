@@ -67,6 +67,14 @@ GEN_AI_TOOL_CALL_ID = "gen_ai.tool.call.id"
 GEN_AI_TOOL_TYPE = "gen_ai.tool.type"
 GEN_AI_TOOL_DESCRIPTION = "gen_ai.tool.description"
 
+# Content (opt-in — only emitted when ``Tracer(record_content=True)``)
+GEN_AI_INPUT_MESSAGES = "gen_ai.input.messages"
+GEN_AI_OUTPUT_MESSAGES = "gen_ai.output.messages"
+GEN_AI_SYSTEM_INSTRUCTIONS = "gen_ai.system_instructions"
+GEN_AI_TOOL_DEFINITIONS = "gen_ai.tool.definitions"
+GEN_AI_TOOL_CALL_ARGUMENTS = "gen_ai.tool.call.arguments"
+GEN_AI_TOOL_CALL_RESULT = "gen_ai.tool.call.result"
+
 # Network (recommended on CLIENT spans)
 SERVER_ADDRESS = "server.address"
 SERVER_PORT = "server.port"
