@@ -102,7 +102,15 @@ async def mcp_client_span(
 
     span = tracer.start_span(span_name, kind=SpanKind.CLIENT, attributes=attrs)
     try:
-        with _otel_trace.use_span(span):
+        # Disable use_span's default record_exception / set_status_on_exception
+        # so we are the single source of the exception event and ERROR
+        # status — otherwise OTel would auto-record on context exit AND
+        # this ``except`` block would record again, double-counting.
+        with _otel_trace.use_span(
+            span,
+            record_exception=False,
+            set_status_on_exception=False,
+        ):
             yield span
     except BaseException as exc:
         try:

@@ -63,8 +63,8 @@ def _patch_mcp_trace(monkeypatch, provider: TracerProvider) -> None:
             return provider.get_tracer(name)
 
         @staticmethod
-        def use_span(span):
-            return _trace.use_span(span)
+        def use_span(span, **kwargs):
+            return _trace.use_span(span, **kwargs)
 
         @staticmethod
         def get_current_span():
@@ -152,6 +152,33 @@ class TestMCPClientSpan:
         assert attrs["error.type"] == "RuntimeError"
         evnames = [e.name for e in span.events]
         assert "exception" in evnames
+
+    async def test_exception_event_is_recorded_only_once(self, monkeypatch):
+        """OTel's ``use_span`` defaults to record_exception=True; if we
+        leave that on, the auto-recording on context exit and our own
+        ``record_exception`` in the except branch both fire — duplicate
+        exception events double-count errors at the backend.
+
+        We disable auto-recording on ``use_span`` and own the
+        recording. Pin: exactly one ``exception`` event per failure."""
+        provider, exporter = _make_provider()
+        _patch_mcp_trace(monkeypatch, provider)
+
+        async def call_remote(name, args):
+            raise RuntimeError("boom")
+
+        tool = await _make_tool(call_remote)
+        try:
+            await tool.execute("tc1", tool.parameters.model_validate({"q": "x"}))
+        except RuntimeError:
+            pass
+
+        mcp_spans = [s for s in exporter.spans if s.name.startswith("tools/call ")]
+        assert len(mcp_spans) == 1
+        exception_events = [e for e in mcp_spans[0].events if e.name == "exception"]
+        assert len(exception_events) == 1, (
+            f"expected exactly 1 exception event; got {len(exception_events)}"
+        )
 
     async def test_span_records_cancellation(self, monkeypatch):
         provider, exporter = _make_provider()
