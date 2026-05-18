@@ -7,6 +7,7 @@ from typing import Any
 
 from cubepi.providers.base import (
     AssistantMessage,
+    BaseProvider,
     ImageContent,
     Message,
     MessageStream,
@@ -22,6 +23,7 @@ from cubepi.providers.base import (
     ToolResultMessage,
     Usage,
     UserMessage,
+    _fire_listeners,
     invoke_on_payload,
     invoke_on_response,
 )
@@ -39,7 +41,7 @@ _THINKING_TO_EFFORT: dict[ThinkingLevel, str | None] = {
 }
 
 
-class OpenAIResponsesProvider:
+class OpenAIResponsesProvider(BaseProvider):
     """Provider that uses the OpenAI Responses API.
 
     The Responses API supports reasoning models (o-series) with streaming,
@@ -49,6 +51,7 @@ class OpenAIResponsesProvider:
     def __init__(
         self, *, api_key: str | None = None, base_url: str | None = None
     ) -> None:
+        super().__init__()
         import openai
 
         kwargs: dict[str, Any] = {}
@@ -57,6 +60,23 @@ class OpenAIResponsesProvider:
         if base_url:
             kwargs["base_url"] = base_url
         self._client = openai.AsyncOpenAI(**kwargs)
+
+    async def _emit(self, ms: MessageStream, event: StreamEvent, model: Model) -> None:
+        """Push an event to the stream and fire chunk listeners in order."""
+        ms.push(event)
+        if self._chunk_listeners:
+            await _fire_listeners(self._chunk_listeners, event, model)
+
+    @staticmethod
+    def _assemble_response(resp: Any) -> dict[str, Any] | None:
+        """Convert the OpenAI Responses SDK Response object to its canonical
+        dict shape (same as a non-streaming Responses.create() return value).
+        """
+        if resp is None:
+            return None
+        if hasattr(resp, "model_dump"):
+            return resp.model_dump(mode="json")
+        return dict(resp) if isinstance(resp, dict) else None
 
     async def stream(
         self,
@@ -104,9 +124,13 @@ class OpenAIResponsesProvider:
             kwargs["temperature"] = model.temperature
 
         async def _produce() -> None:
+            body: dict | None = None
+            exc: BaseException | None = None
             try:
                 nonlocal kwargs
                 kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
+                if self._request_listeners:
+                    await _fire_listeners(self._request_listeners, kwargs, model)
 
                 response = await self._client.responses.create(**kwargs)
 
@@ -128,8 +152,10 @@ class OpenAIResponsesProvider:
                     provider_id=model.provider,
                     model_id=model.id,
                 )
-                ms.push(
-                    StreamEvent(type="start", partial=partial.model_copy(deep=True))
+                await self._emit(
+                    ms,
+                    StreamEvent(type="start", partial=partial.model_copy(deep=True)),
+                    model,
                 )
 
                 # Track current streaming state
@@ -149,11 +175,13 @@ class OpenAIResponsesProvider:
                                 "error_message": "Request was aborted",
                             }
                         )
-                        ms.push(
+                        await self._emit(
+                            ms,
                             StreamEvent(
                                 type="error",
                                 error_message="Request was aborted",
-                            )
+                            ),
+                            model,
                         )
                         ms.set_result(aborted)
                         return
@@ -168,24 +196,28 @@ class OpenAIResponsesProvider:
                             current_thinking = ""
                             partial.content.append(ThinkingContent(thinking=""))
                             current_content_index = len(partial.content) - 1
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="thinking_start",
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
                         elif item.type == "message":
                             current_item_type = "message"
                             current_text = ""
                             partial.content.append(TextContent(text=""))
                             current_content_index = len(partial.content) - 1
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="text_start",
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
                         elif item.type == "function_call":
                             current_item_type = "function_call"
@@ -209,12 +241,14 @@ class OpenAIResponsesProvider:
                                 )
                             )
                             current_content_index = len(partial.content) - 1
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="toolcall_start",
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
 
                     # --- Reasoning (thinking) deltas ---
@@ -227,13 +261,15 @@ class OpenAIResponsesProvider:
                                 partial.content[-1] = ThinkingContent(
                                     thinking=current_thinking
                                 )
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="thinking_delta",
                                     delta=event.delta,
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
 
                     elif etype == "response.reasoning_text.delta":
@@ -245,13 +281,15 @@ class OpenAIResponsesProvider:
                                 partial.content[-1] = ThinkingContent(
                                     thinking=current_thinking
                                 )
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="thinking_delta",
                                     delta=event.delta,
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
 
                     elif etype == "response.reasoning_summary_part.done":
@@ -264,13 +302,15 @@ class OpenAIResponsesProvider:
                                 partial.content[-1] = ThinkingContent(
                                     thinking=current_thinking
                                 )
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="thinking_delta",
                                     delta="\n\n",
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
 
                     # --- Text deltas ---
@@ -281,13 +321,15 @@ class OpenAIResponsesProvider:
                                 partial.content[-1], TextContent
                             ):
                                 partial.content[-1] = TextContent(text=current_text)
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="text_delta",
                                     delta=event.delta,
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
 
                     elif etype == "response.refusal.delta":
@@ -297,26 +339,30 @@ class OpenAIResponsesProvider:
                                 partial.content[-1], TextContent
                             ):
                                 partial.content[-1] = TextContent(text=current_text)
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="text_delta",
                                     delta=event.delta,
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
 
                     # --- Tool call argument deltas ---
                     elif etype == "response.function_call_arguments.delta":
                         if active_tool_item_id and active_tool_item_id in tool_state:
                             tool_state[active_tool_item_id]["json"] += event.delta
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="toolcall_delta",
                                     delta=event.delta,
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
 
                     elif etype == "response.function_call_arguments.done":
@@ -340,12 +386,14 @@ class OpenAIResponsesProvider:
                                 partial.content[-1] = ThinkingContent(
                                     thinking=final_thinking
                                 )
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="thinking_end",
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
                             current_item_type = None
 
@@ -366,12 +414,14 @@ class OpenAIResponsesProvider:
                                 and isinstance(partial.content[-1], TextContent)
                             ):
                                 partial.content[-1] = TextContent(text=final_text)
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="text_end",
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
                             current_item_type = None
 
@@ -396,18 +446,21 @@ class OpenAIResponsesProvider:
                                         name=item.name,
                                         arguments=args,
                                     )
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="toolcall_end",
                                     content_index=current_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
                             current_item_type = None
 
                     # --- Response completed ---
                     elif etype == "response.completed":
                         resp = event.response
+                        body = self._assemble_response(resp)
                         usage = Usage()
                         if resp and resp.usage:
                             cached = 0
@@ -433,7 +486,7 @@ class OpenAIResponsesProvider:
                                 else None,
                             }
                         )
-                        ms.push(StreamEvent(type="done"))
+                        await self._emit(ms, StreamEvent(type="done"), model)
                         ms.set_result(partial)
                         return
 
@@ -448,6 +501,7 @@ class OpenAIResponsesProvider:
 
                     elif etype == "response.failed":
                         resp = event.response
+                        body = self._assemble_response(resp)
                         error_detail = ""
                         if resp and hasattr(resp, "error") and resp.error:
                             code = getattr(resp.error, "code", "unknown")
@@ -465,21 +519,33 @@ class OpenAIResponsesProvider:
                         raise RuntimeError(error_detail or "Unknown error (no details)")
 
                 # If we get here without response.completed, finalize
-                ms.push(StreamEvent(type="done"))
+                await self._emit(ms, StreamEvent(type="done"), model)
                 ms.set_result(partial)
 
-            except BaseException as exc:
+            except BaseException as e:
+                exc = e
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
-                    error_message=str(exc),
+                    error_message=str(e),
                     usage=Usage(),
                     timestamp=time.time(),
                 )
-                ms.push(StreamEvent(type="error", error_message=str(exc)))
+                await self._emit(
+                    ms, StreamEvent(type="error", error_message=str(e)), model
+                )
+                if self._chunk_listeners:
+                    await _fire_listeners(
+                        self._chunk_listeners,
+                        StreamEvent(type="error", error_message=str(e)),
+                        model,
+                    )
                 ms.set_result(error_msg)
-                if not isinstance(exc, Exception):
+                if not isinstance(e, Exception):
                     raise
+            finally:
+                if self._response_listeners:
+                    await _fire_listeners(self._response_listeners, body, model, exc)
 
         ms.attach_task(asyncio.create_task(_produce()))
         return ms

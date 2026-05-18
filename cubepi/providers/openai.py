@@ -9,6 +9,7 @@ from cubepi.utils.json_parse import parse_streaming_json
 
 from cubepi.providers.base import (
     AssistantMessage,
+    BaseProvider,
     ImageContent,
     Message,
     MessageStream,
@@ -23,12 +24,13 @@ from cubepi.providers.base import (
     ToolResultMessage,
     Usage,
     UserMessage,
+    _fire_listeners,
     invoke_on_payload,
     invoke_on_response,
 )
 
 
-class OpenAIProvider:
+class OpenAIProvider(BaseProvider):
     def __init__(
         self,
         *,
@@ -38,6 +40,7 @@ class OpenAIProvider:
         extra_body: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> None:
+        super().__init__()
         import openai
 
         kwargs: dict[str, Any] = {}
@@ -50,6 +53,12 @@ class OpenAIProvider:
         self._client = openai.AsyncOpenAI(**kwargs)
         self._payload_quirks: set[str] = set(payload_quirks or [])
         self._extra_body: dict[str, Any] = extra_body or {}
+
+    async def _emit(self, ms: MessageStream, event: StreamEvent, model: Model) -> None:
+        """Push an event to the stream and fire chunk listeners in order."""
+        ms.push(event)
+        if self._chunk_listeners:
+            await _fire_listeners(self._chunk_listeners, event, model)
 
     async def stream(
         self,
@@ -82,9 +91,13 @@ class OpenAIProvider:
             kwargs["tools"] = [self._convert_tool(t) for t in tools]
 
         async def _produce() -> None:
+            body: dict | None = None
+            exc: BaseException | None = None
             try:
                 nonlocal kwargs
                 kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
+                if self._request_listeners:
+                    await _fire_listeners(self._request_listeners, kwargs, model)
 
                 if "max_completion_tokens_alias" in self._payload_quirks:
                     if "max_completion_tokens" in kwargs:
@@ -129,8 +142,10 @@ class OpenAIProvider:
                     provider_id=model.provider,
                     model_id=model.id,
                 )
-                ms.push(
-                    StreamEvent(type="start", partial=partial.model_copy(deep=True))
+                await self._emit(
+                    ms,
+                    StreamEvent(type="start", partial=partial.model_copy(deep=True)),
+                    model,
                 )
 
                 current_text = ""
@@ -140,11 +155,37 @@ class OpenAIProvider:
                 response_id: str | None = None
                 thinking_started = False
                 thinking_content_index: int | None = None
+                # Captured for _assemble_response. Populated from the first chunk
+                # that exposes them; later chunks shouldn't overwrite.
+                response_model: str | None = None
+                response_created: int | None = None
+                system_fingerprint: str | None = None
+                service_tier: str | None = None
+                final_finish_reason: str | None = None
+                final_usage: Any = None
 
                 async for chunk in response:
                     # Usage-only chunk (stream_options.include_usage=True sends a
                     # trailing chunk with no choices and usage populated).
+                    if response_model is None:
+                        rm = getattr(chunk, "model", None)
+                        if rm:
+                            response_model = rm
+                    if response_created is None:
+                        rc = getattr(chunk, "created", None)
+                        if rc is not None:
+                            response_created = rc
+                    if system_fingerprint is None:
+                        sf = getattr(chunk, "system_fingerprint", None)
+                        if sf:
+                            system_fingerprint = sf
+                    if service_tier is None:
+                        st = getattr(chunk, "service_tier", None)
+                        if st:
+                            service_tier = st
+
                     if getattr(chunk, "usage", None) is not None:
+                        final_usage = chunk.usage
                         u = chunk.usage
                         prompt_tokens = getattr(u, "prompt_tokens", 0) or 0
                         cached_tokens = (
@@ -175,11 +216,13 @@ class OpenAIProvider:
                                 "error_message": "Request was aborted",
                             }
                         )
-                        ms.push(
+                        await self._emit(
+                            ms,
                             StreamEvent(
                                 type="error",
                                 error_message="Request was aborted",
-                            )
+                            ),
+                            model,
                         )
                         ms.set_result(aborted)
                         return
@@ -220,37 +263,43 @@ class OpenAIProvider:
                         if not thinking_started:
                             partial.content.append(ThinkingContent(thinking=""))
                             thinking_content_index = len(partial.content) - 1
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="thinking_start",
                                     content_index=thinking_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
                             thinking_started = True
                         existing = partial.content[thinking_content_index].thinking  # type: ignore[union-attr]
                         partial.content[thinking_content_index] = ThinkingContent(
                             thinking=existing + reasoning_delta
                         )
-                        ms.push(
+                        await self._emit(
+                            ms,
                             StreamEvent(
                                 type="thinking_delta",
                                 delta=reasoning_delta,
                                 content_index=thinking_content_index,
                                 partial=partial.model_copy(deep=True),
-                            )
+                            ),
+                            model,
                         )
 
                     if delta.content:
                         if not text_started:
                             partial.content.append(TextContent(text=""))
                             text_content_index = len(partial.content) - 1
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="text_start",
                                     content_index=text_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
                             text_started = True
                         current_text += delta.content
@@ -258,13 +307,15 @@ class OpenAIProvider:
                             partial.content[-1], TextContent
                         ):
                             partial.content[-1] = TextContent(text=current_text)
-                        ms.push(
+                        await self._emit(
+                            ms,
                             StreamEvent(
                                 type="text_delta",
                                 delta=delta.content,
                                 content_index=text_content_index,
                                 partial=partial.model_copy(deep=True),
-                            )
+                            ),
+                            model,
                         )
 
                     if delta.tool_calls:
@@ -272,12 +323,14 @@ class OpenAIProvider:
                             idx = tc_delta.index
                             if idx not in tool_calls_in_progress:
                                 if text_started:
-                                    ms.push(
+                                    await self._emit(
+                                        ms,
                                         StreamEvent(
                                             type="text_end",
                                             content_index=text_content_index,
                                             partial=partial.model_copy(deep=True),
-                                        )
+                                        ),
+                                        model,
                                     )
                                     text_started = False
                                 tool_calls_in_progress[idx] = {
@@ -300,18 +353,21 @@ class OpenAIProvider:
                                 tool_calls_in_progress[idx]["content_index"] = (
                                     tc_content_index
                                 )
-                                ms.push(
+                                await self._emit(
+                                    ms,
                                     StreamEvent(
                                         type="toolcall_start",
                                         content_index=tc_content_index,
                                         partial=partial.model_copy(deep=True),
-                                    )
+                                    ),
+                                    model,
                                 )
                             if tc_delta.function and tc_delta.function.arguments:
                                 tool_calls_in_progress[idx]["arguments"] += (
                                     tc_delta.function.arguments
                                 )
-                                ms.push(
+                                await self._emit(
+                                    ms,
                                     StreamEvent(
                                         type="toolcall_delta",
                                         delta=tc_delta.function.arguments,
@@ -319,30 +375,36 @@ class OpenAIProvider:
                                             "content_index"
                                         ],
                                         partial=partial.model_copy(deep=True),
-                                    )
+                                    ),
+                                    model,
                                 )
 
                     finish_reason = (
                         chunk.choices[0].finish_reason if chunk.choices else None
                     )
                     if finish_reason:
+                        final_finish_reason = finish_reason
                         if thinking_started:
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="thinking_end",
                                     content_index=thinking_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
                             thinking_started = False
 
                         if text_started:
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="text_end",
                                     content_index=text_content_index,
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
 
                         for idx, tc_data in tool_calls_in_progress.items():
@@ -354,12 +416,14 @@ class OpenAIProvider:
                                         name=tc_data["name"],
                                         arguments=args,
                                     )
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="toolcall_end",
                                     content_index=tc_data["content_index"],
                                     partial=partial.model_copy(deep=True),
-                                )
+                                ),
+                                model,
                             )
 
                         stop_map = {
@@ -380,24 +444,112 @@ class OpenAIProvider:
                             }
                         )
 
-                ms.push(StreamEvent(type="done"))
+                body = self._assemble_response(
+                    response_id=response_id,
+                    model_id=response_model or model.id,
+                    created=response_created,
+                    system_fingerprint=system_fingerprint,
+                    service_tier=service_tier,
+                    text=current_text,
+                    tool_calls_in_progress=tool_calls_in_progress,
+                    finish_reason=final_finish_reason,
+                    usage=final_usage,
+                )
+                await self._emit(ms, StreamEvent(type="done"), model)
                 ms.set_result(partial)
 
-            except BaseException as exc:
+            except BaseException as e:
+                exc = e
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
-                    error_message=str(exc),
+                    error_message=str(e),
                     usage=Usage(),
                     timestamp=time.time(),
                 )
-                ms.push(StreamEvent(type="error", error_message=str(exc)))
+                await self._emit(
+                    ms, StreamEvent(type="error", error_message=str(e)), model
+                )
                 ms.set_result(error_msg)
-                if not isinstance(exc, Exception):
+                if not isinstance(e, Exception):
                     raise
+            finally:
+                if self._response_listeners:
+                    await _fire_listeners(self._response_listeners, body, model, exc)
 
         ms.attach_task(asyncio.create_task(_produce()))
         return ms
+
+    @staticmethod
+    def _assemble_response(
+        *,
+        response_id: str | None,
+        model_id: str,
+        created: int | None,
+        system_fingerprint: str | None,
+        service_tier: str | None,
+        text: str,
+        tool_calls_in_progress: dict[int, dict[str, Any]],
+        finish_reason: str | None,
+        usage: Any,
+    ) -> dict[str, Any]:
+        """Assemble OpenAI's non-streaming ``chat.completion`` response shape
+        from accumulated streaming state.
+        """
+        tool_calls: list[dict[str, Any]] = []
+        for idx in sorted(tool_calls_in_progress):
+            tc = tool_calls_in_progress[idx]
+            tool_calls.append(
+                {
+                    "id": tc.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": tc.get("name", ""),
+                        "arguments": tc.get("arguments", ""),
+                    },
+                }
+            )
+
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": text or None,
+        }
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+
+        usage_dict: dict[str, Any] = {}
+        if usage is not None:
+            usage_dict = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
+                "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+            }
+            details = getattr(usage, "prompt_tokens_details", None)
+            if details is not None:
+                cached = getattr(details, "cached_tokens", None)
+                if cached is not None:
+                    usage_dict["prompt_tokens_details"] = {"cached_tokens": cached}
+
+        body: dict[str, Any] = {
+            "id": response_id,
+            "object": "chat.completion",
+            "created": created,
+            "model": model_id,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": message,
+                    "finish_reason": finish_reason,
+                    "logprobs": None,
+                }
+            ],
+            "usage": usage_dict,
+        }
+        if system_fingerprint is not None:
+            body["system_fingerprint"] = system_fingerprint
+        if service_tier is not None:
+            body["service_tier"] = service_tier
+        return body
 
     @staticmethod
     def _convert_message(msg: Message) -> dict[str, Any]:
