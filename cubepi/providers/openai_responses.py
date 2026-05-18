@@ -535,12 +535,6 @@ class OpenAIResponsesProvider(BaseProvider):
                 await self._emit(
                     ms, StreamEvent(type="error", error_message=str(e)), model
                 )
-                if self._chunk_listeners:
-                    await _fire_listeners(
-                        self._chunk_listeners,
-                        StreamEvent(type="error", error_message=str(e)),
-                        model,
-                    )
                 ms.set_result(error_msg)
                 if not isinstance(e, Exception):
                     raise

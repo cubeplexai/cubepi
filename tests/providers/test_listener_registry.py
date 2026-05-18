@@ -372,6 +372,37 @@ class TestAsyncListeners:
         await asyncio.sleep(0.01)
 
 
+class TestAbortBodyShape:
+    """Faux response listener must NOT report a full successful body when
+    the stream was aborted via opts.signal."""
+
+    async def test_aborted_run_reports_aborted_body(self):
+        provider = FauxProvider(tokens_per_second=10.0)
+        seen: list = []
+        provider.subscribe_response(lambda body, model, exc: seen.append((body, exc)))
+
+        provider.append_responses([faux_assistant_message("x" * 400)])
+        signal = asyncio.Event()
+        opts = StreamOptions(signal=signal)
+
+        ms = await provider.stream(MODEL, [UserMessage(content=[])], options=opts)
+        # Let producer enter the streaming loop.
+        await asyncio.sleep(0.05)
+        # Trigger abort path inside _stream_with_deltas (signal check between
+        # chunks). The producer will set an aborted result on the stream.
+        signal.set()
+        # Drain so the producer can complete.
+        await _drain(ms)
+
+        assert len(seen) == 1
+        body, exc = seen[0]
+        assert exc is None  # abort isn't an exception in this path
+        assert body is not None
+        # The body must reflect the aborted state, NOT the queued full
+        # response. stop_reason on the aborted body is "aborted".
+        assert body["stop_reason"] == "aborted"
+
+
 class TestBaseProvider:
     """Cover BaseProvider sentinels not exercised by Faux."""
 

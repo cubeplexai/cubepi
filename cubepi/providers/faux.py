@@ -362,7 +362,20 @@ class FauxProvider(BaseProvider):
                 )
 
                 await self._stream_with_deltas(ms, resolved, opts.signal, model)
-                body = self._assemble_response(seq=seq, model=model, message=resolved)
+                # If the abort signal fired during streaming,
+                # _stream_with_deltas sets an aborted result on the stream
+                # and returns early. The queued `resolved` message would
+                # misrepresent the run as a successful full response, so
+                # surface the actual aborted result instead.
+                if opts.signal and opts.signal.is_set():
+                    aborted_msg = await ms.result()
+                    body = self._assemble_response(
+                        seq=seq, model=model, message=aborted_msg
+                    )
+                else:
+                    body = self._assemble_response(
+                        seq=seq, model=model, message=resolved
+                    )
             except BaseException as e:
                 exc = e
                 error_msg = AssistantMessage(
