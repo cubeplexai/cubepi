@@ -21,6 +21,7 @@ from cubepi.providers.base import (
     ToolDefinition,
     Usage,
     _fire_listeners,
+    _fire_request_listeners,
     _fire_response_listeners,
     invoke_on_payload,
 )
@@ -308,8 +309,7 @@ class FauxProvider(BaseProvider):
                     "system_prompt": system_prompt,
                 }
                 payload = await invoke_on_payload(opts.on_payload, payload, model)
-                if self._request_listeners:
-                    await _fire_listeners(self._request_listeners, payload, model)
+                await _fire_request_listeners(self._request_listeners, payload, model)
 
                 if step is None:
                     error_msg = AssistantMessage(

@@ -24,6 +24,7 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
     _fire_listeners,
+    _fire_request_listeners,
     _fire_response_listeners,
     invoke_on_payload,
     invoke_on_response,
@@ -130,8 +131,7 @@ class OpenAIResponsesProvider(BaseProvider):
             try:
                 nonlocal kwargs
                 kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
-                if self._request_listeners:
-                    await _fire_listeners(self._request_listeners, kwargs, model)
+                await _fire_request_listeners(self._request_listeners, kwargs, model)
 
                 response = await self._client.responses.create(**kwargs)
 

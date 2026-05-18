@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 from dataclasses import dataclass, field
 from typing import (
@@ -330,6 +331,26 @@ def _fire_listeners_sync(listeners: list[Callable], *args: Any) -> None:
                         close()
         except Exception as exc:  # noqa: BLE001 — intentional broad catch
             _log_listener_exception(cb, exc)
+
+
+async def _fire_request_listeners(
+    listeners: list[Callable], payload: dict, model: "Model"
+) -> None:
+    """Fire :func:`subscribe_request` listeners on a defensive deep copy
+    of the payload.
+
+    ``subscribe_request`` is documented as an **observer** — the
+    mutation hook is the per-call ``StreamOptions.on_payload`` slot,
+    which runs before this. Without the copy, a redacting/logging
+    listener that strips fields in place (``del payload["messages"]``)
+    would silently alter the dict the provider then sends over the
+    wire. The cost of one deepcopy per stream is negligible compared
+    to the actual HTTP call.
+    """
+    if not listeners:
+        return
+    snapshot = copy.deepcopy(payload)
+    await _fire_listeners(listeners, snapshot, model)
 
 
 async def _fire_response_listeners(

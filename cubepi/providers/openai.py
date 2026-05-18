@@ -25,6 +25,7 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
     _fire_listeners,
+    _fire_request_listeners,
     _fire_response_listeners,
     invoke_on_payload,
     invoke_on_response,
@@ -124,8 +125,9 @@ class OpenAIProvider(BaseProvider):
                 # see the final wire payload (including extra_body merges,
                 # max_completion_tokens_alias rewrite, and stream_options
                 # injection). The on_payload mutator already ran above.
-                if self._request_listeners:
-                    await _fire_listeners(self._request_listeners, kwargs, model)
+                # _fire_request_listeners deep-copies so a listener cannot
+                # accidentally mutate the dict that's about to be sent.
+                await _fire_request_listeners(self._request_listeners, kwargs, model)
 
                 response = await self._client.chat.completions.create(**kwargs)
 
