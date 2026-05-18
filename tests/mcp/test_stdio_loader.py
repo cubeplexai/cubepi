@@ -14,15 +14,21 @@ def test_import_stdio_loader() -> None:
 @pytest.mark.asyncio
 async def test_stdio_loader_against_fake_server() -> None:
     """Spawn the fake stdio server, list tools, invoke 'echo'."""
-    from cubepi.mcp import load_mcp_tools_stdio
+    from cubepi.mcp import MCPDiscoveryResult, load_mcp_tools_stdio
 
-    tools = await load_mcp_tools_stdio(
+    discovery = await load_mcp_tools_stdio(
         command=sys.executable,
         args=["-m", "tests.mcp._fake_stdio_server"],
     )
-    assert len(tools) == 1
-    echo = tools[0]
+    assert isinstance(discovery, MCPDiscoveryResult)
+    assert len(discovery.tools) == 1
+    echo = discovery.tools[0]
     assert echo.name == "echo"
+
+    # Server info is captured from the initialize handshake; the fake
+    # server reports its name + version via Implementation.
+    assert discovery.server is not None
+    assert discovery.server.name
 
     args = echo.parameters(text="hello")
     result = await echo.execute("tc-stdio-1", args, signal=None, on_update=None)

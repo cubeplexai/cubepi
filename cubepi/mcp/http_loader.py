@@ -8,8 +8,12 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any, Literal
 
-from cubepi.agent.types import AgentTool
 from cubepi.mcp._adapter import make_mcp_agent_tool
+from cubepi.mcp.types import (
+    MCPDiscoveryResult,
+    server_info_from_init_result,
+    tool_info_from_desc,
+)
 
 Transport = Literal["sse", "streamable_http"]
 
@@ -73,10 +77,21 @@ async def load_mcp_tools_http(
     headers: dict[str, str] | None = None,
     timeout: float = 30.0,
     transport: Transport = "sse",
-) -> list[AgentTool]:
-    """Connect to an HTTP MCP server, discover tools, return AgentTools.
+) -> MCPDiscoveryResult:
+    """Connect to an HTTP MCP server and discover its tools + metadata.
 
-    Uses the `mcp` SDK's HTTP client. ``transport`` picks the wire format:
+    Returns a :class:`MCPDiscoveryResult` carrying:
+
+    - ``tools`` — executable ``AgentTool`` per ``tools/list`` entry.
+    - ``server`` — ``MCPServerInfo`` (name, version, websiteUrl, icons)
+      captured from the ``initialize`` handshake's ``serverInfo``. Sourced
+      from MCP spec rev 2025-11-25's ``Implementation`` shape.
+    - ``tool_infos`` — per-tool display metadata (currently ``icons``)
+      captured from each ``tools/list`` entry, separated from
+      ``AgentTool`` so callers can render visuals without coupling
+      core types to display concerns.
+
+    ``transport`` picks the wire format:
 
     - ``"sse"`` (default) — legacy SSE-over-GET transport (``sse_client``).
     - ``"streamable_http"`` — newer SSE-over-POST transport
@@ -106,11 +121,11 @@ async def load_mcp_tools_http(
     async with _open_session(
         server_url, headers=headers, timeout=timeout, transport=transport
     ) as session:
-        await asyncio.wait_for(session.initialize(), timeout=timeout)
+        init_result = await asyncio.wait_for(session.initialize(), timeout=timeout)
         tools_resp = await asyncio.wait_for(session.list_tools(), timeout=timeout)
         tool_descs = tools_resp.tools
 
-    return [
+    tools = [
         make_mcp_agent_tool(
             name=desc.name,
             description=desc.description or "",
@@ -119,6 +134,12 @@ async def load_mcp_tools_http(
         )
         for desc in tool_descs
     ]
+    tool_infos = [tool_info_from_desc(desc) for desc in tool_descs]
+    return MCPDiscoveryResult(
+        tools=tools,
+        server=server_info_from_init_result(init_result),
+        tool_infos=tool_infos,
+    )
 
 
 def _serialize_call_tool_response(resp: Any) -> dict[str, Any]:

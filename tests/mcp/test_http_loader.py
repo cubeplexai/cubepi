@@ -24,9 +24,14 @@ def test_import_http_loader() -> None:
 class _FakeSession:
     """Stand-in for mcp.ClientSession that records calls and returns canned data."""
 
-    def __init__(self, *streams, tools=None, call_response=None):
+    def __init__(self, *streams, tools=None, call_response=None, init_result=None):
         self._tools = tools or []
         self._call_response = call_response
+        self._init_result = init_result or SimpleNamespace(
+            serverInfo=SimpleNamespace(
+                name="fake-server", version="0.0.0", icons=None, websiteUrl=None
+            )
+        )
         self.initialized = False
         self.calls: list[tuple[str, dict]] = []
 
@@ -38,6 +43,7 @@ class _FakeSession:
 
     async def initialize(self):
         self.initialized = True
+        return self._init_result
 
     async def list_tools(self):
         return SimpleNamespace(tools=self._tools)
@@ -47,7 +53,7 @@ class _FakeSession:
         return self._call_response
 
 
-def _install_fake_transport(monkeypatch, *, tools, call_response):
+def _install_fake_transport(monkeypatch, *, tools, call_response, init_result=None):
     """Patch both transport clients; return per-transport call recorders.
 
     The loader picks the transport at runtime, so we patch both
@@ -92,7 +98,12 @@ def _install_fake_transport(monkeypatch, *, tools, call_response):
         yield ("read-stream-stub", "write-stream-stub", lambda: None)
 
     def fake_client_session(*streams):
-        sess = _FakeSession(*streams, tools=tools, call_response=call_response)
+        sess = _FakeSession(
+            *streams,
+            tools=tools,
+            call_response=call_response,
+            init_result=init_result,
+        )
         sessions.append(sess)
         return sess
 
@@ -117,6 +128,7 @@ async def test_load_mcp_tools_http_lists_and_calls_tool(monkeypatch) -> None:
                 "properties": {"query": {"type": "string"}},
                 "required": ["query"],
             },
+            icons=None,
         ),
     ]
     call_resp = SimpleNamespace(
@@ -131,12 +143,13 @@ async def test_load_mcp_tools_http_lists_and_calls_tool(monkeypatch) -> None:
         monkeypatch, tools=tools_resp, call_response=call_resp
     )
 
-    tools = await load_mcp_tools_http(
+    result = await load_mcp_tools_http(
         "https://mcp.example/sse",
         headers={"x-test": "1"},
         timeout=12.5,
     )
 
+    tools = result.tools
     assert len(tools) == 1
     tool = tools[0]
     assert tool.name == "search"
@@ -179,6 +192,7 @@ async def test_load_mcp_tools_http_propagates_is_error(monkeypatch) -> None:
             name="boom",
             description=None,  # falsy description path → ""
             inputSchema=None,  # falsy schema path → empty object schema
+            icons=None,
         ),
     ]
     call_resp = SimpleNamespace(
@@ -187,7 +201,8 @@ async def test_load_mcp_tools_http_propagates_is_error(monkeypatch) -> None:
     )
     _install_fake_transport(monkeypatch, tools=tools_resp, call_response=call_resp)
 
-    tools = await load_mcp_tools_http("https://mcp.example/sse")
+    result = await load_mcp_tools_http("https://mcp.example/sse")
+    tools = result.tools
     assert len(tools) == 1
     tool = tools[0]
     # falsy → defaults applied
@@ -208,6 +223,7 @@ async def test_load_mcp_tools_http_preserves_structured_content(monkeypatch) -> 
             name="weather",
             description="",
             inputSchema={"type": "object", "properties": {}},
+            icons=None,
         ),
     ]
     call_resp = SimpleNamespace(
@@ -217,9 +233,11 @@ async def test_load_mcp_tools_http_preserves_structured_content(monkeypatch) -> 
     )
     _install_fake_transport(monkeypatch, tools=tools_resp, call_response=call_resp)
 
-    tools = await load_mcp_tools_http("https://mcp.example/sse")
-    args = tools[0].parameters()
-    result = await tools[0].execute("tc-sc", args, signal=None, on_update=None)
+    discovery = await load_mcp_tools_http("https://mcp.example/sse")
+    args = discovery.tools[0].parameters()
+    result = await discovery.tools[0].execute(
+        "tc-sc", args, signal=None, on_update=None
+    )
     assert result.details["structuredContent"] == {"temp_f": 73, "conditions": "clear"}
 
 
@@ -233,14 +251,15 @@ async def test_load_mcp_tools_http_handles_empty_content(monkeypatch) -> None:
             name="silent",
             description="",
             inputSchema={"type": "object", "properties": {}},
+            icons=None,
         ),
     ]
     call_resp = SimpleNamespace(content=None, isError=False)
     _install_fake_transport(monkeypatch, tools=tools_resp, call_response=call_resp)
 
-    tools = await load_mcp_tools_http("https://mcp.example/sse")
-    args = tools[0].parameters()
-    result = await tools[0].execute("tc-3", args, signal=None, on_update=None)
+    discovery = await load_mcp_tools_http("https://mcp.example/sse")
+    args = discovery.tools[0].parameters()
+    result = await discovery.tools[0].execute("tc-3", args, signal=None, on_update=None)
     assert result.content == []
 
 
@@ -262,6 +281,7 @@ async def test_load_mcp_tools_http_streamable_transport(monkeypatch) -> None:
             name="search",
             description="",
             inputSchema={"type": "object", "properties": {}},
+            icons=None,
         ),
     ]
     call_resp = SimpleNamespace(
@@ -271,12 +291,13 @@ async def test_load_mcp_tools_http_streamable_transport(monkeypatch) -> None:
         monkeypatch, tools=tools_resp, call_response=call_resp
     )
 
-    tools = await load_mcp_tools_http(
+    discovery = await load_mcp_tools_http(
         "https://mcp.example/mcp",
         headers={"authorization": "Bearer x"},
         timeout=7.5,
         transport="streamable_http",
     )
+    tools = discovery.tools
 
     # Discovery used streamable_http (sse must not be touched).
     assert sse_calls == []
@@ -363,8 +384,125 @@ async def test_load_mcp_tools_http_against_test_server() -> None:
 
     from cubepi.mcp import load_mcp_tools_http
 
-    tools = await load_mcp_tools_http(server_url)
-    assert len(tools) > 0
-    first = tools[0]
+    discovery = await load_mcp_tools_http(server_url)
+    assert len(discovery.tools) > 0
+    first = discovery.tools[0]
     assert first.name
     assert first.description is not None
+
+
+# ---------------------------------------------------------------------------
+# New: server + tool icon metadata capture (MCP spec 2025-11-25)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_http_captures_server_info_from_initialize(
+    monkeypatch,
+) -> None:
+    """Implementation.icons + websiteUrl + name flow into MCPServerInfo."""
+    from cubepi.mcp import MCPDiscoveryResult, MCPIcon, load_mcp_tools_http
+
+    init_result = SimpleNamespace(
+        serverInfo=SimpleNamespace(
+            name="Linear",
+            version="1.4.2",
+            websiteUrl="https://linear.app",
+            icons=[
+                SimpleNamespace(
+                    src="https://linear.app/favicon.svg", mimeType="image/svg+xml"
+                ),
+                SimpleNamespace(
+                    src="data:image/png;base64,zzz",
+                    mimeType="image/png",
+                    sizes=["48x48"],
+                ),
+            ],
+        )
+    )
+    tools_resp = [
+        SimpleNamespace(
+            name="create_issue",
+            description="Create a Linear issue",
+            inputSchema={"type": "object", "properties": {}},
+            icons=None,
+        ),
+    ]
+    call_resp = SimpleNamespace(content=[], isError=False)
+    _install_fake_transport(
+        monkeypatch, tools=tools_resp, call_response=call_resp, init_result=init_result
+    )
+
+    discovery = await load_mcp_tools_http("https://mcp.example/sse")
+    assert isinstance(discovery, MCPDiscoveryResult)
+    assert discovery.server is not None
+    assert discovery.server.name == "Linear"
+    assert discovery.server.version == "1.4.2"
+    assert discovery.server.website_url == "https://linear.app"
+    assert discovery.server.icons == (
+        MCPIcon(src="https://linear.app/favicon.svg", mime_type="image/svg+xml"),
+        MCPIcon(
+            src="data:image/png;base64,zzz", mime_type="image/png", sizes=("48x48",)
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_http_captures_per_tool_icons(monkeypatch) -> None:
+    """Per-tool ``Tool.icons`` flow into ``tool_infos`` keyed by tool name."""
+    from cubepi.mcp import MCPIcon, load_mcp_tools_http
+
+    tools_resp = [
+        SimpleNamespace(
+            name="search",
+            description="",
+            inputSchema={"type": "object", "properties": {}},
+            icons=[
+                SimpleNamespace(
+                    src="data:image/svg+xml;base64,abc", mimeType=None, sizes=None
+                )
+            ],
+        ),
+        SimpleNamespace(
+            name="fetch",
+            description="",
+            inputSchema={"type": "object", "properties": {}},
+            icons=None,
+        ),
+    ]
+    call_resp = SimpleNamespace(content=[], isError=False)
+    _install_fake_transport(monkeypatch, tools=tools_resp, call_response=call_resp)
+
+    discovery = await load_mcp_tools_http("https://mcp.example/sse")
+    by_name = {ti.name: ti for ti in discovery.tool_infos}
+    assert by_name["search"].icons == (MCPIcon(src="data:image/svg+xml;base64,abc"),)
+    assert by_name["fetch"].icons == ()
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_http_handles_missing_server_icons(monkeypatch) -> None:
+    """Server without icons / websiteUrl yields MCPServerInfo with empty defaults."""
+    from cubepi.mcp import load_mcp_tools_http
+
+    init_result = SimpleNamespace(
+        serverInfo=SimpleNamespace(
+            name="bare-server", version="0.1.0", icons=None, websiteUrl=None
+        )
+    )
+    tools_resp = [
+        SimpleNamespace(
+            name="echo",
+            description="",
+            inputSchema={"type": "object", "properties": {}},
+            icons=None,
+        ),
+    ]
+    call_resp = SimpleNamespace(content=[], isError=False)
+    _install_fake_transport(
+        monkeypatch, tools=tools_resp, call_response=call_resp, init_result=init_result
+    )
+
+    discovery = await load_mcp_tools_http("https://mcp.example/sse")
+    assert discovery.server is not None
+    assert discovery.server.icons == ()
+    assert discovery.server.website_url is None
