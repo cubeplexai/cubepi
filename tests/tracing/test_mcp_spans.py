@@ -181,6 +181,10 @@ class TestMCPClientSpan:
         )
 
     async def test_span_records_cancellation(self, monkeypatch):
+        """Cancellation is a control signal, not a failure — match the
+        chat / turn / invoke_agent convention: leave Status UNSET,
+        record cubepi.aborted=true + error.type, do NOT add an
+        ``exception`` event."""
         provider, exporter = _make_provider()
         _patch_mcp_trace(monkeypatch, provider)
 
@@ -195,8 +199,14 @@ class TestMCPClientSpan:
 
         mcp_spans = [s for s in exporter.spans if s.name.startswith("tools/call ")]
         assert len(mcp_spans) == 1
-        attrs = _attrs(mcp_spans[0])
+        span = mcp_spans[0]
+        attrs = _attrs(span)
         assert attrs["error.type"] == "cubepi.aborted"
+        assert attrs["cubepi.aborted"] is True
+        # Status stays UNSET; cancel is not a failure.
+        assert span.status.status_code == StatusCode.UNSET
+        # No exception event — cancel is signaled via cubepi.aborted only.
+        assert not any(e.name == "exception" for e in span.events)
 
 
 class TestNoOpWhenOTelMissing:

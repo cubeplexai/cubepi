@@ -114,9 +114,17 @@ async def mcp_client_span(
             yield span
     except BaseException as exc:
         try:
-            span.set_status(Status(StatusCode.ERROR, str(exc)[:256]))
-            span.set_attribute(_ERROR_TYPE, _error_type_for(exc))
-            span.record_exception(exc)
+            error_type = _error_type_for(exc)
+            span.set_attribute(_ERROR_TYPE, error_type)
+            # Cancellation is a control signal, not a failure — match the
+            # convention from the chat / turn / invoke_agent spans: leave
+            # Status UNSET and mark cubepi.aborted=true, do NOT record an
+            # exception event.
+            if error_type == "cubepi.aborted":
+                span.set_attribute("cubepi.aborted", True)
+            else:
+                span.set_status(Status(StatusCode.ERROR, str(exc)[:256]))
+                span.record_exception(exc)
         finally:
             span.end()
         raise
