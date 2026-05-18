@@ -135,6 +135,10 @@ class Recorder:
         # enough — but defensively key by AgentStartEvent identity
         # in case the contract changes.
         self._run: _RunState | None = None
+        # Set on attach() so the recorder can look up AgentTool
+        # definitions (description, execution_mode) at tool-exec span
+        # open. ``None`` if the agent doesn't expose a tool registry.
+        self._agent: Any | None = None
 
     # ------------------------------------------------------------------
     # Attach / detach
@@ -143,6 +147,7 @@ class Recorder:
     def attach(self, agent: "Agent") -> Callable[[], None]:
         from cubepi.providers.base import BaseProvider
 
+        self._agent = agent
         unsub_agent = agent.subscribe(self._on_agent_event)
         # ``Agent`` stores the provider as a private attribute; accept
         # either the (private) ``_provider`` or a public ``provider``
@@ -268,6 +273,10 @@ class Recorder:
             context=ctx,
             attributes={
                 CUBEPI_TURN_INDEX: run.turn_index,
+                # Propagate run_id so every child span carries it —
+                # OTel does NOT inherit attributes from parent spans, and
+                # JsonlSpanExporter shards by ``cubepi.run_id`` per span.
+                CUBEPI_RUN_ID: run.run_id,
             },
         )
         run.turn_terminated_by_tool = False
@@ -318,6 +327,8 @@ class Recorder:
             GEN_AI_TOOL_NAME: event.tool_name,
             GEN_AI_TOOL_CALL_ID: event.tool_call_id,
             GEN_AI_TOOL_TYPE: "function",
+            # Per-span run_id so JsonlSpanExporter shards correctly.
+            CUBEPI_RUN_ID: run.run_id,
         }
         # Lookup AgentTool for description + execution_mode.
         tool_obj = self._find_tool(event.tool_name)
@@ -401,6 +412,8 @@ class Recorder:
             GEN_AI_PROVIDER_NAME: map_provider_name(model.provider),
             GEN_AI_REQUEST_MODEL: model.id,
             GEN_AI_REQUEST_STREAM: True,
+            # Per-span run_id so JsonlSpanExporter shards correctly.
+            CUBEPI_RUN_ID: run.run_id,
         }
         # Pull StreamOptions-derived params from the payload where the
         # provider exposed them as final kwargs.
@@ -480,11 +493,20 @@ class Recorder:
         try:
             if body is not None:
                 self._record_chat_response_attrs(span, body)
+            # Cooperative abort: providers may finish the response
+            # listener with ``exc is None`` and a body whose finish
+            # reason is ``"aborted"`` (faux + the agent's signal path).
+            # Mark the chat span aborted in that case so it matches
+            # the contract for hard cancels.
+            if body is not None and _body_is_aborted(body):
+                span.set_attribute(CUBEPI_ABORTED, True)
+                span.set_attribute(ERROR_TYPE, "cubepi.aborted")
+
             if exc is None:
                 # Healthy completion — leave Status UNSET per OTel guidance.
                 pass
             elif _is_cancelled_error(exc):
-                # Abort: not a failure. Mark and leave UNSET.
+                # Hard cancel: not a failure. Mark and leave UNSET.
                 span.set_attribute(CUBEPI_ABORTED, True)
                 span.set_attribute(ERROR_TYPE, "cubepi.aborted")
             else:
@@ -511,11 +533,23 @@ class Recorder:
     # ------------------------------------------------------------------
 
     def _find_tool(self, name: str):
-        # Look up the AgentTool on the active agent via context. The
-        # Recorder doesn't hold an agent reference; instead we accept
-        # that the tool lookup is best-effort. cubepi's _prepare_tool_call
-        # already validates the tool exists; if we miss it here, the
-        # span just lacks the description/execution_mode attrs.
+        """Look up an :class:`AgentTool` by name on the attached agent.
+
+        Read directly from the agent's tool registry; the Recorder is
+        attached for the agent's lifetime so the reference is stable.
+        Returns ``None`` if the agent exposes no tool list or the name
+        isn't registered.
+        """
+        agent = self._agent
+        if agent is None:
+            return None
+        tools = getattr(agent, "_state", None)
+        if tools is None:
+            return None
+        tool_list = getattr(tools, "_tools", None) or []
+        for t in tool_list:
+            if getattr(t, "name", None) == name:
+                return t
         return None
 
     def _record_chat_response_attrs(self, span: Any, body: dict) -> None:
@@ -677,3 +711,22 @@ def _is_cancelled_error(exc: BaseException) -> bool:
     import asyncio
 
     return isinstance(exc, asyncio.CancelledError)
+
+
+def _body_is_aborted(body: dict) -> bool:
+    """Detect cooperative-abort signal in an assembled provider body.
+
+    Cubepi providers normalize aborts into ``stop_reason = "aborted"``
+    on the assistant message (the body's ``stop_reason`` for Anthropic-
+    shaped bodies; for OpenAI bodies the equivalent surfaces via the
+    aborted partial response which carries no terminal finish_reason
+    of its own — handled separately on the agent-side at TurnEnd).
+    """
+    if body.get("stop_reason") == "aborted":
+        return True
+    choices = body.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, dict) and first.get("finish_reason") == "aborted":
+            return True
+    return False

@@ -226,6 +226,11 @@ class TestExecuteToolSpan:
         assert attrs["gen_ai.tool.name"] == "echo"
         assert attrs["gen_ai.tool.call.id"] == "t1"
         assert attrs["gen_ai.tool.type"] == "function"
+        # description and execution_mode come from the AgentTool — the
+        # Recorder reads them off the agent's tool registry at exec
+        # start.
+        assert attrs["gen_ai.tool.description"] == "echo a thing"
+        assert attrs["cubepi.tool.execution_mode"] in {"parallel", "sequential"}
         assert attrs["cubepi.tool.is_error"] is False
         assert "cubepi.tool.terminate" not in attrs
 
