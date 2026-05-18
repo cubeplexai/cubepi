@@ -333,6 +333,29 @@ def _fire_listeners_sync(listeners: list[Callable], *args: Any) -> None:
             _log_listener_exception(cb, exc)
 
 
+async def _fire_chunk_listeners(
+    listeners: list[Callable], event: "StreamEvent", model: "Model"
+) -> None:
+    """Fire :func:`subscribe_chunk` listeners with **per-listener** deep
+    copies of the event.
+
+    The consumer's queued ``StreamEvent`` (already pushed onto the
+    ``MessageStream``) and every other listener's copy are isolated.
+    Without per-listener copies, a redacting listener that mutated
+    ``event.partial`` would silently alter what later chunk listeners
+    observed in the same stream.
+    """
+    if not listeners:
+        return
+    for cb in tuple(listeners):
+        try:
+            result = cb(event.model_copy(deep=True), model)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:  # noqa: BLE001 — intentional broad catch
+            _log_listener_exception(cb, exc)
+
+
 async def _fire_request_listeners(
     listeners: list[Callable], payload: dict, model: "Model"
 ) -> None:
@@ -557,6 +580,4 @@ class BaseProvider:
         """
         ms.push(event)
         if model is not None and self._chunk_listeners:
-            await _fire_listeners(
-                self._chunk_listeners, event.model_copy(deep=True), model
-            )
+            await _fire_chunk_listeners(self._chunk_listeners, event, model)

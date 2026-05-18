@@ -241,6 +241,34 @@ class TestChunkListenerImmutability:
             "redactor's mutation leaked into consumer's queued events"
         )
 
+    async def test_listener_mutation_does_not_leak_between_listeners(self):
+        """Each chunk listener gets its OWN copy — a mutating listener-A
+        must not affect what listener-B (registered later) observes
+        when they both fire for the same StreamEvent."""
+        provider = FauxProvider()
+        b_saw_empty_partial: list[bool] = []
+
+        def redactor_a(event, model):
+            if event.partial is not None:
+                event.partial.content.clear()
+                event.delta = "REDACTED"
+
+        def observer_b(event, model):
+            if event.partial is not None:
+                b_saw_empty_partial.append(len(event.partial.content) == 0)
+
+        provider.subscribe_chunk(redactor_a)
+        provider.subscribe_chunk(observer_b)
+        provider.append_responses([faux_assistant_message("listener isolation")])
+        await _run_once(provider, "isolated")
+
+        assert b_saw_empty_partial, "observer_b never saw a partial-bearing event"
+        # If per-listener isolation were broken, all of B's observations
+        # would have an empty partial.content. At least one should not.
+        assert not all(b_saw_empty_partial), (
+            "listener-A's mutation leaked into listener-B's view"
+        )
+
 
 class TestRequestListenerImmutability:
     async def test_listener_mutation_does_not_leak_into_next_listener(self):
