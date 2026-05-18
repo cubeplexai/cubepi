@@ -135,6 +135,13 @@ class Tracer:
         installed by this attach, then calls :meth:`force_flush` to
         ensure spans produced by the agent's runs are persisted before
         the caller proceeds.
+
+        Also registers this Tracer's private TracerProvider with
+        :mod:`cubepi.mcp._tracing` so MCP CLIENT spans flow through
+        the same exporters — without this step, the MCP module falls
+        back to the OTel global default (a no-op provider when the
+        caller didn't separately call ``trace.set_tracer_provider``).
+        The detach callable unregisters.
         """
         from cubepi.tracing.recorder import Recorder
 
@@ -143,7 +150,25 @@ class Tracer:
             record_content=self._record_content,
             redact=self._redact,
         )
-        return recorder.attach(agent)
+        recorder_detach = recorder.attach(agent)
+
+        # Route MCP spans through this Tracer's provider.
+        try:
+            from cubepi.mcp import _tracing as mcp_tracing
+
+            mcp_tracing.register_provider(self._provider)
+        except ImportError:  # pragma: no cover — mcp module always present
+            mcp_tracing = None
+
+        def detach() -> None:
+            recorder_detach()
+            if mcp_tracing is not None:
+                try:
+                    mcp_tracing.unregister_provider()
+                except Exception:
+                    pass
+
+        return detach
 
     async def force_flush(self, timeout_seconds: float = 30.0) -> bool:
         """Block until all currently buffered spans are exported.

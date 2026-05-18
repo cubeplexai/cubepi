@@ -72,6 +72,9 @@ def _patch_mcp_trace(monkeypatch, provider: TracerProvider) -> None:
 
     monkeypatch.setattr(mcp_tracing, "_otel_trace", _ShimTraceMod)
     monkeypatch.setattr(mcp_tracing, "_OTEL_AVAILABLE", True)
+    # Other tests' Tracer.attach() may have populated _registered_provider;
+    # reset for deterministic per-test resolution via the shim above.
+    monkeypatch.setattr(mcp_tracing, "_registered_provider", None)
 
 
 async def _make_tool(
@@ -338,6 +341,93 @@ class TestTraceparentInjection:
         # Outside any span: helper returns None and loader must not add
         # a traceparent header.
         assert current_traceparent() is None
+
+
+class TestTracerProviderRouting:
+    """When a user constructs a cubepi.tracing.Tracer with its own
+    private provider and calls attach(agent), MCP CLIENT spans must
+    flow through that same provider's exporters — without this, MCP
+    spans would silently land in the OTel global no-op provider
+    (codex round 5)."""
+
+    async def test_mcp_span_lands_in_tracer_exporter(self):
+        from cubepi.agent.agent import Agent
+        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.faux import (
+            FauxProvider,
+            faux_assistant_message,
+        )
+        from cubepi.tracing import Tracer
+
+        from pydantic import BaseModel
+
+        # Capture exporter shared by the cubepi Tracer.
+        exporter = _CaptureExporter()
+
+        # Build an MCP-backed tool whose call_remote we can drive.
+        class P(BaseModel):
+            q: str = ""
+
+        async def call_remote(name, args):
+            return {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+        from cubepi.mcp._adapter import make_mcp_agent_tool
+
+        mcp_tool = make_mcp_agent_tool(
+            name="search",
+            description="search",
+            input_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+            call_remote=call_remote,
+            server_address="api.example.com",
+            protocol_version="2025-11-25",
+        )
+
+        provider = FauxProvider()
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    [ToolCall(id="tc1", name="search", arguments={"q": "x"})],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("done"),
+            ]
+        )
+        agent = Agent(
+            provider=provider,
+            model=Model(id="faux-1", provider="faux"),
+            system_prompt="s",
+            tools=[mcp_tool],
+        )
+
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        detach = tracer.attach(agent)
+
+        try:
+            await agent.prompt("go")
+            await agent.wait_for_idle()
+        finally:
+            detach()
+            await tracer.shutdown()
+
+        # Exactly one MCP tools/call CLIENT span landed in the Tracer's
+        # exporter — proving the routing worked.
+        mcp_spans = [s for s in exporter.spans if s.name.startswith("tools/call ")]
+        assert len(mcp_spans) == 1
+        attrs = dict(mcp_spans[0].attributes or {})
+        assert attrs["mcp.method.name"] == "tools/call"
+        assert attrs["gen_ai.tool.name"] == "search"
+
+    def test_register_and_unregister_provider(self):
+        from cubepi.mcp import _tracing as mcp_tracing
+
+        assert mcp_tracing._registered_provider is None
+        sentinel = object()
+        mcp_tracing.register_provider(sentinel)
+        try:
+            assert mcp_tracing._registered_provider is sentinel
+        finally:
+            mcp_tracing.unregister_provider()
+        assert mcp_tracing._registered_provider is None
 
 
 class TestLoaderHelpers:

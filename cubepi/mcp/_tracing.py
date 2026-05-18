@@ -49,6 +49,56 @@ except ImportError:  # pragma: no cover — exercised only without the extra.
     StatusCode = None  # type: ignore[assignment]
 
 
+# When :class:`cubepi.tracing.Tracer` is attached to an agent it
+# registers its private :class:`TracerProvider` here. Without this
+# registration, ``_otel_trace.get_tracer`` falls back to the OTel
+# global default — which is a no-op provider unless the caller also
+# did ``set_tracer_provider`` themselves. ``Tracer.attach`` calls
+# :func:`register_provider`; the corresponding ``detach`` callable
+# clears it.
+_registered_provider: Any | None = None
+
+
+def register_provider(provider: Any) -> None:
+    """Register a non-global TracerProvider as the source for MCP CLIENT
+    spans. Called by :meth:`cubepi.tracing.Tracer.attach`.
+    """
+    global _registered_provider
+    _registered_provider = provider
+
+
+def unregister_provider() -> None:
+    """Reverse :func:`register_provider`. Called by the detach callable
+    returned from :meth:`cubepi.tracing.Tracer.attach`.
+    """
+    global _registered_provider
+    _registered_provider = None
+
+
+def _get_tracer(scope_name: str) -> Any:
+    """Resolve the tracer to use for emitting an MCP span.
+
+    Prefers the provider registered by ``cubepi.tracing.Tracer`` over
+    OTel's global default (which is a no-op unless the user separately
+    called ``set_tracer_provider``).
+    """
+    if _registered_provider is not None:
+        return _registered_provider.get_tracer(scope_name)
+    return _otel_trace.get_tracer(scope_name)
+
+
+def _current_span_via_registered() -> Any:
+    """Return the current span — preferring the registered provider's
+    context. Used by :func:`current_traceparent`.
+
+    The OTel context is process-global and shared across providers, so
+    ``get_current_span()`` returns the right answer whether or not we
+    use the registered provider. We expose this indirection so tests
+    can monkeypatch a single helper.
+    """
+    return _otel_trace.get_current_span()
+
+
 # Public attribute name constants — duplicated from
 # cubepi.tracing.schema so this module can be imported without the
 # tracing extra installed. Keep in sync.
@@ -83,7 +133,7 @@ async def mcp_client_span(
         yield None
         return
 
-    tracer = _otel_trace.get_tracer(_SCOPE_NAME)
+    tracer = _get_tracer(_SCOPE_NAME)
     span_name = f"{method} {tool_name}" if tool_name else method
     attrs: dict[str, Any] = {
         _MCP_METHOD_NAME: method,
