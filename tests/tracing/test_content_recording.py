@@ -214,6 +214,82 @@ class TestTurnContent:
         assert out[0]["role"] == "assistant"
 
 
+class TestRootOutputIsOnlyGenerated:
+    async def test_root_output_excludes_user_prompts(self):
+        """The root invoke_agent's gen_ai.output.messages must be model
+        output only (assistant + tool_result), NOT include the caller's
+        user prompts — codex round-1 finding on PR #83."""
+        agent, provider, exporter, tracer = await _build(record_content=True)
+        provider.append_responses([faux_assistant_message("hello back")])
+        await agent.prompt("hi there")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        out = _json_attr(root, "gen_ai.output.messages")
+        # No user-role messages must appear in output.
+        for m in out:
+            assert m["role"] != "user", (
+                f"root gen_ai.output.messages must not include user prompts; got {m}"
+            )
+        # An assistant message with the model output IS expected.
+        assert any(
+            m["role"] == "assistant"
+            and any(p.get("content") == "hello back" for p in m.get("parts", []))
+            for m in out
+        )
+
+
+class TestChatInputIncludesPriorAssistant:
+    async def test_second_chat_input_includes_prior_assistant_turn(self):
+        """In a tool-using multi-turn run, the second chat span's
+        gen_ai.input.messages must include the prior assistant
+        (tool-call) message + the tool_result so consumers can
+        reconstruct the prompt — codex round-1 finding on PR #83."""
+
+        class P(BaseModel):
+            pass
+
+        async def run(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="tool-output")])
+
+        tool = AgentTool(name="t", description="t", parameters=P, execute=run)
+
+        agent, provider, exporter, tracer = await _build(
+            record_content=True, tools=[tool]
+        )
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    [ToolCall(id="c1", name="t", arguments={})],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("final answer"),
+            ]
+        )
+
+        await agent.prompt("kick off")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        chats = sorted(
+            [s for s in exporter.spans if s.name.startswith("chat ")],
+            key=lambda s: s.start_time or 0,
+        )
+        assert len(chats) == 2
+        second = chats[1]
+        inp = _json_attr(second, "gen_ai.input.messages")
+        roles = [m["role"] for m in inp]
+        # Must include the original user prompt, the assistant tool-call
+        # message, and the tool result — in that order.
+        assert roles.count("user") == 1
+        assert "assistant" in roles
+        assert "tool" in roles
+        # The assistant message must carry the tool_call part.
+        asst = next(m for m in inp if m["role"] == "assistant")
+        assert any(p.get("type") == "tool_call" for p in asst.get("parts", []))
+
+
 class TestRedaction:
     async def test_redact_can_substitute(self):
         seen_keys: list[str] = []

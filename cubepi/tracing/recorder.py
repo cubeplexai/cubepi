@@ -133,8 +133,19 @@ class _RunState:
     turn_terminated_by_tool: bool = False
     # Content recording (only used when record_content=True).
     system_prompt: str | None = None
+    # input_messages: user / tool_result messages — used by the root
+    # span's ``gen_ai.input.messages``. Pure caller-provided input.
     input_messages: list[Any] = field(default_factory=list)
+    # output_messages: assistant + tool_result messages produced
+    # during the run — used by the root span's ``gen_ai.output.messages``.
     output_messages: list[Any] = field(default_factory=list)
+    # transcript: ALL messages in chronological order, including prior
+    # assistant turns. Used as the chat span's ``gen_ai.input.messages``
+    # so multi-turn tool-using runs reconstruct correctly — the second
+    # chat call's request includes the prior assistant tool-call
+    # message plus the tool_result, and so must its input.messages
+    # attribute.
+    transcript: list[Any] = field(default_factory=list)
     # Per-turn message accumulators (cleared at TurnStart).
     turn_input_messages: list[Any] = field(default_factory=list)
     turn_output_messages: list[Any] = field(default_factory=list)
@@ -297,11 +308,17 @@ class Recorder:
                     GEN_AI_INPUT_MESSAGES,
                     messages_to_semconv(run.input_messages),
                 )
-            if event.messages:
+            # ``event.messages`` is the run's full new_messages list —
+            # for a normal ``agent.prompt(...)`` it includes the user
+            # prompt(s) as well as the generated assistant/tool replies.
+            # ``gen_ai.output.messages`` should be model output only, so
+            # use the accumulator that tracks just assistant + tool
+            # results.
+            if run.output_messages:
                 self._set_content_attr(
                     run.agent_span,
                     GEN_AI_OUTPUT_MESSAGES,
-                    messages_to_semconv(event.messages),
+                    messages_to_semconv(run.output_messages),
                 )
         run.agent_span.end()
         self._run = None
@@ -477,12 +494,22 @@ class Recorder:
             )
             run.input_messages.append(msg)
             run.turn_input_messages.append(msg)
+            run.transcript.append(msg)
 
     def _on_message_end(self, event: MessageEndEvent) -> None:
-        # Reserved for future use. Currently no-op — chat span is
-        # closed by the provider response listener, and turn span
-        # gets its stop_reason from TurnEndEvent.
-        del event
+        run = self._run
+        if run is None:
+            return
+        # Append assistant / tool_result messages to the transcript so
+        # later chat spans see them in their ``gen_ai.input.messages``.
+        # Note: ``output_messages`` accumulation happens at TurnEnd
+        # (since it includes the synthesized turn snapshot); here we
+        # only update the chronological transcript that drives chat
+        # span input.
+        msg = event.message
+        msg_role = getattr(msg, "role", None)
+        if msg_role in ("assistant", "tool_result"):
+            run.transcript.append(msg)
 
     # ------------------------------------------------------------------
     # Provider listeners — drive the chat span lifetime
@@ -559,11 +586,14 @@ class Recorder:
                     self._set_content_attr(
                         chat_span, GEN_AI_SYSTEM_INSTRUCTIONS, sys_payload
                     )
-            if run.input_messages:
+            if run.transcript:
+                # chat input = full chronological context the provider
+                # is about to receive (user prompts + earlier
+                # assistant/tool-result turns).
                 self._set_content_attr(
                     chat_span,
                     GEN_AI_INPUT_MESSAGES,
-                    messages_to_semconv(run.input_messages),
+                    messages_to_semconv(run.transcript),
                 )
             tool_defs = tool_definitions_to_semconv(payload)
             if tool_defs:
