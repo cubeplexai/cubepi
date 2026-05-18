@@ -18,11 +18,13 @@ except ImportError as exc:  # pragma: no cover — exercised only without the ex
     ) from exc
 
 from cubepi.tracing.exporters import JsonlSpanExporter
+from cubepi.tracing.meter import Meter
 from cubepi.tracing.schema import SCHEMA_URL
 from cubepi.tracing.tracer import Tracer
 
 __all__ = [
     "JsonlSpanExporter",
+    "Meter",
     "SCHEMA_URL",
     "Tracer",
 ]
