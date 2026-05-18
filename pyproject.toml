@@ -36,6 +36,9 @@ mcp = [
 docs = [
     "griffe>=0.45",
 ]
+tracing = [
+    "opentelemetry-sdk>=1.30",
+]
 
 [dependency-groups]
 dev = [
