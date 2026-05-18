@@ -13,12 +13,16 @@ class MCPIcon:
 
     Mirrors ``mcp.types.Icon`` with snake_case fields. ``src`` is either an
     HTTP/HTTPS URL or a ``data:`` URI; ``sizes`` is a tuple of strings such
-    as ``("48x48", "96x96")``.
+    as ``("48x48", "96x96")``. ``theme`` is ``"light"`` or ``"dark"`` when
+    the server supplies separate variants — the spec lets clients pick the
+    variant matching the current UI theme and fall back to the first entry
+    otherwise.
     """
 
     src: str
     mime_type: str | None = None
     sizes: tuple[str, ...] | None = None
+    theme: str | None = None
 
 
 @dataclass(frozen=True)
@@ -76,7 +80,8 @@ def _icon_from_raw(raw: object) -> MCPIcon | None:
     mime = getattr(raw, "mimeType", None) or getattr(raw, "mime_type", None)
     sizes_raw = getattr(raw, "sizes", None)
     sizes = tuple(sizes_raw) if sizes_raw else None
-    return MCPIcon(src=src, mime_type=mime, sizes=sizes)
+    theme = getattr(raw, "theme", None)
+    return MCPIcon(src=src, mime_type=mime, sizes=sizes, theme=theme)
 
 
 def icons_from_raw(raws: object) -> tuple[MCPIcon, ...]:
