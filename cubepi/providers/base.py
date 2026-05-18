@@ -294,11 +294,18 @@ def _fire_listeners_sync(listeners: list[Callable], *args: Any) -> None:
         try:
             result = cb(*args)
             if inspect.isawaitable(result):
+                wrapped = _safe_run_coroutine(cb, result)
                 try:
-                    asyncio.create_task(_safe_run_coroutine(cb, result))
+                    asyncio.create_task(wrapped)
                 except RuntimeError:
-                    # No running event loop (e.g. teardown) — drop.
-                    pass
+                    # No running event loop (e.g. teardown) — close both
+                    # the wrapper and the inner listener coroutine so
+                    # neither leaks as a "coroutine was never awaited"
+                    # warning.
+                    wrapped.close()
+                    close = getattr(result, "close", None)
+                    if callable(close):
+                        close()
         except Exception as exc:  # noqa: BLE001 — intentional broad catch
             _log_listener_exception(cb, exc)
 

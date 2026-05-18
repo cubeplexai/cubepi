@@ -422,3 +422,172 @@ class TestBaseProvider:
         # Calling detach again must not raise even though the listener is
         # already gone — covers the ValueError swallow in _detach.
         detach()
+
+
+class TestFireListenersHelpers:
+    """Direct unit tests for the listener-fanout helpers, bypassing
+    provider streaming. These cover branches that are awkward to reach
+    end-to-end."""
+
+    async def test_fire_listeners_empty_returns(self):
+        from cubepi.providers.base import _fire_listeners
+
+        # Empty list — must return without touching anything.
+        await _fire_listeners([])
+
+    async def test_fire_listeners_swallows_sync_exception(self):
+        from cubepi.providers.base import _fire_listeners
+
+        seen: list = []
+
+        def bad(x):
+            raise RuntimeError("nope")
+
+        def good(x):
+            seen.append(x)
+
+        await _fire_listeners([bad, good], "payload")
+        # Despite the first raising, the second still ran.
+        assert seen == ["payload"]
+
+    def test_fire_listeners_sync_empty_returns(self):
+        from cubepi.providers.base import _fire_listeners_sync
+
+        _fire_listeners_sync([])  # No listeners — short-circuit.
+
+    def test_fire_listeners_sync_swallows_sync_exception(self):
+        from cubepi.providers.base import _fire_listeners_sync
+
+        seen: list = []
+
+        def bad(x):
+            raise RuntimeError("listener oops")
+
+        def good(x):
+            seen.append(x)
+
+        _fire_listeners_sync([bad, good], "x")
+        assert seen == ["x"]
+
+    def test_fire_listeners_sync_no_running_loop(self):
+        """Outside a running event loop, asyncio.create_task raises
+        RuntimeError. The sync helper must swallow it (covers the
+        no-running-loop branch in the detached-task scheduling)."""
+        from cubepi.providers.base import _fire_listeners_sync
+
+        async def async_cb(x):
+            pass  # pragma: no cover — never awaited in this test
+
+        # Important: do NOT await; we're synchronous here, no event loop.
+        _fire_listeners_sync([async_cb], "x")
+
+
+class TestProviderEmit:
+    """Cover the chunk-listener fan-out inside Anthropic and OpenAI
+    _emit helpers directly — they each carry the same hot-path branch
+    but the Faux end-to-end tests exercise Faux's _emit only."""
+
+    async def test_anthropic_emit_fires_chunk_listeners(self):
+        from cubepi.providers.anthropic import AnthropicProvider
+        from cubepi.providers.base import MessageStream
+
+        provider = AnthropicProvider(api_key="test-key")
+        seen: list = []
+        provider.subscribe_chunk(lambda ev, m: seen.append((ev.type, m.id)))
+
+        ms = MessageStream()
+        event = StreamEvent(type="text_delta", delta="hi")
+        await provider._emit(ms, event, MODEL)
+
+        assert seen == [("text_delta", MODEL.id)]
+        # The event was also pushed onto the stream.
+        first = await ms.__anext__()
+        assert first.type == "text_delta"
+
+    async def test_openai_emit_fires_chunk_listeners(self):
+        from cubepi.providers.openai import OpenAIProvider
+        from cubepi.providers.base import MessageStream
+
+        provider = OpenAIProvider(api_key="test-key")
+        seen: list = []
+        provider.subscribe_chunk(lambda ev, m: seen.append(ev.type))
+
+        ms = MessageStream()
+        await provider._emit(ms, StreamEvent(type="text_delta", delta="hi"), MODEL)
+        assert seen == ["text_delta"]
+
+    async def test_openai_responses_emit_fires_chunk_listeners(self):
+        from cubepi.providers.openai_responses import OpenAIResponsesProvider
+        from cubepi.providers.base import MessageStream
+
+        provider = OpenAIResponsesProvider(api_key="test-key")
+        seen: list = []
+        provider.subscribe_chunk(lambda ev, m: seen.append(ev.type))
+
+        ms = MessageStream()
+        await provider._emit(ms, StreamEvent(type="text_delta", delta="hi"), MODEL)
+        assert seen == ["text_delta"]
+
+
+class TestAssembleResponse:
+    """Cover static _assemble_response helpers directly — exercises the
+    optional-field branches without needing a real LLM stream."""
+
+    def test_openai_assemble_with_system_fingerprint_and_service_tier(self):
+        from cubepi.providers.openai import OpenAIProvider
+
+        class FakeUsageDetails:
+            cached_tokens = 7
+
+        class FakeUsage:
+            prompt_tokens = 10
+            completion_tokens = 4
+            total_tokens = 14
+            prompt_tokens_details = FakeUsageDetails()
+
+        body = OpenAIProvider._assemble_response(
+            response_id="resp-123",
+            model_id="gpt-test",
+            created=12345,
+            system_fingerprint="fp_abc",
+            service_tier="scale",
+            text="hello",
+            tool_calls_in_progress={
+                0: {"id": "call_1", "name": "do_thing", "arguments": '{"a":1}'}
+            },
+            finish_reason="stop",
+            usage=FakeUsage(),
+        )
+
+        assert body["id"] == "resp-123"
+        assert body["object"] == "chat.completion"
+        assert body["model"] == "gpt-test"
+        assert body["created"] == 12345
+        # Both optional fields present in body.
+        assert body["system_fingerprint"] == "fp_abc"
+        assert body["service_tier"] == "scale"
+        assert body["choices"][0]["finish_reason"] == "stop"
+        assert body["choices"][0]["message"]["content"] == "hello"
+        assert body["choices"][0]["message"]["tool_calls"][0]["id"] == "call_1"
+        assert body["usage"]["prompt_tokens_details"] == {"cached_tokens": 7}
+
+    def test_openai_assemble_without_optional_fields(self):
+        from cubepi.providers.openai import OpenAIProvider
+
+        body = OpenAIProvider._assemble_response(
+            response_id=None,
+            model_id="gpt-test",
+            created=None,
+            system_fingerprint=None,
+            service_tier=None,
+            text="",
+            tool_calls_in_progress={},
+            finish_reason=None,
+            usage=None,
+        )
+        # Optional fields omitted entirely.
+        assert "system_fingerprint" not in body
+        assert "service_tier" not in body
+        # Content normalizes to None when text is empty and no tool calls.
+        assert body["choices"][0]["message"]["content"] is None
+        assert body["usage"] == {}
