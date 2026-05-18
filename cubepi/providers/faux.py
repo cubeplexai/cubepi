@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from cubepi.providers.base import (
     AssistantMessage,
+    BaseProvider,
     Message,
     MessageStream,
     Model,
@@ -19,6 +20,7 @@ from cubepi.providers.base import (
     ToolCall,
     ToolDefinition,
     Usage,
+    _fire_listeners,
 )
 
 FauxContentBlock = TextContent | ThinkingContent | ToolCall
@@ -148,7 +150,7 @@ def _can_accept_extended_args(factory: FauxResponseFactory) -> bool:
         return False
 
 
-class FauxProvider:
+class FauxProvider(BaseProvider):
     def __init__(
         self,
         *,
@@ -156,12 +158,69 @@ class FauxProvider:
         token_size_min: int = 3,
         token_size_max: int = 5,
     ) -> None:
+        super().__init__()
         self._responses: list[FauxResponseStep] = []
         self._tokens_per_second = tokens_per_second
         self._min = max(1, min(token_size_min, token_size_max))
         self._max = max(self._min, token_size_max)
         self.call_count = 0
         self._prompt_cache: dict[str, str] = {}
+        # Monotonic counter for deterministic _assemble_response ids.
+        self._response_seq = 0
+
+    async def _emit(
+        self, ms: MessageStream, event: StreamEvent, model: Model | None
+    ) -> None:
+        """Push an event to the stream and fire chunk listeners in order.
+
+        ``model`` may be None when invoked from internal helpers
+        (``_stream_with_deltas`` is exposed for direct calls in tests). In
+        that case listener fan-out is skipped — the test isn't observing
+        listeners anyway.
+        """
+        ms.push(event)
+        if model is not None and self._chunk_listeners:
+            await _fire_listeners(self._chunk_listeners, event, model)
+
+    @staticmethod
+    def _assemble_response(
+        *, seq: int, model: Model, message: AssistantMessage
+    ) -> dict[str, Any]:
+        """Pinned, deterministic dict shape for FauxProvider responses.
+
+        The schema is intentionally minimal and stable across runs (ids use
+        the per-instance monotonic seq, no random or time-based fields) so
+        tests for the listener registry can assert exact equality.
+        """
+        content_blocks: list[dict[str, Any]] = []
+        for block in message.content:
+            if isinstance(block, TextContent):
+                content_blocks.append({"type": "text", "text": block.text})
+            elif isinstance(block, ThinkingContent):
+                content_blocks.append({"type": "thinking", "thinking": block.thinking})
+            elif isinstance(block, ToolCall):
+                content_blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.arguments,
+                    }
+                )
+        usage = message.usage or Usage()
+        return {
+            "id": f"faux-{seq}",
+            "model": model.id,
+            "role": "assistant",
+            "content": content_blocks,
+            "stop_reason": message.stop_reason,
+            "usage": {
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cache_read_tokens": usage.cache_read_tokens,
+                "cache_write_tokens": usage.cache_write_tokens,
+            },
+        }
 
     def set_responses(self, responses: list[FauxResponseStep]) -> None:
         self._responses = list(responses)
@@ -227,11 +286,25 @@ class FauxProvider:
         opts = options or StreamOptions()
         ms = MessageStream()
         self.call_count += 1
+        self._response_seq += 1
+        seq = self._response_seq
 
         step = self._responses.pop(0) if self._responses else None
 
         async def _produce() -> None:
+            body: dict | None = None
+            exc: BaseException | None = None
             try:
+                # Fire request listeners with a minimal payload (faux has no
+                # real wire payload). Tests assert this fires.
+                if self._request_listeners:
+                    payload = {
+                        "model": model.id,
+                        "messages": [m.model_dump() for m in messages],
+                        "system_prompt": system_prompt,
+                    }
+                    await _fire_listeners(self._request_listeners, payload, model)
+
                 if step is None:
                     error_msg = AssistantMessage(
                         content=[],
@@ -240,10 +313,17 @@ class FauxProvider:
                         usage=Usage(),
                         timestamp=time.time(),
                     )
-                    ms.push(
-                        StreamEvent(type="error", error_message=error_msg.error_message)
+                    await self._emit(
+                        ms,
+                        StreamEvent(
+                            type="error", error_message=error_msg.error_message
+                        ),
+                        model,
                     )
                     ms.set_result(error_msg)
+                    body = self._assemble_response(
+                        seq=seq, model=model, message=error_msg
+                    )
                     return
 
                 if callable(step):
@@ -275,19 +355,26 @@ class FauxProvider:
                     }
                 )
 
-                await self._stream_with_deltas(ms, resolved, opts.signal)
-            except BaseException as exc:
+                await self._stream_with_deltas(ms, resolved, opts.signal, model)
+                body = self._assemble_response(seq=seq, model=model, message=resolved)
+            except BaseException as e:
+                exc = e
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
-                    error_message=str(exc),
+                    error_message=str(e),
                     usage=Usage(),
                     timestamp=time.time(),
                 )
-                ms.push(StreamEvent(type="error", error_message=str(exc)))
+                await self._emit(
+                    ms, StreamEvent(type="error", error_message=str(e)), model
+                )
                 ms.set_result(error_msg)
-                if not isinstance(exc, Exception):
+                if not isinstance(e, Exception):
                     raise
+            finally:
+                if self._response_listeners:
+                    await _fire_listeners(self._response_listeners, body, model, exc)
 
         ms.attach_task(asyncio.create_task(_produce()))
         return ms
@@ -297,7 +384,11 @@ class FauxProvider:
         stream: MessageStream,
         message: AssistantMessage,
         signal: asyncio.Event | None,
+        model: Model | None = None,
     ) -> None:
+        # ``model`` is optional so existing tests that call this private
+        # helper directly without a model still work. _emit short-circuits
+        # the listener fan-out when model is None.
         partial = AssistantMessage(
             content=[],
             stop_reason=message.stop_reason,
@@ -309,17 +400,27 @@ class FauxProvider:
 
         if signal and signal.is_set():
             aborted = self._make_aborted(partial)
-            stream.push(StreamEvent(type="error", error_message="Request was aborted"))
+            await self._emit(
+                stream,
+                StreamEvent(type="error", error_message="Request was aborted"),
+                model,
+            )
             stream.set_result(aborted)
             return
 
-        stream.push(StreamEvent(type="start", partial=partial.model_copy(deep=True)))
+        await self._emit(
+            stream,
+            StreamEvent(type="start", partial=partial.model_copy(deep=True)),
+            model,
+        )
 
         for block in message.content:
             if signal and signal.is_set():
                 aborted = self._make_aborted(partial)
-                stream.push(
-                    StreamEvent(type="error", error_message="Request was aborted")
+                await self._emit(
+                    stream,
+                    StreamEvent(type="error", error_message="Request was aborted"),
+                    model,
                 )
                 stream.set_result(aborted)
                 return
@@ -327,21 +428,25 @@ class FauxProvider:
             if isinstance(block, ThinkingContent):
                 partial.content.append(ThinkingContent(thinking=""))
                 block_idx = len(partial.content) - 1
-                stream.push(
+                await self._emit(
+                    stream,
                     StreamEvent(
                         type="thinking_start",
                         content_index=block_idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
                 for chunk in _split_by_token_size(block.thinking, self._min, self._max):
                     await self._schedule_chunk(chunk)
                     if signal and signal.is_set():
                         aborted = self._make_aborted(partial)
-                        stream.push(
+                        await self._emit(
+                            stream,
                             StreamEvent(
                                 type="error", error_message="Request was aborted"
-                            )
+                            ),
+                            model,
                         )
                         stream.set_result(aborted)
                         return
@@ -350,60 +455,72 @@ class FauxProvider:
                         partial.content[-1] = ThinkingContent(
                             thinking=last.thinking + chunk
                         )
-                    stream.push(
+                    await self._emit(
+                        stream,
                         StreamEvent(
                             type="thinking_delta",
                             delta=chunk,
                             content_index=block_idx,
                             partial=partial.model_copy(deep=True),
-                        )
+                        ),
+                        model,
                     )
-                stream.push(
+                await self._emit(
+                    stream,
                     StreamEvent(
                         type="thinking_end",
                         content_index=block_idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
 
             elif isinstance(block, TextContent):
                 partial.content.append(TextContent(text=""))
                 block_idx = len(partial.content) - 1
-                stream.push(
+                await self._emit(
+                    stream,
                     StreamEvent(
                         type="text_start",
                         content_index=block_idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
                 for chunk in _split_by_token_size(block.text, self._min, self._max):
                     await self._schedule_chunk(chunk)
                     if signal and signal.is_set():
                         aborted = self._make_aborted(partial)
-                        stream.push(
+                        await self._emit(
+                            stream,
                             StreamEvent(
                                 type="error", error_message="Request was aborted"
-                            )
+                            ),
+                            model,
                         )
                         stream.set_result(aborted)
                         return
                     last = partial.content[-1]
                     if isinstance(last, TextContent):
                         partial.content[-1] = TextContent(text=last.text + chunk)
-                    stream.push(
+                    await self._emit(
+                        stream,
                         StreamEvent(
                             type="text_delta",
                             delta=chunk,
                             content_index=block_idx,
                             partial=partial.model_copy(deep=True),
-                        )
+                        ),
+                        model,
                     )
-                stream.push(
+                await self._emit(
+                    stream,
                     StreamEvent(
                         type="text_end",
                         content_index=block_idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
 
             elif isinstance(block, ToolCall):
@@ -411,52 +528,64 @@ class FauxProvider:
                     ToolCall(id=block.id, name=block.name, arguments={})
                 )
                 block_idx = len(partial.content) - 1
-                stream.push(
+                await self._emit(
+                    stream,
                     StreamEvent(
                         type="toolcall_start",
                         content_index=block_idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
                 json_str = json.dumps(block.arguments)
                 for chunk in _split_by_token_size(json_str, self._min, self._max):
                     await self._schedule_chunk(chunk)
                     if signal and signal.is_set():
                         aborted = self._make_aborted(partial)
-                        stream.push(
+                        await self._emit(
+                            stream,
                             StreamEvent(
                                 type="error", error_message="Request was aborted"
-                            )
+                            ),
+                            model,
                         )
                         stream.set_result(aborted)
                         return
-                    stream.push(
+                    await self._emit(
+                        stream,
                         StreamEvent(
                             type="toolcall_delta",
                             delta=chunk,
                             content_index=block_idx,
                             partial=partial.model_copy(deep=True),
-                        )
+                        ),
+                        model,
                     )
                 last = partial.content[-1]
                 if isinstance(last, ToolCall):
                     partial.content[-1] = ToolCall(
                         id=block.id, name=block.name, arguments=block.arguments
                     )
-                stream.push(
+                await self._emit(
+                    stream,
                     StreamEvent(
                         type="toolcall_end",
                         content_index=block_idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
 
         if message.stop_reason in ("error", "aborted"):
-            stream.push(StreamEvent(type="error", error_message=message.error_message))
+            await self._emit(
+                stream,
+                StreamEvent(type="error", error_message=message.error_message),
+                model,
+            )
             stream.set_result(message)
             return
 
-        stream.push(StreamEvent(type="done"))
+        await self._emit(stream, StreamEvent(type="done"), model)
         stream.set_result(message)
 
     async def _schedule_chunk(self, chunk: str) -> None:
