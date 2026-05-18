@@ -21,7 +21,6 @@ from cubepi.providers.base import (
     ToolResultMessage,
     Usage,
     UserMessage,
-    _fire_listeners,
     _fire_request_listeners,
     _fire_response_listeners,
     adjust_max_tokens_for_thinking,
@@ -81,16 +80,6 @@ class AnthropicProvider(BaseProvider):
         self._cache_policy: CacheMarkerPolicy = (
             cache_policy or DefaultCacheMarkerPolicy()
         )
-
-    async def _emit(self, ms: MessageStream, event: StreamEvent, model: Model) -> None:
-        """Push an event to the stream and fire chunk listeners in order.
-
-        The synchronous guard on ``self._chunk_listeners`` makes the no-listener
-        case zero-await — important because this fires on every text delta.
-        """
-        ms.push(event)
-        if self._chunk_listeners:
-            await _fire_listeners(self._chunk_listeners, event, model)
 
     async def stream(
         self,

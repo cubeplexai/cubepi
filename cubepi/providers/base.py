@@ -533,3 +533,30 @@ class BaseProvider:
         """
         self._response_listeners.append(cb)
         return lambda: _detach(self._response_listeners, cb)
+
+    async def _emit(
+        self,
+        ms: "MessageStream",
+        event: "StreamEvent",
+        model: Model | None,
+    ) -> None:
+        """Push an event to the message stream and fan out to chunk
+        listeners with an isolated deep copy.
+
+        The synchronous guard on ``self._chunk_listeners`` makes the
+        no-listener case zero-await — important because this fires on
+        every text delta. When listeners are present, each receives a
+        ``model_copy(deep=True)`` of the event so a redacting/mutating
+        observer cannot edit the same object that was already enqueued
+        for the ``async for`` consumer.
+
+        ``model`` may be ``None`` when invoked from internal helpers
+        that bypass ``stream()`` (e.g. ``FauxProvider._stream_with_deltas``
+        is exposed for direct calls in tests). In that case the listener
+        fan-out is skipped — the test isn't observing listeners anyway.
+        """
+        ms.push(event)
+        if model is not None and self._chunk_listeners:
+            await _fire_listeners(
+                self._chunk_listeners, event.model_copy(deep=True), model
+            )

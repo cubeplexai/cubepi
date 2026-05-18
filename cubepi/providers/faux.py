@@ -20,7 +20,6 @@ from cubepi.providers.base import (
     ToolCall,
     ToolDefinition,
     Usage,
-    _fire_listeners,
     _fire_request_listeners,
     _fire_response_listeners,
     invoke_on_payload,
@@ -170,20 +169,6 @@ class FauxProvider(BaseProvider):
         self._prompt_cache: dict[str, str] = {}
         # Monotonic counter for deterministic _assemble_response ids.
         self._response_seq = 0
-
-    async def _emit(
-        self, ms: MessageStream, event: StreamEvent, model: Model | None
-    ) -> None:
-        """Push an event to the stream and fire chunk listeners in order.
-
-        ``model`` may be None when invoked from internal helpers
-        (``_stream_with_deltas`` is exposed for direct calls in tests). In
-        that case listener fan-out is skipped — the test isn't observing
-        listeners anyway.
-        """
-        ms.push(event)
-        if model is not None and self._chunk_listeners:
-            await _fire_listeners(self._chunk_listeners, event, model)
 
     @staticmethod
     def _assemble_response(

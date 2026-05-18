@@ -24,7 +24,6 @@ from cubepi.providers.base import (
     ToolResultMessage,
     Usage,
     UserMessage,
-    _fire_listeners,
     _fire_request_listeners,
     _fire_response_listeners,
     invoke_on_payload,
@@ -55,12 +54,6 @@ class OpenAIProvider(BaseProvider):
         self._client = openai.AsyncOpenAI(**kwargs)
         self._payload_quirks: set[str] = set(payload_quirks or [])
         self._extra_body: dict[str, Any] = extra_body or {}
-
-    async def _emit(self, ms: MessageStream, event: StreamEvent, model: Model) -> None:
-        """Push an event to the stream and fire chunk listeners in order."""
-        ms.push(event)
-        if self._chunk_listeners:
-            await _fire_listeners(self._chunk_listeners, event, model)
 
     async def stream(
         self,

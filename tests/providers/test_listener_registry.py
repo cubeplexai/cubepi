@@ -207,6 +207,41 @@ class TestPayloadOrdering:
         assert seen[0].get("mutated_by_on_payload") is True
 
 
+class TestChunkListenerImmutability:
+    async def test_listener_mutation_does_not_leak_to_consumer(self):
+        """subscribe_chunk listeners receive a deep copy of the StreamEvent
+        so a redacting/mutating observer cannot edit what `async for ev in
+        ms` consumers (e.g. cubepi/agent/loop.py) observe."""
+        provider = FauxProvider()
+        consumer_events: list = []
+
+        def redactor(event, model):
+            # Try to mutate — this should NOT affect the consumer-side
+            # event of the same chunk.
+            if event.partial is not None:
+                event.partial.content.clear()
+
+        provider.subscribe_chunk(redactor)
+        provider.append_responses([faux_assistant_message("hello world")])
+        ms = await provider.stream(MODEL, [UserMessage(content=[])])
+        async for ev in ms:
+            consumer_events.append(ev)
+        await ms.result()
+
+        # The consumer should have seen at least one text_delta event
+        # whose partial.content was NOT empty. If the redactor's mutation
+        # had leaked, every event's partial.content would be empty.
+        text_deltas = [
+            e
+            for e in consumer_events
+            if e.type == "text_delta" and e.partial is not None
+        ]
+        assert text_deltas, "expected at least one text_delta on the consumer side"
+        assert any(ev.partial.content for ev in text_deltas), (
+            "redactor's mutation leaked into consumer's queued events"
+        )
+
+
 class TestRequestListenerImmutability:
     async def test_listener_mutation_does_not_leak_into_next_listener(self):
         """subscribe_request gets a defensive deep copy of the payload —
