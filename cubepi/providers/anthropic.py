@@ -6,6 +6,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from cubepi.providers.base import (
     AssistantMessage,
+    BaseProvider,
     ImageContent,
     Message,
     MessageStream,
@@ -20,6 +21,7 @@ from cubepi.providers.base import (
     ToolResultMessage,
     Usage,
     UserMessage,
+    _fire_listeners,
     adjust_max_tokens_for_thinking,
     invoke_on_payload,
     invoke_on_response,
@@ -57,7 +59,7 @@ class DefaultCacheMarkerPolicy:
         return [len(messages) - 1] if messages else []
 
 
-class AnthropicProvider:
+class AnthropicProvider(BaseProvider):
     def __init__(
         self,
         *,
@@ -66,6 +68,7 @@ class AnthropicProvider:
         cache_retention: CacheRetention = "short",
         cache_policy: CacheMarkerPolicy | None = None,
     ) -> None:
+        super().__init__()
         import anthropic
 
         kwargs: dict[str, Any] = {"api_key": api_key}
@@ -76,6 +79,18 @@ class AnthropicProvider:
         self._cache_policy: CacheMarkerPolicy = (
             cache_policy or DefaultCacheMarkerPolicy()
         )
+
+    async def _emit(
+        self, ms: MessageStream, event: StreamEvent, model: Model
+    ) -> None:
+        """Push an event to the stream and fire chunk listeners in order.
+
+        The synchronous guard on ``self._chunk_listeners`` makes the no-listener
+        case zero-await — important because this fires on every text delta.
+        """
+        ms.push(event)
+        if self._chunk_listeners:
+            await _fire_listeners(self._chunk_listeners, event, model)
 
     async def stream(
         self,
@@ -138,9 +153,13 @@ class AnthropicProvider:
             }
 
         async def _produce() -> None:
+            body: dict | None = None
+            exc: BaseException | None = None
             try:
                 nonlocal kwargs
                 kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
+                if self._request_listeners:
+                    await _fire_listeners(self._request_listeners, kwargs, model)
 
                 async with self._client.messages.stream(**kwargs) as stream:
                     # Invoke on_response with HTTP metadata if available
@@ -162,8 +181,10 @@ class AnthropicProvider:
                         provider_id=model.provider,
                         model_id=model.id,
                     )
-                    ms.push(
-                        StreamEvent(type="start", partial=partial.model_copy(deep=True))
+                    await self._emit(
+                        ms,
+                        StreamEvent(type="start", partial=partial.model_copy(deep=True)),
+                        model,
                     )
 
                     async for event in stream:
@@ -174,34 +195,45 @@ class AnthropicProvider:
                                     "error_message": "Request was aborted",
                                 }
                             )
-                            ms.push(
+                            await self._emit(
+                                ms,
                                 StreamEvent(
                                     type="error",
                                     error_message="Request was aborted",
-                                )
+                                ),
+                                model,
                             )
                             ms.set_result(aborted)
                             return
 
-                        self._handle_event(event, partial, ms)
+                        await self._handle_event(event, partial, ms, model)
 
                     final_msg = await stream.get_final_message()
                     result = self._convert_response(final_msg, model)
-                    ms.push(StreamEvent(type="done"))
+                    body = self._assemble_response(final_msg)
+                    await self._emit(ms, StreamEvent(type="done"), model)
                     ms.set_result(result)
 
-            except BaseException as exc:
+            except BaseException as e:
+                exc = e
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
-                    error_message=str(exc),
+                    error_message=str(e),
                     usage=Usage(),
                     timestamp=time.time(),
                 )
-                ms.push(StreamEvent(type="error", error_message=str(exc)))
+                await self._emit(
+                    ms, StreamEvent(type="error", error_message=str(e)), model
+                )
                 ms.set_result(error_msg)
-                if not isinstance(exc, Exception):
+                if not isinstance(e, Exception):
                     raise
+            finally:
+                if self._response_listeners:
+                    await _fire_listeners(
+                        self._response_listeners, body, model, exc
+                    )
 
         ms.attach_task(asyncio.create_task(_produce()))
         return ms
@@ -331,8 +363,12 @@ class AnthropicProvider:
             "input_schema": td.parameters,
         }
 
-    def _handle_event(
-        self, event: Any, partial: AssistantMessage, ms: MessageStream
+    async def _handle_event(
+        self,
+        event: Any,
+        partial: AssistantMessage,
+        ms: MessageStream,
+        model: Model,
     ) -> None:
         etype = getattr(event, "type", "")
         if etype == "content_block_start":
@@ -340,32 +376,38 @@ class AnthropicProvider:
             block = event.content_block
             if block.type == "text":
                 partial.content.append(TextContent(text=""))
-                ms.push(
+                await self._emit(
+                    ms,
                     StreamEvent(
                         type="text_start",
                         content_index=idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
             elif block.type == "thinking":
                 partial.content.append(ThinkingContent(thinking=""))
-                ms.push(
+                await self._emit(
+                    ms,
                     StreamEvent(
                         type="thinking_start",
                         content_index=idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
             elif block.type == "tool_use":
                 partial.content.append(
                     ToolCall(id=block.id, name=block.name, arguments={})
                 )
-                ms.push(
+                await self._emit(
+                    ms,
                     StreamEvent(
                         type="toolcall_start",
                         content_index=idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
         elif etype == "content_block_delta":
             idx = getattr(event, "index", len(partial.content) - 1)
@@ -375,64 +417,129 @@ class AnthropicProvider:
                     partial.content[-1] = TextContent(
                         text=partial.content[-1].text + delta.text
                     )
-                ms.push(
+                await self._emit(
+                    ms,
                     StreamEvent(
                         type="text_delta",
                         delta=delta.text,
                         content_index=idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
             elif hasattr(delta, "thinking"):
                 if partial.content and isinstance(partial.content[-1], ThinkingContent):
                     partial.content[-1] = ThinkingContent(
                         thinking=partial.content[-1].thinking + delta.thinking
                     )
-                ms.push(
+                await self._emit(
+                    ms,
                     StreamEvent(
                         type="thinking_delta",
                         delta=delta.thinking,
                         content_index=idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
             elif hasattr(delta, "partial_json"):
-                ms.push(
+                await self._emit(
+                    ms,
                     StreamEvent(
                         type="toolcall_delta",
                         delta=delta.partial_json,
                         content_index=idx,
                         partial=partial.model_copy(deep=True),
-                    )
+                    ),
+                    model,
                 )
         elif etype == "content_block_stop":
             idx = getattr(event, "index", len(partial.content) - 1)
             if partial.content:
                 last = partial.content[-1]
                 if isinstance(last, TextContent):
-                    ms.push(
+                    await self._emit(
+                        ms,
                         StreamEvent(
                             type="text_end",
                             content_index=idx,
                             partial=partial.model_copy(deep=True),
-                        )
+                        ),
+                        model,
                     )
                 elif isinstance(last, ThinkingContent):
-                    ms.push(
+                    await self._emit(
+                        ms,
                         StreamEvent(
                             type="thinking_end",
                             content_index=idx,
                             partial=partial.model_copy(deep=True),
-                        )
+                        ),
+                        model,
                     )
                 elif isinstance(last, ToolCall):
-                    ms.push(
+                    await self._emit(
+                        ms,
                         StreamEvent(
                             type="toolcall_end",
                             content_index=idx,
                             partial=partial.model_copy(deep=True),
-                        )
+                        ),
+                        model,
                     )
+
+    @staticmethod
+    def _assemble_response(final_msg: Any) -> dict[str, Any]:
+        """Assemble Anthropic's non-streaming ``messages.create()`` response
+        shape from the final streaming Message object.
+
+        Mirrors the REST API response keys. Used to populate the assembled
+        ``body`` argument passed to ``subscribe_response`` listeners.
+        """
+        content: list[dict[str, Any]] = []
+        for block in final_msg.content:
+            btype = getattr(block, "type", None)
+            if btype == "text":
+                content.append({"type": "text", "text": block.text})
+            elif btype == "thinking":
+                content.append({"type": "thinking", "thinking": block.thinking})
+            elif btype == "tool_use":
+                content.append(
+                    {
+                        "type": "tool_use",
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
+                    }
+                )
+
+        usage = getattr(final_msg, "usage", None)
+        usage_dict: dict[str, Any] = {}
+        if usage is not None:
+            usage_dict = {
+                "input_tokens": getattr(usage, "input_tokens", 0),
+                "output_tokens": getattr(usage, "output_tokens", 0),
+                "cache_read_input_tokens": getattr(
+                    usage, "cache_read_input_tokens", 0
+                )
+                or 0,
+                "cache_creation_input_tokens": getattr(
+                    usage, "cache_creation_input_tokens", 0
+                )
+                or 0,
+            }
+
+        body: dict[str, Any] = {
+            "id": getattr(final_msg, "id", None),
+            "type": "message",
+            "role": "assistant",
+            "model": getattr(final_msg, "model", None),
+            "content": content,
+            "stop_reason": getattr(final_msg, "stop_reason", None),
+            "stop_sequence": getattr(final_msg, "stop_sequence", None),
+            "usage": usage_dict,
+        }
+        return body
 
     @staticmethod
     def _convert_response(response: Any, model: Model) -> AssistantMessage:
