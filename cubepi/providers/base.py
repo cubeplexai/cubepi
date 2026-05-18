@@ -284,9 +284,10 @@ def _fire_listeners_sync(listeners: list[Callable], *args: Any) -> None:
     a subsequent ``await`` may not get a chance to run its callee's body.
 
     Sync listeners are invoked directly. Async listeners are scheduled as
-    detached tasks (best-effort — completion is not guaranteed before the
-    event loop tears down). Use sync listeners when you need cancellation-
-    proof delivery of the response observation."""
+    detached tasks wrapped in :func:`_safe_run_coroutine` so that any
+    exception raised inside the coroutine body is logged via
+    :func:`_log_listener_exception` rather than bubbling up to asyncio as
+    an "unhandled task exception" warning."""
     if not listeners:
         return
     for cb in tuple(listeners):
@@ -294,12 +295,22 @@ def _fire_listeners_sync(listeners: list[Callable], *args: Any) -> None:
             result = cb(*args)
             if inspect.isawaitable(result):
                 try:
-                    asyncio.create_task(result)
+                    asyncio.create_task(_safe_run_coroutine(cb, result))
                 except RuntimeError:
                     # No running event loop (e.g. teardown) — drop.
                     pass
         except Exception as exc:  # noqa: BLE001 — intentional broad catch
             _log_listener_exception(cb, exc)
+
+
+async def _safe_run_coroutine(cb: Callable, coro: Any) -> None:
+    """Await an arbitrary coroutine, logging and swallowing any exception
+    it raises. Used by :func:`_fire_listeners_sync` so async listener
+    failures don't become asyncio unhandled-task-exception warnings."""
+    try:
+        await coro
+    except Exception as exc:  # noqa: BLE001 — intentional broad catch
+        _log_listener_exception(cb, exc)
 
 
 def _log_listener_exception(cb: Callable, exc: BaseException) -> None:

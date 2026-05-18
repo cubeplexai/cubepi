@@ -319,3 +319,75 @@ class TestSlowListenerBlocks:
         # n_chunks should be >= 4 (start, text_start, deltas..., text_end, done).
         assert n_chunks >= 4
         assert elapsed >= n_chunks * per_chunk_sleep * 0.8  # 20% leeway
+
+
+class TestAsyncListeners:
+    async def test_async_request_listener_awaited(self):
+        provider = FauxProvider()
+        seen: list = []
+
+        async def cb(payload, model):
+            await asyncio.sleep(0)
+            seen.append(payload)
+
+        provider.subscribe_request(cb)
+        await _run_once(provider, "ok")
+        assert len(seen) == 1
+
+    async def test_async_response_listener_runs_through_normal_completion(self):
+        """In the normal-completion path, async response listeners are
+        scheduled as detached tasks by _fire_listeners_sync. Verify the
+        coroutine body actually runs."""
+        provider = FauxProvider()
+        ran = asyncio.Event()
+
+        async def cb(body, model, exc):
+            await asyncio.sleep(0)
+            ran.set()
+
+        provider.subscribe_response(cb)
+        await _run_once(provider, "ok")
+        # Give the detached task one tick to complete.
+        await asyncio.wait_for(ran.wait(), timeout=1.0)
+        assert ran.is_set()
+
+    async def test_async_response_listener_exception_does_not_bubble(self):
+        """Per the _fire_listeners_sync contract, async listener exceptions
+        are wrapped in _safe_run_coroutine and swallowed. This must not
+        surface as an asyncio unhandled-task-exception warning."""
+        provider = FauxProvider()
+        bombed = asyncio.Event()
+
+        async def bomb(body, model, exc):
+            bombed.set()
+            raise RuntimeError("async listener bomb")
+
+        provider.subscribe_response(bomb)
+        # Should complete normally despite the listener exception.
+        await _run_once(provider, "ok")
+        # Wait for the detached task to actually run.
+        await asyncio.wait_for(bombed.wait(), timeout=1.0)
+        # Yield once more so the inner coroutine has a chance to raise
+        # and be caught by _safe_run_coroutine.
+        await asyncio.sleep(0.01)
+
+
+class TestBaseProvider:
+    """Cover BaseProvider sentinels not exercised by Faux."""
+
+    async def test_stream_raises_not_implemented(self):
+        from cubepi.providers.base import BaseProvider
+
+        class Empty(BaseProvider):
+            pass
+
+        with pytest.raises(NotImplementedError):
+            await Empty().stream(MODEL, [UserMessage(content=[])])
+
+    def test_detach_is_idempotent(self):
+        provider = FauxProvider()
+        detach = provider.subscribe_request(lambda p, m: None)
+        detach()
+        # Calling detach again must not raise even though the listener is
+        # already gone — covers the ValueError swallow in _detach.
+        detach()

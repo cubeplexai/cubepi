@@ -97,8 +97,6 @@ class OpenAIProvider(BaseProvider):
             try:
                 nonlocal kwargs
                 kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
-                if self._request_listeners:
-                    await _fire_listeners(self._request_listeners, kwargs, model)
 
                 if "max_completion_tokens_alias" in self._payload_quirks:
                     if "max_completion_tokens" in kwargs:
@@ -121,6 +119,13 @@ class OpenAIProvider(BaseProvider):
                 so = kwargs.setdefault("stream_options", {})
                 if "include_usage" not in so:
                     so["include_usage"] = True
+
+                # Fire request listeners AFTER all kwargs mutations so observers
+                # see the final wire payload (including extra_body merges,
+                # max_completion_tokens_alias rewrite, and stream_options
+                # injection). The on_payload mutator already ran above.
+                if self._request_listeners:
+                    await _fire_listeners(self._request_listeners, kwargs, model)
 
                 response = await self._client.chat.completions.create(**kwargs)
 
