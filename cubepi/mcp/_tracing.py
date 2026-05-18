@@ -50,41 +50,84 @@ except ImportError:  # pragma: no cover — exercised only without the extra.
 
 
 # When :class:`cubepi.tracing.Tracer` is attached to an agent it
-# registers its private :class:`TracerProvider` here. Without this
-# registration, ``_otel_trace.get_tracer`` falls back to the OTel
+# pushes its private :class:`TracerProvider` onto this stack. Without
+# any registration, ``_otel_trace.get_tracer`` falls back to the OTel
 # global default — which is a no-op provider unless the caller also
-# did ``set_tracer_provider`` themselves. ``Tracer.attach`` calls
-# :func:`register_provider`; the corresponding ``detach`` callable
-# clears it.
-_registered_provider: Any | None = None
+# did ``set_tracer_provider`` themselves.
+#
+# Using a stack rather than a single slot lets one Tracer attach to
+# multiple agents (each attach pushes a token; each detach pops just
+# its own entry) and supports detaches in any order without clearing
+# routing for the still-attached agents.
+_provider_stack: list[tuple[object, Any]] = []
 
 
-def register_provider(provider: Any) -> None:
-    """Register a non-global TracerProvider as the source for MCP CLIENT
-    spans. Called by :meth:`cubepi.tracing.Tracer.attach`.
+def register_provider(provider: Any) -> object:
+    """Push ``provider`` onto the routing stack as the preferred source
+    for MCP spans. Returns an opaque token that
+    :func:`unregister_provider` uses to remove this exact entry.
+
+    Called by :meth:`cubepi.tracing.Tracer.attach`.
     """
-    global _registered_provider
-    _registered_provider = provider
+    token = object()
+    _provider_stack.append((token, provider))
+    return token
 
 
-def unregister_provider() -> None:
-    """Reverse :func:`register_provider`. Called by the detach callable
-    returned from :meth:`cubepi.tracing.Tracer.attach`.
+def unregister_provider(token: object | None = None) -> None:
+    """Remove a previously-registered provider.
+
+    ``token`` is the value returned from :func:`register_provider`.
+    When ``None`` (legacy callers) the most recent entry is popped.
+    Out-of-order detaches affect only their own registration; siblings
+    remain.
     """
-    global _registered_provider
-    _registered_provider = None
+    if not _provider_stack:
+        return
+    if token is None:
+        _provider_stack.pop()
+        return
+    for i, (t, _p) in enumerate(_provider_stack):
+        if t is token:
+            _provider_stack.pop(i)
+            return
 
 
 def _get_tracer(scope_name: str) -> Any:
     """Resolve the tracer to use for emitting an MCP span.
 
-    Prefers the provider registered by ``cubepi.tracing.Tracer`` over
-    OTel's global default (which is a no-op unless the user separately
-    called ``set_tracer_provider``).
+    Prefers the most recently-registered provider over OTel's global
+    default (which is a no-op unless the user separately called
+    ``set_tracer_provider``).
     """
-    if _registered_provider is not None:
-        return _registered_provider.get_tracer(scope_name)
+    if _provider_stack:
+        return _provider_stack[-1][1].get_tracer(scope_name)
     return _otel_trace.get_tracer(scope_name)
+
+
+# When the cubepi Recorder opens an ``execute_tool`` span, it registers
+# it here keyed by ``tool_call_id``. The MCP adapter looks up the
+# parent span by tool_call_id and passes it as an explicit context to
+# :func:`mcp_client_span`, so the MCP CLIENT span becomes a child of
+# the agent's ``execute_tool`` span rather than starting an orphan
+# trace under the OTel "current span" (which the recorder doesn't
+# bother making current — see docs/specs/2026-05-18-cubepi-tracing-
+# design.md §9).
+_active_tool_spans: dict[str, Any] = {}
+
+
+def register_tool_span(tool_call_id: str, span: Any) -> None:
+    _active_tool_spans[tool_call_id] = span
+
+
+def unregister_tool_span(tool_call_id: str) -> None:
+    _active_tool_spans.pop(tool_call_id, None)
+
+
+def _get_tool_span(tool_call_id: str | None) -> Any:
+    if tool_call_id is None:
+        return None
+    return _active_tool_spans.get(tool_call_id)
 
 
 def _current_span_via_registered() -> Any:
@@ -122,6 +165,7 @@ async def mcp_client_span(
     protocol_version: str | None = None,
     server_address: str | None = None,
     server_port: int | None = None,
+    parent_tool_call_id: str | None = None,
 ) -> AsyncIterator[Any]:
     """Open an OTel CLIENT span around an MCP RPC.
 
@@ -135,6 +179,15 @@ async def mcp_client_span(
 
     tracer = _get_tracer(_SCOPE_NAME)
     span_name = f"{method} {tool_name}" if tool_name else method
+    # Resolve explicit parent: if the caller passed a tool_call_id and
+    # the cubepi recorder has an active ``execute_tool`` span for it,
+    # make the MCP CLIENT span its child rather than an orphan trace.
+    parent_span = _get_tool_span(parent_tool_call_id)
+    parent_context = (
+        _otel_trace.set_span_in_context(parent_span)
+        if parent_span is not None
+        else None
+    )
     attrs: dict[str, Any] = {
         _MCP_METHOD_NAME: method,
         _GEN_AI_OPERATION_NAME: "execute_tool",
@@ -150,7 +203,12 @@ async def mcp_client_span(
     if server_port is not None:
         attrs[_SERVER_PORT] = server_port
 
-    span = tracer.start_span(span_name, kind=SpanKind.CLIENT, attributes=attrs)
+    span = tracer.start_span(
+        span_name,
+        kind=SpanKind.CLIENT,
+        attributes=attrs,
+        context=parent_context,
+    )
     try:
         # Disable use_span's default record_exception / set_status_on_exception
         # so we are the single source of the exception event and ERROR

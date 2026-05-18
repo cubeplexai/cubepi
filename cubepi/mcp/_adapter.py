@@ -133,10 +133,11 @@ def make_mcp_agent_tool(
         signal=None,
         on_update=None,
     ) -> AgentToolResult:
-        # tool_call_id and on_update are unused by MCP semantics (MCP RPC is
-        # not incremental), but we accept them for signature compatibility
-        # with cubepi's agent loop.
-        del tool_call_id, on_update
+        # on_update is unused by MCP semantics (MCP RPC is not
+        # incremental). ``tool_call_id`` is forwarded as the parent
+        # lookup key so the CLIENT span nests under the cubepi recorder's
+        # execute_tool span when tracing is enabled.
+        del on_update
         args_dict = (
             args.model_dump(exclude_none=True)
             if hasattr(args, "model_dump")
@@ -149,6 +150,7 @@ def make_mcp_agent_tool(
             protocol_version=protocol_version,
             server_address=server_address,
             server_port=server_port,
+            parent_tool_call_id=tool_call_id,
         ) as span:
             result = await call_remote(name, args_dict)
             # MCP server-reported tool failure (``isError: true``): the

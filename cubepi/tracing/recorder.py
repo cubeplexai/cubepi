@@ -439,6 +439,19 @@ class Recorder:
             attributes=attrs,
         )
         run.tool_spans[event.tool_call_id] = span
+        # Expose this execute_tool span to ``cubepi.mcp._tracing`` so an
+        # MCP tool call running inside this span (in the AgentTool body)
+        # can look it up by ``tool_call_id`` and make its CLIENT span a
+        # child. Without this hop, MCP would start its span under the
+        # OTel "current span" — which the recorder doesn't bother making
+        # current — and the CLIENT span would become an orphan root
+        # trace (codex round-6 review on PR #86).
+        try:
+            from cubepi.mcp import _tracing as _mcp_tracing
+
+            _mcp_tracing.register_tool_span(event.tool_call_id, span)
+        except ImportError:  # pragma: no cover — mcp module always present
+            pass
         if self._record_content and event.args is not None:
             self._set_content_attr(
                 span, GEN_AI_TOOL_CALL_ARGUMENTS, _coerce_dict(event.args)
@@ -449,6 +462,12 @@ class Recorder:
         if run is None:
             return
         span = run.tool_spans.pop(event.tool_call_id, None)
+        try:
+            from cubepi.mcp import _tracing as _mcp_tracing
+
+            _mcp_tracing.unregister_tool_span(event.tool_call_id)
+        except ImportError:  # pragma: no cover — mcp module always present
+            pass
         if span is None:
             return
         span.set_attribute(CUBEPI_TOOL_IS_ERROR, event.is_error)

@@ -70,11 +70,18 @@ def _patch_mcp_trace(monkeypatch, provider: TracerProvider) -> None:
         def get_current_span():
             return _trace.get_current_span()
 
+        @staticmethod
+        def set_span_in_context(span, context=None):
+            return _trace.set_span_in_context(span, context)
+
     monkeypatch.setattr(mcp_tracing, "_otel_trace", _ShimTraceMod)
     monkeypatch.setattr(mcp_tracing, "_OTEL_AVAILABLE", True)
-    # Other tests' Tracer.attach() may have populated _registered_provider;
-    # reset for deterministic per-test resolution via the shim above.
-    monkeypatch.setattr(mcp_tracing, "_registered_provider", None)
+    # Other tests' Tracer.attach() may have left entries on the provider
+    # stack; clear so this test resolves via the shim above. Also clear
+    # the tool-span registry — leftover entries would make subsequent
+    # mcp spans nest under a stale execute_tool span.
+    monkeypatch.setattr(mcp_tracing, "_provider_stack", [])
+    monkeypatch.setattr(mcp_tracing, "_active_tool_spans", {})
 
 
 async def _make_tool(
@@ -417,17 +424,184 @@ class TestTracerProviderRouting:
         assert attrs["mcp.method.name"] == "tools/call"
         assert attrs["gen_ai.tool.name"] == "search"
 
-    def test_register_and_unregister_provider(self):
+        # The CLIENT span must be a child of the recorder's
+        # execute_tool span (same trace_id, parent_span_id set), not an
+        # orphan root trace (codex round-6 review on PR #86).
+        client_span = mcp_spans[0]
+        execute_spans = [
+            s for s in exporter.spans if s.name.startswith("execute_tool ")
+        ]
+        assert len(execute_spans) == 1
+        tool_ctx = execute_spans[0].get_span_context()
+        client_ctx = client_span.get_span_context()
+        assert client_ctx.trace_id == tool_ctx.trace_id
+        assert client_span.parent is not None
+        assert client_span.parent.span_id == tool_ctx.span_id
+
+    async def test_two_attaches_detach_one_keeps_other_routing(self):
+        """When a Tracer is attached to two agents and one is detached,
+        the remaining agent's MCP spans must still land in the Tracer's
+        exporter. Refcounted register/unregister is the contract
+        (codex round-6 review on PR #86)."""
+        from cubepi.agent.agent import Agent
+        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.faux import FauxProvider, faux_assistant_message
+        from cubepi.tracing import Tracer
+
+        exporter = _CaptureExporter()
+
+        async def call_remote(name, args):
+            return {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+        from cubepi.mcp._adapter import make_mcp_agent_tool
+
+        def _make_agent():
+            mcp_tool = make_mcp_agent_tool(
+                name="search",
+                description="search",
+                input_schema={
+                    "type": "object",
+                    "properties": {"q": {"type": "string"}},
+                },
+                call_remote=call_remote,
+            )
+            provider_a = FauxProvider()
+            provider_a.append_responses(
+                [
+                    faux_assistant_message(
+                        [ToolCall(id="tc1", name="search", arguments={"q": "x"})],
+                        stop_reason="tool_use",
+                    ),
+                    faux_assistant_message("done"),
+                ]
+            )
+            return Agent(
+                provider=provider_a,
+                model=Model(id="faux-1", provider="faux"),
+                system_prompt="s",
+                tools=[mcp_tool],
+            )
+
+        agent_a = _make_agent()
+        agent_b = _make_agent()
+
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        detach_a = tracer.attach(agent_a)
+        detach_b = tracer.attach(agent_b)
+
+        try:
+            # Detach the first attachment; agent_b's runs must still
+            # route MCP spans through the Tracer's exporter.
+            detach_a()
+
+            await agent_b.prompt("go")
+            await agent_b.wait_for_idle()
+        finally:
+            detach_b()
+            await tracer.shutdown()
+
+        mcp_spans = [s for s in exporter.spans if s.name.startswith("tools/call ")]
+        assert len(mcp_spans) == 1, (
+            "MCP routing for the still-attached agent broke when the "
+            "other agent's detach was called"
+        )
+
+    def test_register_and_unregister_provider(self, monkeypatch):
         from cubepi.mcp import _tracing as mcp_tracing
 
-        assert mcp_tracing._registered_provider is None
+        # Start from a clean stack so the assertion below is well-defined
+        # regardless of other tests' attach()/detach() side-effects.
+        monkeypatch.setattr(mcp_tracing, "_provider_stack", [])
+
         sentinel = object()
-        mcp_tracing.register_provider(sentinel)
+        token = mcp_tracing.register_provider(sentinel)
         try:
-            assert mcp_tracing._registered_provider is sentinel
+            assert mcp_tracing._provider_stack[-1][1] is sentinel
         finally:
-            mcp_tracing.unregister_provider()
-        assert mcp_tracing._registered_provider is None
+            mcp_tracing.unregister_provider(token)
+        assert mcp_tracing._provider_stack == []
+
+    def test_unregister_only_removes_own_token(self, monkeypatch):
+        """Two providers registered in sequence; detaching the first
+        must leave the second's registration intact so MCP spans
+        continue flowing through it. Without this, a Tracer attached to
+        agent A and B then detached from A would drop MCP routing for B
+        (codex round-6 review on PR #86)."""
+        from cubepi.mcp import _tracing as mcp_tracing
+
+        monkeypatch.setattr(mcp_tracing, "_provider_stack", [])
+
+        first = object()
+        second = object()
+        t1 = mcp_tracing.register_provider(first)
+        t2 = mcp_tracing.register_provider(second)
+        try:
+            # Detach the first registration; the second must remain
+            # routable. The most-recently-pushed provider wins on lookup.
+            mcp_tracing.unregister_provider(t1)
+            assert len(mcp_tracing._provider_stack) == 1
+            assert mcp_tracing._provider_stack[-1][1] is second
+        finally:
+            mcp_tracing.unregister_provider(t2)
+        assert mcp_tracing._provider_stack == []
+
+
+class TestMCPSpanParentage:
+    """Phase 5 round 6: the MCP CLIENT span must nest under the
+    cubepi recorder's ``execute_tool`` span, not start an orphan root
+    trace. The recorder publishes its execute_tool span by tool_call_id;
+    the adapter passes the id through to ``mcp_client_span`` which uses
+    it as the explicit parent context."""
+
+    async def test_mcp_span_parented_to_registered_tool_span(self, monkeypatch):
+        provider, exporter = _make_provider()
+        _patch_mcp_trace(monkeypatch, provider)
+
+        # Open a synthetic "execute_tool" span and register it as the
+        # parent for tool_call_id "tc1" — the same hook the cubepi
+        # recorder uses.
+        from cubepi.mcp import _tracing as mcp_tracing
+
+        tracer = provider.get_tracer("test")
+        tool_span = tracer.start_span("execute_tool search")
+        mcp_tracing.register_tool_span("tc1", tool_span)
+        try:
+
+            async def call_remote(name, args):
+                return {"content": [], "isError": False}
+
+            tool = await _make_tool(call_remote)
+            await tool.execute("tc1", tool.parameters.model_validate({"q": "x"}))
+        finally:
+            mcp_tracing.unregister_tool_span("tc1")
+            tool_span.end()
+
+        mcp_spans = [s for s in exporter.spans if s.name.startswith("tools/call ")]
+        assert len(mcp_spans) == 1
+        client_span = mcp_spans[0]
+        tool_ctx = tool_span.get_span_context()
+        client_ctx = client_span.get_span_context()
+        # Same trace_id, parent points at the execute_tool span.
+        assert client_ctx.trace_id == tool_ctx.trace_id
+        assert client_span.parent is not None
+        assert client_span.parent.span_id == tool_ctx.span_id
+
+    async def test_mcp_span_orphan_when_no_registered_parent(self, monkeypatch):
+        """Without a registered parent, the MCP span starts a new
+        root trace. Pinning this so the parented-path test above is
+        meaningful (i.e., parenting only kicks in when we ask for it)."""
+        provider, exporter = _make_provider()
+        _patch_mcp_trace(monkeypatch, provider)
+
+        async def call_remote(name, args):
+            return {"content": [], "isError": False}
+
+        tool = await _make_tool(call_remote)
+        await tool.execute("no-parent-tc", tool.parameters.model_validate({"q": "x"}))
+
+        mcp_spans = [s for s in exporter.spans if s.name.startswith("tools/call ")]
+        assert len(mcp_spans) == 1
+        assert mcp_spans[0].parent is None
 
 
 class TestLoaderHelpers:
