@@ -45,6 +45,8 @@ class _PreparedToolCall:
 class _ImmediateOutcome:
     result: AgentToolResult
     is_error: bool
+    blocked_by_hook: bool = False
+    block_reason: str | None = None
 
 
 @dataclass
@@ -52,6 +54,8 @@ class _FinalizedOutcome:
     tool_call: ToolCall
     result: AgentToolResult
     is_error: bool
+    blocked_by_hook: bool = False
+    block_reason: str | None = None
 
 
 def _error_result(message: str) -> AgentToolResult:
@@ -109,6 +113,8 @@ async def _prepare_tool_call(
                         before_result.reason or "Tool execution was blocked"
                     ),
                     is_error=True,
+                    blocked_by_hook=True,
+                    block_reason=before_result.reason,
                 )
         except Exception as exc:
             return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
@@ -267,6 +273,8 @@ async def _execute_sequential(
                 tool_call=tc,
                 result=preparation.result,
                 is_error=preparation.is_error,
+                blocked_by_hook=preparation.blocked_by_hook,
+                block_reason=preparation.block_reason,
             )
         else:
             result, is_error = await _execute_prepared(preparation, signal, emit_fn)
@@ -287,6 +295,9 @@ async def _execute_sequential(
                 tool_name=tc.name,
                 result=finalized.result,
                 is_error=finalized.is_error,
+                terminate=bool(finalized.result.terminate),
+                blocked_by_hook=finalized.blocked_by_hook,
+                block_reason=finalized.block_reason,
             ),
         )
         tool_msg = _make_tool_result_message(finalized)
@@ -326,6 +337,8 @@ async def _execute_parallel(
                 tool_call=tc,
                 result=preparation.result,
                 is_error=preparation.is_error,
+                blocked_by_hook=preparation.blocked_by_hook,
+                block_reason=preparation.block_reason,
             )
             await emit_event(
                 emit_fn,
@@ -334,6 +347,9 @@ async def _execute_parallel(
                     tool_name=tc.name,
                     result=finalized.result,
                     is_error=finalized.is_error,
+                    terminate=bool(finalized.result.terminate),
+                    blocked_by_hook=finalized.blocked_by_hook,
+                    block_reason=finalized.block_reason,
                 ),
             )
             entries.append(finalized)
@@ -357,6 +373,9 @@ async def _execute_parallel(
                         tool_name=prep.tool_call.name,
                         result=fin.result,
                         is_error=fin.is_error,
+                        terminate=bool(fin.result.terminate),
+                        blocked_by_hook=fin.blocked_by_hook,
+                        block_reason=fin.block_reason,
                     ),
                 )
                 return fin

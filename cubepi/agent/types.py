@@ -153,6 +153,18 @@ class ToolExecutionEndEvent(BaseModel):
     tool_name: str
     result: Any = None
     is_error: bool = False
+    terminate: bool = False
+    """True iff the tool's AgentToolResult.terminate was True (or the
+    after_tool_call hook set terminate=True). Recorders use this to mark
+    the turn as terminated-by-tool without unwrapping ``result``."""
+    blocked_by_hook: bool = False
+    """True iff the tool call was blocked by a ``before_tool_call`` hook
+    returning ``block=True``. Distinguishes hook-blocks from other
+    immediate errors (tool-not-found, arg-validation failure)."""
+    block_reason: str | None = None
+    """When ``blocked_by_hook`` is True, the reason string from
+    ``BeforeToolCallResult.reason`` (or ``None`` if the hook supplied
+    no reason)."""
 
 
 AgentEvent = (
