@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.trace import SpanKind, StatusCode
@@ -402,9 +401,10 @@ class TestLifecycle:
         await tracer.shutdown()
         await tracer.shutdown()
 
-    async def test_record_content_true_is_not_yet_supported(self):
-        with pytest.raises(NotImplementedError):
-            Tracer(service_name="s", record_content=True)
+    async def test_record_content_true_is_accepted(self):
+        # Phase 2: record_content=True is supported. No exception.
+        tracer = Tracer(service_name="s", record_content=True, exporters=[])
+        assert tracer is not None
 
 
 class TestJsonlExporter:

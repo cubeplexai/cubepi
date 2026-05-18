@@ -69,15 +69,11 @@ class Tracer:
         agent_version: str | None = None,
         exporters: list[SpanExporter] | None = None,
         record_content: bool = False,
+        redact: "Callable[[str, Any], Any] | None" = None,
         resource: Resource | None = None,
     ) -> None:
-        if record_content:
-            raise NotImplementedError(
-                "record_content=True is Phase 2 of cubepi.tracing. "
-                "Construct with record_content=False (default) for MVP."
-            )
-
         self._record_content = record_content
+        self._redact = redact
         self._resource = resource or _build_resource(
             service_name=service_name,
             service_version=service_version,
@@ -120,6 +116,18 @@ class Tracer:
         """
         return self._otel_tracer
 
+    @property
+    def redact(self) -> "Callable[[str, Any], Any] | None":
+        """Optional ``(key, value) -> value`` filter applied at every
+        ``set_attribute`` site for content attributes.
+
+        Return ``None`` to drop the attribute entirely. Return a value
+        of the same type to substitute. Useful for redacting PII inside
+        ``gen_ai.input.messages`` and friends before they leave the
+        process.
+        """
+        return self._redact
+
     def attach(self, agent: "Agent") -> Callable[[], None]:
         """Wire the cubepi recorder to ``agent``.
 
@@ -130,7 +138,11 @@ class Tracer:
         """
         from cubepi.tracing.recorder import Recorder
 
-        recorder = Recorder(self, record_content=self._record_content)
+        recorder = Recorder(
+            self,
+            record_content=self._record_content,
+            redact=self._redact,
+        )
         return recorder.attach(agent)
 
     async def force_flush(self, timeout_seconds: float = 30.0) -> bool:

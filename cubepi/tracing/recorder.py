@@ -43,12 +43,20 @@ from cubepi.providers.base import (
     ToolResultMessage,
     UserMessage,
 )
+from cubepi.tracing.content import (
+    messages_to_semconv,
+    serialize_for_attribute,
+    system_instructions_to_semconv,
+    tool_definitions_to_semconv,
+)
 from cubepi.tracing.errors import cubepi_error_type_for
 from cubepi.tracing.schema import (
     CUBEPI_ABORTED,
     CUBEPI_AGENT_SYSTEM_PROMPT_SHA256,
     CUBEPI_AGENT_TOOLS,
     CUBEPI_INPUT_MESSAGES_COUNT,
+    CUBEPI_LLM_RAW_REQUEST,
+    CUBEPI_LLM_RAW_RESPONSE,
     CUBEPI_LLM_THINKING_LEVEL,
     CUBEPI_OUTPUT_MESSAGES_COUNT,
     CUBEPI_RUN_ID,
@@ -63,6 +71,12 @@ from cubepi.tracing.schema import (
     CUBEPI_TURN_TOOL_CALLS_COUNT,
     ERROR_TYPE,
     EVENT_GEN_AI_EXCEPTION,
+    GEN_AI_INPUT_MESSAGES,
+    GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_OPERATION_NAME,
     GEN_AI_PROVIDER_NAME,
     GEN_AI_REQUEST_MAX_TOKENS,
@@ -117,6 +131,26 @@ class _RunState:
     new_message_count: int = 0
     # Whether any tool reported terminate=True in the current turn.
     turn_terminated_by_tool: bool = False
+    # Content recording (only used when record_content=True).
+    system_prompt: str | None = None
+    # input_messages: user / tool_result messages — used by the root
+    # span's ``gen_ai.input.messages``. Pure caller-provided input.
+    input_messages: list[Any] = field(default_factory=list)
+    # output_messages: assistant + tool_result messages produced
+    # during the run — used by the root span's ``gen_ai.output.messages``.
+    output_messages: list[Any] = field(default_factory=list)
+    # transcript: ALL messages in chronological order, including prior
+    # assistant turns. Used as the chat span's ``gen_ai.input.messages``
+    # so multi-turn tool-using runs reconstruct correctly — the second
+    # chat call's request includes the prior assistant tool-call
+    # message plus the tool_result, and so must its input.messages
+    # attribute.
+    transcript: list[Any] = field(default_factory=list)
+    # Per-turn message accumulators (cleared at TurnStart).
+    turn_input_messages: list[Any] = field(default_factory=list)
+    turn_output_messages: list[Any] = field(default_factory=list)
+    # Chat-span specific tool_definitions captured at request time.
+    chat_tool_definitions: list[dict] | None = None
 
 
 class Recorder:
@@ -127,9 +161,16 @@ class Recorder:
     agent can host many sequential runs over the recorder's lifetime.
     """
 
-    def __init__(self, tracer: "Tracer", *, record_content: bool = False) -> None:
+    def __init__(
+        self,
+        tracer: "Tracer",
+        *,
+        record_content: bool = False,
+        redact: "Callable[[str, Any], Any] | None" = None,
+    ) -> None:
         self._tracer = tracer
         self._record_content = record_content
+        self._redact = redact
         # Active run state. cubepi agents serialize runs (one
         # ``agent.run()`` at a time per Agent), so a single slot is
         # enough — but defensively key by AgentStartEvent identity
@@ -254,6 +295,31 @@ class Recorder:
         run.agent_span.set_attribute(
             CUBEPI_OUTPUT_MESSAGES_COUNT, run.new_message_count
         )
+        if self._record_content:
+            if run.system_prompt:
+                self._set_content_attr(
+                    run.agent_span,
+                    GEN_AI_SYSTEM_INSTRUCTIONS,
+                    system_instructions_to_semconv(run.system_prompt),
+                )
+            if run.input_messages:
+                self._set_content_attr(
+                    run.agent_span,
+                    GEN_AI_INPUT_MESSAGES,
+                    messages_to_semconv(run.input_messages),
+                )
+            # ``event.messages`` is the run's full new_messages list —
+            # for a normal ``agent.prompt(...)`` it includes the user
+            # prompt(s) as well as the generated assistant/tool replies.
+            # ``gen_ai.output.messages`` should be model output only, so
+            # use the accumulator that tracks just assistant + tool
+            # results.
+            if run.output_messages:
+                self._set_content_attr(
+                    run.agent_span,
+                    GEN_AI_OUTPUT_MESSAGES,
+                    messages_to_semconv(run.output_messages),
+                )
         run.agent_span.end()
         self._run = None
 
@@ -280,12 +346,20 @@ class Recorder:
             },
         )
         run.turn_terminated_by_tool = False
+        run.turn_input_messages = []
+        run.turn_output_messages = []
 
     def _on_turn_end(self, event: TurnEndEvent) -> None:
         run = self._run
         if run is None or run.turn_span is None:
             return
         msg = event.message
+        # Track output messages: assistant + any tool_results from this turn.
+        run.turn_output_messages.append(msg)
+        run.output_messages.append(msg)
+        for tr in getattr(event, "tool_results", []) or []:
+            run.turn_output_messages.append(tr)
+            run.output_messages.append(tr)
         # Map cubepi stop_reason to gen_ai.response.finish_reasons on
         # the chat span — already done in _on_provider_response. Here we
         # record the cubepi-normalized stop_reason on the turn span.
@@ -300,6 +374,20 @@ class Recorder:
         run.turn_span.set_attribute(CUBEPI_TURN_TOOL_CALLS_COUNT, tool_calls_count)
         if run.turn_terminated_by_tool:
             run.turn_span.set_attribute(CUBEPI_TURN_TERMINATED_BY_TOOL, True)
+        # Content: record per-turn input/output messages if enabled.
+        if self._record_content:
+            if run.turn_input_messages:
+                self._set_content_attr(
+                    run.turn_span,
+                    GEN_AI_INPUT_MESSAGES,
+                    messages_to_semconv(run.turn_input_messages),
+                )
+            if run.turn_output_messages:
+                self._set_content_attr(
+                    run.turn_span,
+                    GEN_AI_OUTPUT_MESSAGES,
+                    messages_to_semconv(run.turn_output_messages),
+                )
         # Error handling on the turn: if assistant message stopped with
         # "error", mark turn ERROR. Abort path leaves UNSET + sets
         # cubepi.aborted on the invoke_agent root.
@@ -330,6 +418,9 @@ class Recorder:
             # Per-span run_id so JsonlSpanExporter shards correctly.
             CUBEPI_RUN_ID: run.run_id,
         }
+        # NOTE: gen_ai.tool.call.arguments is opt-in content recorded
+        # after start_span so the redaction hook can run before the
+        # attribute is committed.
         # Lookup AgentTool for description + execution_mode.
         tool_obj = self._find_tool(event.tool_name)
         if tool_obj is not None:
@@ -344,6 +435,10 @@ class Recorder:
             attributes=attrs,
         )
         run.tool_spans[event.tool_call_id] = span
+        if self._record_content and event.args is not None:
+            self._set_content_attr(
+                span, GEN_AI_TOOL_CALL_ARGUMENTS, _coerce_dict(event.args)
+            )
 
     def _on_tool_exec_end(self, event: ToolExecutionEndEvent) -> None:
         run = self._run
@@ -353,6 +448,10 @@ class Recorder:
         if span is None:
             return
         span.set_attribute(CUBEPI_TOOL_IS_ERROR, event.is_error)
+        if self._record_content and event.result is not None:
+            self._set_content_attr(
+                span, GEN_AI_TOOL_CALL_RESULT, _coerce_dict(event.result)
+            )
         if event.terminate:
             span.set_attribute(CUBEPI_TOOL_TERMINATE, True)
             run.turn_terminated_by_tool = True
@@ -380,7 +479,9 @@ class Recorder:
         if run is None:
             return
         msg = event.message
-        # Count user-provided + tool-result messages as input.
+        # Count user-provided + tool-result messages as input. We also
+        # accumulate them for content recording (only emitted on spans
+        # when ``record_content=True``).
         if isinstance(msg, (UserMessage, ToolResultMessage)):
             run.agent_span.set_attribute(
                 CUBEPI_INPUT_MESSAGES_COUNT,
@@ -391,12 +492,24 @@ class Recorder:
                 )
                 + 1,
             )
+            run.input_messages.append(msg)
+            run.turn_input_messages.append(msg)
+            run.transcript.append(msg)
 
     def _on_message_end(self, event: MessageEndEvent) -> None:
-        # Reserved for future use. Currently no-op — chat span is
-        # closed by the provider response listener, and turn span
-        # gets its stop_reason from TurnEndEvent.
-        del event
+        run = self._run
+        if run is None:
+            return
+        # Append assistant / tool_result messages to the transcript so
+        # later chat spans see them in their ``gen_ai.input.messages``.
+        # Note: ``output_messages`` accumulation happens at TurnEnd
+        # (since it includes the synthesized turn snapshot); here we
+        # only update the chronological transcript that drives chat
+        # span input.
+        msg = event.message
+        msg_role = getattr(msg, "role", None)
+        if msg_role in ("assistant", "tool_result"):
+            run.transcript.append(msg)
 
     # ------------------------------------------------------------------
     # Provider listeners — drive the chat span lifetime
@@ -461,7 +574,33 @@ class Recorder:
         run.chat_span = chat_span
         run.chat_open_ns = time.time_ns()
         run.chat_first_chunk_recorded = False
-        # cubepi.llm.raw_request is content; MVP is record_content=False.
+
+        # Content (record_content=True): record system instructions,
+        # input messages, tool definitions, and the raw wire payload.
+        if self._record_content:
+            sys_prompt = _extract_system_prompt(payload)
+            if sys_prompt:
+                run.system_prompt = sys_prompt
+                sys_payload = system_instructions_to_semconv(sys_prompt)
+                if sys_payload:
+                    self._set_content_attr(
+                        chat_span, GEN_AI_SYSTEM_INSTRUCTIONS, sys_payload
+                    )
+            if run.transcript:
+                # chat input = full chronological context the provider
+                # is about to receive (user prompts + earlier
+                # assistant/tool-result turns).
+                self._set_content_attr(
+                    chat_span,
+                    GEN_AI_INPUT_MESSAGES,
+                    messages_to_semconv(run.transcript),
+                )
+            tool_defs = tool_definitions_to_semconv(payload)
+            if tool_defs:
+                run.chat_tool_definitions = tool_defs
+                self._set_content_attr(chat_span, GEN_AI_TOOL_DEFINITIONS, tool_defs)
+            # Raw wire payload — large; gated by record_content.
+            self._set_content_attr(chat_span, CUBEPI_LLM_RAW_REQUEST, payload)
 
     def _on_provider_chunk(self, event: StreamEvent, model: "Model") -> None:
         del model
@@ -493,6 +632,12 @@ class Recorder:
         try:
             if body is not None:
                 self._record_chat_response_attrs(span, body)
+                if self._record_content:
+                    # Output messages on chat span: the assembled body
+                    # itself (provider-shaped). Record both the raw
+                    # response (JSON dict) for backends that prefer it,
+                    # and the normalized output messages where derivable.
+                    self._set_content_attr(span, CUBEPI_LLM_RAW_RESPONSE, body)
             # Cooperative abort: providers may finish the response
             # listener with ``exc is None`` and a body whose finish
             # reason is ``"aborted"`` (faux + the agent's signal path).
@@ -531,6 +676,29 @@ class Recorder:
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
+
+    def _set_content_attr(self, span: Any, key: str, value: Any) -> None:
+        """Set a content attribute on ``span`` with optional redaction.
+
+        ``value`` is JSON-serialized (OTel attribute values can only be
+        simple scalars/sequences, not dicts/lists-of-dicts). When the
+        Tracer has a ``redact`` hook, the raw value is passed through
+        it first; returning ``None`` skips the attribute entirely.
+        """
+        if not self._record_content:
+            return
+        if self._redact is not None:
+            try:
+                value = self._redact(key, value)
+            except Exception:
+                # Redactor must never crash the recorder.
+                return
+            if value is None:
+                return
+        if isinstance(value, str):
+            span.set_attribute(key, value)
+        else:
+            span.set_attribute(key, serialize_for_attribute(value))
 
     def _find_tool(self, name: str):
         """Look up an :class:`AgentTool` by name on the attached agent.
@@ -705,6 +873,24 @@ def _safe_tool_name(t: Any) -> str:
         return str(t.get("name") or "")
     name = getattr(t, "name", None)
     return str(name) if name else ""
+
+
+def _coerce_dict(value: Any) -> Any:
+    """Coerce a pydantic model or arbitrary object into a JSON-safe
+    structure. Returns the value as-is if already a dict/list/scalar.
+    """
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump()
+        except Exception:
+            pass
+    if hasattr(value, "__dict__") and not isinstance(value, type):
+        # Best-effort dataclass-like coercion.
+        try:
+            return dict(vars(value))
+        except Exception:
+            pass
+    return value
 
 
 def _is_cancelled_error(exc: BaseException) -> bool:
