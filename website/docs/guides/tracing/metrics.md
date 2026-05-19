@@ -48,13 +48,14 @@ meter = Meter(
     ],
 )
 
-tracer.attach(agent)
-meter.attach(agent)
+tracer_detach = tracer.attach(agent)
+meter_detach = meter.attach(agent)
 ```
 
-`Meter.attach()` is independent from `Tracer.attach()`. You can run either
-on its own; the recommended setup is both, sharing one Resource so the
-backend treats them as the same service.
+`Meter.attach()` is independent from `Tracer.attach()`. Each returns its
+own detach callable — capture both. You can run either on its own; the
+recommended setup is both, sharing one Resource so the backend treats
+them as the same service.
 
 ## Bucket boundaries
 
@@ -90,10 +91,15 @@ filterable by `gen_ai.agent.name` (set at the `Resource` level when
 
 ```python
 finally:
-    detach()                  # detach from Tracer + Meter
+    tracer_detach()           # closes any spans a cancelled run left open
+    meter_detach()            # unsubscribes the meter's listeners
     await tracer.shutdown()
     await meter.shutdown()
 ```
+
+Order matters: run `tracer_detach()` before `tracer.shutdown()` so any
+spans an in-flight cancellation left open get closed and exported in
+the same flush.
 
 `Meter.shutdown()` awaits a flush of the metric reader, then closes it.
 `PeriodicExportingMetricReader` exports on a fixed interval (60 s by
