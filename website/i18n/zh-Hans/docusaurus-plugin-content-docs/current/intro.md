@@ -53,13 +53,13 @@ pip install cubepi
 
 ## 状态
 
-CubePi 当前版本是 `v0.4.0` —— alpha。相比 0.3 新增了原生
-OpenTelemetry 追踪模块（[指南 →](./guides/tracing/overview)）：
-包含 `Tracer`、`Meter`、内容录制、MCP CLIENT span，以及按 run
-打标签的 `tracing_context`。
+你正在浏览的是 **Next 🚧** 频道 —— 跟踪 `main` 分支的未发布文档。
+这里描述的 API 在打 tag 发布之前还可能变动。
 
-v0.4 的公开 API 已稳定，并冻结在当前快照中。旧版本可以从右上角
-的版本选择器切换。`Next 🚧` 频道跟踪未发布的 main 分支。
+最新已发布版本是 `v0.4.0`（[从右上角版本选择器切换](pathname:///)）。
+相比 0.3 新增了原生 OpenTelemetry 追踪模块
+（[指南 →](./guides/tracing/overview)）：包含 `Tracer`、`Meter`、
+内容录制、MCP CLIENT span，以及按 run 打标签的 `tracing_context`。
 
 源代码、Issue 和讨论都在
 [GitHub](https://github.com/cubeplexai/cubepi)。
