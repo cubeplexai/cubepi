@@ -40,6 +40,7 @@ from cubepi.providers.capability import (
     ReasoningLevelSpec,
     TemperatureSpec,
 )
+from cubepi.providers.catalog import get_provider_preset, list_provider_presets
 
 __all__ = [
     "__version__",
@@ -68,6 +69,8 @@ __all__ = [
     "UserMessage",
     "adjust_max_tokens_for_thinking",
     "compose_middleware",
+    "get_provider_preset",
+    "list_provider_presets",
     "run_agent_loop",
     "run_agent_loop_continue",
 ]
