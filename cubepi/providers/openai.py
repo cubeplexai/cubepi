@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any, Literal
+from typing import Any
 
 from cubepi.utils.json_parse import parse_streaming_json
 
@@ -43,7 +43,6 @@ class OpenAIProvider(BaseProvider):
         *,
         api_key: str | None = None,
         base_url: str | None = None,
-        payload_quirks: list[Literal["max_completion_tokens_alias"]] | None = None,
         extra_body: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
         capability: CapabilityDescriptor | None = None,
@@ -60,7 +59,6 @@ class OpenAIProvider(BaseProvider):
         if extra_headers:
             kwargs["default_headers"] = extra_headers
         self._client: openai.AsyncOpenAI = openai.AsyncOpenAI(**kwargs)
-        self._payload_quirks: set[str] = set(payload_quirks or [])
         self._extra_body: dict[str, Any] = extra_body or {}
 
         # Track whether capability was explicitly passed so the OpenAI path
@@ -114,10 +112,6 @@ class OpenAIProvider(BaseProvider):
                 nonlocal kwargs
                 kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
 
-                if "max_completion_tokens_alias" in self._payload_quirks:
-                    if "max_completion_tokens" in kwargs:
-                        kwargs["max_tokens"] = kwargs.pop("max_completion_tokens")
-
                 # Merge instance-level extra_body into the request kwargs.
                 # Provider-config extra_body (e.g. {"enable_thinking": false}) is
                 # applied here so callers don't need to use on_payload for simple cases.
@@ -158,7 +152,7 @@ class OpenAIProvider(BaseProvider):
 
                 # Fire request listeners AFTER all kwargs mutations so observers
                 # see the final wire payload (including extra_body merges,
-                # max_completion_tokens_alias rewrite, and stream_options
+                # capability-driven max_tokens field rename, and stream_options
                 # injection). The on_payload mutator already ran above.
                 # _fire_request_listeners deep-copies so a listener cannot
                 # accidentally mutate the dict that's about to be sent.
