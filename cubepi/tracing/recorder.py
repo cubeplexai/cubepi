@@ -234,23 +234,31 @@ class Recorder:
             self._close_open_spans(self._run)
             self._sweep_tool_span_tokens(self._run)
 
-        async def _detach_async() -> None:
-            _sync_detach()
-            await self._tracer.force_flush()
+        def detach():
+            """Synchronous cleanup + scheduled flush.
 
-        def detach() -> None:
-            # Synchronous part runs immediately in either path so the
-            # caller can rely on cleanup having happened by the time
-            # ``detach()`` returns.
+            The unsubscribe / open-span close / MCP-token sweep all
+            run synchronously here — observable on the line after
+            ``detach()`` returns. The flush is scheduled as an
+            ``asyncio.Task`` and returned so callers who need the
+            buffered spans persisted before they proceed can
+            ``await detach()`` — the previous fire-and-forget
+            ``create_task(...)`` left them in ``BatchSpanProcessor``
+            indefinitely if the caller exited ``asyncio.run`` (codex
+            overall-review MAJOR).
+
+            Outside an async context (no running loop) returns
+            ``None`` — sync cleanup is done but flush is the caller's
+            responsibility via ``await tracer.shutdown()``.
+            """
             _sync_detach()
             try:
                 import asyncio
 
                 loop = asyncio.get_running_loop()
             except RuntimeError:
-                return  # no loop — sync cleanup already done.
-            # Inside a loop — schedule the remaining async flush.
-            loop.create_task(self._tracer.force_flush())
+                return None
+            return loop.create_task(self._tracer.force_flush())
 
         return detach
 

@@ -494,6 +494,50 @@ class TestErrorAndAbort:
         assert fallback_chat.status.status_code == StatusCode.UNSET
 
 
+class TestDetachFlushGuarantee:
+    """``Tracer.attach()``'s ``detach()`` must let callers await the
+    flush so buffered spans land before they proceed — previously the
+    flush was scheduled fire-and-forget and the caller could exit
+    asyncio.run before BatchSpanProcessor drained (codex overall-
+    review MAJOR)."""
+
+    async def test_detach_returns_awaitable_task(self):
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+
+        # Replicate Tracer.attach's detach: it should return a Task.
+        detach = tracer.attach(agent)
+        # `attach()` already happened in _build, so detach has been
+        # consumed. Build a fresh attach here.
+        await agent.prompt("y")
+        await agent.wait_for_idle()
+        result = detach()
+        assert result is not None, (
+            "detach() inside running loop must return a flush Task; "
+            "got None"
+        )
+        assert asyncio.isfuture(result) or asyncio.iscoroutine(result), (
+            f"detach() must return an awaitable; got {type(result).__name__}"
+        )
+        # Awaiting it must complete the flush.
+        flushed = await result
+        # force_flush returns a bool — exporter should have spans.
+        del flushed
+        await tracer.shutdown()
+        assert exporter.spans, "no spans landed after awaited detach"
+
+    def test_detach_outside_loop_returns_none(self):
+        # Build a Tracer + Agent in sync context (no running loop).
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[])
+        detach = tracer.attach(agent)
+        # No running loop → flush is the caller's responsibility.
+        assert detach() is None
+
+
 class TestCancellationExportsSpans:
     """``asyncio.CancelledError`` bypasses cubepi's agent-loop
     ``except Exception``, so no AgentEnd / TurnEnd / ToolExecutionEnd

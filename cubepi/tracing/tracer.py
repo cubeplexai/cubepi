@@ -128,13 +128,25 @@ class Tracer:
         """
         return self._redact
 
-    def attach(self, agent: "Agent") -> Callable[[], None]:
+    def attach(self, agent: "Agent") -> Callable[[], Any]:
         """Wire the cubepi recorder to ``agent``.
 
-        Returns a ``detach()`` callable that unsubscribes every hook
-        installed by this attach, then calls :meth:`force_flush` to
-        ensure spans produced by the agent's runs are persisted before
-        the caller proceeds.
+        Returns a ``detach()`` callable. When invoked:
+
+        - Synchronously: unsubscribes every hook, closes any spans
+          still open from a cancelled run, sweeps MCP tool-span
+          registrations — observable on the next line.
+        - Schedules a flush on the running event loop and returns the
+          resulting ``asyncio.Task`` so callers can ``await detach()``
+          to block until buffered spans have been exported. Outside
+          an async context returns ``None`` — call
+          ``await tracer.shutdown()`` separately to flush.
+
+        Either ``await detach()`` or ``await tracer.shutdown()`` (or
+        both) must be used in the caller's ``finally`` block; the
+        synchronous ``detach()`` alone does not guarantee that ended
+        spans have left ``BatchSpanProcessor`` (codex overall-review
+        MAJOR).
 
         Also registers this Tracer's private TracerProvider with
         :mod:`cubepi.mcp._tracing` so MCP CLIENT spans flow through
@@ -165,13 +177,18 @@ class Tracer:
         except ImportError:  # pragma: no cover — mcp module always present
             mcp_tracing = None
 
-        def detach() -> None:
-            recorder_detach()
+        def detach():
+            # Forward the recorder's detach return — when called from
+            # an async context it's an ``asyncio.Task`` for the
+            # flush; callers can ``await detach()`` to wait for
+            # buffered spans to land (codex overall-review MAJOR).
+            flush_task = recorder_detach()
             if mcp_tracing is not None and mcp_token is not None:
                 try:
                     mcp_tracing.unregister_provider(mcp_token)
                 except Exception:
                     pass
+            return flush_task
 
         return detach
 
