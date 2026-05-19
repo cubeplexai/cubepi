@@ -857,6 +857,97 @@ class TestMCPSpanParentage:
         assert mcp[0].parent is not None
         assert mcp[0].parent.span_id == execute[0].get_span_context().span_id
 
+    async def test_cancellation_does_not_leak_tool_registrations(self):
+        """``asyncio.CancelledError`` inherits ``BaseException`` and
+        bypasses the cubepi agent loop's ``except Exception`` handler,
+        so a cancelled run never emits ``ToolExecutionEndEvent`` and
+        never reaches the per-event unregister. Without an explicit
+        cleanup path, ``_active_entries`` in ``cubepi.mcp._tracing``
+        would grow unbounded across aborted runs (codex round-10).
+
+        Pin: after a cancelled run + detach, ``_active_entries`` is
+        back to its pre-run size."""
+        import asyncio as _asyncio
+
+        from cubepi.agent.agent import Agent
+        from cubepi.mcp import _tracing as mcp_tracing
+        from cubepi.mcp._adapter import make_mcp_agent_tool
+        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.faux import FauxProvider, faux_assistant_message
+        from cubepi.tracing import Tracer
+
+        baseline = len(mcp_tracing._active_entries)
+
+        # Gate the MCP call so we can cancel mid-flight, simulating
+        # the real "agent run cancelled while a tool is awaiting" path.
+        in_call = _asyncio.Event()
+        never = _asyncio.Event()
+
+        async def call_remote(name, args):
+            in_call.set()
+            await never.wait()  # cancellation lands here
+            return {"content": [], "isError": False}
+
+        mcp_tool = make_mcp_agent_tool(
+            name="search",
+            description="search",
+            input_schema={
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+            },
+            call_remote=call_remote,
+        )
+
+        provider = FauxProvider()
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    [ToolCall(id="tc1", name="search", arguments={"q": "x"})],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("done"),
+            ]
+        )
+        agent = Agent(
+            provider=provider,
+            model=Model(id="faux-1", provider="faux"),
+            system_prompt="s",
+            tools=[mcp_tool],
+        )
+
+        exporter = _CaptureExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        detach = tracer.attach(agent)
+
+        try:
+            run_task = _asyncio.create_task(agent.prompt("go"))
+            await in_call.wait()
+            # During registration_active = baseline + 1.
+            assert len(mcp_tracing._active_entries) == baseline + 1, (
+                "expected exactly one active MCP tool registration mid-run"
+            )
+            run_task.cancel()
+            try:
+                await run_task
+            except _asyncio.CancelledError:
+                pass
+            # Drain any post-cancel events; agent doesn't emit on cancel
+            # but wait_for_idle is harmless.
+            try:
+                await _asyncio.wait_for(agent.wait_for_idle(), timeout=1.0)
+            except (_asyncio.TimeoutError, _asyncio.CancelledError):
+                pass
+        finally:
+            detach()
+            # detach() may schedule async cleanup; give it a tick to run.
+            await _asyncio.sleep(0)
+            await tracer.shutdown()
+
+        assert len(mcp_tracing._active_entries) == baseline, (
+            "cancelled MCP tool execution leaked a registration in "
+            "_active_entries — detach()'s sweep didn't run"
+        )
+
     async def test_unregister_cleans_dict_even_from_different_task(self):
         """Direct contract test for the dict+contextvar hybrid:
         ``register_tool_span`` in one task, ``unregister_tool_span`` in
