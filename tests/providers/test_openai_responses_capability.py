@@ -229,3 +229,37 @@ async def test_capability_reasoning_on_payload_merged():
         p, _model(reasoning=True), thinking="medium"
     )
     assert payload["reasoning"] == {"summary": "auto"}
+
+
+@pytest.mark.asyncio
+async def test_capability_does_not_set_temperature_on_reasoning_model():
+    """Reasoning models reject temperature — capability path must skip the setdefault."""
+    cap = CapabilityDescriptor()  # default TemperatureSpec(mode="free")
+    p = OpenAIResponsesProvider(api_key="x", capability=cap)
+    # Model with reasoning=True
+    m = Model(
+        id="o3-test",
+        provider="test",
+        context_window=200_000,
+        max_tokens=16384,
+        temperature=1.0,
+        reasoning=True,
+    )
+    payload = await _capture_payload_responses(p, m, thinking="off")
+    assert "temperature" not in payload
+
+
+@pytest.mark.asyncio
+async def test_capability_on_payload_overrides_max_output_tokens():
+    """on_payload runs before capability; capability uses setdefault → caller wins."""
+    cap = CapabilityDescriptor()
+    p = OpenAIResponsesProvider(api_key="x", capability=cap)
+
+    async def set_max(kwargs, model):
+        kwargs["max_output_tokens"] = 1234
+        return kwargs
+
+    payload = await _capture_payload_responses(
+        p, _model(), thinking="off", on_payload=set_max
+    )
+    assert payload["max_output_tokens"] == 1234
