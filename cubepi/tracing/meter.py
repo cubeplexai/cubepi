@@ -111,7 +111,7 @@ class Meter:
         self._provider = MeterProvider(resource=self._resource, metric_readers=readers)
         self._otel_meter = self._provider.get_meter(
             name=SCOPE_NAME,
-            version=cubepi.__version__ if hasattr(cubepi, "__version__") else None,
+            version=cubepi.__version__,
             schema_url=SCHEMA_URL,
         )
         self._duration_hist = self._otel_meter.create_histogram(

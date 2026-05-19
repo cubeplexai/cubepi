@@ -1,5 +1,13 @@
 """cubepi — Pythonic async-native agent framework."""
 
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+try:
+    __version__ = _pkg_version("cubepi")
+except PackageNotFoundError:  # pragma: no cover — non-installed checkout
+    __version__ = "0.0.0+unknown"
+
+
 from cubepi.agent import (
     Agent,
     AgentState,
@@ -29,6 +37,7 @@ from cubepi.providers import (
 )
 
 __all__ = [
+    "__version__",
     "Agent",
     "AgentState",
     "AgentTool",

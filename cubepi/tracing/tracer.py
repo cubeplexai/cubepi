@@ -98,9 +98,7 @@ class Tracer:
 
         self._otel_tracer = self._provider.get_tracer(
             instrumenting_module_name=SCOPE_NAME,
-            instrumenting_library_version=cubepi.__version__
-            if hasattr(cubepi, "__version__")
-            else None,
+            instrumenting_library_version=cubepi.__version__,
             schema_url=SCHEMA_URL,
         )
         self._shutdown = False
