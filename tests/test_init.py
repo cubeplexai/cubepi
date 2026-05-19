@@ -17,4 +17,4 @@ def test_catalog_re_exported():
     assert hasattr(cubepi, "list_provider_presets")
     assert hasattr(cubepi, "get_provider_preset")
     presets = cubepi.list_provider_presets()
-    assert len(presets) == 22
+    assert len(presets) == 37

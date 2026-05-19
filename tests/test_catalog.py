@@ -70,7 +70,7 @@ def test_list_provider_presets_returns_all_entries():
 
 def test_every_preset_parses_into_typed_model():
     presets = list_provider_presets()
-    assert len(presets) == 22
+    assert len(presets) == 37
     valid_apis = WireApi.__args__
     for p in presets:
         assert p.api in valid_apis, p.slug
