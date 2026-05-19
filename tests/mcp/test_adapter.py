@@ -288,21 +288,95 @@ async def test_signal_abort_cancels_in_flight_mcp_call() -> None:
     await started.wait()
     # Cooperative abort: set the signal but do NOT cancel the task.
     signal.set()
-    # Adapter must propagate as CancelledError.
+    # Adapter must complete with a synthetic AgentToolResult (NOT
+    # raise CancelledError) so the agent's normal abort lifecycle
+    # runs — callers that do ``agent.abort(); await prompt_task``
+    # must not see a new exception shape from MCP-backed tools
+    # (codex round-1 follow-up on PR #88).
     try:
-        await _asyncio.wait_for(task, timeout=1.0)
-    except _asyncio.CancelledError:
-        pass
+        result = await _asyncio.wait_for(task, timeout=1.0)
     except _asyncio.TimeoutError:
         task.cancel()
         raise AssertionError(
             "MCP adapter ignored abort signal; tools/call did not bail out"
         )
-    # The inner call_remote should have been cancelled too.
+    # The inner call_remote was cancelled too.
     assert finished.is_set(), "call_remote was not cancelled when signal fired"
+    # Synthetic tool result carries the aborted flag in details.
+    assert result.details.get("aborted") is True
+    # No spurious error status — abort isn't a failure.
+    assert result.is_error is None or result.is_error is False
+    assert result.content == []
+
+
+async def test_agent_abort_during_mcp_call_does_not_raise() -> None:
+    """The full ``agent.abort(); await prompt_task`` contract: when
+    a real cubepi Agent calls an MCP tool that's still in flight and
+    the user fires ``agent.abort()``, the prompt task must complete
+    without surfacing ``CancelledError`` to the caller — matching
+    the lifecycle non-MCP provider aborts use. Codex round-1
+    follow-up on PR #88."""
+    import asyncio as _asyncio
+
+    from cubepi.agent.agent import Agent
+    from cubepi.mcp._adapter import make_mcp_agent_tool
+    from cubepi.providers.base import Model, ToolCall
+    from cubepi.providers.faux import FauxProvider, faux_assistant_message
+
+    in_flight = _asyncio.Event()
+
+    async def _slow(_name, _args):
+        in_flight.set()
+        await _asyncio.sleep(10.0)
+        return {"content": [], "isError": False}
+
+    mcp_tool = make_mcp_agent_tool(
+        name="slow",
+        description="slow",
+        input_schema={"type": "object", "properties": {}, "required": []},
+        call_remote=_slow,
+    )
+    provider = FauxProvider()
+    provider.append_responses(
+        [
+            faux_assistant_message(
+                [ToolCall(id="tc1", name="slow", arguments={})],
+                stop_reason="tool_use",
+            ),
+            # Even though abort will kick in first, queue a follow-up
+            # in case the loop somehow advances to a second turn.
+            faux_assistant_message("done"),
+        ]
+    )
+    agent = Agent(
+        provider=provider,
+        model=Model(id="faux-1", provider="faux"),
+        system_prompt="s",
+        tools=[mcp_tool],
+    )
+
+    prompt_task = _asyncio.create_task(agent.prompt("go"))
+    await in_flight.wait()
+    agent.abort()
+    # The contract: prompt_task completes (returns None) without
+    # raising. With the previous CancelledError-raising path this
+    # would either propagate or wedge.
+    try:
+        await _asyncio.wait_for(prompt_task, timeout=2.0)
+    except _asyncio.CancelledError:
+        raise AssertionError(
+            "agent.abort() during MCP call surfaced CancelledError to "
+            "the caller — expected normal lifecycle completion"
+        )
+    except _asyncio.TimeoutError:
+        prompt_task.cancel()
+        raise AssertionError("prompt_task did not complete after abort()")
 
 
 async def test_signal_already_set_before_call_aborts_immediately() -> None:
+    """Pre-set signal: adapter returns the aborted synthetic result
+    without invoking ``call_remote`` at all (codex round-1 follow-up
+    on PR #88)."""
     import asyncio as _asyncio
 
     from cubepi.mcp._adapter import make_mcp_agent_tool
@@ -322,11 +396,9 @@ async def test_signal_already_set_before_call_aborts_immediately() -> None:
     )
     signal = _asyncio.Event()
     signal.set()  # already aborted before _execute even starts
-    try:
-        await tool.execute("tc-pre", tool.parameters(), signal=signal, on_update=None)
-    except _asyncio.CancelledError:
-        pass
-    else:
-        raise AssertionError(
-            "pre-set signal should have raised CancelledError before call_remote"
-        )
+    result = await tool.execute(
+        "tc-pre", tool.parameters(), signal=signal, on_update=None
+    )
+    assert called is False, "pre-set signal should skip call_remote entirely"
+    assert result.details.get("aborted") is True
+    assert result.content == []
