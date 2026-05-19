@@ -9,7 +9,7 @@ const ROWS: { label: string; langgraph: string; cubepi: string }[] = [
   { label: 'Tool execution',  langgraph: 'Tools are graph nodes with manual wiring',                cubepi: 'Declare tools as functions; framework routes and parallelizes' },
   { label: 'Multi-provider',  langgraph: 'Via langchain chat model adapters',                       cubepi: 'Native Provider protocol — Anthropic, OpenAI built in' },
   { label: 'Middleware',      langgraph: 'Graph-level middleware on node entry/exit',               cubepi: '5 typed hooks with declarative composition rules' },
-  { label: 'Observability',   langgraph: 'LangSmith / Langfuse integration',                        cubepi: 'Events + middleware hooks — bring your own tracing' },
+  { label: 'Observability',   langgraph: 'LangSmith / Langfuse integration',                        cubepi: 'Native OpenTelemetry — Tracer, Meter, GenAI semconv, OTLP / JSONL out of the box' },
 ];
 
 export default function WhyTable() {
