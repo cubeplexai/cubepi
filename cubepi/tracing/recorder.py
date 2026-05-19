@@ -1122,8 +1122,28 @@ def _extract_system_prompt(payload: dict) -> str | None:
 
 
 def _safe_tool_name(t: Any) -> str:
+    """Best-effort tool-name extractor across provider payload shapes.
+
+    Three shapes seen in the wild:
+
+    - Anthropic / cubepi.AgentTool: top-level ``{"name": ...}``
+    - OpenAI Responses: top-level ``{"name": ..., "type": "function"}``
+    - OpenAI Chat: nested ``{"type": "function", "function": {"name": ...}}``
+
+    Falls back to an attribute lookup for plain objects. Without the
+    nested-function branch, OpenAI Chat tool lists produced
+    ``[""]`` on the root span attribute (codex overall-review MINOR).
+    """
     if isinstance(t, dict):
-        return str(t.get("name") or "")
+        top = t.get("name")
+        if top:
+            return str(top)
+        fn = t.get("function")
+        if isinstance(fn, dict):
+            nested = fn.get("name")
+            if nested:
+                return str(nested)
+        return ""
     name = getattr(t, "name", None)
     return str(name) if name else ""
 

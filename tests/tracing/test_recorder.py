@@ -494,6 +494,44 @@ class TestErrorAndAbort:
         assert fallback_chat.status.status_code == StatusCode.UNSET
 
 
+class TestSafeToolName:
+    """``_safe_tool_name`` must handle all three tool payload shapes:
+    Anthropic/cubepi top-level ``name``, OpenAI Responses top-level
+    ``name``, and OpenAI Chat's nested ``{type: function, function:
+    {name: ...}}``. Without the nested branch the root span's tool
+    list was filled with ``[""]`` for OpenAI Chat (codex
+    overall-review MINOR)."""
+
+    def test_top_level_name(self):
+        from cubepi.tracing.recorder import _safe_tool_name
+
+        assert _safe_tool_name({"name": "search"}) == "search"
+
+    def test_openai_chat_nested_function_shape(self):
+        from cubepi.tracing.recorder import _safe_tool_name
+
+        assert (
+            _safe_tool_name(
+                {"type": "function", "function": {"name": "fetch"}}
+            )
+            == "fetch"
+        )
+
+    def test_object_attribute(self):
+        from cubepi.tracing.recorder import _safe_tool_name
+
+        class _T:
+            name = "calc"
+
+        assert _safe_tool_name(_T()) == "calc"
+
+    def test_missing_name_returns_empty(self):
+        from cubepi.tracing.recorder import _safe_tool_name
+
+        assert _safe_tool_name({}) == ""
+        assert _safe_tool_name({"type": "function"}) == ""
+
+
 class TestRequestMaxTokensCrossProvider:
     """OpenAI Responses uses ``max_output_tokens`` while
     chat-completions / Anthropic use ``max_tokens``. The recorder
