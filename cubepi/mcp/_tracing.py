@@ -106,25 +106,37 @@ def _get_tracer(scope_name: str) -> Any:
 
 
 # When the cubepi Recorder opens an ``execute_tool`` span, it registers
-# it here keyed by ``tool_call_id``. The MCP adapter looks up the
-# parent span by tool_call_id and passes it as an explicit context to
-# :func:`mcp_client_span`, so the MCP CLIENT span becomes a child of
-# the agent's ``execute_tool`` span rather than starting an orphan
-# trace under the OTel "current span" (which the recorder doesn't
-# bother making current — see docs/specs/2026-05-18-cubepi-tracing-
-# design.md §9).
-_active_tool_spans: dict[str, Any] = {}
+# (span, owning_provider) here keyed by ``tool_call_id``. The MCP
+# adapter looks up the parent span by tool_call_id and passes it as an
+# explicit context to :func:`mcp_client_span`, so the MCP CLIENT span
+# becomes a child of the agent's ``execute_tool`` span rather than
+# starting an orphan trace under the OTel "current span" (which the
+# recorder doesn't bother making current — see docs/specs/2026-05-18-
+# cubepi-tracing-design.md §9).
+#
+# We store the owning provider alongside the span so that when multiple
+# ``Tracer`` instances are attached to different agents in the same
+# process, each MCP CLIENT span is exported through *its parent's*
+# Tracer (matching trace IDs), not whichever Tracer's registration is
+# at the top of the LIFO ``_provider_stack`` (codex round-7 review on
+# PR #86). The stack is now only consulted when there is no parent —
+# e.g., a bare ``mcp_client_span`` outside an agent's tool execution.
+_active_tool_spans: dict[str, tuple[Any, Any]] = {}
 
 
-def register_tool_span(tool_call_id: str, span: Any) -> None:
-    _active_tool_spans[tool_call_id] = span
+def register_tool_span(
+    tool_call_id: str,
+    span: Any,
+    provider: Any = None,
+) -> None:
+    _active_tool_spans[tool_call_id] = (span, provider)
 
 
 def unregister_tool_span(tool_call_id: str) -> None:
     _active_tool_spans.pop(tool_call_id, None)
 
 
-def _get_tool_span(tool_call_id: str | None) -> Any:
+def _get_tool_span_entry(tool_call_id: str | None) -> tuple[Any, Any] | None:
     if tool_call_id is None:
         return None
     return _active_tool_spans.get(tool_call_id)
@@ -177,17 +189,26 @@ async def mcp_client_span(
         yield None
         return
 
-    tracer = _get_tracer(_SCOPE_NAME)
     span_name = f"{method} {tool_name}" if tool_name else method
-    # Resolve explicit parent: if the caller passed a tool_call_id and
-    # the cubepi recorder has an active ``execute_tool`` span for it,
-    # make the MCP CLIENT span its child rather than an orphan trace.
-    parent_span = _get_tool_span(parent_tool_call_id)
-    parent_context = (
-        _otel_trace.set_span_in_context(parent_span)
-        if parent_span is not None
-        else None
-    )
+    # Resolve explicit parent + owning provider: if the caller passed a
+    # tool_call_id and the cubepi recorder has an active
+    # ``execute_tool`` span for it, make the MCP CLIENT span its child
+    # rather than an orphan trace, AND route it through the parent's
+    # owning provider so trace_ids and exporter destination stay
+    # consistent (codex round-7 fix). Fall back to the registered-
+    # provider stack only when there is no parent.
+    entry = _get_tool_span_entry(parent_tool_call_id)
+    if entry is not None:
+        parent_span, parent_provider = entry
+        parent_context = _otel_trace.set_span_in_context(parent_span)
+        tracer = (
+            parent_provider.get_tracer(_SCOPE_NAME)
+            if parent_provider is not None
+            else _get_tracer(_SCOPE_NAME)
+        )
+    else:
+        parent_context = None
+        tracer = _get_tracer(_SCOPE_NAME)
     attrs: dict[str, Any] = {
         _MCP_METHOD_NAME: method,
         _GEN_AI_OPERATION_NAME: "execute_tool",

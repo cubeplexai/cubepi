@@ -442,14 +442,19 @@ class Recorder:
         # Expose this execute_tool span to ``cubepi.mcp._tracing`` so an
         # MCP tool call running inside this span (in the AgentTool body)
         # can look it up by ``tool_call_id`` and make its CLIENT span a
-        # child. Without this hop, MCP would start its span under the
-        # OTel "current span" — which the recorder doesn't bother making
-        # current — and the CLIENT span would become an orphan root
-        # trace (codex round-6 review on PR #86).
+        # child. Pass the owning provider alongside so the MCP CLIENT
+        # span is exported through *this* Tracer's exporter rather than
+        # whichever Tracer was attached most recently in the process —
+        # otherwise concurrent Tracers misroute spans across each other
+        # (codex round-6 + round-7 reviews on PR #86).
         try:
             from cubepi.mcp import _tracing as _mcp_tracing
 
-            _mcp_tracing.register_tool_span(event.tool_call_id, span)
+            _mcp_tracing.register_tool_span(
+                event.tool_call_id,
+                span,
+                provider=self._tracer._provider,
+            )
         except ImportError:  # pragma: no cover — mcp module always present
             pass
         if self._record_content and event.args is not None:

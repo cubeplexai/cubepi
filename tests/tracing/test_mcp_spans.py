@@ -586,6 +586,98 @@ class TestMCPSpanParentage:
         assert client_span.parent is not None
         assert client_span.parent.span_id == tool_ctx.span_id
 
+    async def test_two_tracers_route_mcp_by_parent_owner(self):
+        """Two different cubepi.Tracer instances attached to two agents
+        in the same process. An MCP CLIENT span emitted under agent A's
+        execute_tool span must export through Tracer A's exporter — not
+        Tracer B's, even if B was attached more recently (LIFO order on
+        the provider stack).
+
+        Without this routing, agent A's trace would be missing its MCP
+        leg and Tracer B's exporter would receive a stray span with
+        agent A's trace_id (codex round-7 review on PR #86)."""
+        from cubepi.agent.agent import Agent
+        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.faux import FauxProvider, faux_assistant_message
+        from cubepi.tracing import Tracer
+
+        from cubepi.mcp._adapter import make_mcp_agent_tool
+
+        async def call_remote(name, args):
+            return {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+        def _make_agent():
+            mcp_tool = make_mcp_agent_tool(
+                name="search",
+                description="search",
+                input_schema={
+                    "type": "object",
+                    "properties": {"q": {"type": "string"}},
+                },
+                call_remote=call_remote,
+            )
+            provider = FauxProvider()
+            provider.append_responses(
+                [
+                    faux_assistant_message(
+                        [ToolCall(id="tc1", name="search", arguments={"q": "x"})],
+                        stop_reason="tool_use",
+                    ),
+                    faux_assistant_message("done"),
+                ]
+            )
+            return Agent(
+                provider=provider,
+                model=Model(id="faux-1", provider="faux"),
+                system_prompt="s",
+                tools=[mcp_tool],
+            )
+
+        exporter_a = _CaptureExporter()
+        exporter_b = _CaptureExporter()
+
+        agent_a = _make_agent()
+        agent_b = _make_agent()
+
+        tracer_a = Tracer(service_name="a", agent_name="a", exporters=[exporter_a])
+        tracer_b = Tracer(service_name="b", agent_name="b", exporters=[exporter_b])
+
+        # Attach A first then B so B is at the top of the LIFO stack.
+        # The buggy implementation would route both agents' MCP spans
+        # through B; we want A's spans in A's exporter and B's in B's.
+        detach_a = tracer_a.attach(agent_a)
+        detach_b = tracer_b.attach(agent_b)
+
+        try:
+            await agent_a.prompt("go")
+            await agent_a.wait_for_idle()
+            await agent_b.prompt("go")
+            await agent_b.wait_for_idle()
+        finally:
+            detach_a()
+            detach_b()
+            await tracer_a.shutdown()
+            await tracer_b.shutdown()
+
+        # Each exporter saw exactly one tools/call CLIENT span — its
+        # own agent's — with matching trace_id.
+        mcp_a = [s for s in exporter_a.spans if s.name.startswith("tools/call ")]
+        mcp_b = [s for s in exporter_b.spans if s.name.startswith("tools/call ")]
+        assert len(mcp_a) == 1, "agent_a's MCP span did not land in tracer_a"
+        assert len(mcp_b) == 1, "agent_b's MCP span did not land in tracer_b"
+
+        # Cross-check trace_id consistency: each exporter's MCP span
+        # shares trace_id with that exporter's execute_tool span (i.e.,
+        # parent and child went to the same backend together).
+        for exporter in (exporter_a, exporter_b):
+            execute = [s for s in exporter.spans if s.name.startswith("execute_tool ")]
+            mcp = [s for s in exporter.spans if s.name.startswith("tools/call ")]
+            assert len(execute) == 1 and len(mcp) == 1
+            assert (
+                execute[0].get_span_context().trace_id
+                == mcp[0].get_span_context().trace_id
+            )
+
     async def test_mcp_span_orphan_when_no_registered_parent(self, monkeypatch):
         """Without a registered parent, the MCP span starts a new
         root trace. Pinning this so the parented-path test above is
