@@ -137,7 +137,11 @@ class OpenAIProvider(BaseProvider):
                 cap = self._resolve_capability(model.id)
                 if self._cap_active:
                     kwargs.setdefault("temperature", model.temperature)
-                    kwargs.setdefault("max_tokens", model.max_tokens)
+                    # Don't inject a default max_tokens when the caller already
+                    # set the renamed target field (e.g. max_completion_tokens
+                    # via on_payload).
+                    if cap.max_tokens_field not in kwargs:
+                        kwargs.setdefault("max_tokens", model.max_tokens)
                     apply_temperature(kwargs, cap.temperature)
                     if cap.max_tokens_field != "max_tokens" and "max_tokens" in kwargs:
                         kwargs[cap.max_tokens_field] = kwargs.pop("max_tokens")

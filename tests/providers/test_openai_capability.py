@@ -292,3 +292,19 @@ async def test_max_tokens_field_renamed_preserves_on_payload_value():
     payload = await _capture_payload_openai(p, _model(), on_payload=set_caller_max)
     assert payload["max_completion_tokens"] == 1234
     assert "max_tokens" not in payload
+
+
+@pytest.mark.asyncio
+async def test_max_completion_tokens_preserves_on_payload_value():
+    """When on_payload sets max_completion_tokens and capability would rename
+    max_tokens -> max_completion_tokens, the caller's value must survive."""
+    cap = CapabilityDescriptor(max_tokens_field="max_completion_tokens")
+    p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
+
+    async def set_caller(kwargs, model):
+        kwargs["max_completion_tokens"] = 999
+        return kwargs
+
+    payload = await _capture_payload_openai(p, _model(), on_payload=set_caller)
+    assert payload["max_completion_tokens"] == 999
+    assert "max_tokens" not in payload

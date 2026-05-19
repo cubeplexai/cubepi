@@ -38,6 +38,13 @@
   base_url: https://api.openai.com/v1
   auth: { mode: api_key }
   capability:
+    # Request reasoning summaries + opt in to encrypted reasoning content for
+    # stateless multi-turn reasoning. Mirrors the legacy
+    # OpenAIResponsesProvider path. merge runs before write_reasoning_level,
+    # which adds reasoning.effort into the existing dict.
+    reasoning_on_payload:
+      reasoning: { summary: auto }
+      include: [reasoning.encrypted_content]
     reasoning_level:
       path: reasoning.effort
       kind: effort
