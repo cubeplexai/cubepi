@@ -33,7 +33,7 @@ class TemperatureSpec(BaseModel):
 class ReasoningLevelSpec(BaseModel):
     """How to express a fine-grain reasoning level on this endpoint."""
 
-    path: str
+    path: str = Field(..., min_length=1)
     kind: Literal["int_budget", "effort", "enum"]
     level_budgets: dict[str, int] | None = None
     level_to_effort: dict[str, str] | None = None
@@ -144,7 +144,13 @@ def _resolve_level_value(spec: ReasoningLevelSpec, level: ThinkingLevel) -> Any 
 
 
 def _write_dotted_path(target: dict[str, Any], path: str, value: Any) -> None:
-    """Walk a dotted path into ``target``, creating dicts as needed; set the leaf."""
+    """Walk a dotted path into ``target``, creating dicts as needed; set the leaf.
+
+    When an intermediate segment holds a non-dict scalar in ``target``, the
+    scalar is replaced with a fresh dict before recursion continues. The
+    capability layer is the authority on what lives at a provider-controlled
+    path, so this "capability wins" rule mirrors :func:`merge_capability_payload`.
+    """
     parts = path.split(".")
     cursor: Any = target
     for part in parts[:-1]:

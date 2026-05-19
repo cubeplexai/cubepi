@@ -230,3 +230,39 @@ def test_writes_into_existing_nested_dict():
     )
     write_reasoning_level(kwargs, spec, "off")
     assert kwargs == {"extra_body": {"other": True, "thinking": {"type": "disabled"}}}
+
+
+def test_write_reasoning_level_overwrites_existing_leaf():
+    """Pre-existing leaf value at the spec's path is replaced (last writer wins)."""
+    kwargs: dict = {"reasoning_effort": "low"}
+    spec = ReasoningLevelSpec(
+        path="reasoning_effort",
+        kind="effort",
+        level_to_effort={"high": "high"},
+    )
+    write_reasoning_level(kwargs, spec, "high")
+    assert kwargs == {"reasoning_effort": "high"}
+
+
+def test_write_reasoning_level_replaces_non_dict_intermediate():
+    """A non-dict scalar at an intermediate segment is clobbered with a dict."""
+    kwargs: dict = {"thinking": "stale-string"}
+    spec = ReasoningLevelSpec(
+        path="thinking.budget_tokens",
+        kind="int_budget",
+        level_budgets={"medium": 8192},
+    )
+    write_reasoning_level(kwargs, spec, "medium")
+    assert kwargs == {"thinking": {"budget_tokens": 8192}}
+
+
+def test_reasoning_level_path_must_be_non_empty():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ReasoningLevelSpec(
+            path="",
+            kind="int_budget",
+            level_budgets={"low": 4000},
+        )
