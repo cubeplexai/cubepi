@@ -17,6 +17,7 @@ Histograms emitted (per OTel GenAI semconv):
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 from opentelemetry.sdk.metrics import MeterProvider
@@ -130,14 +131,6 @@ class Meter:
             explicit_bucket_boundaries_advisory=list(_DEFAULT_DURATION_BUCKETS),
         )
         self._shutdown = False
-        # Per-run state for timing.
-        self._chat_open_ns: int | None = None
-        self._chat_first_chunk_ns: int | None = None
-        self._chat_attrs: dict[str, Any] = {}
-        self._tool_open_ns: dict[str, int] = {}
-        self._tool_attrs: dict[str, dict[str, Any]] = {}
-        self._agent_open_ns: int | None = None
-        self._agent_attrs: dict[str, Any] = {}
 
     # -- public API ---------------------------------------------------
 
@@ -148,16 +141,44 @@ class Meter:
         return self._otel_meter
 
     def attach(self, agent: "Agent") -> Callable[[], None]:
-        """Subscribe to ``agent`` and start emitting metrics."""
+        """Subscribe to ``agent`` and start emitting metrics.
+
+        Each ``attach()`` call gets its own :class:`_MeterState` so
+        multiple concurrent agents attached to the same Meter don't
+        clobber each other's open-ns timestamps and attribute dicts
+        (codex overall-review MAJOR — previously all state lived on
+        the Meter instance, so a second agent's ``provider_request``
+        overwrote the first agent's ``_chat_open_ns`` / ``_chat_attrs``
+        before its response landed).
+        """
         from cubepi.providers.base import BaseProvider
 
-        unsub_agent = agent.subscribe(self._on_agent_event)
+        state = _MeterState()
+
+        async def _on_agent_event(event: Any, signal: Any | None = None) -> None:
+            del signal
+            self._handle_agent_event(state, event)
+
+        def _on_request(payload: dict, model: "Model") -> None:
+            self._handle_provider_request(state, payload, model)
+
+        def _on_chunk(event: Any, model: "Model") -> None:
+            self._handle_provider_chunk(state, event, model)
+
+        def _on_response(
+            body: dict | None,
+            model: "Model",
+            exc: BaseException | None,
+        ) -> None:
+            self._handle_provider_response(state, body, model, exc)
+
+        unsub_agent = agent.subscribe(_on_agent_event)
         provider = getattr(agent, "_provider", None) or getattr(agent, "provider", None)
         detachers: list[Callable[[], None]] = []
         if isinstance(provider, BaseProvider):
-            detachers.append(provider.subscribe_request(self._on_provider_request))
-            detachers.append(provider.subscribe_chunk(self._on_provider_chunk))
-            detachers.append(provider.subscribe_response(self._on_provider_response))
+            detachers.append(provider.subscribe_request(_on_request))
+            detachers.append(provider.subscribe_chunk(_on_chunk))
+            detachers.append(provider.subscribe_response(_on_response))
 
         def detach() -> None:
             unsub_agent()
@@ -186,22 +207,24 @@ class Meter:
         await self.shutdown()
 
     # -- event handlers -----------------------------------------------
+    #
+    # Each handler takes a per-attach ``_MeterState`` so concurrent
+    # agents attached to one Meter never share timing/attribute state.
 
-    async def _on_agent_event(self, event: Any, signal: Any | None = None) -> None:
-        del signal
+    def _handle_agent_event(self, state: "_MeterState", event: Any) -> None:
         try:
             type_name = getattr(event, "type", "")
             if type_name == "agent_start":
-                self._agent_open_ns = time.time_ns()
-                self._agent_attrs = {GEN_AI_OPERATION_NAME: OP_INVOKE_AGENT}
+                state.agent_open_ns = time.time_ns()
+                state.agent_attrs = {GEN_AI_OPERATION_NAME: OP_INVOKE_AGENT}
             elif type_name == "agent_end":
-                if self._agent_open_ns is not None:
-                    duration = (time.time_ns() - self._agent_open_ns) / 1e9
-                    self._duration_hist.record(duration, self._agent_attrs)
-                self._agent_open_ns = None
-                self._agent_attrs = {}
+                if state.agent_open_ns is not None:
+                    duration = (time.time_ns() - state.agent_open_ns) / 1e9
+                    self._duration_hist.record(duration, state.agent_attrs)
+                state.agent_open_ns = None
+                state.agent_attrs = {}
             elif type_name == "tool_execution_start":
-                self._tool_open_ns[event.tool_call_id] = time.time_ns()
+                state.tool_open_ns[event.tool_call_id] = time.time_ns()
                 # Carry the most-recent provider onto tool metrics so
                 # ``execute_tool`` duration observations can be filtered
                 # alongside chat metrics. ``_on_provider_request`` fires
@@ -210,79 +233,86 @@ class Meter:
                 # time here from the latest chat attrs instead
                 # (codex P2 finding on PR #85).
                 attrs: dict[str, Any] = {GEN_AI_OPERATION_NAME: OP_EXECUTE_TOOL}
-                provider_name = self._chat_attrs.get(GEN_AI_PROVIDER_NAME) or (
-                    self._agent_attrs.get(GEN_AI_PROVIDER_NAME)
-                    if self._agent_attrs
+                provider_name = state.chat_attrs.get(GEN_AI_PROVIDER_NAME) or (
+                    state.agent_attrs.get(GEN_AI_PROVIDER_NAME)
+                    if state.agent_attrs
                     else None
                 )
                 if provider_name is not None:
                     attrs[GEN_AI_PROVIDER_NAME] = provider_name
-                self._tool_attrs[event.tool_call_id] = attrs
+                state.tool_attrs[event.tool_call_id] = attrs
             elif type_name == "tool_execution_end":
-                start = self._tool_open_ns.pop(event.tool_call_id, None)
-                attrs = self._tool_attrs.pop(event.tool_call_id, None)
+                start = state.tool_open_ns.pop(event.tool_call_id, None)
+                attrs = state.tool_attrs.pop(event.tool_call_id, None)
                 if start is not None and attrs is not None:
                     duration = (time.time_ns() - start) / 1e9
                     self._duration_hist.record(duration, attrs)
         except Exception:
             pass
 
-    def _on_provider_request(self, payload: dict, model: "Model") -> None:
+    def _handle_provider_request(
+        self, state: "_MeterState", payload: dict, model: "Model"
+    ) -> None:
+        del payload
         provider_name = map_provider_name(model.provider)
-        self._chat_open_ns = time.time_ns()
-        self._chat_first_chunk_ns = None
+        state.chat_open_ns = time.time_ns()
+        state.chat_first_chunk_ns = None
         # Include gen_ai.request.model so failed/cancelled chat metrics
         # (where the response body never lands and gen_ai.response.model
         # cannot be set) can still be grouped by the requested model
         # (codex P2 finding on PR #85).
-        self._chat_attrs = {
+        state.chat_attrs = {
             GEN_AI_OPERATION_NAME: OP_CHAT,
             GEN_AI_PROVIDER_NAME: provider_name,
             GEN_AI_REQUEST_MODEL: model.id,
         }
         # Stamp the agent + tool attrs with provider too, so all metrics
         # from this run can be filtered by provider in one shot.
-        if self._agent_attrs:
-            self._agent_attrs.setdefault(GEN_AI_PROVIDER_NAME, provider_name)
-        for _, attrs in self._tool_attrs.items():
+        if state.agent_attrs:
+            state.agent_attrs.setdefault(GEN_AI_PROVIDER_NAME, provider_name)
+        for _, attrs in state.tool_attrs.items():
             attrs.setdefault(GEN_AI_PROVIDER_NAME, provider_name)
 
-    def _on_provider_chunk(self, event: Any, model: "Model") -> None:
+    def _handle_provider_chunk(
+        self, state: "_MeterState", event: Any, model: "Model"
+    ) -> None:
         del model
-        if self._chat_first_chunk_ns is not None or self._chat_open_ns is None:
+        if state.chat_first_chunk_ns is not None or state.chat_open_ns is None:
             return
         ev_type = getattr(event, "type", "")
         if ev_type in ("text_delta", "thinking_delta", "toolcall_delta"):
-            self._chat_first_chunk_ns = time.time_ns()
+            state.chat_first_chunk_ns = time.time_ns()
 
-    def _on_provider_response(
+    def _handle_provider_response(
         self,
+        state: "_MeterState",
         body: dict | None,
         model: "Model",
         exc: BaseException | None,
     ) -> None:
-        if self._chat_open_ns is None:
+        del model
+        if state.chat_open_ns is None:
             return
         try:
             now = time.time_ns()
-            duration = (now - self._chat_open_ns) / 1e9
+            duration = (now - state.chat_open_ns) / 1e9
             response_model: str | None = None
             if isinstance(body, dict):
                 response_model = body.get("model") or None
-            attrs = dict(self._chat_attrs)
+            attrs = dict(state.chat_attrs)
             if response_model:
                 attrs[GEN_AI_RESPONSE_MODEL] = response_model
             self._duration_hist.record(duration, attrs)
-            if self._chat_first_chunk_ns is not None:
-                ttfc = (self._chat_first_chunk_ns - self._chat_open_ns) / 1e9
+            if state.chat_first_chunk_ns is not None:
+                ttfc = (state.chat_first_chunk_ns - state.chat_open_ns) / 1e9
                 self._ttfc_hist.record(ttfc, attrs)
             # Token usage — one observation per type.
             if isinstance(body, dict) and not exc:
                 self._record_token_usage(body, attrs)
         finally:
-            self._chat_open_ns = None
-            self._chat_first_chunk_ns = None
-            self._chat_attrs = {}
+            state.chat_open_ns = None
+            state.chat_first_chunk_ns = None
+            state.chat_attrs = {}
 
     def _record_token_usage(self, body: dict, attrs: dict) -> None:
         usage = body.get("usage") if isinstance(body.get("usage"), dict) else None
@@ -316,3 +346,24 @@ class Meter:
                 self._token_hist.record(
                     compl_t, {**attrs, "gen_ai.token.type": "output"}
                 )
+
+
+@dataclass
+class _MeterState:
+    """Per-attach mutable state. One per :meth:`Meter.attach` call so
+    concurrent agents on the same Meter never share their open-ns
+    timestamps or attribute dicts (codex overall-review MAJOR).
+
+    Previously these fields lived on the Meter instance — a second
+    agent's ``provider_request`` would overwrite the first agent's
+    ``chat_open_ns`` / ``chat_attrs`` before its response listener
+    fired, corrupting the recorded duration and token-usage points.
+    """
+
+    chat_open_ns: int | None = None
+    chat_first_chunk_ns: int | None = None
+    chat_attrs: dict[str, Any] = field(default_factory=dict)
+    tool_open_ns: dict[str, int] = field(default_factory=dict)
+    tool_attrs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    agent_open_ns: int | None = None
+    agent_attrs: dict[str, Any] = field(default_factory=dict)

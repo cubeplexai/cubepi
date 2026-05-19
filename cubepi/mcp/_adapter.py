@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Awaitable, Callable, Literal
 
 from pydantic import BaseModel, Field, create_model
@@ -152,7 +153,32 @@ def make_mcp_agent_tool(
             server_port=server_port,
             parent_tool_call_id=tool_call_id,
         ) as span:
-            result = await call_remote(name, args_dict)
+            result = await _await_with_signal(call_remote(name, args_dict), signal)
+            if result is _ABORTED_SENTINEL:
+                # Cooperative abort fired while the MCP RPC was in
+                # flight. Mark the CLIENT span aborted (Status UNSET,
+                # cubepi.aborted=true) so the trace shows the
+                # interruption, then return a synthetic tool result.
+                # Returning rather than raising preserves the agent
+                # lifecycle that non-MCP provider aborts use: the
+                # ``ToolExecutionEndEvent`` fires, the loop advances
+                # to the next turn, the provider's stream loop sees
+                # ``signal.is_set()`` and emits an aborted
+                # ``AssistantMessage``, and ``TurnEnd`` / ``AgentEnd``
+                # close the run normally. Callers that
+                # ``agent.abort(); await prompt_task`` therefore see
+                # no new exception type from MCP-backed tools (codex
+                # round-1 follow-up on PR #88).
+                if span is not None:
+                    try:
+                        span.set_attribute("cubepi.aborted", True)
+                        span.set_attribute("error.type", "cubepi.aborted")
+                    except Exception:
+                        pass
+                return AgentToolResult(
+                    content=[],
+                    details={"aborted": True},
+                )
             # MCP server-reported tool failure (``isError: true``): the
             # JSON-RPC call succeeded but the tool's logic failed. Mark
             # the CLIENT span ERROR so backends count it as a failure,
@@ -187,3 +213,104 @@ def make_mcp_agent_tool(
         parameters=parameters_model,
         execute=_execute,
     )
+
+
+def _consume_task_exception(task: "asyncio.Task[Any]") -> None:
+    """``add_done_callback`` target that swallows the result/exception
+    of a fire-and-forget cancelled task. Without this, asyncio logs
+    "task exception was never retrieved" at GC time for tasks we
+    cancelled and don't await."""
+    try:
+        task.exception()
+    except (asyncio.CancelledError, asyncio.InvalidStateError):
+        pass
+
+
+# Sentinel returned by :func:`_await_with_signal` on cooperative abort.
+# The MCP ``_execute`` adapter checks for it and synthesizes a tool
+# result rather than raising ``asyncio.CancelledError``, so callers
+# that do ``agent.abort(); await prompt_task`` don't see a new
+# exception shape from MCP-backed tools — the agent loop runs its
+# normal abort lifecycle (ToolExecutionEnd → next turn →
+# provider stream sees signal → AssistantMessage(stop_reason="aborted")
+# → TurnEnd → AgentEnd). See codex round-1 follow-up on PR #88.
+_ABORTED_SENTINEL: Any = object()
+
+
+async def _await_with_signal(coro: Awaitable[Any], signal: Any) -> Any:
+    """Await ``coro``, but bail out with :data:`_ABORTED_SENTINEL` if
+    ``signal`` (an ``asyncio.Event`` set by ``agent.abort()``) fires
+    while the awaitable is in flight.
+
+    ``Agent.abort()`` only sets the cooperative signal — it does NOT
+    cancel the running task — so without a co-watching coroutine an
+    in-flight MCP ``tools/call`` would block until response or
+    transport timeout regardless of abort. Cancellation latency would
+    be bounded by the MCP timeout (30s default), not by the user's
+    intent. Racing the signal here lets ``abort()`` propagate
+    through MCP within a tick (codex overall-review MAJOR).
+
+    Returning a sentinel rather than raising ``asyncio.CancelledError``
+    keeps the agent lifecycle intact: the MCP ``_execute`` adapter
+    converts the sentinel into a synthetic ``AgentToolResult`` so the
+    normal ``ToolExecutionEnd`` / ``TurnEnd`` / ``AgentEnd`` flow
+    completes without surfacing a new exception type to callers that
+    only catch ``Exception`` (codex round-1 follow-up on PR #88).
+
+    When ``signal`` is ``None`` (e.g. tool invoked outside the agent
+    loop, or by a non-cubepi caller), just await the coroutine.
+    """
+    if signal is None or not hasattr(signal, "wait"):
+        return await coro
+    if signal.is_set():
+        # Already aborted before we even started. Close the coroutine
+        # so the caller doesn't get a "coroutine was never awaited"
+        # warning — ``coro`` is fresh and hasn't started executing.
+        if hasattr(coro, "close"):
+            coro.close()
+        return _ABORTED_SENTINEL
+    call_task = asyncio.ensure_future(coro)
+    signal_task = asyncio.ensure_future(signal.wait())
+    try:
+        done, pending = await asyncio.wait(
+            {call_task, signal_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    except BaseException:
+        # Outer cancellation: clean up both tasks and re-raise.
+        # Same fire-and-forget cleanup as the signal-won branch —
+        # don't block on slow transport teardown.
+        for t in (call_task, signal_task):
+            if not t.done():
+                t.cancel()
+                t.add_done_callback(_consume_task_exception)
+        raise
+    if signal_task in done:
+        # Cooperative abort fired first — cancel the in-flight RPC
+        # and return the sentinel so ``_execute`` can synthesize a
+        # graceful tool result.
+        #
+        # Don't ``await call_task`` here: ``call_remote`` may catch
+        # ``CancelledError`` for slow transport cleanup (HTTP socket
+        # close, MCP session shutdown), and awaiting would reintroduce
+        # the abort-latency problem this helper was meant to fix —
+        # the prompt task would still hang until the MCP transport
+        # timeout despite the signal having won the race (codex
+        # round-2 follow-up on PR #88).
+        #
+        # Cancellation is dispatched eagerly; the cleanup finishes
+        # out-of-band. The ``add_done_callback`` consumes the
+        # eventual exception so asyncio doesn't log a
+        # "task exception was never retrieved" warning at GC time.
+        if not call_task.done():
+            call_task.cancel()
+            call_task.add_done_callback(_consume_task_exception)
+        return _ABORTED_SENTINEL
+    # call_task completed first; tidy the signal watcher.
+    if not signal_task.done():
+        signal_task.cancel()
+        try:
+            await signal_task
+        except BaseException:
+            pass
+    return call_task.result()

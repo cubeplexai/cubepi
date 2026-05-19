@@ -213,9 +213,9 @@ class Recorder:
             )
 
         def _sync_detach() -> None:
-            """All synchronous cleanup: unsubscribe + sweep leaked
-            registrations. Runs eagerly in ``detach()`` so the
-            cancellation-leak cleanup is observable on the next line —
+            """All synchronous cleanup: unsubscribe + close any spans
+            still open + sweep leaked registrations. Runs eagerly in
+            ``detach()`` so cleanup is observable on the next line —
             not deferred to a loop tick that may never arrive if the
             caller immediately awaits ``tracer.shutdown()`` or exits
             ``asyncio.run`` (codex round-11).
@@ -226,29 +226,39 @@ class Recorder:
                     d()
                 except Exception:
                     pass
-            # Final cleanup of any leaked tool-span registrations from
-            # a cancelled run — CancelledError bypasses the agent's
-            # ``except Exception`` handler so _on_agent_end /
-            # _on_tool_exec_end never fire (codex round-10).
+            # Close any spans that an in-flight cancelled run left
+            # open, then sweep MCP registrations (codex round-10 /
+            # overall-review BLOCKING). CancelledError bypasses the
+            # agent's ``except Exception`` handler so the per-event
+            # end handlers never fire.
+            self._close_open_spans(self._run)
             self._sweep_tool_span_tokens(self._run)
 
-        async def _detach_async() -> None:
-            _sync_detach()
-            await self._tracer.force_flush()
+        def detach():
+            """Synchronous cleanup + scheduled flush.
 
-        def detach() -> None:
-            # Synchronous part runs immediately in either path so the
-            # caller can rely on cleanup having happened by the time
-            # ``detach()`` returns.
+            The unsubscribe / open-span close / MCP-token sweep all
+            run synchronously here — observable on the line after
+            ``detach()`` returns. The flush is scheduled as an
+            ``asyncio.Task`` and returned so callers who need the
+            buffered spans persisted before they proceed can
+            ``await detach()`` — the previous fire-and-forget
+            ``create_task(...)`` left them in ``BatchSpanProcessor``
+            indefinitely if the caller exited ``asyncio.run`` (codex
+            overall-review MAJOR).
+
+            Outside an async context (no running loop) returns
+            ``None`` — sync cleanup is done but flush is the caller's
+            responsibility via ``await tracer.shutdown()``.
+            """
             _sync_detach()
             try:
                 import asyncio
 
                 loop = asyncio.get_running_loop()
             except RuntimeError:
-                return  # no loop — sync cleanup already done.
-            # Inside a loop — schedule the remaining async flush.
-            loop.create_task(self._tracer.force_flush())
+                return None
+            return loop.create_task(self._tracer.force_flush())
 
         return detach
 
@@ -337,12 +347,68 @@ class Recorder:
                 pass
         run.tool_span_tokens.clear()
 
+    def _close_open_spans(self, run: "_RunState | None") -> None:
+        """End any spans still open on ``run``.
+
+        Normal flow ends ``execute_tool`` / ``chat`` / ``cubepi.turn`` /
+        ``invoke_agent`` spans in their respective event handlers. But
+        ``asyncio.CancelledError`` bypasses cubepi's agent-loop
+        ``except Exception`` handler — no ``ToolExecutionEnd`` /
+        ``TurnEnd`` / ``AgentEnd`` is emitted. Without this sweep the
+        spans never reach ``span.end()`` and ``BatchSpanProcessor``
+        never exports them: cancelled runs simply disappear from the
+        backend (codex overall-review BLOCKING).
+
+        Each span gets ``cubepi.aborted=true`` + ``error.type`` so the
+        backend sees the run was interrupted rather than silently
+        succeeding. Status is left UNSET — cancellation isn't a
+        failure.
+        """
+        if run is None:
+            return
+        for span in list(run.tool_spans.values()):
+            try:
+                span.set_attribute(CUBEPI_ABORTED, True)
+                span.set_attribute(ERROR_TYPE, "cubepi.aborted")
+                span.end()
+            except Exception:
+                pass
+        run.tool_spans.clear()
+        if run.chat_span is not None:
+            try:
+                run.chat_span.set_attribute(CUBEPI_ABORTED, True)
+                run.chat_span.set_attribute(ERROR_TYPE, "cubepi.aborted")
+                run.chat_span.end()
+            except Exception:
+                pass
+            run.chat_span = None
+            run.chat_open_ns = None
+            run.chat_first_chunk_recorded = False
+        if run.turn_span is not None:
+            try:
+                run.turn_span.set_attribute(CUBEPI_ABORTED, True)
+                run.turn_span.end()
+            except Exception:
+                pass
+            run.turn_span = None
+        if run.agent_span is not None:
+            try:
+                run.agent_span.set_attribute(CUBEPI_ABORTED, True)
+                run.agent_span.end()
+            except Exception:
+                pass
+            # Don't null agent_span — _RunState gets dropped wholesale.
+
     def _on_agent_start(self) -> None:
-        # Defensive sweep: if a prior run was cancelled (CancelledError
-        # inherits BaseException — cubepi's agent loop doesn't emit
-        # ToolExecutionEndEvent in that path), its tool-span registrations
-        # could still be live in cubepi.mcp._tracing. Clean before
-        # opening the new _RunState.
+        # Defensive cleanup: if a prior run was cancelled
+        # (CancelledError inherits BaseException — cubepi's agent loop
+        # doesn't emit ToolExecutionEnd / TurnEnd / AgentEnd in that
+        # path), its open spans never reached span.end() and its MCP
+        # tool-span registrations are still live. Close + sweep both
+        # before opening the new _RunState so the prior run is at
+        # least visible (marked aborted) in the backend and shared
+        # state stays consistent.
+        self._close_open_spans(self._run)
         self._sweep_tool_span_tokens(self._run)
 
         run_id = str(uuid.uuid4())
@@ -676,8 +742,14 @@ class Recorder:
         }
         # Pull StreamOptions-derived params from the payload where the
         # provider exposed them as final kwargs.
+        #
+        # Note: OpenAI Responses uses ``max_output_tokens`` in place of
+        # the chat-completions ``max_tokens`` field — accept either so
+        # the resulting ``gen_ai.request.max_tokens`` attribute is
+        # consistent across providers (codex overall-review MINOR).
         for key, attr in (
             ("max_tokens", GEN_AI_REQUEST_MAX_TOKENS),
+            ("max_output_tokens", GEN_AI_REQUEST_MAX_TOKENS),
             ("temperature", GEN_AI_REQUEST_TEMPERATURE),
             ("top_p", GEN_AI_REQUEST_TOP_P),
         ):
@@ -1050,8 +1122,28 @@ def _extract_system_prompt(payload: dict) -> str | None:
 
 
 def _safe_tool_name(t: Any) -> str:
+    """Best-effort tool-name extractor across provider payload shapes.
+
+    Three shapes seen in the wild:
+
+    - Anthropic / cubepi.AgentTool: top-level ``{"name": ...}``
+    - OpenAI Responses: top-level ``{"name": ..., "type": "function"}``
+    - OpenAI Chat: nested ``{"type": "function", "function": {"name": ...}}``
+
+    Falls back to an attribute lookup for plain objects. Without the
+    nested-function branch, OpenAI Chat tool lists produced
+    ``[""]`` on the root span attribute (codex overall-review MINOR).
+    """
     if isinstance(t, dict):
-        return str(t.get("name") or "")
+        top = t.get("name")
+        if top:
+            return str(top)
+        fn = t.get("function")
+        if isinstance(fn, dict):
+            nested = fn.get("name")
+            if nested:
+                return str(nested)
+        return ""
     name = getattr(t, "name", None)
     return str(name) if name else ""
 

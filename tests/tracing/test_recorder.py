@@ -494,6 +494,202 @@ class TestErrorAndAbort:
         assert fallback_chat.status.status_code == StatusCode.UNSET
 
 
+class TestSafeToolName:
+    """``_safe_tool_name`` must handle all three tool payload shapes:
+    Anthropic/cubepi top-level ``name``, OpenAI Responses top-level
+    ``name``, and OpenAI Chat's nested ``{type: function, function:
+    {name: ...}}``. Without the nested branch the root span's tool
+    list was filled with ``[""]`` for OpenAI Chat (codex
+    overall-review MINOR)."""
+
+    def test_top_level_name(self):
+        from cubepi.tracing.recorder import _safe_tool_name
+
+        assert _safe_tool_name({"name": "search"}) == "search"
+
+    def test_openai_chat_nested_function_shape(self):
+        from cubepi.tracing.recorder import _safe_tool_name
+
+        assert (
+            _safe_tool_name({"type": "function", "function": {"name": "fetch"}})
+            == "fetch"
+        )
+
+    def test_object_attribute(self):
+        from cubepi.tracing.recorder import _safe_tool_name
+
+        class _T:
+            name = "calc"
+
+        assert _safe_tool_name(_T()) == "calc"
+
+    def test_missing_name_returns_empty(self):
+        from cubepi.tracing.recorder import _safe_tool_name
+
+        assert _safe_tool_name({}) == ""
+        assert _safe_tool_name({"type": "function"}) == ""
+
+
+class TestRequestMaxTokensCrossProvider:
+    """OpenAI Responses uses ``max_output_tokens`` while
+    chat-completions / Anthropic use ``max_tokens``. The recorder
+    must capture either into ``gen_ai.request.max_tokens`` so the
+    attribute is consistent across providers (codex overall-review
+    MINOR)."""
+
+    async def test_max_output_tokens_lands_in_request_max_tokens(self):
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        tracer.attach(agent)
+
+        recorder = _find_attached_recorder(provider)
+        assert recorder is not None
+        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
+
+        await recorder._on_agent_event(AgentStartEvent())
+        await recorder._on_agent_event(TurnStartEvent())
+        # Simulate an OpenAI Responses request payload shape.
+        recorder._on_provider_request(
+            {"messages": [], "max_output_tokens": 4096},
+            MODEL,
+        )
+        recorder._on_provider_response({"model": "faux-1"}, MODEL, None)
+        await tracer.shutdown()
+
+        chats = [s for s in exporter.spans if s.name.startswith("chat ")]
+        assert chats, "no chat span captured"
+        # The most recent chat span carries the value.
+        attrs = _attrs(chats[-1])
+        assert attrs.get("gen_ai.request.max_tokens") == 4096
+
+
+class TestDetachFlushGuarantee:
+    """``Tracer.attach()``'s ``detach()`` must let callers await the
+    flush so buffered spans land before they proceed — previously the
+    flush was scheduled fire-and-forget and the caller could exit
+    asyncio.run before BatchSpanProcessor drained (codex overall-
+    review MAJOR)."""
+
+    async def test_detach_returns_awaitable_task(self):
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+
+        # Replicate Tracer.attach's detach: it should return a Task.
+        detach = tracer.attach(agent)
+        # `attach()` already happened in _build, so detach has been
+        # consumed. Build a fresh attach here.
+        await agent.prompt("y")
+        await agent.wait_for_idle()
+        result = detach()
+        assert result is not None, (
+            "detach() inside running loop must return a flush Task; got None"
+        )
+        assert asyncio.isfuture(result) or asyncio.iscoroutine(result), (
+            f"detach() must return an awaitable; got {type(result).__name__}"
+        )
+        # Awaiting it must complete the flush.
+        flushed = await result
+        # force_flush returns a bool — exporter should have spans.
+        del flushed
+        await tracer.shutdown()
+        assert exporter.spans, "no spans landed after awaited detach"
+
+    def test_detach_outside_loop_returns_none(self):
+        # Build a Tracer + Agent in sync context (no running loop).
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[])
+        detach = tracer.attach(agent)
+        # No running loop → flush is the caller's responsibility.
+        assert detach() is None
+
+
+class TestCancellationExportsSpans:
+    """``asyncio.CancelledError`` bypasses cubepi's agent-loop
+    ``except Exception``, so no AgentEnd / TurnEnd / ToolExecutionEnd
+    event is emitted on cancel. Without an explicit close path the
+    open spans never reach ``span.end()`` and ``BatchSpanProcessor``
+    drops them — cancelled runs simply disappear from the backend
+    (codex overall-review BLOCKING)."""
+
+    async def test_cancelled_run_still_exports_invoke_agent_span(self):
+        provider = FauxProvider(tokens_per_second=10.0)
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        detach = tracer.attach(agent)
+
+        provider.append_responses([faux_assistant_message("x" * 600)])
+
+        run = asyncio.create_task(agent.prompt("hi"))
+        await asyncio.sleep(0.05)
+        run.cancel()
+        try:
+            await run
+        except asyncio.CancelledError:
+            pass
+
+        detach()
+        await tracer.shutdown()
+
+        # invoke_agent + cubepi.turn + chat must all have been ended
+        # and exported, even though no AgentEnd/TurnEnd fired.
+        names = {s.name for s in exporter.spans}
+        assert "invoke_agent" in names, (
+            f"cancelled run's invoke_agent span not exported; got {names}"
+        )
+        assert "cubepi.turn" in names
+        assert any(n.startswith("chat ") for n in names)
+
+        # Each must carry cubepi.aborted so the backend sees the
+        # interruption rather than thinking the run completed.
+        for span in exporter.spans:
+            if span.name in ("invoke_agent", "cubepi.turn") or span.name.startswith(
+                "chat "
+            ):
+                attrs = _attrs(span)
+                assert attrs.get("cubepi.aborted") is True, (
+                    f"{span.name} missing cubepi.aborted after cancellation"
+                )
+
+
+class TestCloseOpenSpansDefensive:
+    """``_close_open_spans`` swallows any exception raised while
+    marking a span aborted — the cleanup must continue across all
+    open spans even if one raises. Pin those defensive branches
+    (codex overall-review BLOCKING follow-up: pure coverage)."""
+
+    def test_close_open_spans_swallows_set_attribute_errors(self):
+        from cubepi.tracing.recorder import Recorder, _RunState
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+
+        class _BoomSpan:
+            def set_attribute(self, *_a, **_kw):
+                raise RuntimeError("set_attribute boom")
+
+            def end(self):
+                raise RuntimeError("end boom")
+
+        run = _RunState(run_id="r", agent_span=_BoomSpan())
+        run.tool_spans = {"tc1": _BoomSpan(), "tc2": _BoomSpan()}
+        run.chat_span = _BoomSpan()
+        run.turn_span = _BoomSpan()
+
+        # All four branches' exception handlers must fire without
+        # propagating. Post-condition: tool_spans cleared, others
+        # nulled, no exception raised.
+        recorder._close_open_spans(run)
+        assert run.tool_spans == {}
+        assert run.chat_span is None
+        assert run.turn_span is None
+
+
 class TestAgentSignalHelper:
     """Unit-level coverage for the defensive branches of
     ``Recorder._agent_signal_is_set`` introduced in PR #87. The

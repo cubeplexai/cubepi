@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from cubepi.mcp._adapter import make_mcp_agent_tool
 from cubepi.mcp.types import (
@@ -25,14 +25,19 @@ async def _open_session(
     headers: dict[str, str] | None,
     timeout: float,
     transport: Transport,
-) -> AsyncIterator[Any]:
+) -> AsyncIterator[tuple[Any, Callable[[], str | None]]]:
     """Open an MCP ClientSession over the requested transport.
 
-    Normalises the two SDK transport client signatures: ``sse_client``
-    yields a 2-tuple ``(read, write)`` while ``streamablehttp_client``
-    yields a 3-tuple ``(read, write, get_session_id_callable)``. We drop
-    the session-id callable and expose a single ``ClientSession`` to the
-    caller.
+    Yields ``(session, get_session_id)``:
+
+    - ``session`` is the live ``ClientSession``.
+    - ``get_session_id()`` returns the current MCP session id for the
+      Streamable HTTP transport (``mcp.session.id`` per the GenAI MCP
+      semconv), or ``None`` for SSE (which has no session-id concept).
+      Callers use this to stamp ``mcp.session.id`` onto the CLIENT
+      span inside ``_call_remote`` rather than at loader time —
+      loader-time stamping was impossible because each call opens a
+      fresh session with its own id (codex overall-review MINOR).
     """
     from mcp import ClientSession
 
@@ -50,9 +55,9 @@ async def _open_session(
             headers=headers,
             timeout=timeout_td,
             sse_read_timeout=timeout_td,
-        ) as (read_stream, write_stream, _get_session_id):
+        ) as (read_stream, write_stream, get_session_id):
             async with ClientSession(read_stream, write_stream) as session:
-                yield session
+                yield session, get_session_id
         return
 
     if transport == "sse":
@@ -65,10 +70,43 @@ async def _open_session(
             sse_read_timeout=timeout,
         ) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
-                yield session
+                yield session, _no_session_id
         return
 
     raise ValueError(f"unsupported MCP transport '{transport}'")
+
+
+def _no_session_id() -> str | None:
+    """SSE transport has no MCP session id; this stub yields ``None``
+    so callers can treat both transports uniformly."""
+    return None
+
+
+def _stamp_session_id(session_id: str | None) -> None:
+    """Attach ``mcp.session.id`` to the current OTel span if both the
+    id and ``opentelemetry`` are present.
+
+    The CLIENT span was opened by ``cubepi.mcp._adapter._execute``
+    via ``mcp_client_span``; ``use_span`` makes it the current span
+    while ``call_remote`` runs, so reading ``get_current_span()``
+    inside the loader's call path resolves to the right span. No-op
+    when OTel isn't installed or the loader is called outside an
+    active span context.
+    """
+    if not session_id:
+        return
+    try:
+        from opentelemetry import trace as _otel_trace
+    except ImportError:
+        return
+    span = _otel_trace.get_current_span()
+    ctx = span.get_span_context()
+    if not getattr(ctx, "is_valid", False):
+        return
+    try:
+        span.set_attribute("mcp.session.id", str(session_id))
+    except Exception:
+        pass
 
 
 async def load_mcp_tools_http(
@@ -124,8 +162,12 @@ async def load_mcp_tools_http(
 
         async with _open_session(
             server_url, headers=call_headers, timeout=timeout, transport=transport
-        ) as session:
+        ) as (session, get_session_id):
             await asyncio.wait_for(session.initialize(), timeout=timeout)
+            # Stamp mcp.session.id on the active CLIENT span (the one
+            # opened by _adapter._execute via ``mcp_client_span``).
+            # Per-call session id can only be read after initialize().
+            _stamp_session_id(get_session_id())
             resp = await asyncio.wait_for(
                 session.call_tool(tool_name, args), timeout=timeout
             )
@@ -133,7 +175,7 @@ async def load_mcp_tools_http(
 
     async with _open_session(
         server_url, headers=headers, timeout=timeout, transport=transport
-    ) as session:
+    ) as (session, _get_session_id):
         init_result = await asyncio.wait_for(session.initialize(), timeout=timeout)
         tools_resp = await asyncio.wait_for(session.list_tools(), timeout=timeout)
         tool_descs = tools_resp.tools

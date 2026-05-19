@@ -506,3 +506,107 @@ async def test_load_mcp_tools_http_handles_missing_server_icons(monkeypatch) -> 
     assert discovery.server is not None
     assert discovery.server.icons == ()
     assert discovery.server.website_url is None
+
+
+def test_stamp_session_id_handles_otel_missing(monkeypatch) -> None:
+    """When opentelemetry isn't importable, ``_stamp_session_id``
+    must no-op silently — the loader can't assume the optional
+    tracing extra is installed (defensive-branch coverage)."""
+    import builtins
+
+    from cubepi.mcp import http_loader
+
+    real_import = builtins.__import__
+
+    def _no_otel(name, *args, **kwargs):
+        if name.startswith("opentelemetry"):
+            raise ImportError("opentelemetry not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _no_otel)
+    # Must not raise.
+    http_loader._stamp_session_id("sess-x")
+
+
+def test_stamp_session_id_noop_without_active_span() -> None:
+    """When no recording span is active (``ctx.is_valid == False``)
+    ``_stamp_session_id`` must return without touching the span
+    (defensive-branch coverage)."""
+    from cubepi.mcp import http_loader
+
+    # No tracer provider set up — get_current_span returns the OTel
+    # NonRecordingSpan whose ctx.is_valid is False.
+    http_loader._stamp_session_id("sess-y")
+
+
+def test_stamp_session_id_swallows_set_attribute_errors(monkeypatch) -> None:
+    """When the current span's ``set_attribute`` raises,
+    ``_stamp_session_id`` must swallow — observability never gets
+    in the loader's way (defensive-branch coverage)."""
+    from opentelemetry import trace as _otel_trace
+
+    class _BoomSpan:
+        def get_span_context(self):
+            class _Ctx:
+                is_valid = True
+
+            return _Ctx()
+
+        def set_attribute(self, *_a, **_kw):
+            raise RuntimeError("boom")
+
+    from cubepi.mcp import http_loader
+
+    monkeypatch.setattr(_otel_trace, "get_current_span", lambda: _BoomSpan())
+    # Must not raise.
+    http_loader._stamp_session_id("sess-x")
+
+
+@pytest.mark.asyncio
+async def test_stamp_session_id_attaches_attr_to_current_span() -> None:
+    """``_stamp_session_id`` reads the active OTel span and writes
+    ``mcp.session.id`` onto it. The streamable HTTP loader calls it
+    inside ``_call_remote`` after ``initialize()`` returns, while the
+    CLIENT span opened by ``mcp_client_span`` is current.
+
+    Codex overall-review MINOR finding: previously the HTTP loader
+    dropped the ``_get_session_id`` callable yielded by
+    ``streamablehttp_client``, so the CLIENT span never carried
+    ``mcp.session.id`` for HTTP MCP servers."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import (
+        SimpleSpanProcessor,
+        SpanExporter,
+        SpanExportResult,
+    )
+
+    class _Capture(SpanExporter):
+        def __init__(self) -> None:
+            self.spans: list = []
+
+        def export(self, spans):  # noqa: ANN001
+            self.spans.extend(spans)
+            return SpanExportResult.SUCCESS
+
+        def shutdown(self) -> None:
+            pass
+
+        def force_flush(self, timeout_millis: int = 30_000) -> bool:
+            return True
+
+    exporter = _Capture()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+
+    from cubepi.mcp.http_loader import _stamp_session_id
+
+    with tracer.start_as_current_span("test-span"):
+        _stamp_session_id("session-abc-123")
+    # No-op cases (must not raise).
+    _stamp_session_id(None)
+    _stamp_session_id("")
+
+    assert exporter.spans
+    attrs = dict(exporter.spans[0].attributes or {})
+    assert attrs.get("mcp.session.id") == "session-abc-123"

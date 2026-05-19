@@ -46,13 +46,6 @@ def _build_meter() -> tuple[Meter, InMemoryMetricReader]:
         "gen_ai.client.operation.time_to_first_chunk", unit="s"
     )
     meter._shutdown = False
-    meter._chat_open_ns = None
-    meter._chat_first_chunk_ns = None
-    meter._chat_attrs = {}
-    meter._tool_open_ns = {}
-    meter._tool_attrs = {}
-    meter._agent_open_ns = None
-    meter._agent_attrs = {}
     return meter, reader
 
 
@@ -210,6 +203,70 @@ class TestProviderOnToolMetrics:
             assert attrs.get("gen_ai.provider.name") == "faux", (
                 f"execute_tool metric missing gen_ai.provider.name; got {attrs}"
             )
+
+
+class TestConcurrentAgents:
+    """Two agents attached to the same Meter must produce independent
+    measurements — codex overall-review MAJOR. Previously timing /
+    attribute state lived on the Meter instance, so a second agent's
+    provider_request overwrote the first agent's ``_chat_open_ns`` /
+    ``_chat_attrs`` before its response landed and corrupted the
+    duration + token recordings."""
+
+    async def test_interleaved_provider_requests_dont_share_state(self):
+        """Drive the meter's provider listeners directly with the two
+        attaches' state interleaved (request A → request B → response
+        A → response B). With instance-level state the first response
+        would record duration against B's attrs; with per-attach state
+        each one records against its own attrs."""
+        agent_a = Agent(provider=FauxProvider(), model=MODEL, system_prompt="s")
+        agent_b = Agent(
+            provider=FauxProvider(),
+            model=Model(id="faux-2", provider="faux"),
+            system_prompt="s",
+        )
+        meter, reader = _build_meter()
+        meter.attach(agent_a)
+        meter.attach(agent_b)
+
+        # Walk the agents' provider listener registries directly so
+        # we control the ordering. Each agent has its own listener
+        # callable bound to its own _MeterState.
+        prov_a = agent_a._provider
+        prov_b = agent_b._provider
+        req_a = next(iter(prov_a._request_listeners))
+        req_b = next(iter(prov_b._request_listeners))
+        resp_a = next(iter(prov_a._response_listeners))
+        resp_b = next(iter(prov_b._response_listeners))
+
+        # Open both chat windows.
+        req_a({"messages": []}, MODEL)
+        req_b({"messages": []}, Model(id="faux-2", provider="faux"))
+        # Close them in original order.
+        body_a = {"model": "faux-1", "usage": {"input_tokens": 1, "output_tokens": 2}}
+        body_b = {"model": "faux-2", "usage": {"input_tokens": 3, "output_tokens": 4}}
+        resp_a(body_a, MODEL, None)
+        resp_b(body_b, Model(id="faux-2", provider="faux"), None)
+
+        points = _all_metric_points(reader)
+        chat_durations = [
+            dp
+            for n, dp in points
+            if n == "gen_ai.client.operation.duration"
+            and dict(dp.attributes).get("gen_ai.operation.name") == "chat"
+        ]
+        # Exactly two chat-duration observations, one per agent, each
+        # carrying its own request model. With instance-shared state
+        # both observations would carry the second request's model.
+        assert len(chat_durations) == 2, (
+            f"expected 2 chat durations, got {len(chat_durations)}"
+        )
+        request_models = sorted(
+            dict(dp.attributes).get("gen_ai.request.model") for dp in chat_durations
+        )
+        assert request_models == ["faux-1", "faux-2"], (
+            f"meter shared chat_attrs across attaches; got models {request_models}"
+        )
 
 
 class TestNoMetricsWithoutListeners:
