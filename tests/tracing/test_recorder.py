@@ -1014,6 +1014,24 @@ class TestAtexitFlush:
         # Must NOT raise.
         tracer._atexit_flush()
 
+    async def test_shutdown_swallows_unregister_failure(self, monkeypatch):
+        """If ``atexit.unregister`` raises (e.g. mocked away or Python
+        version edge case), ``shutdown()`` must still complete — the
+        unregister is best-effort cleanup."""
+        import atexit as _atexit
+
+        def _bad_unregister(_f):
+            raise RuntimeError("unregister boom")
+
+        monkeypatch.setattr(_atexit, "register", lambda f: None)
+        monkeypatch.setattr(_atexit, "unregister", _bad_unregister)
+        tracer = Tracer(service_name="t", exporters=[])
+        # Replace the unregister callback with one that hits the
+        # patched atexit.unregister.
+        tracer._atexit_unregister = lambda: _atexit.unregister(tracer._atexit_flush)
+        # Must NOT raise.
+        await tracer.shutdown()
+
     async def test_shutdown_unregisters_atexit_hook(self, monkeypatch):
         unregistered: list = []
         import atexit as _atexit
