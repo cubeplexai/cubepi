@@ -914,6 +914,7 @@ class TestAttachedContextManager:
         assert tracer._shutdown is True
         assert exporter.spans
 
+
 class TestTracingContext:
     """``cubepi.tracing.tracing_context`` sets per-task tags +
     metadata that the recorder stamps onto the invoke_agent span."""
@@ -1031,6 +1032,43 @@ class TestTracingContext:
         assert attrs.get("cubepi.metadata.good_str") == "yes"
         assert attrs.get("cubepi.metadata.good_int") == 42
         assert "cubepi.metadata.bad_dict" not in attrs
+
+    async def test_metadata_set_attribute_typeerror_is_swallowed(self, monkeypatch):
+        """OTel SDK silently drops most invalid attribute values, but
+        a non-conforming type could in principle raise TypeError /
+        ValueError from ``set_attribute``. The recorder must swallow
+        per-key so one bad metadata entry can't crash the whole span
+        (covers the defensive ``except (TypeError, ValueError)``
+        branch)."""
+        from cubepi.tracing import tracing_context
+        from opentelemetry.sdk.trace import Span as _SdkSpan
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        # Patch set_attribute to raise on a specific cubepi.metadata.*
+        # key while letting every other attribute go through. The
+        # recorder writes many cubepi.* / gen_ai.* attrs at agent
+        # start, so we need to be surgical.
+        original = _SdkSpan.set_attribute
+
+        def _selective_set_attribute(self, key, value):
+            if key == "cubepi.metadata.boom":
+                raise TypeError("simulated OTel reject")
+            return original(self, key, value)
+
+        monkeypatch.setattr(_SdkSpan, "set_attribute", _selective_set_attribute)
+
+        with tracing_context(metadata={"boom": object(), "good": "yes"}):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        # bad key swallowed; good key landed.
+        assert "cubepi.metadata.boom" not in attrs
+        assert attrs.get("cubepi.metadata.good") == "yes"
 
     async def test_metadata_cannot_clobber_reserved_cubepi_attrs(self):
         """User-supplied metadata keys must not be able to overwrite
