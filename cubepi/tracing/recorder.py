@@ -742,8 +742,14 @@ class Recorder:
         }
         # Pull StreamOptions-derived params from the payload where the
         # provider exposed them as final kwargs.
+        #
+        # Note: OpenAI Responses uses ``max_output_tokens`` in place of
+        # the chat-completions ``max_tokens`` field — accept either so
+        # the resulting ``gen_ai.request.max_tokens`` attribute is
+        # consistent across providers (codex overall-review MINOR).
         for key, attr in (
             ("max_tokens", GEN_AI_REQUEST_MAX_TOKENS),
+            ("max_output_tokens", GEN_AI_REQUEST_MAX_TOKENS),
             ("temperature", GEN_AI_REQUEST_TEMPERATURE),
             ("top_p", GEN_AI_REQUEST_TOP_P),
         ):

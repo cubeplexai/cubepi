@@ -494,6 +494,41 @@ class TestErrorAndAbort:
         assert fallback_chat.status.status_code == StatusCode.UNSET
 
 
+class TestRequestMaxTokensCrossProvider:
+    """OpenAI Responses uses ``max_output_tokens`` while
+    chat-completions / Anthropic use ``max_tokens``. The recorder
+    must capture either into ``gen_ai.request.max_tokens`` so the
+    attribute is consistent across providers (codex overall-review
+    MINOR)."""
+
+    async def test_max_output_tokens_lands_in_request_max_tokens(self):
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        tracer.attach(agent)
+
+        recorder = _find_attached_recorder(provider)
+        assert recorder is not None
+        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
+
+        await recorder._on_agent_event(AgentStartEvent())
+        await recorder._on_agent_event(TurnStartEvent())
+        # Simulate an OpenAI Responses request payload shape.
+        recorder._on_provider_request(
+            {"messages": [], "max_output_tokens": 4096},
+            MODEL,
+        )
+        recorder._on_provider_response({"model": "faux-1"}, MODEL, None)
+        await tracer.shutdown()
+
+        chats = [s for s in exporter.spans if s.name.startswith("chat ")]
+        assert chats, "no chat span captured"
+        # The most recent chat span carries the value.
+        attrs = _attrs(chats[-1])
+        assert attrs.get("gen_ai.request.max_tokens") == 4096
+
+
 class TestDetachFlushGuarantee:
     """``Tracer.attach()``'s ``detach()`` must let callers await the
     flush so buffered spans land before they proceed — previously the
