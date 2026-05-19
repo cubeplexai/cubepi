@@ -931,6 +931,109 @@ class TestLifecycle:
         assert tracer is not None
 
 
+class TestAtexitFlush:
+    """``Tracer(atexit_flush=True)`` registers a process-exit hook
+    that sync-flushes any buffered spans through BatchSpanProcessor.
+    Safety net for callers who forget ``await tracer.shutdown()`` —
+    matches the Traceloop SDK pattern. atexit doesn't run on
+    SIGKILL / os._exit but covers normal Ctrl-C / unhandled
+    exception / sys.exit paths."""
+
+    def test_registers_atexit_when_enabled(self, monkeypatch):
+        registered: list = []
+        unregistered: list = []
+        import atexit as _atexit
+
+        monkeypatch.setattr(_atexit, "register", lambda f: registered.append(f))
+        monkeypatch.setattr(_atexit, "unregister", lambda f: unregistered.append(f))
+
+        tracer = Tracer(service_name="t", exporters=[])
+        assert tracer._atexit_flush in registered
+        assert tracer._atexit_unregister is not None
+        # Sanity: the unregister callback removes the same function.
+        tracer._atexit_unregister()
+        assert tracer._atexit_flush in unregistered
+
+    def test_disabled_when_opted_out(self, monkeypatch):
+        registered: list = []
+        import atexit as _atexit
+
+        monkeypatch.setattr(_atexit, "register", lambda f: registered.append(f))
+        tracer = Tracer(service_name="t", exporters=[], atexit_flush=False)
+        assert tracer._atexit_flush not in registered
+        assert tracer._atexit_unregister is None
+
+    async def test_atexit_flush_calls_provider_force_flush(self):
+        flushed: list = []
+
+        class _FakeProvider:
+            def force_flush(self, timeout_millis: int = 30_000) -> bool:
+                flushed.append(timeout_millis)
+                return True
+
+            def shutdown(self) -> None:
+                pass
+
+        tracer = Tracer(service_name="t", exporters=[], atexit_flush=False)
+        tracer._provider = _FakeProvider()  # type: ignore[assignment]
+        tracer._atexit_flush_timeout_ms = 5000
+        tracer._atexit_flush()
+        assert flushed == [5000]
+
+    async def test_atexit_flush_noop_after_shutdown(self):
+        flushed: list = []
+
+        class _FakeProvider:
+            def force_flush(self, timeout_millis: int = 30_000) -> bool:
+                flushed.append(timeout_millis)
+                return True
+
+            def shutdown(self) -> None:
+                pass
+
+        tracer = Tracer(service_name="t", exporters=[], atexit_flush=False)
+        tracer._provider = _FakeProvider()  # type: ignore[assignment]
+        await tracer.shutdown()
+        flushed.clear()
+        tracer._atexit_flush()
+        assert flushed == [], "atexit hook must no-op after explicit shutdown"
+
+    def test_atexit_flush_swallows_exceptions(self):
+        """atexit handlers must NEVER raise — would corrupt
+        interpreter shutdown for every other registered handler."""
+
+        class _BoomProvider:
+            def force_flush(self, timeout_millis: int = 30_000) -> bool:
+                raise RuntimeError("flush boom")
+
+            def shutdown(self) -> None:
+                pass
+
+        tracer = Tracer(service_name="t", exporters=[], atexit_flush=False)
+        tracer._provider = _BoomProvider()  # type: ignore[assignment]
+        # Must NOT raise.
+        tracer._atexit_flush()
+
+    async def test_shutdown_unregisters_atexit_hook(self, monkeypatch):
+        unregistered: list = []
+        import atexit as _atexit
+
+        monkeypatch.setattr(_atexit, "register", lambda f: None)
+        monkeypatch.setattr(_atexit, "unregister", lambda f: unregistered.append(f))
+
+        tracer = Tracer(service_name="t", exporters=[])
+        hook = tracer._atexit_flush
+        await tracer.shutdown()
+        assert hook in unregistered, (
+            "shutdown() must unregister the atexit hook to keep the "
+            "atexit table from growing across many Tracer instances"
+        )
+        # Idempotent: a second shutdown does not double-unregister.
+        unregistered.clear()
+        await tracer.shutdown()
+        assert unregistered == []
+
+
 class TestJsonlExporter:
     async def test_writes_jsonl_files(self, tmp_path):
         from cubepi.tracing.exporters import JsonlSpanExporter

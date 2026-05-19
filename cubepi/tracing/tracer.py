@@ -8,6 +8,7 @@ the agent's event stream.
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
@@ -72,6 +73,8 @@ class Tracer:
         record_content: bool = False,
         redact: "Callable[[str, Any], Any] | None" = None,
         resource: Resource | None = None,
+        atexit_flush: bool = True,
+        atexit_flush_timeout_seconds: float = 5.0,
     ) -> None:
         self._record_content = record_content
         self._redact = redact
@@ -101,6 +104,20 @@ class Tracer:
             schema_url=SCHEMA_URL,
         )
         self._shutdown = False
+        self._atexit_flush_timeout_ms = int(atexit_flush_timeout_seconds * 1000)
+        self._atexit_unregister: Callable[[], None] | None = None
+        if atexit_flush:
+            # Safety net for callers that forget ``await tracer.shutdown()``:
+            # at process exit, sync-flush any buffered spans through
+            # BatchSpanProcessor. Idempotent — ``shutdown()`` flips
+            # ``self._shutdown`` so this becomes a no-op when the user
+            # cleaned up properly. Matches the Traceloop SDK pattern.
+            #
+            # Limitations: ``atexit`` does NOT run on SIGKILL, kernel
+            # OOM kill, or os._exit(). For guaranteed delivery under
+            # those conditions, use SimpleSpanProcessor instead.
+            atexit.register(self._atexit_flush)
+            self._atexit_unregister = lambda: atexit.unregister(self._atexit_flush)
 
     # -- public API ---------------------------------------------------
 
@@ -209,6 +226,38 @@ class Tracer:
         await self.force_flush(timeout_seconds=timeout_seconds)
         self._provider.shutdown()
         self._shutdown = True
+        # Remove the atexit hook now that the user has cleaned up
+        # explicitly — keeps the interpreter's atexit table from
+        # growing unbounded when many Tracers are constructed (e.g.
+        # in tests) and prevents a redundant flush at interpreter
+        # shutdown.
+        if self._atexit_unregister is not None:
+            try:
+                self._atexit_unregister()
+            except Exception:
+                pass
+            self._atexit_unregister = None
+
+    def _atexit_flush(self) -> None:
+        """Process-exit safety net: sync-flush any buffered spans.
+
+        Runs in the interpreter's atexit handler chain — no event
+        loop available, so we call ``provider.force_flush``
+        synchronously (BatchSpanProcessor's flush is sync; it blocks
+        the calling thread until the queue drains or the timeout
+        elapses).
+
+        Idempotent with ``shutdown()`` — if the user cleaned up
+        explicitly, ``_shutdown`` is True and we no-op.
+        """
+        if self._shutdown:
+            return
+        try:
+            self._provider.force_flush(timeout_millis=self._atexit_flush_timeout_ms)
+        except Exception:
+            # atexit hooks must never raise — would corrupt interpreter
+            # shutdown for everything else.
+            pass
 
     @contextlib.asynccontextmanager
     async def attached(self, agent: "Agent") -> AsyncIterator["Tracer"]:
