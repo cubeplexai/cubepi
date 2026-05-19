@@ -16,9 +16,10 @@ Histograms emitted (per OTel GenAI semconv):
 
 from __future__ import annotations
 
+import contextlib
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import (
@@ -199,6 +200,35 @@ class Meter:
         await self.force_flush(timeout_seconds=timeout_seconds)
         self._provider.shutdown()
         self._shutdown = True
+
+    @contextlib.asynccontextmanager
+    async def attached(self, agent: "Agent") -> AsyncIterator["Meter"]:
+        """RAII wrapper around :meth:`attach`.
+
+        ``async with`` enters by attaching the per-attach state, exits
+        by calling the detach callable returned from :meth:`attach`.
+        Mirrors :meth:`Tracer.attached` — use both for the cleanest
+        end-to-end shutdown:
+
+        ::
+
+            async with (
+                Tracer(...) as tracer,
+                Meter(resource=tracer.resource, ...) as meter,
+                tracer.attached(agent),
+                meter.attached(agent),
+            ):
+                await agent.prompt("...")
+            # auto: detach both + shutdown both
+        """
+        detach = self.attach(agent)
+        try:
+            yield self
+        finally:
+            try:
+                detach()
+            except Exception:
+                pass
 
     async def __aenter__(self) -> "Meter":
         return self

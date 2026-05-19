@@ -8,8 +8,9 @@ the agent's event stream.
 
 from __future__ import annotations
 
+import contextlib
 import uuid
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -208,6 +209,44 @@ class Tracer:
         await self.force_flush(timeout_seconds=timeout_seconds)
         self._provider.shutdown()
         self._shutdown = True
+
+    @contextlib.asynccontextmanager
+    async def attached(self, agent: "Agent") -> AsyncIterator["Tracer"]:
+        """RAII wrapper around :meth:`attach`.
+
+        ``async with`` enters by attaching the recorder, exits by
+        running detach and (in an async context) awaiting its returned
+        flush ``Task``. Equivalent to::
+
+            detach = tracer.attach(agent)
+            try:
+                ...
+            finally:
+                result = detach()
+                if result is not None:  # async context: it's a Task
+                    await result
+
+        Use this instead of the bare ``attach`` / ``finally: detach()``
+        pattern when you want the cleanup tied to a single ``async
+        with`` block. Combines with :class:`Tracer`'s own context
+        manager:
+
+        ::
+
+            async with Tracer(...) as tracer, tracer.attached(agent):
+                await agent.prompt("...")
+            # auto: detach (closes cancelled spans) + shutdown (flush + close)
+        """
+        detach = self.attach(agent)
+        try:
+            yield self
+        finally:
+            result = detach()
+            if result is not None and hasattr(result, "__await__"):
+                try:
+                    await result
+                except Exception:
+                    pass
 
     async def __aenter__(self) -> "Tracer":
         return self

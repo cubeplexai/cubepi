@@ -779,6 +779,93 @@ class TestTranscriptSeedingDefensiveBranches:
         assert recorder._run.transcript == []
 
 
+class TestAttachedContextManager:
+    """``Tracer.attached(agent)`` is the RAII wrapper around
+    ``attach`` / ``detach``. Pin: the body runs with the recorder
+    attached, the exit path runs the same cleanup as a manual
+    ``detach()`` call (closes any cancelled-run spans, schedules and
+    awaits the flush), and the next attach on the same agent doesn't
+    pile up handlers."""
+
+    async def test_basic_usage(self):
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        provider.append_responses([faux_assistant_message("ok")])
+
+        async with tracer.attached(agent):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+
+        # After the block, spans have been flushed.
+        names = {s.name for s in exporter.spans}
+        assert "invoke_agent" in names
+        assert "cubepi.turn" in names
+        assert any(n.startswith("chat ") for n in names)
+
+    async def test_cancellation_inside_block_still_closes_spans(self):
+        provider = FauxProvider(tokens_per_second=10.0)
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        provider.append_responses([faux_assistant_message("x" * 400)])
+
+        async with tracer.attached(agent):
+            run = asyncio.create_task(agent.prompt("hi"))
+            await asyncio.sleep(0.05)
+            run.cancel()
+            try:
+                await run
+            except asyncio.CancelledError:
+                pass
+        # The async exit ran detach + awaited flush.
+        names = {s.name for s in exporter.spans}
+        assert "invoke_agent" in names, (
+            f"cancelled run's invoke_agent span did not export; got {names}"
+        )
+        # Each open-at-cancel span carries cubepi.aborted.
+        for span in exporter.spans:
+            if span.name == "invoke_agent" or span.name == "cubepi.turn":
+                attrs = _attrs(span)
+                assert attrs.get("cubepi.aborted") is True
+
+    async def test_exception_inside_block_still_detaches(self):
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[])
+
+        try:
+            async with tracer.attached(agent):
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+        # Exception propagated; the recorder must be detached so it
+        # can be attached again to a different agent without piling up
+        # subscriptions on the original.
+        async with tracer.attached(agent):
+            pass  # no-op; should not error or warn
+
+    async def test_combined_with_tracer_async_with(self):
+        """The intended top-level idiom — Tracer + attached in one
+        ``async with`` line.
+        """
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider.append_responses([faux_assistant_message("ok")])
+        exporter = InMemoryExporter()
+
+        async with (
+            Tracer(service_name="t", agent_name="a", exporters=[exporter]) as tracer,
+            tracer.attached(agent),
+        ):
+            await agent.prompt("x")
+            await agent.wait_for_idle()
+        # Tracer is shut down; further use raises.
+        assert tracer._shutdown is True
+        assert exporter.spans
+
+
 class TestLifecycle:
     async def test_shutdown_is_idempotent(self):
         agent, provider, exporter, tracer = await _build()

@@ -269,6 +269,38 @@ class TestConcurrentAgents:
         )
 
 
+class TestAttachedContextManager:
+    """``Meter.attached(agent)`` mirrors ``Tracer.attached`` — RAII
+    wrapper that detaches on exit."""
+
+    async def test_basic_usage(self):
+        provider = FauxProvider()
+        provider.append_responses([faux_assistant_message("ok")])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        meter, reader = _build_meter()
+
+        async with meter.attached(agent):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+
+        points = _all_metric_points(reader)
+        durations = _by_name(points, "gen_ai.client.operation.duration")
+        assert len(durations) >= 2  # chat + invoke_agent
+
+    async def test_exception_inside_block_still_detaches(self):
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        meter, _reader = _build_meter()
+        try:
+            async with meter.attached(agent):
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+        # Re-attach must not pile up duplicate listeners.
+        async with meter.attached(agent):
+            pass
+
+
 class TestNoMetricsWithoutListeners:
     async def test_detach_stops_emission(self):
         provider = FauxProvider()
