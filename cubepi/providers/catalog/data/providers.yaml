@@ -124,7 +124,7 @@
       # https://api-docs.deepseek.com/guides/thinking_mode
       path: output_config.effort
       kind: effort
-      level_to_effort: { minimal: minimal, low: low, medium: medium, high: high, xhigh: high }
+      level_to_effort: { minimal: minimal, low: low, medium: medium, high: high, xhigh: max }
     # DeepSeek's Anthropic-shape endpoint accepts temperature in [0.0, 2.0]
     # (broader than vanilla Anthropic's [0.0, 1.0]).
     temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }

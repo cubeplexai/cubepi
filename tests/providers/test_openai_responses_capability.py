@@ -282,3 +282,27 @@ async def test_legacy_no_capability_preserves_on_payload_max_output_tokens():
         p, _model(), thinking="off", on_payload=set_max
     )
     assert payload["max_output_tokens"] == 999
+
+
+@pytest.mark.asyncio
+async def test_capability_skips_reasoning_for_non_reasoning_model():
+    """Capability path must not write reasoning fields when model.reasoning=False."""
+    cap = CapabilityDescriptor(
+        reasoning_on_payload={"reasoning": {"effort": "low"}},
+        reasoning_level=ReasoningLevelSpec(
+            path="reasoning.effort",
+            kind="effort",
+            level_to_effort={"medium": "medium"},
+        ),
+    )
+    p = OpenAIResponsesProvider(api_key="x", capability=cap)
+    m = Model(
+        id="gpt-4o-test",
+        provider="test",
+        context_window=128000,
+        max_tokens=16384,
+        temperature=1.0,
+        reasoning=False,  # non-reasoning
+    )
+    payload = await _capture_payload_responses(p, m, thinking="medium")
+    assert "reasoning" not in payload

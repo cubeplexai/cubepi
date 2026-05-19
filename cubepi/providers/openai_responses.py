@@ -149,7 +149,10 @@ class OpenAIResponsesProvider(BaseProvider):
                     apply_temperature(kwargs, cap.temperature)
                     if opts.thinking == "off":
                         merge_capability_payload(kwargs, cap.reasoning_off_payload)
-                    else:
+                    elif model.reasoning:
+                        # Only write reasoning fields when the model actually
+                        # reasons. Non-reasoning Responses models reject
+                        # reasoning_effort and related fields.
                         merge_capability_payload(kwargs, cap.reasoning_on_payload)
                         if cap.reasoning_level is not None:
                             write_reasoning_level(
