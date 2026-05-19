@@ -40,6 +40,17 @@ Each layer carries standard `gen_ai.*` attributes — `gen_ai.operation.name`,
 - **W3C trace context propagation** — outgoing MCP calls inject the active
   `traceparent` as an HTTP header so an instrumented MCP server can continue
   the trace.
+- **`tracer.attached(agent)` / `meter.attached(agent)`** — async context
+  managers that RAII-wrap attach/detach, so cleanup is one `async with`
+  block instead of an explicit `try/finally`.
+- **`atexit` flush hook** — `Tracer(atexit_flush=True)` (default) registers
+  a process-exit handler that sync-flushes any buffered spans, so callers
+  who forget `await tracer.shutdown()` still get their spans exported on
+  normal exit / Ctrl-C / unhandled exception.
+- **`tracing_context()`** — set per-run tags and metadata
+  (`cubepi.tags = ("beta-arm",)`, `cubepi.metadata.user_id = "u-42"`)
+  via a contextvar-scoped block. Concurrent agents each see their own
+  values.
 
 ## What it costs
 
@@ -62,6 +73,9 @@ Each layer carries standard `gen_ai.*` attributes — `gen_ai.operation.name`,
 | Latency + token histograms next to the spans | `Meter` alongside `Tracer` |
 | Record prompts / model outputs for evaluation | `Tracer(record_content=True)` |
 | Redact PII before it leaves the process | `Tracer(redact=…)` |
+| Tag runs with `user_id` / `session_id` / A-B arm | `tracing_context(tags=…, metadata=…)` |
+| One-liner cleanup, no try/finally | `async with tracer.attached(agent): …` |
+| Forget to call `shutdown()` and not lose spans | `Tracer(atexit_flush=True)` (default) |
 | Continue a trace from an upstream service | `Tracer(resource=…)` + W3C `traceparent` (auto for MCP, manual for HTTP) |
 
 ## Where to go next

@@ -19,7 +19,7 @@ rather than mid-run.
 
 ## Attach a Tracer
 
-The minimal end-to-end setup — local JSONL export:
+The minimal end-to-end setup — local JSONL export, idiomatic RAII:
 
 ```python
 import asyncio
@@ -36,25 +36,46 @@ async def main() -> None:
         system_prompt="Be helpful.",
     )
 
-    tracer = Tracer(
-        service_name="my-bot",
-        agent_name="assistant",
-        exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
-    )
-    detach = tracer.attach(agent)
-    try:
+    async with (
+        Tracer(
+            service_name="my-bot",
+            agent_name="assistant",
+            exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+        ) as tracer,
+        tracer.attached(agent),
+    ):
         await agent.prompt("Say hello.")
         await agent.wait_for_idle()
-    finally:
-        # Either is enough on its own:
-        #   await detach()                  # awaits the scheduled flush
-        #   await tracer.shutdown()          # flushes + closes exporters
-        detach()
-        await tracer.shutdown()
+    # On exit: auto-detach (closes any cancelled-run spans, awaits the
+    # flush) + tracer shutdown (flushes + closes exporters). No
+    # try/finally needed.
 
 
 asyncio.run(main())
 ```
+
+If you can't restructure into an `async with` (e.g. long-lived web
+handler that hands the agent around), the explicit pattern still
+works and is fully equivalent:
+
+```python
+detach = tracer.attach(agent)
+try:
+    await agent.prompt("…")
+finally:
+    # Either is enough on its own:
+    #   await detach()                # awaits the scheduled flush
+    #   await tracer.shutdown()        # flushes + closes exporters
+    detach()
+    await tracer.shutdown()
+```
+
+Even if you forget the cleanup entirely, `Tracer` registers an
+`atexit` hook by default that sync-flushes buffered spans at process
+exit — pass `atexit_flush=False` to opt out, or rely on it as a
+safety net while you're still building. (Doesn't run on `SIGKILL` or
+`os._exit`; for guaranteed delivery there, use the synchronous
+`SimpleSpanProcessor` from OTel.)
 
 The run produces one JSONL file per agent run:
 
@@ -162,6 +183,42 @@ Both `Tracer` and `Meter` are fine to share across agents — call
 metric state so concurrent agents don't share span or histogram state,
 and MCP CLIENT spans route through the right Tracer based on which
 agent's `execute_tool` span is the parent.
+
+With the RAII helper, stacking them is one `async with`:
+
+```python
+async with (
+    Tracer(...) as tracer,
+    tracer.attached(agent_a),
+    tracer.attached(agent_b),
+):
+    await asyncio.gather(agent_a.prompt("…"), agent_b.prompt("…"))
+```
+
+## Tagging individual runs
+
+`cubepi.tracing.tracing_context` scopes per-run tags / metadata onto
+the `invoke_agent` span — perfect for `user_id`, `session_id`,
+A/B-test arm, anything you'd want to filter by in the backend later:
+
+```python
+from cubepi.tracing import tracing_context
+
+async with tracer.attached(agent):
+    with tracing_context(tags=["beta-arm"], metadata={"user_id": "u-42"}):
+        await agent.prompt("Hello.")
+```
+
+Attributes on the span:
+
+- `cubepi.tags = ("beta-arm",)`
+- `cubepi.metadata.user_id = "u-42"`
+
+The `cubepi.metadata.*` prefix keeps user keys from clobbering
+recorder-owned schema (e.g. `cubepi.run_id`). Tags and metadata
+contextvars are per-asyncio-task, so concurrent agents see
+independent values, and nested `tracing_context` blocks merge
+(tags concatenate, metadata keys union with inner winning).
 
 ## Next
 

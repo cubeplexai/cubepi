@@ -29,6 +29,8 @@ landed) are still groupable by what was asked for:
 
 ## Attaching a Meter
 
+The idiomatic RAII form — `async with` everything, no manual cleanup:
+
 ```python
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
     OTLPMetricExporter,
@@ -36,26 +38,44 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 from cubepi.tracing import Tracer, Meter
 from cubepi.tracing.exporters import JsonlSpanExporter
 
-tracer = Tracer(
-    service_name="my-bot",
-    agent_name="assistant",
-    exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
-)
-meter = Meter(
-    resource=tracer.resource,        # share Resource so service.* matches spans
-    exporters=[
-        OTLPMetricExporter(endpoint="http://otel-collector:4318/v1/metrics"),
-    ],
-)
-
-tracer_detach = tracer.attach(agent)
-meter_detach = meter.attach(agent)
+async with (
+    Tracer(
+        service_name="my-bot",
+        agent_name="assistant",
+        exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+    ) as tracer,
+    Meter(
+        resource=tracer.resource,    # share Resource so service.* matches spans
+        exporters=[
+            OTLPMetricExporter(endpoint="http://otel-collector:4318/v1/metrics"),
+        ],
+    ) as meter,
+    tracer.attached(agent),
+    meter.attached(agent),
+):
+    await agent.prompt("...")
+# Exit order auto: detach both (closes any cancelled-run spans, flushes
+# the trace pipeline) → shutdown both (flush + close exporters).
 ```
 
-`Meter.attach()` is independent from `Tracer.attach()`. Each returns its
-own detach callable — capture both. You can run either on its own; the
-recommended setup is both, sharing one Resource so the backend treats
-them as the same service.
+`Meter.attach()` is independent from `Tracer.attach()`. You can run
+either on its own; the recommended setup is both, sharing one
+`Resource` so the backend treats them as the same service.
+
+If you need the explicit, non-RAII form (e.g. attaching agents
+dynamically over the lifetime of a long-running server):
+
+```python
+tracer_detach = tracer.attach(agent)
+meter_detach = meter.attach(agent)
+try:
+    ...
+finally:
+    tracer_detach()       # closes any cancelled-run spans
+    meter_detach()        # unsubscribes the meter's listeners
+    await tracer.shutdown()
+    await meter.shutdown()
+```
 
 ## Bucket boundaries
 
@@ -89,17 +109,21 @@ filterable by `gen_ai.agent.name` (set at the `Resource` level when
 
 ## Shutting down
 
+The RAII form (`async with … as tracer, … as meter, tracer.attached(agent),
+meter.attached(agent):` from above) handles the shutdown ordering for you:
+detach inner first → outer `Tracer/Meter` `__aexit__` runs `shutdown()`.
+
+For the manual pattern, order matters — `tracer_detach()` must run before
+`tracer.shutdown()` so any spans an in-flight cancellation left open get
+closed and exported in the same flush:
+
 ```python
 finally:
-    tracer_detach()           # closes any spans a cancelled run left open
-    meter_detach()            # unsubscribes the meter's listeners
+    tracer_detach()
+    meter_detach()
     await tracer.shutdown()
     await meter.shutdown()
 ```
-
-Order matters: run `tracer_detach()` before `tracer.shutdown()` so any
-spans an in-flight cancellation left open get closed and exported in
-the same flush.
 
 `Meter.shutdown()` awaits a flush of the metric reader, then closes it.
 `PeriodicExportingMetricReader` exports on a fixed interval (60 s by
