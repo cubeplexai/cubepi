@@ -267,3 +267,18 @@ async def test_capability_on_payload_overrides_max_output_tokens():
         p, _model(), thinking="off", on_payload=set_max
     )
     assert payload["max_output_tokens"] == 1234
+
+
+@pytest.mark.asyncio
+async def test_legacy_no_capability_preserves_on_payload_max_output_tokens():
+    """Regression: when on_payload sets max_output_tokens, legacy path preserves it."""
+    p = OpenAIResponsesProvider(api_key="x")  # legacy, no capability
+
+    async def set_max(kwargs, model):
+        kwargs["max_output_tokens"] = 999
+        return kwargs
+
+    payload = await _capture_payload_responses(
+        p, _model(), thinking="off", on_payload=set_max
+    )
+    assert payload["max_output_tokens"] == 999

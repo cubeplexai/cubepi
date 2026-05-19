@@ -157,21 +157,26 @@ class OpenAIResponsesProvider(BaseProvider):
                             )
                 else:
                     # Legacy path: configure reasoning effort via the inline map.
+                    # Use setdefault to preserve on_payload-set fields, matching
+                    # the capability path's ordering semantics.
                     effort = _THINKING_TO_EFFORT.get(opts.thinking)
                     if model.reasoning and effort is not None:
-                        kwargs["reasoning"] = {
-                            "effort": effort,
-                            "summary": "auto",
-                        }
-                        kwargs["include"] = ["reasoning.encrypted_content"]
+                        kwargs.setdefault(
+                            "reasoning",
+                            {
+                                "effort": effort,
+                                "summary": "auto",
+                            },
+                        )
+                        kwargs.setdefault("include", ["reasoning.encrypted_content"])
 
                     if model.max_tokens:
-                        kwargs["max_output_tokens"] = model.max_tokens
+                        kwargs.setdefault("max_output_tokens", model.max_tokens)
 
                     # Forward temperature for non-reasoning models; reasoning
                     # models don't support temperature on the Responses API.
                     if not model.reasoning:
-                        kwargs["temperature"] = model.temperature
+                        kwargs.setdefault("temperature", model.temperature)
 
                 await _fire_request_listeners(self._request_listeners, kwargs, model)
 

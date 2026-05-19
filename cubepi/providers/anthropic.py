@@ -206,6 +206,20 @@ class AnthropicProvider(BaseProvider):
                 budget = thinking_block.get("budget_tokens", 0) or 0
             kwargs["max_tokens"] = min(model.max_tokens + budget, model.context_window)
 
+            # If context_window clipped max_tokens such that the budget no
+            # longer fits, reduce the budget in place. Anthropic rejects when
+            # budget_tokens >= max_tokens; reserve at least 1024 output tokens
+            # to mirror adjust_max_tokens_for_thinking's legacy policy.
+            min_output_tokens = 1024
+            if budget > 0 and kwargs["max_tokens"] - budget < min_output_tokens:
+                new_budget = max(0, kwargs["max_tokens"] - min_output_tokens)
+                if isinstance(thinking_block, dict):
+                    if new_budget > 0:
+                        thinking_block["budget_tokens"] = new_budget
+                    else:
+                        # Budget reduced to 0 — disable thinking entirely.
+                        kwargs["thinking"] = {"type": "disabled"}
+
         async def _produce() -> None:
             body: dict | None = None
             exc: BaseException | None = None
