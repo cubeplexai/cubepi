@@ -141,11 +141,20 @@ the background. To make sure buffered spans land before your process exits:
 
 ```python
 finally:
-    detach()                    # unsubscribes; does NOT block on flush
+    detach()                    # closes any spans a cancelled run left open
     await tracer.shutdown()     # awaits force_flush, then shuts the SDK down
 ```
 
-`detach()` returns `None` — it unsubscribes the recorder synchronously but
-does not flush. Always pair it with `await tracer.shutdown()` (or
-`await tracer.force_flush()`) so buffered spans land before the process
-exits. `shutdown()` is idempotent; calling it twice is a no-op.
+`detach()` runs its synchronous cleanup (unsubscribe + close any spans an
+in-flight cancellation left open) immediately, then schedules a flush as
+an `asyncio.Task` on the running loop and returns it. Two valid patterns:
+
+- **Both** `detach(); await tracer.shutdown()` — the safest belt-and-braces
+  approach; `shutdown()` is idempotent.
+- **Awaited detach** `await detach()` — the returned Task awaits
+  `force_flush`, so this single call is enough when you're not also
+  shutting down the Tracer.
+
+Outside an async context (no running loop) `detach()` returns `None` — the
+sync part has run, but the flush is the caller's responsibility via
+`await tracer.shutdown()`.

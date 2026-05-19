@@ -68,18 +68,23 @@ boundaries (in seconds):
 OTel exposes these as the `_advisory` boundaries; backends are free to use
 them as-is or override.
 
-## One agent per Meter, for now
+## Concurrent agents on one Meter
 
-Today `Meter` keeps its timing and attribute state (`_chat_open_ns`,
-`_chat_attrs`, `_agent_open_ns`, etc.) on the instance, not per attach.
-Two agents attached to the same `Meter` running concurrently can overwrite
-each other's open-ns timestamps and corrupt the recorded durations or
-token counts.
+Like `Tracer`, one `Meter` instance is safe to attach to multiple agents
+in the same process. Each `attach()` call gets its own internal
+`_MeterState` holding the open-ns timestamps and attribute dicts, so
+overlapping runs from two agents never share or overwrite each other's
+metric state.
 
-If you have several concurrent agents in one process, give each its own
-`Meter` (they can share a `Resource` so service-level attributes match).
-A future change will scope state per `attach()` so a single `Meter` is
-safe across agents.
+```python
+meter = Meter(resource=tracer.resource, exporters=[exporter])
+meter.attach(agent_a)
+meter.attach(agent_b)
+```
+
+Both agents emit independent duration / token / TTFC observations,
+filterable by `gen_ai.agent.name` (set at the `Resource` level when
+`Tracer(agent_name=…)` is used) or by `gen_ai.request.model`.
 
 ## Shutting down
 
