@@ -24,16 +24,18 @@
     supports_tools: true
     supports_images: true
   default_models:
-    - { model_id: claude-opus-4-7,    display_name: Claude Opus 4.7,    context_window: 200000, max_tokens: 8192,  input_modalities: [text, image], reasoning: true }
-    - { model_id: claude-sonnet-4-6,  display_name: Claude Sonnet 4.6,  context_window: 200000, max_tokens: 8192,  input_modalities: [text, image], reasoning: true }
-    - { model_id: claude-haiku-4-5,   display_name: Claude Haiku 4.5,   context_window: 200000, max_tokens: 8192,  input_modalities: [text, image], reasoning: false }
+    # Opus 4.7 + Sonnet 4.6: 1M context window (Sonnet via beta header).
+    # Opus 4.7 supports up to 128K output tokens; Sonnet 4.6 up to 64K.
+    - { model_id: claude-opus-4-7,    display_name: Claude Opus 4.7,    context_window: 1000000, max_tokens: 128000, input_modalities: [text, image], reasoning: true }
+    - { model_id: claude-sonnet-4-6,  display_name: Claude Sonnet 4.6,  context_window: 1000000, max_tokens: 64000,  input_modalities: [text, image], reasoning: true }
+    - { model_id: claude-haiku-4-5,   display_name: Claude Haiku 4.5,   context_window: 200000,  max_tokens: 8192,   input_modalities: [text, image], reasoning: false }
 
 - slug: openai
   display_name: OpenAI
   short_name: OpenAI
   logo: openai
   category: saas
-  description: OpenAI Responses API (GPT-5, o-series reasoning).
+  description: OpenAI Responses API (GPT-5 series, o-series reasoning).
   api: openai-responses
   base_url: https://api.openai.com/v1
   auth: { mode: api_key }
@@ -54,16 +56,19 @@
     supports_tools: true
     supports_images: true
   default_models:
-    - { model_id: gpt-5,        display_name: GPT-5,        context_window: 400000, max_tokens: 16384, input_modalities: [text, image], reasoning: true }
-    - { model_id: gpt-5-mini,   display_name: GPT-5 Mini,   context_window: 400000, max_tokens: 16384, input_modalities: [text, image], reasoning: true }
-    - { model_id: o3-mini,      display_name: o3-mini,      context_window: 200000, max_tokens: 16384, input_modalities: [text],        reasoning: true }
+    # GPT-5.5 (Apr 23 2026): 1M context, 128K output. GPT-5.4 series 1M context.
+    # o4-mini = cost-efficient reasoning model, 200K context.
+    - { model_id: gpt-5.5,        display_name: GPT-5.5,       context_window: 1000000, max_tokens: 128000, input_modalities: [text, image], reasoning: true }
+    - { model_id: gpt-5.4,        display_name: GPT-5.4,       context_window: 1000000, max_tokens: 65536,  input_modalities: [text, image], reasoning: true }
+    - { model_id: gpt-5.4-mini,   display_name: GPT-5.4 Mini,  context_window: 1000000, max_tokens: 65536,  input_modalities: [text, image], reasoning: true }
+    - { model_id: o4-mini,        display_name: o4-mini,       context_window: 200000,  max_tokens: 100000, input_modalities: [text],        reasoning: true }
 
 - slug: openai-legacy
   display_name: OpenAI (Chat Completions)
   short_name: OpenAI-Chat
   logo: openai
   category: saas
-  description: OpenAI legacy chat/completions wire (GPT-4/3.5).
+  description: OpenAI legacy chat/completions wire (GPT-4o, GPT-4.1).
   api: openai-completions
   base_url: https://api.openai.com/v1
   auth: { mode: api_key }
@@ -73,7 +78,8 @@
     supports_tools: true
     supports_images: true
   default_models:
-    - { model_id: gpt-4o, display_name: GPT-4o, context_window: 128000, max_tokens: 16384, input_modalities: [text, image], reasoning: false }
+    - { model_id: gpt-4o,   display_name: GPT-4o,   context_window: 128000, max_tokens: 16384, input_modalities: [text, image], reasoning: false }
+    - { model_id: gpt-4.1,  display_name: GPT-4.1,  context_window: 1000000, max_tokens: 32768, input_modalities: [text, image], reasoning: false }
 
 - slug: qwen-dashscope
   display_name: 通义千问 (DashScope)
@@ -91,15 +97,17 @@
     supports_tools: true
     supports_images: true
   default_models:
-    - { model_id: qwen3.6-plus,  display_name: Qwen 3.6 Plus,  context_window: 256000, max_tokens: 32000, input_modalities: [text, image], reasoning: true }
-    - { model_id: qwen3.6-flash, display_name: Qwen 3.6 Flash, context_window: 128000, max_tokens: 16000, input_modalities: [text, image], reasoning: false }
+    # Qwen3.6 series (2026): Max/Plus/Flash tiers via DashScope OpenAI-compat.
+    - { model_id: qwen3-max,      display_name: Qwen3 Max,      context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true }
+    - { model_id: qwen3.6-plus,   display_name: Qwen 3.6 Plus,  context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true }
+    - { model_id: qwen3.6-flash,  display_name: Qwen 3.6 Flash, context_window: 131072, max_tokens: 16384, input_modalities: [text, image], reasoning: false }
 
 - slug: doubao-volcengine
   display_name: 豆包 (火山方舟)
   short_name: Doubao
   logo: doubao
   category: saas
-  description: ByteDance Volcengine OpenAI-compatible endpoint for Doubao models.
+  description: ByteDance Volcengine OpenAI-compatible endpoint for Doubao Seed models.
   api: openai-completions
   base_url: https://ark.cn-beijing.volces.com/api/v3
   auth: { mode: api_key }
@@ -110,7 +118,11 @@
     supports_tools: true
     supports_images: true
   default_models:
-    - { model_id: doubao-seed-2.0-pro, display_name: Doubao Seed 2.0 Pro, context_window: 128000, max_tokens: 16384, input_modalities: [text, image], reasoning: true }
+    # Doubao Seed 2.0 family (Feb 14 2026 GA). 256K context across chat tiers.
+    - { model_id: doubao-seed-2.0-pro,   display_name: Doubao Seed 2.0 Pro,   context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true }
+    - { model_id: doubao-seed-2.0-code,  display_name: Doubao Seed 2.0 Code,  context_window: 256000, max_tokens: 16384, input_modalities: [text],        reasoning: true }
+    - { model_id: doubao-seed-2.0-lite,  display_name: Doubao Seed 2.0 Lite,  context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true }
+    - { model_id: doubao-seed-2.0-mini,  display_name: Doubao Seed 2.0 Mini,  context_window: 256000, max_tokens: 16384, input_modalities: [text],        reasoning: false }
 
 - slug: deepseek-anthropic
   display_name: DeepSeek (Anthropic shape)
@@ -136,7 +148,9 @@
     # (broader than vanilla Anthropic's [0.0, 1.0]).
     temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
   default_models:
-    - { model_id: deepseek-v4-pro, display_name: DeepSeek V4 Pro, context_window: 64000, max_tokens: 12000, input_modalities: [text], reasoning: true }
+    # DeepSeek V4 (Apr 24 2026 preview): 1M context across Pro / Flash.
+    - { model_id: deepseek-v4-pro,    display_name: DeepSeek V4 Pro,    context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true }
+    - { model_id: deepseek-v4-flash,  display_name: DeepSeek V4 Flash,  context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true }
 
 - slug: deepseek-openai
   display_name: DeepSeek (OpenAI shape)
@@ -152,7 +166,8 @@
     reasoning_on_payload:  { extra_body: { reasoning: { exclude: false } } }
     temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
   default_models:
-    - { model_id: deepseek-chat, display_name: DeepSeek Chat, context_window: 64000, max_tokens: 8192, input_modalities: [text], reasoning: false }
+    - { model_id: deepseek-v4-pro,    display_name: DeepSeek V4 Pro,    context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true }
+    - { model_id: deepseek-v4-flash,  display_name: DeepSeek V4 Flash,  context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true }
 
 - slug: moonshot
   display_name: Moonshot Kimi
@@ -165,8 +180,53 @@
   auth: { mode: api_key }
   capability:
     temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+    supports_tools: true
   default_models:
-    - { model_id: moonshot-v1-128k, display_name: Kimi 128k, context_window: 128000, max_tokens: 8192, input_modalities: [text], reasoning: false }
+    # Kimi K2.6 (Apr 20 2026): 256K context, MoE 1T total / 32B active params.
+    - { model_id: kimi-k2.6,         display_name: Kimi K2.6,        context_window: 262144, max_tokens: 32768, input_modalities: [text], reasoning: true }
+    - { model_id: kimi-k2,           display_name: Kimi K2,          context_window: 131072, max_tokens: 16384, input_modalities: [text], reasoning: false }
+
+- slug: zhipu
+  display_name: 智谱 (Zhipu / BigModel)
+  short_name: Zhipu
+  logo: zhipu
+  category: saas
+  description: Zhipu AI GLM OpenAI-compatible endpoint (BigModel platform).
+  api: openai-completions
+  base_url: https://open.bigmodel.cn/api/paas/v4
+  auth: { mode: api_key }
+  capability:
+    # GLM thinking mode toggle (GLM-4.5+/GLM-5). Stays inside extra_body to
+    # ride through OpenAI-compat dispatch unchanged.
+    reasoning_off_payload: { extra_body: { thinking: { type: disabled } } }
+    reasoning_on_payload:  { extra_body: { thinking: { type: enabled  } } }
+    temperature: { mode: free, min: 0.0, max: 1.0, default: 0.7 }
+    supports_tools: true
+    supports_images: true
+  default_models:
+    # GLM-5 (Feb 11 2026): 744B MoE, MIT-licensed open weights. 200K context.
+    - { model_id: glm-5,         display_name: GLM-5,         context_window: 200000, max_tokens: 32768, input_modalities: [text, image], reasoning: true }
+    - { model_id: glm-4.7,       display_name: GLM-4.7,       context_window: 200000, max_tokens: 16384, input_modalities: [text, image], reasoning: true }
+    - { model_id: glm-4.7-flash, display_name: GLM-4.7 Flash, context_window: 128000, max_tokens: 16384, input_modalities: [text],        reasoning: false }
+
+- slug: minimax
+  display_name: MiniMax
+  short_name: MiniMax
+  logo: minimax
+  category: saas
+  description: MiniMax OpenAI-compatible endpoint (M-series chat / agent models).
+  api: openai-completions
+  base_url: https://api.minimax.io/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    supports_tools: true
+    supports_images: true
+  default_models:
+    # MiniMax M2.7 (Mar 18 2026): 204800-token context, up to 131072 max output.
+    - { model_id: MiniMax-M2.7,            display_name: MiniMax M2.7,            context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true }
+    - { model_id: MiniMax-M2.7-highspeed,  display_name: MiniMax M2.7 Highspeed,  context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: false }
+    - { model_id: MiniMax-M2.5,            display_name: MiniMax M2.5,            context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true }
 
 - slug: xai
   display_name: xAI
@@ -180,8 +240,12 @@
   capability:
     temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
     supports_tools: true
+    supports_images: true
   default_models:
-    - { model_id: grok-4, display_name: Grok 4, context_window: 131072, max_tokens: 16384, input_modalities: [text], reasoning: true }
+    # Grok 4.3 (May 6 2026): 1M context, always-on reasoning, native multimodal.
+    # Older grok-4 / grok-4-fast etc. retire May 15 2026.
+    - { model_id: grok-4.3,       display_name: Grok 4.3,       context_window: 1000000, max_tokens: 32768, input_modalities: [text, image, video], reasoning: true }
+    - { model_id: grok-4.20,      display_name: Grok 4.20,      context_window: 2000000, max_tokens: 32768, input_modalities: [text, image],        reasoning: true }
 
 - slug: mistral
   display_name: Mistral
@@ -194,8 +258,14 @@
   auth: { mode: api_key }
   capability:
     temperature: { mode: free, min: 0.0, max: 1.0, default: 0.7 }
+    supports_tools: true
+    supports_images: true
   default_models:
-    - { model_id: mistral-large-latest, display_name: Mistral Large, context_window: 131072, max_tokens: 8192, input_modalities: [text], reasoning: false }
+    # Mistral Medium 3.5 (Apr 29 2026): 128B dense, 256K context, native multimodal.
+    # Mistral Large 3: 675B MoE, 256K context.
+    - { model_id: mistral-large-latest,   display_name: Mistral Large 3,    context_window: 256000, max_tokens: 32768, input_modalities: [text, image], reasoning: true }
+    - { model_id: mistral-medium-latest,  display_name: Mistral Medium 3.5, context_window: 256000, max_tokens: 32768, input_modalities: [text, image], reasoning: true }
+    - { model_id: mistral-small-latest,   display_name: Mistral Small 4,    context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: false }
 
 - slug: openrouter
   display_name: OpenRouter
@@ -218,7 +288,7 @@
         path: reasoning.effort
         kind: effort
         level_to_effort: { low: low, medium: medium, high: high }
-    openai/o3-mini:
+    openai/o4-mini:
       reasoning_level:
         path: reasoning.effort
         kind: effort
