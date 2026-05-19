@@ -78,8 +78,18 @@ def test_resolve_capability_returns_default_when_inactive():
     assert result.reasoning_off_payload == {}
 
 
-async def _capture_payload_openai(provider: OpenAIProvider, model: Model) -> dict:
-    """Run a stream with a fake openai client and return the kwargs sent."""
+async def _capture_payload_openai(
+    provider: OpenAIProvider,
+    model: Model,
+    *,
+    on_payload=None,
+    thinking: str = "off",
+) -> dict:
+    """Run a stream with a fake openai client and return the kwargs sent.
+
+    on_payload: optional caller-side payload mutator passed via StreamOptions.
+    thinking: ThinkingLevel value for StreamOptions; defaults to "off".
+    """
     captured: dict = {}
 
     async def listener(kwargs: dict, m: Model) -> None:
@@ -87,14 +97,13 @@ async def _capture_payload_openai(provider: OpenAIProvider, model: Model) -> dic
 
     provider._request_listeners.append(listener)
 
-    # Stub the openai client so it doesn't try to actually call the network.
     class _FakeResponse:
         response = None
 
         def __aiter__(self):
             async def gen():
                 return
-                yield  # never
+                yield
             return gen()
 
     async def fake_create(**kw):
@@ -104,7 +113,7 @@ async def _capture_payload_openai(provider: OpenAIProvider, model: Model) -> dic
     stream = await provider.stream(
         model=model,
         messages=[UserMessage(content=[TextContent(text="hi")])],
-        options=StreamOptions(thinking="off"),
+        options=StreamOptions(thinking=thinking, on_payload=on_payload),
     )
     async for _ in stream:
         pass
@@ -153,3 +162,18 @@ async def test_legacy_no_capability_does_not_inject_temperature_or_max_tokens():
     payload = await _capture_payload_openai(p, _model())
     assert "temperature" not in payload
     assert "max_tokens" not in payload
+
+
+@pytest.mark.asyncio
+async def test_temperature_free_preserves_caller_value_via_on_payload():
+    """setdefault must not overwrite a temperature the caller set via on_payload.
+    Spec §3.5: capability-active path uses setdefault so caller wins."""
+    cap = CapabilityDescriptor(temperature=TemperatureSpec(mode="free", min=0.0, max=2.0))
+    p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
+
+    async def set_caller_temp(kwargs, model):
+        kwargs["temperature"] = 0.3
+        return kwargs
+
+    payload = await _capture_payload_openai(p, _model(), on_payload=set_caller_temp)
+    assert payload["temperature"] == 0.3
