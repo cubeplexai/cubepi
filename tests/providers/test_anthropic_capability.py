@@ -255,3 +255,20 @@ async def test_capability_clamps_budget_when_context_too_small() -> None:
     thinking_block = captured.get("thinking", {})
     if thinking_block.get("type") == "enabled":
         assert thinking_block["budget_tokens"] < captured["max_tokens"]
+
+
+@pytest.mark.asyncio
+async def test_capability_honors_opts_thinking_budgets_override():
+    """StreamOptions.thinking_budgets overrides capability's level_budgets per request."""
+    from cubepi.providers.base import ThinkingBudgets
+
+    # Default capability — level_budgets has medium=8192
+    p = AnthropicProvider(api_key="x")
+    custom_budgets = ThinkingBudgets(medium=12288)
+    payload = await _capture_anthropic(
+        p, StreamOptions(thinking="medium", thinking_budgets=custom_budgets)
+    )
+    assert payload["thinking"]["type"] == "enabled"
+    assert payload["thinking"]["budget_tokens"] == 12288
+    # max_tokens must accommodate the new budget.
+    assert payload["max_tokens"] >= 12288 + 512  # min_output_tokens floor

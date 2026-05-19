@@ -200,6 +200,20 @@ class AnthropicProvider(BaseProvider):
             if cap.reasoning_level is not None:
                 write_reasoning_level(kwargs, cap.reasoning_level, thinking)
             kwargs.pop("temperature", None)
+
+            # Per-request budget override via StreamOptions.thinking_budgets
+            # takes precedence over the capability's level_budgets. Mirrors
+            # the legacy adjust_max_tokens_for_thinking(custom_budgets=...)
+            # parameter. ThinkingBudgets has no "xhigh" field, so xhigh maps
+            # to "high" (matches legacy clamp behavior).
+            if opts.thinking_budgets is not None and isinstance(
+                kwargs.get("thinking"), dict
+            ):
+                level_for_lookup = "high" if thinking == "xhigh" else thinking
+                custom_budget = getattr(opts.thinking_budgets, level_for_lookup, None)
+                if custom_budget is not None:
+                    kwargs["thinking"]["budget_tokens"] = custom_budget
+
             budget = 0
             thinking_block = kwargs.get("thinking")
             if isinstance(thinking_block, dict):
