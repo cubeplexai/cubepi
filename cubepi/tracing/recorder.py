@@ -212,41 +212,43 @@ class Recorder:
                 provider.subscribe_response(self._on_provider_response)
             )
 
-        async def _detach_async() -> None:
+        def _sync_detach() -> None:
+            """All synchronous cleanup: unsubscribe + sweep leaked
+            registrations. Runs eagerly in ``detach()`` so the
+            cancellation-leak cleanup is observable on the next line —
+            not deferred to a loop tick that may never arrive if the
+            caller immediately awaits ``tracer.shutdown()`` or exits
+            ``asyncio.run`` (codex round-11).
+            """
             unsub_agent()
             for d in provider_detachers:
                 try:
                     d()
                 except Exception:
                     pass
-            # Final cleanup of any leaked tool-span registrations from a
-            # cancelled run (CancelledError bypasses the agent's
-            # Exception handler so _on_agent_end / _on_tool_exec_end
-            # never fire). Without this, _active_entries in
-            # cubepi.mcp._tracing would grow unbounded across aborted
-            # runs (codex round-10).
+            # Final cleanup of any leaked tool-span registrations from
+            # a cancelled run — CancelledError bypasses the agent's
+            # ``except Exception`` handler so _on_agent_end /
+            # _on_tool_exec_end never fire (codex round-10).
             self._sweep_tool_span_tokens(self._run)
+
+        async def _detach_async() -> None:
+            _sync_detach()
             await self._tracer.force_flush()
 
         def detach() -> None:
-            # Synchronous shim. Tests can also call ``detach_async``.
-            import asyncio
-
+            # Synchronous part runs immediately in either path so the
+            # caller can rely on cleanup having happened by the time
+            # ``detach()`` returns.
+            _sync_detach()
             try:
+                import asyncio
+
                 loop = asyncio.get_running_loop()
             except RuntimeError:
-                # No running loop — best-effort sync detach. Sweep
-                # any leaked tool-span registrations (codex round-10).
-                unsub_agent()
-                for d in provider_detachers:
-                    try:
-                        d()
-                    except Exception:
-                        pass
-                self._sweep_tool_span_tokens(self._run)
-                return
-            # Inside a loop — schedule the async detach.
-            loop.create_task(_detach_async())
+                return  # no loop — sync cleanup already done.
+            # Inside a loop — schedule the remaining async flush.
+            loop.create_task(self._tracer.force_flush())
 
         return detach
 

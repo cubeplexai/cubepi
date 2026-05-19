@@ -939,14 +939,19 @@ class TestMCPSpanParentage:
                 pass
         finally:
             detach()
-            # detach() may schedule async cleanup; give it a tick to run.
-            await _asyncio.sleep(0)
+            # ``detach()`` runs the synchronous sweep eagerly — the
+            # registration must already be gone before we even reach
+            # ``tracer.shutdown()`` (codex round-11). Asserting *before*
+            # shutdown pins that contract; the post-shutdown assertion
+            # below is a belt-and-braces check.
+            assert len(mcp_tracing._active_entries) == baseline, (
+                "detach() did not synchronously sweep the cancelled "
+                "tool's registration; cleanup was deferred to a loop "
+                "tick that may not run before tracer.shutdown()"
+            )
             await tracer.shutdown()
 
-        assert len(mcp_tracing._active_entries) == baseline, (
-            "cancelled MCP tool execution leaked a registration in "
-            "_active_entries — detach()'s sweep didn't run"
-        )
+        assert len(mcp_tracing._active_entries) == baseline
 
     async def test_unregister_cleans_dict_even_from_different_task(self):
         """Direct contract test for the dict+contextvar hybrid:
