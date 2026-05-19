@@ -390,6 +390,63 @@ class TestErrorAndAbort:
         attrs = _attrs(root)
         assert attrs.get("cubepi.aborted") is True
 
+    async def test_chat_span_marks_aborted_when_provider_returns_no_body(self):
+        """Real Anthropic/OpenAI/OpenAI-Responses abort branches return
+        from the stream before assembling a body, so the response
+        listener is called as ``(None, model, None)``. Without an
+        explicit case for that the chat span would close UNSET — out
+        of sync with the turn/root which TurnEnd marks aborted (codex
+        P2 round on PR #82).
+
+        Drive the recorder's listeners directly with the (None, None)
+        shape — reproducing real provider behaviour without needing
+        the provider to actually cooperate."""
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        tracer.attach(agent)
+
+        # First, do a real run so a turn span is open via normal flow.
+        # Then, while still inside an agent run, fire provider request +
+        # an abort-shaped response onto the recorder.
+        provider.append_responses([faux_assistant_message("warmup")])
+        await agent.prompt("warmup")
+
+        # The recorder is subscribed to provider events; call those
+        # listeners with the abort-shaped (None, None) tuple. The
+        # listener registry exposes the live callable list.
+        from cubepi.tracing.recorder import Recorder
+
+        recorder = None
+        for cb in provider._request_listeners:
+            if hasattr(cb, "__self__") and isinstance(cb.__self__, Recorder):
+                recorder = cb.__self__
+                break
+        assert recorder is not None
+        # Open a fresh agent + turn span via the recorder's events.
+        from cubepi.agent.types import (
+            AgentStartEvent,
+            TurnStartEvent,
+        )
+
+        await recorder._on_agent_event(AgentStartEvent())
+        await recorder._on_agent_event(TurnStartEvent())
+        # Provider request -> chat span opens.
+        recorder._on_provider_request({"messages": []}, MODEL)
+        # Provider abort branch -> (body=None, exc=None).
+        recorder._on_provider_response(None, MODEL, None)
+
+        await tracer.shutdown()
+        chats = [s for s in exporter.spans if s.name.startswith("chat ")]
+        # Last chat span (the simulated abort) must carry the markers.
+        assert len(chats) >= 2
+        aborted_chat = chats[-1]
+        attrs = _attrs(aborted_chat)
+        assert attrs.get("cubepi.aborted") is True
+        assert attrs.get("error.type") == "cubepi.aborted"
+        assert aborted_chat.status.status_code == StatusCode.UNSET
+
 
 class TestLifecycle:
     async def test_shutdown_is_idempotent(self):

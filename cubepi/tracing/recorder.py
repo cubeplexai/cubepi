@@ -738,7 +738,18 @@ class Recorder:
                 span.set_attribute(CUBEPI_ABORTED, True)
                 span.set_attribute(ERROR_TYPE, "cubepi.aborted")
 
-            if exc is None:
+            if exc is None and body is None:
+                # Provider abort branches (anthropic/openai/openai_responses)
+                # return from the stream before assembling a body, so the
+                # response listener is invoked as (None, model, None). The
+                # cooperative-abort marker check above requires a body to
+                # inspect, so without this branch the chat span would close
+                # UNSET — out of sync with the turn/root which TurnEnd
+                # marks aborted. Match the cancellation contract: leave
+                # Status UNSET, set cubepi.aborted + error.type.
+                span.set_attribute(CUBEPI_ABORTED, True)
+                span.set_attribute(ERROR_TYPE, "cubepi.aborted")
+            elif exc is None:
                 # Healthy completion — leave Status UNSET per OTel guidance.
                 pass
             elif _is_cancelled_error(exc):
