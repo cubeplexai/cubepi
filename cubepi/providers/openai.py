@@ -10,6 +10,8 @@ from cubepi.utils.json_parse import parse_streaming_json
 from cubepi.providers.capability import (
     CapabilityDescriptor,
     apply_temperature,
+    merge_capability_payload,
+    write_reasoning_level,
 )
 from cubepi.providers.base import (
     AssistantMessage,
@@ -145,6 +147,14 @@ class OpenAIProvider(BaseProvider):
                     apply_temperature(kwargs, cap.temperature)
                     if cap.max_tokens_field != "max_tokens" and "max_tokens" in kwargs:
                         kwargs[cap.max_tokens_field] = kwargs.pop("max_tokens")
+                    if opts.thinking == "off":
+                        merge_capability_payload(kwargs, cap.reasoning_off_payload)
+                    else:
+                        merge_capability_payload(kwargs, cap.reasoning_on_payload)
+                        if cap.reasoning_level is not None:
+                            write_reasoning_level(
+                                kwargs, cap.reasoning_level, opts.thinking
+                            )
 
                 # Fire request listeners AFTER all kwargs mutations so observers
                 # see the final wire payload (including extra_body merges,
