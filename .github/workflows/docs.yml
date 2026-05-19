@@ -7,12 +7,14 @@ on:
       - 'website/**'
       - 'cubepi/**'
       - 'pyproject.toml'
+      - 'README.md'
       - '.github/workflows/docs.yml'
   pull_request:
     paths:
       - 'website/**'
       - 'cubepi/**'
       - 'pyproject.toml'
+      - 'README.md'
       - '.github/workflows/docs.yml'
 
 permissions:
