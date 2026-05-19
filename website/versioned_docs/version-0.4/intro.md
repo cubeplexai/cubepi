@@ -60,15 +60,15 @@ working tool-using agent in under five minutes.
 
 ## Status
 
-You are reading the **Next 🚧** channel — unreleased docs that track
-the `main` branch. APIs documented here can still change before they
-ship in a tagged release.
-
-The latest released version is `v0.4.0` ([switch to it from the
-version picker, top-right](pathname:///)). New since 0.3: a native
+CubePi is at `v0.4.0` — alpha. New since 0.3: a native
 OpenTelemetry tracing module ([guide →](./guides/tracing/overview))
 with `Tracer`, `Meter`, content recording, MCP CLIENT spans, and
 per-run `tracing_context` tags.
+
+The public API surface is stable for v0.4 and frozen in this
+snapshot. Older snapshots are available from the version picker
+(top-right). The `Next 🚧` channel tracks the unreleased main
+branch.
 
 Source, issues, and discussion live on
 [GitHub](https://github.com/cubeplexai/cubepi).

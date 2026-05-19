@@ -1,0 +1,263 @@
+---
+id: cubepi-agent
+title: cubepi.agent
+sidebar_position: 1
+hide_table_of_contents: false
+---
+
+# `cubepi.agent`
+
+### Agent
+
+_class_
+
+```python
+Agent(self, *, provider: Provider, model: Model, system_prompt: str = '', tools: list[AgentTool] | None = None, thinking: ThinkingLevel = 'off', convert_to_llm: Callable[[list[Message]], list[Message]] | None = None, transform_context: Callable | None = None, transform_system_prompt: Callable | None = None, after_model_response: Callable | None = None, before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, should_stop_after_turn: Callable | None = None, on_payload: OnPayloadCallback | None = None, on_response: OnResponseCallback | None = None, steering_mode: str = 'one-at-a-time', follow_up_mode: str = 'one-at-a-time', tool_execution: str = 'parallel', checkpointer: Any = None, thread_id: str | None = None, middleware: list[Middleware] | None = None)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/agent.py#L105)
+
+
+### AgentState
+
+_class_
+
+```python
+AgentState(self, system_prompt: str = '', model: Model = (lambda: Model(id='unknown', provider='unknown'))(), thinking: ThinkingLevel = 'off', is_streaming: bool = False, streaming_message: Message | None = None, error_message: str | None = None, _tools: list[AgentTool] = list(), _messages: list[Message] = list(), _pending_tool_calls: set[str] = set())
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/agent.py#L66)
+
+
+### run_agent_loop
+
+_function_
+
+```python
+run_agent_loop(*, prompts: list[Message], context: AgentContext, provider: Provider, model: Model, convert_to_llm: Callable, emit: Callable, transform_context: Callable | None = None, transform_system_prompt: Callable | None = None, after_model_response: Callable | None = None, before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, should_stop_after_turn: Callable | None = None, get_steering_messages: Callable | None = None, get_follow_up_messages: Callable | None = None, stream_options: StreamOptions | None = None, tool_execution: str = 'parallel', system_prompt: str | None = None) -> list[Message]
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/loop.py#L30)
+
+
+### run_agent_loop_continue
+
+_function_
+
+```python
+run_agent_loop_continue(*, context: AgentContext, provider: Provider, model: Model, convert_to_llm: Callable, emit: Callable, transform_context: Callable | None = None, transform_system_prompt: Callable | None = None, after_model_response: Callable | None = None, before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, should_stop_after_turn: Callable | None = None, get_steering_messages: Callable | None = None, get_follow_up_messages: Callable | None = None, stream_options: StreamOptions | None = None, tool_execution: str = 'parallel', system_prompt: str | None = None) -> list[Message]
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/loop.py#L87)
+
+
+### execute_tool_calls
+
+_function_
+
+```python
+execute_tool_calls(context: AgentContext, assistant_message: AssistantMessage, *, tool_execution: str = 'parallel', before_tool_call: Callable | None = None, after_tool_call: Callable | None = None, signal: asyncio.Event | None = None, emit: Callable) -> ToolCallBatch
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/tools.py#L206)
+
+
+### AfterToolCallContext
+
+_class_
+
+```python
+AfterToolCallContext(self, assistant_message: AssistantMessage, tool_call: ToolCall, args: Any, result: AgentToolResult, is_error: bool, context: AgentContext)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L79)
+
+
+### AfterToolCallResult
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L64)
+
+
+### AgentContext
+
+_class_
+
+```python
+AgentContext(self, system_prompt: str, messages: list[Message], tools: list[AgentTool] | None = None, extra: dict[str, Any] = dict())
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L48)
+
+
+### AgentEndEvent
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L104)
+
+
+### AgentEvent
+
+_attribute_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L170)
+
+
+### AgentListener
+
+_attribute_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L185)
+
+
+### AgentStartEvent
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L100)
+
+
+### AgentTool
+
+_class_
+
+```python
+AgentTool(self, name: str, description: str, parameters: type[TParams], execute: Callable[..., Awaitable[AgentToolResult]], label: str = '', execution_mode: Literal['sequential', 'parallel'] | None = None)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L30)
+
+
+### AgentToolResult
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L23)
+
+
+### BeforeToolCallContext
+
+_class_
+
+```python
+BeforeToolCallContext(self, assistant_message: AssistantMessage, tool_call: ToolCall, args: Any, context: AgentContext)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L71)
+
+
+### BeforeToolCallResult
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L59)
+
+
+### MessageEndEvent
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L130)
+
+
+### MessageStartEvent
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L119)
+
+
+### MessageUpdateEvent
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L124)
+
+
+### ShouldStopAfterTurnContext
+
+_class_
+
+```python
+ShouldStopAfterTurnContext(self, message: AssistantMessage, tool_results: list[ToolResultMessage], context: AgentContext, new_messages: list[Message])
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L89)
+
+
+### ToolExecutionEndEvent
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L150)
+
+
+### ToolExecutionStartEvent
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L135)
+
+
+### ToolExecutionUpdateEvent
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L142)
+
+
+### TurnEndEvent
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L113)
+
+
+### TurnStartEvent
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/agent/types.py#L109)
+
+
+### emit_event
+
+_function_
+
+```python
+emit_event(emit_fn: Callable, event: object) -> None
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/utils/emit.py#L7)
+
+
+
+<!-- GENERATED by build-api-reference.py — DO NOT EDIT -->

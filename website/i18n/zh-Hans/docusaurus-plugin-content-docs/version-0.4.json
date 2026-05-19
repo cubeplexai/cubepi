@@ -1,7 +1,7 @@
 {
   "version.label": {
-    "message": "0.3",
-    "description": "The label for version 0.3"
+    "message": "0.4（最新）",
+    "description": "The label for version 0.4"
   },
   "sidebar.docs.category.Getting Started": {
     "message": "快速入门",
@@ -30,6 +30,10 @@
   "sidebar.docs.category.MCP": {
     "message": "MCP",
     "description": "The label for category 'MCP' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Tracing": {
+    "message": "追踪",
+    "description": "The label for category 'Tracing' in sidebar 'docs'"
   },
   "sidebar.docs.category.Recipes": {
     "message": "示例",
