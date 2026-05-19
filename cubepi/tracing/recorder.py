@@ -587,15 +587,20 @@ class Recorder:
         run = self._run
         if run is None:
             return
-        # Append assistant / tool_result messages to the transcript so
-        # later chat spans see them in their ``gen_ai.input.messages``.
-        # Note: ``output_messages`` accumulation happens at TurnEnd
-        # (since it includes the synthesized turn snapshot); here we
-        # only update the chronological transcript that drives chat
-        # span input.
+        # Append assistant messages to the transcript so later chat
+        # spans see them in their ``gen_ai.input.messages``.
+        #
+        # tool_result messages are intentionally excluded here:
+        # ``execute_tool_calls`` emits both MessageStart AND MessageEnd
+        # for the same tool_result, and ``_on_message_start`` already
+        # appends ToolResultMessage to the transcript. Appending again
+        # here would produce two identical ``tool`` entries in the
+        # next chat span's input messages even though the provider
+        # context contains only one. Assistant messages have no
+        # MessageStart in the cubepi event flow, so they only land
+        # here.
         msg = event.message
-        msg_role = getattr(msg, "role", None)
-        if msg_role in ("assistant", "tool_result"):
+        if getattr(msg, "role", None) == "assistant":
             run.transcript.append(msg)
 
     # ------------------------------------------------------------------

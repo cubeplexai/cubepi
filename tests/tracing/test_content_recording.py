@@ -288,6 +288,11 @@ class TestChatInputIncludesPriorAssistant:
         # The assistant message must carry the tool_call part.
         asst = next(m for m in inp if m["role"] == "assistant")
         assert any(p.get("type") == "tool_call" for p in asst.get("parts", []))
+        # Pin the round-83 codex fix: tool_result must appear exactly
+        # once (it was previously appended both by _on_message_start
+        # and _on_message_end, producing two identical ``tool`` entries
+        # even though the provider context contains only one).
+        assert roles.count("tool") == 1
 
 
 class TestRedaction:
