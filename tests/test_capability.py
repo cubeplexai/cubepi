@@ -160,3 +160,17 @@ def test_apply_temperature_free_no_op_when_absent():
     kwargs: dict = {}
     apply_temperature(kwargs, TemperatureSpec(mode="free"))
     assert kwargs == {}
+
+
+def test_apply_temperature_free_clamp_inclusive_at_min():
+    """Value exactly at min stays unchanged (inclusive clamp)."""
+    kwargs = {"temperature": 0.0}
+    apply_temperature(kwargs, TemperatureSpec(mode="free", min=0.0, max=2.0))
+    assert kwargs == {"temperature": 0.0}
+
+
+def test_apply_temperature_free_clamp_inclusive_at_max():
+    """Value exactly at max stays unchanged (inclusive clamp)."""
+    kwargs = {"temperature": 2.0}
+    apply_temperature(kwargs, TemperatureSpec(mode="free", min=0.0, max=2.0))
+    assert kwargs == {"temperature": 2.0}

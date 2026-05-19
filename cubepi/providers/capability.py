@@ -102,7 +102,11 @@ def apply_temperature(kwargs: dict[str, Any], spec: TemperatureSpec) -> None:
         return
 
     if spec.mode == "fixed":
-        assert spec.fixed_value is not None  # enforced by validator
+        if spec.fixed_value is None:
+            raise RuntimeError(
+                "TemperatureSpec(mode='fixed') reached apply_temperature with no "
+                "fixed_value — validator was bypassed"
+            )
         kwargs["temperature"] = spec.fixed_value
         return
 
