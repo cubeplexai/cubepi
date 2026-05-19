@@ -215,6 +215,17 @@ def make_mcp_agent_tool(
     )
 
 
+def _consume_task_exception(task: "asyncio.Task[Any]") -> None:
+    """``add_done_callback`` target that swallows the result/exception
+    of a fire-and-forget cancelled task. Without this, asyncio logs
+    "task exception was never retrieved" at GC time for tasks we
+    cancelled and don't await."""
+    try:
+        task.exception()
+    except (asyncio.CancelledError, asyncio.InvalidStateError):
+        pass
+
+
 # Sentinel returned by :func:`_await_with_signal` on cooperative abort.
 # The MCP ``_execute`` adapter checks for it and synthesizes a tool
 # result rather than raising ``asyncio.CancelledError``, so callers
@@ -267,20 +278,33 @@ async def _await_with_signal(coro: Awaitable[Any], signal: Any) -> Any:
         )
     except BaseException:
         # Outer cancellation: clean up both tasks and re-raise.
+        # Same fire-and-forget cleanup as the signal-won branch —
+        # don't block on slow transport teardown.
         for t in (call_task, signal_task):
             if not t.done():
                 t.cancel()
+                t.add_done_callback(_consume_task_exception)
         raise
     if signal_task in done:
         # Cooperative abort fired first — cancel the in-flight RPC
         # and return the sentinel so ``_execute`` can synthesize a
         # graceful tool result.
+        #
+        # Don't ``await call_task`` here: ``call_remote`` may catch
+        # ``CancelledError`` for slow transport cleanup (HTTP socket
+        # close, MCP session shutdown), and awaiting would reintroduce
+        # the abort-latency problem this helper was meant to fix —
+        # the prompt task would still hang until the MCP transport
+        # timeout despite the signal having won the race (codex
+        # round-2 follow-up on PR #88).
+        #
+        # Cancellation is dispatched eagerly; the cleanup finishes
+        # out-of-band. The ``add_done_callback`` consumes the
+        # eventual exception so asyncio doesn't log a
+        # "task exception was never retrieved" warning at GC time.
         if not call_task.done():
             call_task.cancel()
-            try:
-                await call_task
-            except BaseException:
-                pass
+            call_task.add_done_callback(_consume_task_exception)
         return _ABORTED_SENTINEL
     # call_task completed first; tidy the signal watcher.
     if not signal_task.done():

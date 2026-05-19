@@ -373,6 +373,69 @@ async def test_agent_abort_during_mcp_call_does_not_raise() -> None:
         raise AssertionError("prompt_task did not complete after abort()")
 
 
+async def test_signal_abort_does_not_block_on_slow_call_cleanup() -> None:
+    """``call_remote`` implementations sometimes catch
+    ``CancelledError`` to do slow transport cleanup (close an HTTP
+    socket, finalize an MCP session). The abort path must NOT block
+    on that cleanup — otherwise we reintroduce the abort-latency
+    problem the helper was meant to solve, just bounded by the
+    cleanup duration instead of the MCP timeout (codex round-2
+    follow-up on PR #88)."""
+    import asyncio as _asyncio
+    import time as _time
+
+    from cubepi.mcp._adapter import make_mcp_agent_tool
+
+    in_flight = _asyncio.Event()
+    cleanup_started = _asyncio.Event()
+    cleanup_finished = _asyncio.Event()
+
+    async def _slow_cleanup_call(_name, _args):
+        in_flight.set()
+        try:
+            await _asyncio.sleep(10.0)
+        except _asyncio.CancelledError:
+            cleanup_started.set()
+            # Simulate a slow teardown — 0.5s.
+            try:
+                await _asyncio.sleep(0.5)
+            except _asyncio.CancelledError:
+                pass
+            cleanup_finished.set()
+            raise
+        return {"content": [], "isError": False}
+
+    tool = make_mcp_agent_tool(
+        name="slow-cleanup",
+        description="slow cleanup tool",
+        input_schema={"type": "object", "properties": {}, "required": []},
+        call_remote=_slow_cleanup_call,
+    )
+    signal = _asyncio.Event()
+    task = _asyncio.create_task(
+        tool.execute("tc1", tool.parameters(), signal=signal, on_update=None)
+    )
+    await in_flight.wait()
+    signal.set()
+    t0 = _time.monotonic()
+    result = await _asyncio.wait_for(task, timeout=1.0)
+    elapsed = _time.monotonic() - t0
+    # The fix: the helper does NOT await the cancelled call_task, so
+    # _execute returns within a tick. Slow-cleanup work (the 0.5s
+    # _asyncio.sleep inside the CancelledError handler) continues in
+    # the background and must not delay this return.
+    assert elapsed < 0.3, (
+        f"abort path blocked on call_remote cleanup ({elapsed:.2f}s); "
+        "expected immediate sentinel-based return"
+    )
+    assert result.details.get("aborted") is True
+    # Cleanup started (cancellation dispatched) but may not be finished
+    # yet — that's the whole point of the fix.
+    assert cleanup_started.is_set()
+    # Let the background cleanup finish so the test exits cleanly.
+    await _asyncio.wait_for(cleanup_finished.wait(), timeout=2.0)
+
+
 async def test_signal_already_set_before_call_aborts_immediately() -> None:
     """Pre-set signal: adapter returns the aborted synthetic result
     without invoking ``call_remote`` at all (codex round-1 follow-up
