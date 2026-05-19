@@ -82,13 +82,14 @@
     - { model_id: gpt-4.1,  display_name: GPT-4.1,  context_window: 1000000, max_tokens: 32768, input_modalities: [text, image], reasoning: false }
 
 - slug: qwen-dashscope
-  display_name: 通义千问 (DashScope)
+  display_name: 通义千问 (DashScope International)
   short_name: Qwen
   logo: qwen
   category: saas
-  description: Alibaba Cloud DashScope OpenAI-compatible endpoint for Qwen models.
+  description: Alibaba Cloud Model Studio (Singapore) OpenAI-compatible endpoint for Qwen.
   api: openai-completions
-  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  # International (Singapore) endpoint. CN companion: qwen-dashscope-cn.
+  base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
   auth: { mode: api_key }
   capability:
     reasoning_off_payload: { extra_body: { enable_thinking: false } }
@@ -170,13 +171,14 @@
     - { model_id: deepseek-v4-flash,  display_name: DeepSeek V4 Flash,  context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true }
 
 - slug: moonshot
-  display_name: Moonshot Kimi
+  display_name: Moonshot Kimi (International)
   short_name: Moonshot
   logo: moonshot
   category: saas
-  description: Moonshot AI Kimi OpenAI-compatible endpoint.
+  description: Moonshot AI Kimi OpenAI-compatible endpoint (.ai global region).
   api: openai-completions
-  base_url: https://api.moonshot.cn/v1
+  # International endpoint. CN companion: moonshot-cn.
+  base_url: https://api.moonshot.ai/v1
   auth: { mode: api_key }
   capability:
     temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
@@ -187,13 +189,14 @@
     - { model_id: kimi-k2,           display_name: Kimi K2,          context_window: 131072, max_tokens: 16384, input_modalities: [text], reasoning: false }
 
 - slug: zhipu
-  display_name: 智谱 (Zhipu / BigModel)
+  display_name: 智谱 GLM (Z.AI International)
   short_name: Zhipu
   logo: zhipu
   category: saas
-  description: Zhipu AI GLM OpenAI-compatible endpoint (BigModel platform).
+  description: Zhipu AI GLM OpenAI-compatible endpoint (Z.AI global region).
   api: openai-completions
-  base_url: https://open.bigmodel.cn/api/paas/v4
+  # International endpoint. CN companion (BigModel): zhipu-cn.
+  base_url: https://api.z.ai/api/paas/v4
   auth: { mode: api_key }
   capability:
     # GLM thinking mode toggle (GLM-4.5+/GLM-5). Stays inside extra_body to
@@ -389,6 +392,298 @@
     temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
     supports_tools: false
   default_models: []
+
+# ────────────────────────────────────────────────────────────────────────
+# CN companions (mainland endpoints). Convention: default slug = international,
+# `-cn` suffix = mainland China endpoint.
+# ────────────────────────────────────────────────────────────────────────
+
+- slug: qwen-dashscope-cn
+  display_name: 通义千问 (DashScope 国内)
+  short_name: Qwen CN
+  logo: qwen
+  category: saas
+  description: Alibaba Cloud DashScope 国内站 (Beijing) OpenAI-compatible endpoint.
+  api: openai-completions
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  auth: { mode: api_key }
+  capability:
+    reasoning_off_payload: { extra_body: { enable_thinking: false } }
+    reasoning_on_payload:  { extra_body: { enable_thinking: true  } }
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    supports_tools: true
+    supports_images: true
+  default_models:
+    - { model_id: qwen3-max,      display_name: Qwen3 Max,      context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true }
+    - { model_id: qwen3.6-plus,   display_name: Qwen 3.6 Plus,  context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true }
+    - { model_id: qwen3.6-flash,  display_name: Qwen 3.6 Flash, context_window: 131072, max_tokens: 16384, input_modalities: [text, image], reasoning: false }
+
+- slug: moonshot-cn
+  display_name: Moonshot Kimi (国内)
+  short_name: Moonshot CN
+  logo: moonshot
+  category: saas
+  description: Moonshot AI Kimi 国内站 OpenAI-compatible endpoint.
+  api: openai-completions
+  base_url: https://api.moonshot.cn/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+    supports_tools: true
+  default_models:
+    - { model_id: kimi-k2.6,  display_name: Kimi K2.6,  context_window: 262144, max_tokens: 32768, input_modalities: [text], reasoning: true }
+    - { model_id: kimi-k2,    display_name: Kimi K2,    context_window: 131072, max_tokens: 16384, input_modalities: [text], reasoning: false }
+
+- slug: zhipu-cn
+  display_name: 智谱 GLM (BigModel 国内)
+  short_name: Zhipu CN
+  logo: zhipu
+  category: saas
+  description: Zhipu AI GLM 国内站 (open.bigmodel.cn) OpenAI-compatible endpoint.
+  api: openai-completions
+  base_url: https://open.bigmodel.cn/api/paas/v4
+  auth: { mode: api_key }
+  capability:
+    reasoning_off_payload: { extra_body: { thinking: { type: disabled } } }
+    reasoning_on_payload:  { extra_body: { thinking: { type: enabled  } } }
+    temperature: { mode: free, min: 0.0, max: 1.0, default: 0.7 }
+    supports_tools: true
+    supports_images: true
+  default_models:
+    - { model_id: glm-5,         display_name: GLM-5,         context_window: 200000, max_tokens: 32768, input_modalities: [text, image], reasoning: true }
+    - { model_id: glm-4.7,       display_name: GLM-4.7,       context_window: 200000, max_tokens: 16384, input_modalities: [text, image], reasoning: true }
+    - { model_id: glm-4.7-flash, display_name: GLM-4.7 Flash, context_window: 128000, max_tokens: 16384, input_modalities: [text],        reasoning: false }
+
+- slug: minimax-cn
+  display_name: MiniMax (国内)
+  short_name: MiniMax CN
+  logo: minimax
+  category: saas
+  description: MiniMax 国内站 OpenAI-compatible endpoint (minimaxi.com).
+  api: openai-completions
+  base_url: https://api.minimaxi.com/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    supports_tools: true
+    supports_images: true
+  default_models:
+    - { model_id: MiniMax-M2.7,            display_name: MiniMax M2.7,            context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true }
+    - { model_id: MiniMax-M2.7-highspeed,  display_name: MiniMax M2.7 Highspeed,  context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: false }
+    - { model_id: MiniMax-M2.5,            display_name: MiniMax M2.5,            context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true }
+
+# ────────────────────────────────────────────────────────────────────────
+# Coding plans (subscription tier — separate endpoints / auth from token API).
+# Placeholders for the cubebox UX; OAuth flow + cross-vendor model lists land
+# in a follow-up PR. All `default_models: []` until that work lands.
+# ────────────────────────────────────────────────────────────────────────
+
+- slug: anthropic-claude-code
+  display_name: Anthropic Claude Code (Max plan)
+  short_name: Claude Code
+  logo: anthropic
+  category: saas
+  description: Claude Code via Claude Pro/Max subscription. OAuth (no API key billing).
+  api: anthropic-messages
+  # Wire endpoint same as token API; auth flow is OAuth via `claude setup-token`.
+  # OAuth refresh URL is restricted to Anthropic-owned hosts. cubebox needs to
+  # implement the device-code login flow before this preset is usable.
+  base_url: https://api.anthropic.com
+  auth: { mode: oauth, header_name: Authorization, header_prefix: "Bearer " }
+  capability:
+    reasoning_off_payload: { thinking: { type: disabled } }
+    reasoning_on_payload:  { thinking: { type: enabled  } }
+    reasoning_level:
+      path: thinking.budget_tokens
+      kind: int_budget
+      level_budgets: { "off": 0, minimal: 1024, low: 2048, medium: 8192, high: 16384, xhigh: 16384 }
+    temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }
+    max_tokens_field: max_tokens
+    supports_tools: true
+    supports_images: true
+  default_models: []  # populated dynamically from Claude Code plan entitlements
+
+- slug: openai-codex
+  display_name: OpenAI Codex (ChatGPT plan)
+  short_name: Codex
+  logo: openai
+  category: saas
+  description: Codex CLI via ChatGPT Plus/Pro/Business subscription. OAuth login.
+  api: openai-responses
+  # OAuth via `codex login` (browser flow) or `codex login --device-auth`.
+  # Tokens exchanged to ChatGPT backend; cubebox needs OAuth flow before use.
+  base_url: https://chatgpt.com/backend-api/codex
+  auth: { mode: oauth, header_name: Authorization, header_prefix: "Bearer " }
+  capability:
+    reasoning_on_payload:
+      reasoning: { summary: auto }
+      include: [reasoning.encrypted_content]
+    reasoning_level:
+      path: reasoning.effort
+      kind: effort
+      level_to_effort: { minimal: minimal, low: low, medium: medium, high: high, xhigh: high }
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    max_tokens_field: max_tokens
+    supports_tools: true
+    supports_images: true
+  default_models: []  # populated dynamically from ChatGPT plan entitlements
+
+- slug: zhipu-coding
+  display_name: 智谱 GLM Coding Plan (国际)
+  short_name: GLM Coding
+  logo: zhipu
+  category: saas
+  description: Zhipu Coding Plan dedicated endpoint (Z.AI global). Same api_key as zhipu, routed through /coding/.
+  api: openai-completions
+  base_url: https://api.z.ai/api/coding/paas/v4
+  auth: { mode: api_key }
+  capability:
+    reasoning_off_payload: { extra_body: { thinking: { type: disabled } } }
+    reasoning_on_payload:  { extra_body: { thinking: { type: enabled  } } }
+    temperature: { mode: free, min: 0.0, max: 1.0, default: 0.7 }
+    supports_tools: true
+    supports_images: true
+  default_models: []  # GLM-5 / GLM-4.7 — quota-gated; pulled at runtime
+
+- slug: zhipu-coding-cn
+  display_name: 智谱 GLM Coding Plan (国内)
+  short_name: GLM Coding CN
+  logo: zhipu
+  category: saas
+  description: Zhipu Coding Plan 国内站 (open.bigmodel.cn) dedicated /coding/ endpoint.
+  api: openai-completions
+  base_url: https://open.bigmodel.cn/api/coding/paas/v4
+  auth: { mode: api_key }
+  capability:
+    reasoning_off_payload: { extra_body: { thinking: { type: disabled } } }
+    reasoning_on_payload:  { extra_body: { thinking: { type: enabled  } } }
+    temperature: { mode: free, min: 0.0, max: 1.0, default: 0.7 }
+    supports_tools: true
+    supports_images: true
+  default_models: []
+
+- slug: minimax-coding
+  display_name: MiniMax Coding Plan (国际)
+  short_name: MiniMax Coding
+  logo: minimax
+  category: saas
+  description: MiniMax Coding Plan — anthropic-shape wire on global (.minimax.io). Separate coding api_key.
+  api: anthropic-messages
+  # MiniMax Coding Plan is served on Anthropic-shape, NOT OpenAI-compat.
+  # https://github.com/badlogic/pi-mono/issues/2768
+  base_url: https://api.minimax.io/anthropic
+  auth: { mode: api_key, header_name: x-api-key, header_prefix: "" }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    max_tokens_field: max_tokens
+    supports_tools: true
+    supports_images: true
+  default_models: []  # MiniMax-M2 / M2.1 / M2.5 — coding-plan gated
+
+- slug: minimax-coding-cn
+  display_name: MiniMax Coding Plan (国内)
+  short_name: MiniMax Coding CN
+  logo: minimax
+  category: saas
+  description: MiniMax Coding Plan 国内站 (minimaxi.com), anthropic-shape.
+  api: anthropic-messages
+  base_url: https://api.minimaxi.com/anthropic
+  auth: { mode: api_key, header_name: x-api-key, header_prefix: "" }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    max_tokens_field: max_tokens
+    supports_tools: true
+    supports_images: true
+  default_models: []
+
+- slug: moonshot-coding
+  display_name: Moonshot Kimi Coding (国际)
+  short_name: Kimi Coding
+  logo: moonshot
+  category: saas
+  description: Moonshot Kimi Coding subscription (.ai global). Currently shares /v1 with token API.
+  api: openai-completions
+  # No dedicated /coding/ route as of 2026-05; coding plan uses the same /v1
+  # base but with a separate api_key from the subscription dashboard.
+  base_url: https://api.moonshot.ai/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+    supports_tools: true
+  default_models: []
+
+- slug: moonshot-coding-cn
+  display_name: Moonshot Kimi Coding (国内)
+  short_name: Kimi Coding CN
+  logo: moonshot
+  category: saas
+  description: Moonshot Kimi Coding subscription 国内站 (.cn). Same /v1 wire as token API; coding api_key.
+  api: openai-completions
+  base_url: https://api.moonshot.cn/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+    supports_tools: true
+  default_models: []
+
+- slug: qwen-coding
+  display_name: 通义千问 Coding Plan (国际)
+  short_name: Qwen Coding
+  logo: qwen
+  category: saas
+  description: Alibaba Cloud Qwen Coding Plan (Singapore). $50/mo subscription tier.
+  api: openai-completions
+  base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+  auth: { mode: api_key }
+  capability:
+    reasoning_off_payload: { extra_body: { enable_thinking: false } }
+    reasoning_on_payload:  { extra_body: { enable_thinking: true  } }
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    supports_tools: true
+    supports_images: true
+  default_models: []  # qwen3-coder-plus + qwen3.6 coder variants
+
+- slug: qwen-coding-cn
+  display_name: 通义千问 Coding Plan (国内)
+  short_name: Qwen Coding CN
+  logo: qwen
+  category: saas
+  description: Alibaba Cloud Qwen Coding Plan 国内站. ¥7.9 起 (Lite) / ¥39.9 (Pro) 订阅.
+  api: openai-completions
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  auth: { mode: api_key }
+  capability:
+    reasoning_off_payload: { extra_body: { enable_thinking: false } }
+    reasoning_on_payload:  { extra_body: { enable_thinking: true  } }
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    supports_tools: true
+    supports_images: true
+  default_models: []
+
+- slug: volcengine-coding
+  display_name: 火山方舟 Coding Plan
+  short_name: Ark Coding
+  logo: doubao
+  category: saas
+  description: 火山方舟 Coding Plan — anthropic-shape wire serving Doubao + 3rd-party (Kimi/GLM/MiniMax/DeepSeek).
+  api: anthropic-messages
+  # Coding Plan exposes a Claude-Code-compatible Anthropic wire at /api/coding,
+  # in addition to the OpenAI-compat /api/v3 used by the doubao-volcengine preset.
+  # Only 国内 endpoint as of 2026-05.
+  base_url: https://ark.cn-beijing.volces.com/api/coding
+  auth: { mode: api_key, header_name: x-api-key, header_prefix: "" }
+  capability:
+    reasoning_off_payload: { thinking: { type: disabled } }
+    reasoning_on_payload:  { thinking: { type: enabled  } }
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    max_tokens_field: max_tokens
+    supports_tools: true
+    supports_images: true
+  default_models: []  # Doubao-Seed-2.0-Code/Pro + Kimi-K2.5 + GLM-4.7 + MiniMax-M2.5 + DeepSeek-V4 (quota-gated)
+
+# ────────────────────────────────────────────────────────────────────────
+# Custom (bring-your-own) endpoints.
+# ────────────────────────────────────────────────────────────────────────
 
 - slug: custom-openai
   display_name: Custom OpenAI-compatible
