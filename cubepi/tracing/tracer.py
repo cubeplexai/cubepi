@@ -237,16 +237,28 @@ class Tracer:
                 await agent.prompt("...")
             # auto: detach (closes cancelled spans) + shutdown (flush + close)
         """
+        import sys
+
         detach = self.attach(agent)
         try:
             yield self
         finally:
             result = detach()
             if result is not None and hasattr(result, "__await__"):
-                try:
+                # Surface flush failures to the caller when the body
+                # didn't raise — matches what ``await detach()`` would
+                # do manually, so users don't continue past the block
+                # believing spans were exported when they weren't.
+                # When the body did raise, suppress flush errors so
+                # the original (more diagnostic) exception isn't
+                # masked by a cleanup failure (codex review on PR #90).
+                if sys.exc_info()[1] is None:
                     await result
-                except Exception:
-                    pass
+                else:
+                    try:
+                        await result
+                    except BaseException:
+                        pass
 
     async def __aenter__(self) -> "Tracer":
         return self

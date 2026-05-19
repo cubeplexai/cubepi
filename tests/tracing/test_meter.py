@@ -301,6 +301,36 @@ class TestAttachedContextManager:
             pass
 
 
+class TestAttachedDefensiveBranches:
+    """``Meter.attached`` swallows any exception raised by the detach
+    callable so that an aborted run cleanup doesn't propagate over a
+    healthy body return — covers the defensive branch."""
+
+    async def test_swallows_detach_exception(self):
+        provider = FauxProvider()
+        provider.append_responses([faux_assistant_message("ok")])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        meter, _reader = _build_meter()
+
+        # Patch attach to return a detach that raises.
+        original_attach = meter.attach
+
+        def _attach_with_bad_detach(_agent):
+            real_detach = original_attach(_agent)
+
+            def _bad_detach():
+                real_detach()
+                raise RuntimeError("detach boom")
+
+            return _bad_detach
+
+        meter.attach = _attach_with_bad_detach  # type: ignore[method-assign]
+        # Body completes; detach raises; helper must swallow.
+        async with meter.attached(agent):
+            pass  # no body work needed
+        # If we got here, the swallow worked.
+
+
 class TestNoMetricsWithoutListeners:
     async def test_detach_stops_emission(self):
         provider = FauxProvider()

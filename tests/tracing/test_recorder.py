@@ -846,6 +846,55 @@ class TestAttachedContextManager:
         async with tracer.attached(agent):
             pass  # no-op; should not error or warn
 
+    async def test_flush_exception_surfaces_when_body_ok(self):
+        """If the post-block flush fails and the body itself did NOT
+        raise, the exception must surface to the caller — same as
+        what ``await detach()`` would do manually. Otherwise users
+        continue past the block thinking spans landed (codex P2 on
+        PR #90)."""
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[])
+        provider.append_responses([faux_assistant_message("ok")])
+
+        sentinel = RuntimeError("flush exploded")
+
+        async def _bad_flush(*_a, **_kw):
+            raise sentinel
+
+        # Patch the underlying force_flush to fail.
+        import cubepi.tracing.tracer as _t_mod
+
+        original = tracer.force_flush
+        tracer.force_flush = _bad_flush  # type: ignore[method-assign]
+        try:
+            with __import__("pytest").raises(RuntimeError, match="flush exploded"):
+                async with tracer.attached(agent):
+                    await agent.prompt("hi")
+                    await agent.wait_for_idle()
+        finally:
+            tracer.force_flush = original  # type: ignore[method-assign]
+            del _t_mod
+
+    async def test_flush_exception_suppressed_when_body_raises(self):
+        """When the body raised, the flush failure must NOT mask the
+        original exception — the body's exception is the real
+        problem. Matches the standard contextlib pattern."""
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[])
+
+        async def _bad_flush(*_a, **_kw):
+            raise RuntimeError("flush exploded")
+
+        tracer.force_flush = _bad_flush  # type: ignore[method-assign]
+        try:
+            with __import__("pytest").raises(ValueError, match="body"):
+                async with tracer.attached(agent):
+                    raise ValueError("body")
+        finally:
+            pass
+
     async def test_combined_with_tracer_async_with(self):
         """The intended top-level idiom — Tracer + attached in one
         ``async with`` line.
