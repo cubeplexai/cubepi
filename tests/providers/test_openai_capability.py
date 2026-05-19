@@ -60,3 +60,13 @@ def test_cap_active_when_only_overrides_passed():
         model_capability_overrides={"m": CapabilityDescriptor()},
     )
     assert p._cap_active is True
+
+
+def test_resolve_capability_returns_default_when_inactive():
+    """When no capability kwarg was passed, _resolve_capability still returns
+    a safe-default CapabilityDescriptor (not used in practice — gated by _cap_active —
+    but the API should be predictable)."""
+    p = OpenAIProvider(api_key="x", base_url="http://example")
+    result = p._resolve_capability("any-model")
+    assert isinstance(result, CapabilityDescriptor)
+    assert result.reasoning_off_payload == {}

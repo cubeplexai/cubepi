@@ -54,7 +54,7 @@ class OpenAIProvider(BaseProvider):
             kwargs["base_url"] = base_url
         if extra_headers:
             kwargs["default_headers"] = extra_headers
-        self._client = openai.AsyncOpenAI(**kwargs)
+        self._client: openai.AsyncOpenAI = openai.AsyncOpenAI(**kwargs)
         self._payload_quirks: set[str] = set(payload_quirks or [])
         self._extra_body: dict[str, Any] = extra_body or {}
 
