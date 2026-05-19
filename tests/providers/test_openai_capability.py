@@ -10,6 +10,7 @@ from cubepi.providers.base import (
     Model,
     StreamOptions,
     TextContent,
+    ThinkingLevel,
     UserMessage,
 )
 from cubepi.providers.capability import (
@@ -87,7 +88,7 @@ async def _capture_payload_openai(
     model: Model,
     *,
     on_payload=None,
-    thinking: str = "off",
+    thinking: ThinkingLevel = "off",
 ) -> dict:
     """Run a stream with a fake openai client and return the kwargs sent.
 
@@ -242,3 +243,21 @@ async def test_legacy_no_capability_does_not_merge_reasoning_payload():
     payload = await _capture_payload_openai(p, _model(), thinking="off")
     assert "extra_body" not in payload
     assert "reasoning_effort" not in payload
+
+
+@pytest.mark.asyncio
+async def test_reasoning_on_payload_and_level_both_applied():
+    """Anthropic-style combined case: on_payload writes the thinking block,
+    then reasoning_level writes budget_tokens into the same dict. Order
+    matters — the merge must run before the level write so the dict exists."""
+    cap = CapabilityDescriptor(
+        reasoning_on_payload={"thinking": {"type": "enabled"}},
+        reasoning_level=ReasoningLevelSpec(
+            path="thinking.budget_tokens",
+            kind="int_budget",
+            level_budgets={"medium": 8192},
+        ),
+    )
+    p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
+    payload = await _capture_payload_openai(p, _model(), thinking="medium")
+    assert payload["thinking"] == {"type": "enabled", "budget_tokens": 8192}
