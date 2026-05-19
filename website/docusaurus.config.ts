@@ -14,10 +14,11 @@ const classicOptions: ClassicOptions = {
   docs: {
     sidebarPath: './sidebars.ts',
     editUrl: 'https://github.com/cubeplexai/cubepi/edit/main/website/',
-    lastVersion: '0.3',
+    lastVersion: '0.4',
     versions: {
       current: { label: 'Next 🚧', path: 'next', banner: 'unreleased' },
-      '0.3':   { label: '0.3 (latest)', path: '' },
+      '0.4':   { label: '0.4 (latest)', path: '' },
+      '0.3':   { label: '0.3', path: '0.3' },
     },
   },
   blog: false,
