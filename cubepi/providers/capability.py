@@ -62,3 +62,28 @@ class CapabilityDescriptor(BaseModel):
     supports_tools: bool = True
     supports_images: bool = False
     supports_streaming: bool = True
+
+
+def merge_capability_payload(kwargs: dict[str, Any], patch: dict[str, Any]) -> None:
+    """Deep-merge ``patch`` into ``kwargs`` in place.
+
+    Rules (spec §3.3):
+    1. Recurse into nested dicts.
+    2. Arrays are atomic — capability replaces caller's array on collision.
+    3. On scalar / array key collision, capability (``patch``) wins.
+    4. Patch is never mutated; nested dicts are copied on write.
+    """
+
+    for key, patch_value in patch.items():
+        if (
+            key in kwargs
+            and isinstance(kwargs[key], dict)
+            and isinstance(patch_value, dict)
+        ):
+            merge_capability_payload(kwargs[key], patch_value)
+        elif isinstance(patch_value, dict):
+            # Copy nested dict so subsequent kwargs mutation doesn't bleed into patch.
+            kwargs[key] = {}
+            merge_capability_payload(kwargs[key], patch_value)
+        else:
+            kwargs[key] = patch_value
