@@ -87,3 +87,25 @@ def merge_capability_payload(kwargs: dict[str, Any], patch: dict[str, Any]) -> N
             merge_capability_payload(kwargs[key], patch_value)
         else:
             kwargs[key] = patch_value
+
+
+def apply_temperature(kwargs: dict[str, Any], spec: TemperatureSpec) -> None:
+    """Mutate ``kwargs['temperature']`` in place per ``spec``.
+
+    - mode="ignored": strip the key entirely.
+    - mode="fixed": overwrite with ``fixed_value`` (set the key if absent).
+    - mode="free":  clamp caller's value to ``[min, max]``; no-op if absent.
+    """
+
+    if spec.mode == "ignored":
+        kwargs.pop("temperature", None)
+        return
+
+    if spec.mode == "fixed":
+        assert spec.fixed_value is not None  # enforced by validator
+        kwargs["temperature"] = spec.fixed_value
+        return
+
+    if "temperature" in kwargs:
+        value = kwargs["temperature"]
+        kwargs["temperature"] = max(spec.min, min(spec.max, value))

@@ -2,6 +2,7 @@ from cubepi.providers.capability import (
     CapabilityDescriptor,
     ReasoningLevelSpec,
     TemperatureSpec,
+    apply_temperature,
     merge_capability_payload,
 )
 
@@ -117,3 +118,45 @@ def test_merge_none_patch_value_overwrites():
     kwargs: dict = {"x": {"nested": True}}
     merge_capability_payload(kwargs, {"x": None})
     assert kwargs["x"] is None
+
+
+def test_apply_temperature_free_passes_through():
+    kwargs = {"temperature": 0.7}
+    apply_temperature(kwargs, TemperatureSpec(mode="free"))
+    assert kwargs == {"temperature": 0.7}
+
+
+def test_apply_temperature_free_clamps_above_max():
+    kwargs = {"temperature": 5.0}
+    apply_temperature(kwargs, TemperatureSpec(mode="free", min=0, max=2))
+    assert kwargs == {"temperature": 2.0}
+
+
+def test_apply_temperature_free_clamps_below_min():
+    kwargs = {"temperature": -1.0}
+    apply_temperature(kwargs, TemperatureSpec(mode="free", min=0, max=2))
+    assert kwargs == {"temperature": 0.0}
+
+
+def test_apply_temperature_ignored_strips():
+    kwargs = {"temperature": 0.7}
+    apply_temperature(kwargs, TemperatureSpec(mode="ignored"))
+    assert "temperature" not in kwargs
+
+
+def test_apply_temperature_fixed_overwrites():
+    kwargs = {"temperature": 0.7}
+    apply_temperature(kwargs, TemperatureSpec(mode="fixed", fixed_value=0.0))
+    assert kwargs == {"temperature": 0.0}
+
+
+def test_apply_temperature_fixed_sets_when_absent():
+    kwargs: dict = {}
+    apply_temperature(kwargs, TemperatureSpec(mode="fixed", fixed_value=0.0))
+    assert kwargs == {"temperature": 0.0}
+
+
+def test_apply_temperature_free_no_op_when_absent():
+    kwargs: dict = {}
+    apply_temperature(kwargs, TemperatureSpec(mode="free"))
+    assert kwargs == {}
