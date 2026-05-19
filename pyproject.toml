@@ -19,6 +19,7 @@ dependencies = [
     "anthropic>=0.100.0",
     "openai>=2.36.0",
     "pydantic>=2.13.4",
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]
@@ -73,3 +74,4 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["cubepi"]
+include = ["cubepi/providers/catalog/data/*.yaml"]

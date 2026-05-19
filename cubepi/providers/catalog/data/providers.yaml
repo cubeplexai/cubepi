@@ -1,0 +1,335 @@
+# Provider preset catalog. Spec: docs/dev/specs/2026-05-19-llm-provider-platform-design.md §3.7
+# Each entry parses into cubepi.providers.catalog.types.ProviderPreset.
+
+- slug: anthropic
+  display_name: Anthropic
+  short_name: Anthropic
+  logo: anthropic
+  category: saas
+  description: Anthropic Claude (Messages API). Native thinking + budget.
+  api: anthropic-messages
+  base_url: https://api.anthropic.com
+  auth: { mode: api_key, header_name: x-api-key, header_prefix: "" }
+  capability:
+    reasoning_off_payload: { thinking: { type: disabled } }
+    reasoning_on_payload:  { thinking: { type: enabled  } }
+    reasoning_level:
+      path: thinking.budget_tokens
+      kind: int_budget
+      # Aligned with cubepi.providers.base.ThinkingBudgets so AnthropicProvider's
+      # capability=None default-capability reproduces today's wire bytes.
+      level_budgets: { off: 0, minimal: 1024, low: 2048, medium: 8192, high: 16384, xhigh: 16384 }
+    temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }
+    max_tokens_field: max_tokens
+    supports_tools: true
+    supports_images: true
+  default_models:
+    - { model_id: claude-opus-4-7,    display_name: Claude Opus 4.7,    context_window: 200000, max_tokens: 8192,  input_modalities: [text, image], reasoning: true }
+    - { model_id: claude-sonnet-4-6,  display_name: Claude Sonnet 4.6,  context_window: 200000, max_tokens: 8192,  input_modalities: [text, image], reasoning: true }
+    - { model_id: claude-haiku-4-5,   display_name: Claude Haiku 4.5,   context_window: 200000, max_tokens: 8192,  input_modalities: [text, image], reasoning: false }
+
+- slug: openai
+  display_name: OpenAI
+  short_name: OpenAI
+  logo: openai
+  category: saas
+  description: OpenAI Responses API (GPT-5, o-series reasoning).
+  api: openai-responses
+  base_url: https://api.openai.com/v1
+  auth: { mode: api_key }
+  capability:
+    reasoning_level:
+      path: reasoning.effort
+      kind: effort
+      level_to_effort: { minimal: minimal, low: low, medium: medium, high: high, xhigh: high }
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    max_tokens_field: max_tokens
+    supports_tools: true
+    supports_images: true
+  default_models:
+    - { model_id: gpt-5,        display_name: GPT-5,        context_window: 400000, max_tokens: 16384, input_modalities: [text, image], reasoning: true }
+    - { model_id: gpt-5-mini,   display_name: GPT-5 Mini,   context_window: 400000, max_tokens: 16384, input_modalities: [text, image], reasoning: true }
+    - { model_id: o3-mini,      display_name: o3-mini,      context_window: 200000, max_tokens: 16384, input_modalities: [text],        reasoning: true }
+
+- slug: openai-legacy
+  display_name: OpenAI (Chat Completions)
+  short_name: OpenAI-Chat
+  logo: openai
+  category: saas
+  description: OpenAI legacy chat/completions wire (GPT-4/3.5).
+  api: openai-completions
+  base_url: https://api.openai.com/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    max_tokens_field: max_completion_tokens
+    supports_tools: true
+    supports_images: true
+  default_models:
+    - { model_id: gpt-4o, display_name: GPT-4o, context_window: 128000, max_tokens: 16384, input_modalities: [text, image], reasoning: false }
+
+- slug: qwen-dashscope
+  display_name: 通义千问 (DashScope)
+  short_name: Qwen
+  logo: qwen
+  category: saas
+  description: Alibaba Cloud DashScope OpenAI-compatible endpoint for Qwen models.
+  api: openai-completions
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  auth: { mode: api_key }
+  capability:
+    reasoning_off_payload: { extra_body: { enable_thinking: false } }
+    reasoning_on_payload:  { extra_body: { enable_thinking: true  } }
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    supports_tools: true
+    supports_images: true
+  default_models:
+    - { model_id: qwen3.6-plus,  display_name: Qwen 3.6 Plus,  context_window: 256000, max_tokens: 32000, input_modalities: [text, image], reasoning: true }
+    - { model_id: qwen3.6-flash, display_name: Qwen 3.6 Flash, context_window: 128000, max_tokens: 16000, input_modalities: [text, image], reasoning: false }
+
+- slug: doubao-volcengine
+  display_name: 豆包 (火山方舟)
+  short_name: Doubao
+  logo: doubao
+  category: saas
+  description: ByteDance Volcengine OpenAI-compatible endpoint for Doubao models.
+  api: openai-completions
+  base_url: https://ark.cn-beijing.volces.com/api/v3
+  auth: { mode: api_key }
+  capability:
+    reasoning_off_payload: { extra_body: { thinking: { type: disabled } } }
+    reasoning_on_payload:  { extra_body: { thinking: { type: enabled  } } }
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    supports_tools: true
+    supports_images: true
+  default_models:
+    - { model_id: doubao-seed-2.0-pro, display_name: Doubao Seed 2.0 Pro, context_window: 128000, max_tokens: 16384, input_modalities: [text, image], reasoning: true }
+
+- slug: deepseek-anthropic
+  display_name: DeepSeek (Anthropic shape)
+  short_name: DeepSeek
+  logo: deepseek
+  category: saas
+  description: DeepSeek via its Anthropic-shape endpoint.
+  api: anthropic-messages
+  base_url: https://api.deepseek.com/anthropic
+  auth: { mode: api_key, header_name: x-api-key, header_prefix: "" }
+  capability:
+    reasoning_off_payload: { thinking: { type: disabled } }
+    reasoning_on_payload:  { thinking: { type: enabled } }
+    reasoning_level:
+      path: thinking.budget_tokens
+      kind: int_budget
+      # Mirror Anthropic's budgets (same ThinkingBudgets contract).
+      level_budgets: { off: 0, low: 2048, medium: 8192, high: 16384, xhigh: 16384 }
+    temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }
+  default_models:
+    - { model_id: deepseek-v4-pro, display_name: DeepSeek V4 Pro, context_window: 64000, max_tokens: 12000, input_modalities: [text], reasoning: true }
+
+- slug: deepseek-openai
+  display_name: DeepSeek (OpenAI shape)
+  short_name: DeepSeek
+  logo: deepseek
+  category: saas
+  description: DeepSeek via its OpenAI chat-completions endpoint.
+  api: openai-completions
+  base_url: https://api.deepseek.com
+  auth: { mode: api_key }
+  capability:
+    reasoning_off_payload: { extra_body: { reasoning: { exclude: true } } }
+    reasoning_on_payload:  { extra_body: { reasoning: { exclude: false } } }
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+  default_models:
+    - { model_id: deepseek-chat, display_name: DeepSeek Chat, context_window: 64000, max_tokens: 8192, input_modalities: [text], reasoning: false }
+
+- slug: moonshot
+  display_name: Moonshot Kimi
+  short_name: Moonshot
+  logo: moonshot
+  category: saas
+  description: Moonshot AI Kimi OpenAI-compatible endpoint.
+  api: openai-completions
+  base_url: https://api.moonshot.cn/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+  default_models:
+    - { model_id: moonshot-v1-128k, display_name: Kimi 128k, context_window: 128000, max_tokens: 8192, input_modalities: [text], reasoning: false }
+
+- slug: xai
+  display_name: xAI
+  short_name: xAI
+  logo: xai
+  category: saas
+  description: xAI Grok OpenAI-compatible endpoint.
+  api: openai-completions
+  base_url: https://api.x.ai/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    supports_tools: true
+  default_models:
+    - { model_id: grok-4, display_name: Grok 4, context_window: 131072, max_tokens: 16384, input_modalities: [text], reasoning: true }
+
+- slug: mistral
+  display_name: Mistral
+  short_name: Mistral
+  logo: mistral
+  category: saas
+  description: Mistral La Plateforme OpenAI-compatible.
+  api: openai-completions
+  base_url: https://api.mistral.ai/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 1.0, default: 0.7 }
+  default_models:
+    - { model_id: mistral-large-latest, display_name: Mistral Large, context_window: 131072, max_tokens: 8192, input_modalities: [text], reasoning: false }
+
+- slug: openrouter
+  display_name: OpenRouter
+  short_name: OpenRouter
+  logo: openrouter
+  category: saas
+  description: OpenRouter unified gateway. Per-model reasoning overrides for known reasoning models.
+  api: openai-completions
+  base_url: https://openrouter.ai/api/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+    supports_tools: true
+    supports_images: true
+  model_capability_overrides:
+    deepseek/deepseek-r1:
+      reasoning_off_payload: { reasoning: { exclude: true } }
+      reasoning_on_payload:  { reasoning: { exclude: false } }
+      reasoning_level:
+        path: reasoning.effort
+        kind: effort
+        level_to_effort: { low: low, medium: medium, high: high }
+    openai/o3-mini:
+      reasoning_level:
+        path: reasoning.effort
+        kind: effort
+        level_to_effort: { low: low, medium: medium, high: high }
+  default_models: []
+
+- slug: together-ai
+  display_name: Together AI
+  short_name: Together
+  logo: together
+  category: saas
+  description: Together AI OpenAI-compatible.
+  api: openai-completions
+  base_url: https://api.together.xyz/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+  default_models: []
+
+- slug: groq
+  display_name: Groq
+  short_name: Groq
+  logo: groq
+  category: saas
+  description: Groq high-throughput OpenAI-compatible.
+  api: openai-completions
+  base_url: https://api.groq.com/openai/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+  default_models: []
+
+- slug: fireworks
+  display_name: Fireworks AI
+  short_name: Fireworks
+  logo: fireworks
+  category: saas
+  description: Fireworks AI OpenAI-compatible.
+  api: openai-completions
+  base_url: https://api.fireworks.ai/inference/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+  default_models: []
+
+- slug: vllm
+  display_name: vLLM (self-hosted)
+  short_name: vLLM
+  logo: vllm
+  category: oss-framework
+  description: vLLM OpenAI-compatible server. Reasoning conventions depend on the loaded model and reasoning parser plugin.
+  api: openai-completions
+  base_url: http://localhost:8000/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+    supports_tools: false
+  default_models: []
+
+- slug: ollama
+  display_name: Ollama
+  short_name: Ollama
+  logo: ollama
+  category: oss-framework
+  description: Ollama local OpenAI-compatible endpoint.
+  api: openai-completions
+  base_url: http://localhost:11434/v1
+  auth: { mode: none }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+    supports_tools: false
+  default_models: []
+
+- slug: lm-studio
+  display_name: LM Studio
+  short_name: LM Studio
+  logo: lmstudio
+  category: oss-framework
+  description: LM Studio local server.
+  api: openai-completions
+  base_url: http://localhost:1234/v1
+  auth: { mode: none }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+    supports_tools: false
+  default_models: []
+
+- slug: tgi
+  display_name: HuggingFace TGI
+  short_name: TGI
+  logo: huggingface
+  category: oss-framework
+  description: Text Generation Inference OpenAI-compatible endpoint.
+  api: openai-completions
+  base_url: http://localhost:8080/v1
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+    supports_tools: false
+  default_models: []
+
+- slug: custom-openai
+  display_name: Custom OpenAI-compatible
+  short_name: Custom
+  logo: null
+  category: custom
+  description: Bring your own OpenAI chat-completions endpoint.
+  api: openai-completions
+  base_url: ""
+  auth: { mode: api_key }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+  default_models: []
+
+- slug: custom-anthropic
+  display_name: Custom Anthropic-compatible
+  short_name: Custom
+  logo: null
+  category: custom
+  description: Bring your own Anthropic Messages endpoint.
+  api: anthropic-messages
+  base_url: ""
+  auth: { mode: api_key, header_name: x-api-key, header_prefix: "" }
+  capability:
+    temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }
+  default_models: []
