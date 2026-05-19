@@ -27,9 +27,52 @@ from cubepi.providers.base import (
     invoke_on_payload,
     invoke_on_response,
 )
+from cubepi.providers.capability import (
+    CapabilityDescriptor,
+    ReasoningLevelSpec,
+    TemperatureSpec,
+    apply_temperature,
+    merge_capability_payload,
+    write_reasoning_level,
+)
 from cubepi.providers.models import clamp_thinking_level
 
 CacheRetention = Literal["short", "long", "none"]
+
+
+# Default capability for Anthropic. Unlike OpenAI's empty default, Anthropic
+# always goes through the capability path — capability=None reproduces today's
+# wire bytes exactly because:
+#  - reasoning_off_payload is empty: legacy omits the "thinking" key entirely
+#    when thinking=off, so the default must too (no {"type": "disabled"}).
+#  - reasoning_on_payload writes {"thinking": {"type": "enabled"}}, then
+#    reasoning_level adds budget_tokens at thinking.budget_tokens.
+#  - level_budgets mirrors cubepi.providers.base.ThinkingBudgets defaults
+#    (minimal=1024, low=2048, medium=8192, high=16384). xhigh clamps to high
+#    to match adjust_max_tokens_for_thinking's "xhigh -> high" mapping.
+#    "off" is included for completeness but reasoning_level is never written
+#    on the off-branch.
+#  - temperature mode="free" with min/max [0, 1] matches Anthropic's accepted
+#    range; the stream() method itself decides whether to send temperature
+#    (only when thinking is off — Anthropic rejects temperature with thinking
+#    enabled).
+_ANTHROPIC_DEFAULT_CAPABILITY = CapabilityDescriptor(
+    reasoning_off_payload={},
+    reasoning_on_payload={"thinking": {"type": "enabled"}},
+    reasoning_level=ReasoningLevelSpec(
+        path="thinking.budget_tokens",
+        kind="int_budget",
+        level_budgets={
+            "off": 0,
+            "minimal": 1024,
+            "low": 2048,
+            "medium": 8192,
+            "high": 16384,
+            "xhigh": 16384,
+        },
+    ),
+    temperature=TemperatureSpec(mode="free", min=0.0, max=1.0, default=1.0),
+)
 
 
 @runtime_checkable
@@ -68,6 +111,8 @@ class AnthropicProvider(BaseProvider):
         base_url: str | None = None,
         cache_retention: CacheRetention = "short",
         cache_policy: CacheMarkerPolicy | None = None,
+        capability: CapabilityDescriptor | None = None,
+        model_capability_overrides: dict[str, CapabilityDescriptor] | None = None,
     ) -> None:
         super().__init__()
         import anthropic
@@ -80,6 +125,17 @@ class AnthropicProvider(BaseProvider):
         self._cache_policy: CacheMarkerPolicy = (
             cache_policy or DefaultCacheMarkerPolicy()
         )
+        # Anthropic always runs the capability path; capability=None falls back
+        # to _ANTHROPIC_DEFAULT_CAPABILITY which mirrors legacy wire bytes.
+        self._capability: CapabilityDescriptor = (
+            capability if capability is not None else _ANTHROPIC_DEFAULT_CAPABILITY
+        )
+        self._model_overrides: dict[str, CapabilityDescriptor] = (
+            model_capability_overrides or {}
+        )
+
+    def _resolve_capability(self, model_id: str) -> CapabilityDescriptor:
+        return self._model_overrides.get(model_id, self._capability)
 
     async def stream(
         self,
@@ -93,6 +149,7 @@ class AnthropicProvider(BaseProvider):
         opts = options or StreamOptions()
         ms = MessageStream()
         thinking = clamp_thinking_level(model, opts.thinking)
+        cap = self._resolve_capability(model.id)
 
         cache_control = self._get_cache_control()
         api_messages = [self._convert_message(m) for m in messages]
@@ -100,7 +157,11 @@ class AnthropicProvider(BaseProvider):
             indices = self._cache_policy.message_breakpoint_indices(messages)
             self._apply_indices_markers(api_messages, indices, cache_control)
 
-        max_tokens, thinking_budget = adjust_max_tokens_for_thinking(
+        # Preserve legacy max_tokens adjustment: when thinking is on, we
+        # reserve thinking_budget on top of model.max_tokens (clamped to
+        # model.context_window). The capability writes thinking.budget_tokens;
+        # this helper computes max_tokens.
+        max_tokens, _ = adjust_max_tokens_for_thinking(
             base_max_tokens=model.max_tokens,
             model_max_tokens=model.context_window,
             reasoning_level=thinking,
@@ -112,13 +173,6 @@ class AnthropicProvider(BaseProvider):
             "messages": api_messages,
             "max_tokens": max_tokens,
         }
-        # Anthropic disallows temperature modifications when extended
-        # thinking is enabled — see
-        # https://platform.claude.com/docs/en/build-with-claude/extended-thinking#feature-compatibility
-        # The provider request will fail with thinking on if we send a
-        # non-default temperature, so skip the field unless thinking is off.
-        if thinking == "off":
-            kwargs["temperature"] = model.temperature
         if system_prompt:
             if cache_control and self._cache_policy.mark_system():
                 kwargs["system"] = [
@@ -135,11 +189,25 @@ class AnthropicProvider(BaseProvider):
             if cache_control and api_tools and self._cache_policy.mark_last_tool():
                 api_tools[-1]["cache_control"] = cache_control
             kwargs["tools"] = api_tools
-        if thinking != "off" and thinking_budget > 0:
-            kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": thinking_budget,
-            }
+
+        # Capability-driven thinking + temperature. The default capability
+        # (capability=None) reproduces today's wire bytes:
+        #  - thinking off: reasoning_off_payload is empty, so no "thinking"
+        #    key is written; temperature is sent (legacy behavior).
+        #  - thinking on: reasoning_on_payload writes thinking.type=enabled,
+        #    reasoning_level writes thinking.budget_tokens; temperature is
+        #    stripped because Anthropic rejects custom temperature with
+        #    extended thinking enabled. See
+        #    https://platform.claude.com/docs/en/build-with-claude/extended-thinking#feature-compatibility
+        if thinking == "off":
+            merge_capability_payload(kwargs, cap.reasoning_off_payload)
+            kwargs.setdefault("temperature", model.temperature)
+            apply_temperature(kwargs, cap.temperature)
+        else:
+            merge_capability_payload(kwargs, cap.reasoning_on_payload)
+            if cap.reasoning_level is not None:
+                write_reasoning_level(kwargs, cap.reasoning_level, thinking)
+            kwargs.pop("temperature", None)
 
         async def _produce() -> None:
             body: dict | None = None
