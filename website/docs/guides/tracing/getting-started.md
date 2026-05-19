@@ -46,11 +46,8 @@ async def main() -> None:
         await agent.prompt("Say hello.")
         await agent.wait_for_idle()
     finally:
-        # Either is enough on its own:
-        #   await detach()                  # awaits the post-detach flush
-        #   await tracer.shutdown()          # flushes + closes exporters
-        detach()
-        await tracer.shutdown()
+        detach()                # unsubscribe hooks (sync, no flush)
+        await tracer.shutdown()  # flush + close exporters
 
 
 asyncio.run(main())
@@ -160,8 +157,12 @@ Optional, opt-in via `Tracer(record_content=True)`:
 `Tracer` is fine to share across agents — call `attach(agent)` multiple
 times. Each attach gets its own recorder so concurrent agents don't share
 span state, and MCP CLIENT spans route through the right Tracer based on
-which agent's `execute_tool` span is the parent. The same applies to
-`Meter`.
+which agent's `execute_tool` span is the parent.
+
+`Meter` is **not** yet safe to share across concurrent agents — its
+timing state lives on the instance, so overlapping runs can corrupt each
+other's metrics. Give each concurrent agent its own `Meter` for now;
+see the [Metrics guide](./metrics) for the workaround.
 
 ## Next
 

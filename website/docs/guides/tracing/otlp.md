@@ -102,26 +102,22 @@ OTLP target.
 
 ## Continuing an upstream trace
 
-When cubepi runs inside a service that already has its own traces — e.g. an
-HTTP handler — you usually want the agent run rooted under the inbound trace
-rather than starting a new one. Pass the parent context when attaching:
+`Tracer.attach(agent)` currently roots every agent run in its own trace —
+there is no public API yet for passing an inbound `traceparent` so that
+spans nest under a caller's HTTP handler trace. The internal hook
+(`Tracer._make_parent_context`) exists for a future `run_scope` feature;
+until that ships, agent runs and the surrounding service trace are linked
+only by their resource attributes (`service.name`, `gen_ai.agent.name`,
+`cubepi.run_id`).
 
-```python
-from opentelemetry import trace
+If you need the upstream trace to continue into cubepi today, the
+workaround is to set the OTel current span yourself before calling
+`agent.prompt(...)` and let the agent's spans inherit it via OTel's
+ambient context — cubepi never overrides an active parent.
 
-parent_span = trace.get_current_span()  # set by your web framework's middleware
-parent_ctx = parent_span.get_span_context()
-
-tracer = Tracer(service_name="my-bot", exporters=[exporter])
-
-# Pass parent_trace_id / parent_span_id to root the agent's spans under it.
-# (See cubepi.tracing.Tracer for the internal helper used by run_scope.)
-detach = tracer.attach(agent)
-```
-
-On the way out, MCP `tools/call` automatically injects W3C `traceparent` as
-an HTTP header so an instrumented MCP server can continue the trace
-through to its own backend.
+On the way out, MCP `tools/call` does inject W3C `traceparent` as an HTTP
+header automatically, so an instrumented MCP server downstream of the
+agent can continue the trace through to its own backend.
 
 ## Combining exporters
 
@@ -145,12 +141,11 @@ the background. To make sure buffered spans land before your process exits:
 
 ```python
 finally:
-    detach()                    # closes any spans a cancelled run left open
+    detach()                    # unsubscribes; does NOT block on flush
     await tracer.shutdown()     # awaits force_flush, then shuts the SDK down
 ```
 
-`shutdown()` is idempotent; calling it twice is a no-op.
-
-Alternatively, `await detach()` directly — the Task it returns awaits the
-flush, so a `finally: await detach()` block is enough without calling
-`shutdown()` separately. The two together is the safest pattern.
+`detach()` returns `None` — it unsubscribes the recorder synchronously but
+does not flush. Always pair it with `await tracer.shutdown()` (or
+`await tracer.force_flush()`) so buffered spans land before the process
+exits. `shutdown()` is idempotent; calling it twice is a no-op.
