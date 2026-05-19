@@ -215,7 +215,12 @@ def test_enum_writes_nested_extra_body():
     spec = ReasoningLevelSpec(
         path="extra_body.thinking.type",
         kind="enum",
-        level_to_enum={"off": "disabled", "low": "enabled", "medium": "enabled", "high": "enabled"},
+        level_to_enum={
+            "off": "disabled",
+            "low": "enabled",
+            "medium": "enabled",
+            "high": "enabled",
+        },
     )
     write_reasoning_level(kwargs, spec, "medium")
     assert kwargs == {"extra_body": {"thinking": {"type": "enabled"}}}

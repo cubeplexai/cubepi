@@ -29,7 +29,11 @@ def test_provider_accepts_capability_kwarg():
 
 def test_provider_accepts_model_overrides():
     cap = CapabilityDescriptor()
-    overrides = {"deepseek-r1": CapabilityDescriptor(reasoning_off_payload={"reasoning": {"effort": "low"}})}
+    overrides = {
+        "deepseek-r1": CapabilityDescriptor(
+            reasoning_off_payload={"reasoning": {"effort": "low"}}
+        )
+    }
     p = OpenAIProvider(
         api_key="x",
         base_url="http://example",
@@ -41,7 +45,9 @@ def test_provider_accepts_model_overrides():
 
 def test_resolve_capability_uses_override_when_present():
     base = CapabilityDescriptor()
-    override = CapabilityDescriptor(reasoning_off_payload={"reasoning": {"effort": "low"}})
+    override = CapabilityDescriptor(
+        reasoning_off_payload={"reasoning": {"effort": "low"}}
+    )
     p = OpenAIProvider(
         api_key="x",
         base_url="http://example",
@@ -61,13 +67,16 @@ def test_capability_default_when_kwarg_none():
 
 
 def test_cap_active_when_capability_passed():
-    p = OpenAIProvider(api_key="x", base_url="http://example", capability=CapabilityDescriptor())
+    p = OpenAIProvider(
+        api_key="x", base_url="http://example", capability=CapabilityDescriptor()
+    )
     assert p._cap_active is True
 
 
 def test_cap_active_when_only_overrides_passed():
     p = OpenAIProvider(
-        api_key="x", base_url="http://example",
+        api_key="x",
+        base_url="http://example",
         model_capability_overrides={"m": CapabilityDescriptor()},
     )
     assert p._cap_active is True
@@ -109,6 +118,7 @@ async def _capture_payload_openai(
             async def gen():
                 return
                 yield
+
             return gen()
 
     async def fake_create(**kw):
@@ -145,7 +155,9 @@ async def test_temperature_ignored_strips_field():
 
 @pytest.mark.asyncio
 async def test_temperature_fixed_overwrites():
-    cap = CapabilityDescriptor(temperature=TemperatureSpec(mode="fixed", fixed_value=0.0))
+    cap = CapabilityDescriptor(
+        temperature=TemperatureSpec(mode="fixed", fixed_value=0.0)
+    )
     p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
     payload = await _capture_payload_openai(p, _model(temperature=0.7))
     assert payload["temperature"] == 0.0
@@ -173,7 +185,9 @@ async def test_legacy_no_capability_does_not_inject_temperature_or_max_tokens():
 async def test_temperature_free_preserves_caller_value_via_on_payload():
     """setdefault must not overwrite a temperature the caller set via on_payload.
     Spec §3.5: capability-active path uses setdefault so caller wins."""
-    cap = CapabilityDescriptor(temperature=TemperatureSpec(mode="free", min=0.0, max=2.0))
+    cap = CapabilityDescriptor(
+        temperature=TemperatureSpec(mode="free", min=0.0, max=2.0)
+    )
     p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
 
     async def set_caller_temp(kwargs, model):

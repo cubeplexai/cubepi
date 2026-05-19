@@ -2,13 +2,20 @@ import pytest
 
 from cubepi.providers.catalog import get_provider_preset, list_provider_presets
 from cubepi.providers.catalog.types import (
-    AuthSpec, ModelPreset, ProviderPreset, WireApi,
+    AuthSpec,
+    ModelPreset,
+    ProviderPreset,
+    WireApi,
 )
 from cubepi.providers.capability import CapabilityDescriptor
 
 
 def test_wire_api_values():
-    assert WireApi.__args__ == ("anthropic-messages", "openai-completions", "openai-responses")
+    assert WireApi.__args__ == (
+        "anthropic-messages",
+        "openai-completions",
+        "openai-responses",
+    )
 
 
 def test_minimal_provider_preset_constructs():
@@ -31,8 +38,10 @@ def test_minimal_provider_preset_constructs():
 
 def test_model_preset_minimal():
     m = ModelPreset(
-        model_id="gpt-4o", display_name="GPT-4o",
-        context_window=128000, max_tokens=16384,
+        model_id="gpt-4o",
+        display_name="GPT-4o",
+        context_window=128000,
+        max_tokens=16384,
         input_modalities=["text", "image"],
     )
     assert m.reasoning is False
@@ -46,9 +55,15 @@ def test_auth_spec_api_key_defaults():
 def test_list_provider_presets_returns_all_entries():
     presets = list_provider_presets()
     slugs = [p.slug for p in presets]
-    for required in ("anthropic", "openai", "qwen-dashscope",
-                     "doubao-volcengine", "openrouter",
-                     "custom-openai", "custom-anthropic"):
+    for required in (
+        "anthropic",
+        "openai",
+        "qwen-dashscope",
+        "doubao-volcengine",
+        "openrouter",
+        "custom-openai",
+        "custom-anthropic",
+    ):
         assert required in slugs
 
 
@@ -65,7 +80,9 @@ def test_every_preset_parses_into_typed_model():
 def test_get_provider_preset_by_slug():
     qwen = get_provider_preset("qwen-dashscope")
     assert qwen.api == "openai-completions"
-    assert qwen.capability.reasoning_off_payload == {"extra_body": {"enable_thinking": False}}
+    assert qwen.capability.reasoning_off_payload == {
+        "extra_body": {"enable_thinking": False}
+    }
 
 
 def test_get_provider_preset_unknown_raises():

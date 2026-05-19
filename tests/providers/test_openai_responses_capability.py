@@ -86,7 +86,9 @@ def test_provider_accepts_capability_kwarg():
 def test_provider_accepts_model_overrides():
     cap = CapabilityDescriptor()
     overrides = {
-        "gpt-5": CapabilityDescriptor(reasoning_off_payload={"reasoning": {"effort": "low"}})
+        "gpt-5": CapabilityDescriptor(
+            reasoning_off_payload={"reasoning": {"effort": "low"}}
+        )
     }
     p = OpenAIResponsesProvider(
         api_key="x",
@@ -98,7 +100,9 @@ def test_provider_accepts_model_overrides():
 
 def test_resolve_capability_uses_override_when_present():
     base = CapabilityDescriptor()
-    override = CapabilityDescriptor(reasoning_off_payload={"reasoning": {"effort": "low"}})
+    override = CapabilityDescriptor(
+        reasoning_off_payload={"reasoning": {"effort": "low"}}
+    )
     p = OpenAIResponsesProvider(
         api_key="x",
         capability=base,

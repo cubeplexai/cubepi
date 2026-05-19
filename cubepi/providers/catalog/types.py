@@ -43,6 +43,8 @@ class ProviderPreset(BaseModel):
     auth: AuthSpec
 
     capability: CapabilityDescriptor
-    model_capability_overrides: dict[str, CapabilityDescriptor] = Field(default_factory=dict)
+    model_capability_overrides: dict[str, CapabilityDescriptor] = Field(
+        default_factory=dict
+    )
 
     default_models: list[ModelPreset] = Field(default_factory=list)

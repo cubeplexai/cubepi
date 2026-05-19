@@ -165,7 +165,8 @@ async def test_custom_high_budget_capability_bumps_max_tokens():
     custom = CapabilityDescriptor(
         reasoning_on_payload={"thinking": {"type": "enabled"}},
         reasoning_level=ReasoningLevelSpec(
-            path="thinking.budget_tokens", kind="int_budget",
+            path="thinking.budget_tokens",
+            kind="int_budget",
             level_budgets={"medium": 50000},  # WAY above ThinkingBudgets.medium=8192
         ),
     )
