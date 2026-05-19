@@ -272,3 +272,78 @@ async def test_capability_honors_opts_thinking_budgets_override():
     assert payload["thinking"]["budget_tokens"] == 12288
     # max_tokens must accommodate the new budget.
     assert payload["max_tokens"] >= 12288 + 512  # min_output_tokens floor
+
+
+@pytest.mark.asyncio
+async def test_capability_disables_thinking_when_budget_reduced_to_zero() -> None:
+    """When max_tokens floor is below min_output_tokens (1024), the clamp reduces
+    budget to 0 and the provider must fall back to thinking.type=disabled."""
+    custom = CapabilityDescriptor(
+        reasoning_on_payload={"thinking": {"type": "enabled"}},
+        reasoning_level=ReasoningLevelSpec(
+            path="thinking.budget_tokens",
+            kind="int_budget",
+            level_budgets={"high": 16384},
+        ),
+    )
+    p = AnthropicProvider(api_key="x", capability=custom)
+    # context_window=512 leaves no room for any budget at all.
+    m = Model(
+        id="claude-tiny-test",
+        provider="anthropic",
+        context_window=512,
+        max_tokens=512,
+        reasoning=True,
+        temperature=1.0,
+    )
+    captured: dict[str, Any] = {}
+
+    async def listener(kw: dict[str, Any], model: Model) -> None:
+        captured.update(kw)
+
+    p._request_listeners.append(listener)
+
+    class _FakeStream:
+        response = None
+
+        async def __aenter__(self) -> "_FakeStream":
+            return self
+
+        async def __aexit__(self, *a: Any) -> bool:
+            return False
+
+        def __aiter__(self) -> Any:
+            async def gen() -> Any:
+                return
+                yield  # pragma: no cover - generator marker
+
+            return gen()
+
+        async def get_final_message(self) -> Any:
+            from anthropic.types import Message
+
+            return Message.model_construct(
+                id="m_test",
+                model="claude-tiny-test",
+                role="assistant",
+                content=[],
+                stop_reason="end_turn",
+                stop_sequence=None,
+                type="message",
+                usage={"input_tokens": 1, "output_tokens": 1},
+            )
+
+    def fake_stream(**kw: Any) -> _FakeStream:
+        return _FakeStream()
+
+    p._client.messages.stream = fake_stream  # type: ignore[attr-defined]
+
+    s = await p.stream(
+        model=m,
+        messages=[UserMessage(content=[TextContent(text="hi")])],
+        options=StreamOptions(thinking="high"),
+    )
+    async for _ in s:
+        pass
+    await s.result()
+    assert captured["thinking"] == {"type": "disabled"}
