@@ -431,6 +431,29 @@ class Recorder:
         # that vary per-run set their own value via _ensure_agent_name.
         self._run = _RunState(run_id=run_id, agent_span=span)
 
+        # Stamp any tags / metadata set via ``cubepi.tracing.tracing_context``
+        # for this run. Per-task contextvar scoping means concurrent
+        # agents each see their own values; nested ``tracing_context``
+        # blocks merge before reaching here.
+        try:
+            from cubepi.tracing.context import _current_metadata, _current_tags
+
+            tags = _current_tags()
+            if tags:
+                span.set_attribute("cubepi.tags", tags)
+            metadata = _current_metadata()
+            for key, value in metadata.items():
+                # OTel attribute values are limited to scalar primitives
+                # and homogeneous sequences. Anything else is silently
+                # dropped here — better to lose one tag than corrupt the
+                # whole span.
+                try:
+                    span.set_attribute(f"cubepi.{key}", value)
+                except (TypeError, ValueError):
+                    pass
+        except ImportError:  # pragma: no cover — context module always available
+            pass
+
         # Seed the transcript from the agent's existing conversation
         # history. The cubepi agent loop only emits MessageStartEvent
         # for newly-introduced messages (new prompts in ``run_agent_loop``,

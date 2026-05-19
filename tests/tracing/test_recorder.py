@@ -914,6 +914,124 @@ class TestAttachedContextManager:
         assert tracer._shutdown is True
         assert exporter.spans
 
+class TestTracingContext:
+    """``cubepi.tracing.tracing_context`` sets per-task tags +
+    metadata that the recorder stamps onto the invoke_agent span."""
+
+    async def test_tags_land_on_invoke_agent_span(self):
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        with tracing_context(tags=["beta-arm", "test-suite"]):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        assert attrs.get("cubepi.tags") == ("beta-arm", "test-suite")
+
+    async def test_metadata_keys_land_with_prefix(self):
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        with tracing_context(metadata={"user_id": "u-42", "ab_arm": "control"}):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        assert attrs.get("cubepi.user_id") == "u-42"
+        assert attrs.get("cubepi.ab_arm") == "control"
+
+    async def test_no_context_means_no_tag_attr(self):
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("hi")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        assert "cubepi.tags" not in attrs
+
+    async def test_context_does_not_leak_across_runs(self):
+        """The contextvar resets on block exit — the next run started
+        outside the block must NOT carry the previous tags."""
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses(
+            [
+                faux_assistant_message("first"),
+                faux_assistant_message("second"),
+            ]
+        )
+
+        with tracing_context(tags=["scoped"]):
+            await agent.prompt("first")
+            await agent.wait_for_idle()
+        await agent.prompt("second")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        roots = sorted(
+            [s for s in exporter.spans if s.name == "invoke_agent"],
+            key=lambda s: s.start_time or 0,
+        )
+        assert len(roots) == 2
+        assert _attrs(roots[0]).get("cubepi.tags") == ("scoped",)
+        assert "cubepi.tags" not in _attrs(roots[1])
+
+    async def test_nested_contexts_merge_additively(self):
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        with tracing_context(tags=["outer"], metadata={"k": "outer-val"}):
+            with tracing_context(
+                tags=["inner"], metadata={"k": "inner-val", "x": "new"}
+            ):
+                await agent.prompt("hi")
+                await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        assert attrs.get("cubepi.tags") == ("outer", "inner")
+        assert attrs.get("cubepi.k") == "inner-val"
+        assert attrs.get("cubepi.x") == "new"
+
+    async def test_unsupported_metadata_value_is_dropped(self):
+        """OTel attributes can't hold dicts or arbitrary objects."""
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        with tracing_context(
+            metadata={
+                "good_str": "yes",
+                "good_int": 42,
+                "bad_dict": {"nested": 1},
+            }
+        ):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        assert attrs.get("cubepi.good_str") == "yes"
+        assert attrs.get("cubepi.good_int") == 42
+        assert "cubepi.bad_dict" not in attrs
+
 
 class TestLifecycle:
     async def test_shutdown_is_idempotent(self):
