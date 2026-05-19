@@ -2,6 +2,7 @@ from cubepi.providers.capability import (
     CapabilityDescriptor,
     ReasoningLevelSpec,
     TemperatureSpec,
+    _resolve_level_value,
     apply_temperature,
     merge_capability_payload,
     write_reasoning_level,
@@ -271,3 +272,58 @@ def test_reasoning_level_path_must_be_non_empty():
             kind="int_budget",
             level_budgets={"low": 4000},
         )
+
+
+def test_apply_temperature_fixed_raises_on_bypassed_validator():
+    """Defensive guard: if validator is bypassed and fixed_value is None, raise."""
+    import pytest
+
+    # model_construct bypasses validation.
+    spec = TemperatureSpec.model_construct(mode="fixed", fixed_value=None)
+    with pytest.raises(RuntimeError, match="validator was bypassed"):
+        apply_temperature({}, spec)
+
+
+def test_resolve_level_int_budget_raises_on_bypassed_validator():
+    import pytest
+
+    spec = ReasoningLevelSpec.model_construct(
+        path="thinking.budget_tokens",
+        kind="int_budget",
+        level_budgets=None,
+    )
+    with pytest.raises(RuntimeError, match="validator was bypassed"):
+        _resolve_level_value(spec, "medium")
+
+
+def test_resolve_level_effort_raises_on_bypassed_validator():
+    import pytest
+
+    spec = ReasoningLevelSpec.model_construct(
+        path="reasoning_effort",
+        kind="effort",
+        level_to_effort=None,
+    )
+    with pytest.raises(RuntimeError, match="validator was bypassed"):
+        _resolve_level_value(spec, "medium")
+
+
+def test_resolve_level_enum_raises_on_bypassed_validator():
+    import pytest
+
+    spec = ReasoningLevelSpec.model_construct(
+        path="extra_body.thinking.type",
+        kind="enum",
+        level_to_enum=None,
+    )
+    with pytest.raises(RuntimeError, match="validator was bypassed"):
+        _resolve_level_value(spec, "medium")
+
+
+def test_resolve_level_unknown_kind_returns_none():
+    """Defensive fall-through: a bogus kind (model_construct bypass) returns None."""
+    spec = ReasoningLevelSpec.model_construct(
+        path="whatever",
+        kind="something-bogus",  # not a valid Literal value
+    )
+    assert _resolve_level_value(spec, "medium") is None

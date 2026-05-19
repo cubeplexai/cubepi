@@ -1,5 +1,6 @@
 import pytest
 
+import cubepi.providers.catalog as catalog_module
 from cubepi.providers.catalog import get_provider_preset, list_provider_presets
 from cubepi.providers.catalog.types import (
     AuthSpec,
@@ -69,7 +70,7 @@ def test_list_provider_presets_returns_all_entries():
 
 def test_every_preset_parses_into_typed_model():
     presets = list_provider_presets()
-    assert len(presets) == 20
+    assert len(presets) == 22
     valid_apis = WireApi.__args__
     for p in presets:
         assert p.api in valid_apis, p.slug
@@ -96,3 +97,73 @@ def test_openrouter_has_model_capability_overrides():
     over = p.model_capability_overrides["deepseek/deepseek-r1"]
     assert over.reasoning_level is not None
     assert over.reasoning_level.kind == "effort"
+
+
+def test_load_raises_when_yaml_is_not_a_list(tmp_path, monkeypatch):
+    """Defensive: if providers.yaml is a dict at top level instead of list, raise."""
+    bad = tmp_path / "providers.yaml"
+    bad.write_text("not-a-list: just-a-string\n", encoding="utf-8")
+    monkeypatch.setattr(catalog_module, "_DATA_FILE", bad)
+    catalog_module._load.cache_clear()
+
+    with pytest.raises(ValueError, match="top-level list"):
+        catalog_module._load()
+
+    catalog_module._load.cache_clear()  # restore for other tests
+
+
+def test_load_wraps_per_entry_validation_error(tmp_path, monkeypatch):
+    """Per-entry pydantic failures are re-raised with the entry index."""
+    bad = tmp_path / "providers.yaml"
+    # entry #0 has a required field missing (no `api`, no `base_url`, etc.)
+    bad.write_text(
+        "- slug: broken\n"
+        "  display_name: Broken\n"
+        "  short_name: B\n"
+        "  category: custom\n"
+        "  description: missing api/base_url/auth/capability\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(catalog_module, "_DATA_FILE", bad)
+    catalog_module._load.cache_clear()
+
+    with pytest.raises(ValueError, match=r"providers\.yaml entry #0"):
+        catalog_module._load()
+
+    catalog_module._load.cache_clear()
+
+
+def test_load_rejects_duplicate_slug(tmp_path, monkeypatch):
+    """Two presets sharing the same slug fail the loader."""
+    # Two minimal-valid entries with the same slug.
+    bad = tmp_path / "providers.yaml"
+    bad.write_text(
+        "- slug: dup\n"
+        "  display_name: D1\n"
+        "  short_name: D\n"
+        "  category: custom\n"
+        "  description: first\n"
+        "  api: openai-completions\n"
+        '  base_url: ""\n'
+        "  auth: { mode: api_key }\n"
+        "  capability: {}\n"
+        "  default_models: []\n"
+        "- slug: dup\n"
+        "  display_name: D2\n"
+        "  short_name: D\n"
+        "  category: custom\n"
+        "  description: second\n"
+        "  api: openai-completions\n"
+        '  base_url: ""\n'
+        "  auth: { mode: api_key }\n"
+        "  capability: {}\n"
+        "  default_models: []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(catalog_module, "_DATA_FILE", bad)
+    catalog_module._load.cache_clear()
+
+    with pytest.raises(ValueError, match="duplicate slug"):
+        catalog_module._load()
+
+    catalog_module._load.cache_clear()
