@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from cubepi.utils.json_parse import parse_streaming_json
 
+from cubepi.providers.capability import CapabilityDescriptor
 from cubepi.providers.base import (
     AssistantMessage,
     BaseProvider,
@@ -40,6 +41,8 @@ class OpenAIProvider(BaseProvider):
         payload_quirks: list[Literal["max_completion_tokens_alias"]] | None = None,
         extra_body: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
+        capability: CapabilityDescriptor | None = None,
+        model_capability_overrides: dict[str, CapabilityDescriptor] | None = None,
     ) -> None:
         super().__init__()
         import openai
@@ -54,6 +57,20 @@ class OpenAIProvider(BaseProvider):
         self._client = openai.AsyncOpenAI(**kwargs)
         self._payload_quirks: set[str] = set(payload_quirks or [])
         self._extra_body: dict[str, Any] = extra_body or {}
+
+        # Track whether capability was explicitly passed so the OpenAI path
+        # (which today injects no temperature / no max_tokens) can stay
+        # behavior-identical for legacy callers. Spec §3.5.
+        self._cap_active: bool = (
+            capability is not None or model_capability_overrides is not None
+        )
+        self._capability: CapabilityDescriptor = capability or CapabilityDescriptor()
+        self._model_overrides: dict[str, CapabilityDescriptor] = (
+            model_capability_overrides or {}
+        )
+
+    def _resolve_capability(self, model_id: str) -> CapabilityDescriptor:
+        return self._model_overrides.get(model_id, self._capability)
 
     async def stream(
         self,
