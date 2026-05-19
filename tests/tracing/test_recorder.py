@@ -73,6 +73,18 @@ def _spans_by_name(exporter: InMemoryExporter) -> dict[str, list[ReadableSpan]]:
     return out
 
 
+def _find_attached_recorder(provider):
+    """Walk a provider's request_listeners to return the cubepi
+    Recorder instance — used by tests that need to drive recorder
+    callbacks directly with synthetic provider events."""
+    from cubepi.tracing.recorder import Recorder
+
+    for cb in getattr(provider, "_request_listeners", []):
+        if hasattr(cb, "__self__") and isinstance(cb.__self__, Recorder):
+            return cb.__self__
+    return None
+
+
 def _attrs(span: ReadableSpan) -> dict[str, Any]:
     return dict(span.attributes or {})
 
@@ -389,6 +401,186 @@ class TestErrorAndAbort:
         root = [s for s in exporter.spans if s.name == "invoke_agent"][0]
         attrs = _attrs(root)
         assert attrs.get("cubepi.aborted") is True
+
+    async def test_chat_span_marks_aborted_when_provider_returns_no_body(self):
+        """Real Anthropic/OpenAI/OpenAI-Responses abort branches return
+        from the stream before assembling a body, so the response
+        listener is called as ``(None, model, None)``. Without an
+        explicit case for that the chat span would close UNSET — out
+        of sync with the turn/root which TurnEnd marks aborted (codex
+        P2 round on PR #82).
+
+        The (None, None) shape is only treated as abort when the
+        agent's ``_active_signal`` is set — otherwise it's a benign
+        provider-side fallback (e.g. OpenAIResponsesProvider
+        finalizing an incomplete stream). See the companion
+        ``test_no_body_without_signal_keeps_chat_unset`` below.
+
+        Drive the recorder's listeners directly with the (None, None)
+        shape — reproducing real provider behaviour without needing
+        the provider to actually cooperate."""
+        import asyncio as _asyncio
+
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        tracer.attach(agent)
+
+        # First, do a real run so a turn span is open via normal flow.
+        provider.append_responses([faux_assistant_message("warmup")])
+        await agent.prompt("warmup")
+
+        recorder = _find_attached_recorder(provider)
+        assert recorder is not None
+        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
+
+        await recorder._on_agent_event(AgentStartEvent())
+        await recorder._on_agent_event(TurnStartEvent())
+        recorder._on_provider_request({"messages": []}, MODEL)
+        # Simulate that the user called agent.abort() before the
+        # response listener fires.
+        agent._active_signal = _asyncio.Event()
+        agent._active_signal.set()
+        # Provider abort branch -> (body=None, exc=None).
+        recorder._on_provider_response(None, MODEL, None)
+
+        await tracer.shutdown()
+        chats = [s for s in exporter.spans if s.name.startswith("chat ")]
+        assert len(chats) >= 2
+        aborted_chat = chats[-1]
+        attrs = _attrs(aborted_chat)
+        assert attrs.get("cubepi.aborted") is True
+        assert attrs.get("error.type") == "cubepi.aborted"
+        assert aborted_chat.status.status_code == StatusCode.UNSET
+
+    async def test_no_body_without_signal_keeps_chat_unset(self):
+        """``OpenAIResponsesProvider`` finalizes a stream that ends
+        without ``response.completed`` by firing response listeners
+        with ``(body=None, exc=None)`` — a successful (if incomplete)
+        completion. The chat span MUST NOT be marked aborted in that
+        case; only a (None, None) shape coinciding with the agent's
+        abort signal counts as a real abort (codex P2 follow-up on
+        PR #87)."""
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        tracer.attach(agent)
+
+        provider.append_responses([faux_assistant_message("warmup")])
+        await agent.prompt("warmup")
+
+        recorder = _find_attached_recorder(provider)
+        assert recorder is not None
+        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
+
+        await recorder._on_agent_event(AgentStartEvent())
+        await recorder._on_agent_event(TurnStartEvent())
+        recorder._on_provider_request({"messages": []}, MODEL)
+        # Provider's non-abort fallback path — no signal set.
+        agent._active_signal = None
+        recorder._on_provider_response(None, MODEL, None)
+
+        await tracer.shutdown()
+        chats = [s for s in exporter.spans if s.name.startswith("chat ")]
+        assert len(chats) >= 2
+        fallback_chat = chats[-1]
+        attrs = _attrs(fallback_chat)
+        assert "cubepi.aborted" not in attrs, (
+            "non-abort (None, None) fallback must not be marked aborted"
+        )
+        assert attrs.get("error.type") != "cubepi.aborted"
+        assert fallback_chat.status.status_code == StatusCode.UNSET
+
+
+class TestAgentSignalHelper:
+    """Unit-level coverage for the defensive branches of
+    ``Recorder._agent_signal_is_set`` introduced in PR #87. The
+    main-path branch (signal is set / not set) is already exercised
+    by the abort-handling chat-span tests; here we pin the
+    no-agent and signal-raises edges so codecov accepts the patch."""
+
+    def test_returns_false_when_no_agent_attached(self):
+        from cubepi.tracing.recorder import Recorder
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+        # Default: no agent attached.
+        assert recorder._agent_signal_is_set() is False
+
+    def test_returns_false_when_agent_has_no_signal(self):
+        from cubepi.tracing.recorder import Recorder
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+
+        class _Bare:
+            pass  # no _active_signal attribute
+
+        recorder._agent = _Bare()
+        assert recorder._agent_signal_is_set() is False
+
+    def test_returns_false_when_signal_is_set_raises(self):
+        from cubepi.tracing.recorder import Recorder
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+
+        class _Boom:
+            def is_set(self):
+                raise RuntimeError("broken signal")
+
+        class _Agent:
+            _active_signal = _Boom()
+
+        recorder._agent = _Agent()
+        # Exception is swallowed; helper degrades to False rather than
+        # crashing the response-listener callback chain.
+        assert recorder._agent_signal_is_set() is False
+
+
+class TestTranscriptSeedingDefensiveBranches:
+    """The transcript-seeding path on ``_on_agent_start`` reads
+    ``agent.state.messages`` defensively — pin the no-state and
+    raising-state branches so the patch is fully covered."""
+
+    async def test_no_seed_when_agent_has_no_state(self):
+        from cubepi.tracing.recorder import Recorder
+        from cubepi.agent.types import AgentStartEvent
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+
+        class _Bare:
+            pass  # no `state` attribute
+
+        recorder._agent = _Bare()
+        await recorder._on_agent_event(AgentStartEvent())
+        # _RunState was created (otherwise other handlers crash) but
+        # transcript stays empty.
+        assert recorder._run is not None
+        assert recorder._run.transcript == []
+
+    async def test_seed_handles_exception_in_state_messages(self):
+        from cubepi.tracing.recorder import Recorder
+        from cubepi.agent.types import AgentStartEvent
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+
+        class _BoomState:
+            @property
+            def messages(self):
+                raise RuntimeError("state broken")
+
+        class _Agent:
+            state = _BoomState()
+
+        recorder._agent = _Agent()
+        await recorder._on_agent_event(AgentStartEvent())
+        assert recorder._run is not None
+        assert recorder._run.transcript == []
 
 
 class TestLifecycle:
