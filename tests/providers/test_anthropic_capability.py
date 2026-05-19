@@ -154,3 +154,24 @@ async def test_model_capability_overrides_take_precedence() -> None:
     )
     payload = await _capture_anthropic(p, StreamOptions(thinking="medium"))
     assert payload["thinking"]["budget_tokens"] == 4242
+
+
+@pytest.mark.asyncio
+async def test_custom_high_budget_capability_bumps_max_tokens():
+    """Regression for max_tokens/budget_tokens desync: when custom level_budgets
+    writes a budget larger than ThinkingBudgets defaults, max_tokens must be
+    expanded to accommodate it (else Anthropic API rejects with
+    budget_tokens >= max_tokens)."""
+    custom = CapabilityDescriptor(
+        reasoning_on_payload={"thinking": {"type": "enabled"}},
+        reasoning_level=ReasoningLevelSpec(
+            path="thinking.budget_tokens", kind="int_budget",
+            level_budgets={"medium": 50000},  # WAY above ThinkingBudgets.medium=8192
+        ),
+    )
+    p = AnthropicProvider(api_key="x", capability=custom)
+    payload = await _capture_anthropic(p, StreamOptions(thinking="medium"))
+    assert payload["thinking"]["budget_tokens"] == 50000
+    # max_tokens must be at least budget + something (model.max_tokens=8192,
+    # so min(8192+50000, 200000) = 58192). Anthropic rejects budget>=max_tokens.
+    assert payload["max_tokens"] >= 50000 + 1

@@ -23,7 +23,6 @@ from cubepi.providers.base import (
     UserMessage,
     _fire_request_listeners,
     _fire_response_listeners,
-    adjust_max_tokens_for_thinking,
     invoke_on_payload,
     invoke_on_response,
 )
@@ -157,21 +156,9 @@ class AnthropicProvider(BaseProvider):
             indices = self._cache_policy.message_breakpoint_indices(messages)
             self._apply_indices_markers(api_messages, indices, cache_control)
 
-        # Preserve legacy max_tokens adjustment: when thinking is on, we
-        # reserve thinking_budget on top of model.max_tokens (clamped to
-        # model.context_window). The capability writes thinking.budget_tokens;
-        # this helper computes max_tokens.
-        max_tokens, _ = adjust_max_tokens_for_thinking(
-            base_max_tokens=model.max_tokens,
-            model_max_tokens=model.context_window,
-            reasoning_level=thinking,
-            custom_budgets=opts.thinking_budgets,
-        )
-
         kwargs: dict[str, Any] = {
             "model": model.id,
             "messages": api_messages,
-            "max_tokens": max_tokens,
         }
         if system_prompt:
             if cache_control and self._cache_policy.mark_system():
@@ -199,15 +186,25 @@ class AnthropicProvider(BaseProvider):
         #    stripped because Anthropic rejects custom temperature with
         #    extended thinking enabled. See
         #    https://platform.claude.com/docs/en/build-with-claude/extended-thinking#feature-compatibility
+        #
+        # max_tokens is computed AFTER the capability writes the budget so it
+        # always accommodates whatever budget actually landed on the wire.
+        # Anthropic rejects requests where budget_tokens >= max_tokens.
         if thinking == "off":
             merge_capability_payload(kwargs, cap.reasoning_off_payload)
             kwargs.setdefault("temperature", model.temperature)
             apply_temperature(kwargs, cap.temperature)
+            kwargs["max_tokens"] = min(model.max_tokens, model.context_window)
         else:
             merge_capability_payload(kwargs, cap.reasoning_on_payload)
             if cap.reasoning_level is not None:
                 write_reasoning_level(kwargs, cap.reasoning_level, thinking)
             kwargs.pop("temperature", None)
+            budget = 0
+            thinking_block = kwargs.get("thinking")
+            if isinstance(thinking_block, dict):
+                budget = thinking_block.get("budget_tokens", 0) or 0
+            kwargs["max_tokens"] = min(model.max_tokens + budget, model.context_window)
 
         async def _produce() -> None:
             body: dict | None = None
