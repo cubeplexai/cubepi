@@ -355,10 +355,23 @@ class Recorder:
         # that the provider request actually carries. For a normal
         # ``prompt()`` the pre-run history is also present here — the
         # new prompt(s) then append via MessageStart, producing the
-        # full chronological context (codex P2 finding on PR #83).
+        # full chronological context.
+        #
+        # Source: ``Agent.state.messages`` — that's where production
+        # code (e.g. ``_create_context_snapshot``) reads the persisted
+        # conversation from. ``getattr(agent, "messages", …)`` would
+        # return ``None`` on real Agent instances because the
+        # ``messages`` property lives on :class:`AgentState`, not on
+        # :class:`Agent` (codex P2 follow-up on PR #87).
         if self._agent is not None:
+            history: list[Any] = []
             try:
-                history = list(getattr(self._agent, "messages", None) or [])
+                state = getattr(self._agent, "state", None)
+                state_messages = (
+                    getattr(state, "messages", None) if state is not None else None
+                )
+                if state_messages:
+                    history = list(state_messages)
             except Exception:
                 history = []
             if history:

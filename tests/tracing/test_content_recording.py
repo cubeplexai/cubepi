@@ -313,8 +313,12 @@ class TestChatInputForContinuedHistory:
         from cubepi.providers.base import ToolResultMessage as _TR
 
         agent, provider, exporter, tracer = await _build(record_content=True)
-        # Pre-load the agent with conversation history.
-        agent.messages = [
+        # Pre-load the agent with conversation history via the
+        # production state path — ``agent.state.messages`` is what
+        # ``_create_context_snapshot`` reads from. The recorder must
+        # source its seed from the same place (codex P2 follow-up on
+        # PR #87).
+        agent.state.messages = [
             _U(content=[TextContent(text="earlier prompt")]),
             _A(
                 content=[TextContent(text="ok, working on it")],
