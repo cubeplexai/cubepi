@@ -344,6 +344,26 @@ class Recorder:
         # that vary per-run set their own value via _ensure_agent_name.
         self._run = _RunState(run_id=run_id, agent_span=span)
 
+        # Seed the transcript from the agent's existing conversation
+        # history. The cubepi agent loop only emits MessageStartEvent
+        # for newly-introduced messages (new prompts in ``run_agent_loop``,
+        # tool_results in ``execute_tool_calls``); the prior history is
+        # NOT replayed. Without this seed, ``Agent.resume()`` /
+        # ``run_agent_loop_continue`` (which adds no new prompt) would
+        # leave ``run.transcript`` empty and the first chat span's
+        # ``gen_ai.input.messages`` would omit the conversation history
+        # that the provider request actually carries. For a normal
+        # ``prompt()`` the pre-run history is also present here — the
+        # new prompt(s) then append via MessageStart, producing the
+        # full chronological context (codex P2 finding on PR #83).
+        if self._agent is not None:
+            try:
+                history = list(getattr(self._agent, "messages", None) or [])
+            except Exception:
+                history = []
+            if history:
+                self._run.transcript.extend(history)
+
     def _on_agent_end(self, event: AgentEndEvent) -> None:
         run = self._run
         if run is None:

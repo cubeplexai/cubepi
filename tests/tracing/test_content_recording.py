@@ -295,6 +295,68 @@ class TestChatInputIncludesPriorAssistant:
         assert roles.count("tool") == 1
 
 
+class TestChatInputForContinuedHistory:
+    """For ``Agent.resume()`` and other continuation paths, the cubepi
+    loop intentionally does NOT emit ``MessageStartEvent`` for the
+    pre-existing ``context.messages`` — so without seeding, the
+    recorder's transcript starts empty and the first chat span's
+    ``gen_ai.input.messages`` omits the conversation history that the
+    provider request actually carries.
+
+    Codex P2 finding on PR #83: the recorder must seed the transcript
+    from the agent's existing messages at agent_start.
+    """
+
+    async def test_resume_chat_input_includes_prior_history(self):
+        from cubepi.providers.base import UserMessage as _U
+        from cubepi.providers.base import AssistantMessage as _A
+        from cubepi.providers.base import ToolResultMessage as _TR
+
+        agent, provider, exporter, tracer = await _build(record_content=True)
+        # Pre-load the agent with conversation history.
+        agent.messages = [
+            _U(content=[TextContent(text="earlier prompt")]),
+            _A(
+                content=[TextContent(text="ok, working on it")],
+                stop_reason="end_turn",
+            ),
+        ]
+        # Now drive a new prompt and check that the FIRST chat span
+        # includes the prior turns in its input. (resume() doesn't
+        # add a new prompt; using prompt() here is equivalent for the
+        # transcript-seeding contract since both code paths leave the
+        # pre-existing history un-emitted.)
+        provider.append_responses([faux_assistant_message("acknowledged")])
+        await agent.prompt("now continue")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        chats = sorted(
+            [s for s in exporter.spans if s.name.startswith("chat ")],
+            key=lambda s: s.start_time or 0,
+        )
+        assert len(chats) == 1
+        inp = _json_attr(chats[0], "gen_ai.input.messages")
+        roles = [m["role"] for m in inp]
+        # Must carry: earlier user + earlier assistant + new user prompt.
+        assert roles == ["user", "assistant", "user"], (
+            f"first chat span input must include seeded history; got {roles}"
+        )
+        # Earlier user content survived.
+        assert any("earlier prompt" in p.get("content", "") for p in inp[0]["parts"])
+        # Earlier assistant content survived.
+        assert any(
+            "ok, working on it" in p.get("content", "") for p in inp[1]["parts"]
+        )
+        # New prompt is last.
+        assert any("now continue" in p.get("content", "") for p in inp[2]["parts"])
+
+        # Silence the unused-import linter on the ToolResultMessage
+        # alias — it documents the message shapes this test cares about
+        # even though only User+Assistant are exercised inline.
+        del _TR
+
+
 class TestRedaction:
     async def test_redact_can_substitute(self):
         seen_keys: list[str] = []
