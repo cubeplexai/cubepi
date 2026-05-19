@@ -2,6 +2,7 @@ from cubepi.providers.capability import (
     CapabilityDescriptor,
     ReasoningLevelSpec,
     TemperatureSpec,
+    merge_capability_payload,
 )
 
 
@@ -63,9 +64,6 @@ def test_temperature_default_must_be_within_range():
         TemperatureSpec(min=0.0, max=1.0, default=2.0)
 
 
-from cubepi.providers.capability import merge_capability_payload
-
-
 def test_merge_empty_patch_is_noop():
     kwargs = {"a": 1, "extra_body": {"b": 2}}
     merge_capability_payload(kwargs, {})
@@ -104,3 +102,18 @@ def test_merge_does_not_mutate_patch():
     merge_capability_payload(kwargs, patch)
     kwargs["extra_body"]["enable_thinking"] = True
     assert patch == {"extra_body": {"enable_thinking": False}}
+
+
+def test_merge_patch_dict_overwrites_scalar():
+    """When patch has a dict at a key where kwargs has a scalar, capability wins —
+    the scalar is replaced with the dict (consistent with rule 3)."""
+    kwargs = {"x": 5}
+    merge_capability_payload(kwargs, {"x": {"y": 1}})
+    assert kwargs == {"x": {"y": 1}}
+
+
+def test_merge_none_patch_value_overwrites():
+    """None in patch overwrites a nested dict in kwargs (capability wins, rule 3)."""
+    kwargs: dict = {"x": {"nested": True}}
+    merge_capability_payload(kwargs, {"x": None})
+    assert kwargs["x"] is None
