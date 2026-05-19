@@ -196,8 +196,11 @@ There's no built-in branching primitive; flow control happens through
   line anyway.
 - **Time travel / fork** at arbitrary checkpoints. The Postgres schema
   has fork columns but no API surface in v0.3.
-- **LangSmith / Langfuse integrations.** Bring your own tracing via
-  middleware + `on_response`.
+- **LangSmith / Langfuse vendor SDKs.** CubePi ships native
+  OpenTelemetry tracing instead — see [Tracing →
+  Overview](../guides/tracing/overview). Anything that speaks OTLP
+  (LangSmith's OTel endpoint, Langfuse v3, Jaeger, Tempo, Honeycomb,
+  Datadog, …) drops in via `Tracer(exporters=[OTLPSpanExporter(...)])`.
 
 ## What CubePi does that langgraph doesn't
 
