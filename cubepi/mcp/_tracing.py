@@ -115,17 +115,29 @@ def _get_tracer(scope_name: str) -> Any:
 # CLIENT span through the parent's owning provider so trace_ids and
 # exporter destination stay consistent (codex round-7).
 #
-# We use a ``ContextVar`` rather than a global dict keyed by
-# ``tool_call_id`` because tool-call ids are provider-local (Faux and
-# OpenAI-style providers commonly mint ``tc1`` / ``call_...`` per
-# conversation), so concurrent agents in one process can collide on the
-# same id and overwrite each other's parent registration. ContextVars
-# scope per-task: each agent run sees its own value, and asyncio's
-# ``create_task`` copies the parent's context — so sequential AND
-# parallel tool execution within the same agent both inherit the right
-# parent (codex round-8).
-_current_tool_entry: contextvars.ContextVar[tuple[Any, Any] | None] = (
-    contextvars.ContextVar("_cubepi_mcp_current_tool_entry", default=None)
+# Lookup uses a per-task ``ContextVar`` holding an opaque handle, with
+# the actual ``(span, provider)`` payload stored in a module-level
+# ``_active_entries`` dict. The dict is the source of truth for
+# cleanup; the contextvar is the per-task pointer.
+#
+# Why both: tool-call ids are provider-local (Faux / OpenAI-style mint
+# ``tc1`` / ``call_...`` per conversation), so a global dict keyed by
+# ``tool_call_id`` lets concurrent agents overwrite each other (codex
+# round-8). ContextVars scope per asyncio task and copy on
+# ``create_task``, so each agent run — and each spawned tool task
+# within it — sees only its own parent. BUT the cubepi agent loop
+# emits ``ToolExecutionStartEvent`` in the parent task and (in
+# ``parallel`` tool mode) ``ToolExecutionEndEvent`` from the per-tool
+# *child* task it spawns. A ``Token`` produced in the parent task
+# cannot be ``reset`` in a child task — ``ContextVar.reset`` raises
+# ``ValueError`` (codex round-9). The dict-handle indirection lets
+# ``unregister_tool_span`` clean up the payload unconditionally (so
+# any later lookup through the stale contextvar returns ``None``),
+# while the contextvar reset is best-effort and skipped silently when
+# the calling task differs from the registering one.
+_active_entries: dict[object, tuple[Any, Any]] = {}
+_current_handle: contextvars.ContextVar[object | None] = contextvars.ContextVar(
+    "_cubepi_mcp_current_tool_handle", default=None
 )
 
 
@@ -133,36 +145,66 @@ def register_tool_span(
     tool_call_id: str,
     span: Any,
     provider: Any = None,
-) -> contextvars.Token[tuple[Any, Any] | None]:
+) -> tuple[object, contextvars.Token[object | None]]:
     """Publish ``span`` (and its owning ``provider``) as the current
-    ``execute_tool`` parent for the calling task. Returns a token that
-    :func:`unregister_tool_span` uses to restore the previous value.
+    ``execute_tool`` parent for the calling task.
 
-    ``tool_call_id`` is accepted for API symmetry / debug context but no
-    longer used as a lookup key — see module-level comment.
+    Returns a ``(handle, cv_token)`` tuple — pass it to
+    :func:`unregister_tool_span` on tool-exec end. The handle is used
+    for dict cleanup (safe across tasks); the cv_token is used for
+    contextvar reset (best-effort, only valid in the registering
+    task).
+
+    ``tool_call_id`` is accepted for API symmetry / future debug attrs
+    but is not used as a lookup key — see module-level comment.
     """
-    del tool_call_id  # reserved: kept in signature for future debug attrs.
-    return _current_tool_entry.set((span, provider))
+    del tool_call_id
+    handle = object()
+    _active_entries[handle] = (span, provider)
+    cv_token = _current_handle.set(handle)
+    return (handle, cv_token)
 
 
 def unregister_tool_span(
-    token: contextvars.Token[tuple[Any, Any] | None] | None,
+    token: tuple[object, contextvars.Token[object | None]] | None,
 ) -> None:
-    """Restore the contextvar to its prior value. ``None`` is a no-op
-    so callers can safely unregister even when the import-time hook
-    failed."""
+    """Clean up a previously-registered entry.
+
+    ``token`` is the value returned from :func:`register_tool_span`,
+    or ``None`` (no-op, for callers that defensively unregister when
+    the corresponding register failed).
+
+    The dict entry is always removed — this is the safety net for
+    cross-task ``unregister`` (parallel tool mode emits
+    ``ToolExecutionEndEvent`` from the child task even though
+    ``register`` ran in the parent). The contextvar reset is
+    attempted but silently skipped if the calling task is not the
+    registering task; the next ``register`` in the parent task will
+    overwrite the stale handle.
+    """
     if token is None:
         return
+    handle, cv_token = token
+    _active_entries.pop(handle, None)
     try:
-        _current_tool_entry.reset(token)
-    except (ValueError, LookupError):  # pragma: no cover — token mismatch
+        _current_handle.reset(cv_token)
+    except (ValueError, LookupError):
         pass
 
 
 def _get_tool_span_entry() -> tuple[Any, Any] | None:
     """Return the (span, provider) entry for the current task, or
-    ``None`` when no ``execute_tool`` is active in this context."""
-    return _current_tool_entry.get()
+    ``None`` when no live ``execute_tool`` is in scope.
+
+    A stale contextvar handle (pointing at an already-cleaned-up dict
+    entry) returns ``None`` — exactly the same outcome as no parent at
+    all, so the MCP CLIENT span starts a new root rather than
+    parenting under an already-ended span.
+    """
+    handle = _current_handle.get()
+    if handle is None:
+        return None
+    return _active_entries.get(handle)
 
 
 def _current_span_via_registered() -> Any:

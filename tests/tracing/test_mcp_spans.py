@@ -781,6 +781,118 @@ class TestMCPSpanParentage:
                 f"agent_{who}: MCP span parented to the wrong execute_tool"
             )
 
+    async def test_parallel_tool_mode_parents_mcp_span(self):
+        """In ``parallel`` tool execution, the cubepi agent loop emits
+        ``ToolExecutionStartEvent`` in the parent task and
+        ``ToolExecutionEndEvent`` from the per-tool *child* task it
+        spawns. A naive ``ContextVar.reset(token)`` would raise
+        ``ValueError`` in the child task because the Token was minted
+        in a different context. The dict+contextvar hybrid keeps the
+        registry valid until the child task's cleanup runs — pin that
+        an MCP CLIENT span is still correctly parented under
+        ``execute_tool`` in this mode (codex round-9 review)."""
+        from cubepi.agent.agent import Agent
+        from cubepi.agent.types import AgentTool
+        from cubepi.mcp._adapter import make_mcp_agent_tool
+        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.faux import FauxProvider, faux_assistant_message
+        from cubepi.tracing import Tracer
+
+        async def call_remote(name, args):
+            return {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+        # Build the MCP tool with execution_mode="parallel" so the
+        # agent's _execute_parallel path is taken.
+        base_tool = make_mcp_agent_tool(
+            name="search",
+            description="search",
+            input_schema={
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+            },
+            call_remote=call_remote,
+        )
+        mcp_tool = AgentTool(
+            name=base_tool.name,
+            description=base_tool.description,
+            parameters=base_tool.parameters,
+            execute=base_tool.execute,
+            execution_mode="parallel",
+        )
+
+        provider = FauxProvider()
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    [ToolCall(id="tc1", name="search", arguments={"q": "x"})],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("done"),
+            ]
+        )
+        agent = Agent(
+            provider=provider,
+            model=Model(id="faux-1", provider="faux"),
+            system_prompt="s",
+            tools=[mcp_tool],
+        )
+
+        exporter = _CaptureExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        detach = tracer.attach(agent)
+        try:
+            await agent.prompt("go")
+            await agent.wait_for_idle()
+        finally:
+            detach()
+            await tracer.shutdown()
+
+        execute = [s for s in exporter.spans if s.name.startswith("execute_tool ")]
+        mcp = [s for s in exporter.spans if s.name.startswith("tools/call ")]
+        assert len(execute) == 1
+        assert len(mcp) == 1
+        assert (
+            mcp[0].get_span_context().trace_id == execute[0].get_span_context().trace_id
+        )
+        assert mcp[0].parent is not None
+        assert mcp[0].parent.span_id == execute[0].get_span_context().span_id
+
+    async def test_unregister_cleans_dict_even_from_different_task(self):
+        """Direct contract test for the dict+contextvar hybrid:
+        ``register_tool_span`` in one task, ``unregister_tool_span`` in
+        a different task. The ``ContextVar.reset`` raises and is
+        swallowed; the dict entry must still be cleaned up so any
+        subsequent lookup via a stale contextvar returns ``None``
+        (codex round-9 review)."""
+        import asyncio as _asyncio
+
+        from cubepi.mcp import _tracing as mcp_tracing
+
+        # Build a parent task that registers, then a child task that
+        # unregisters. We assert the dict is empty after cleanup.
+        registered_count_before = len(mcp_tracing._active_entries)
+
+        token_holder: list = []
+
+        async def _register():
+            token = mcp_tracing.register_tool_span("tc1", "span-A", provider="prov-A")
+            token_holder.append(token)
+            # Don't unregister here — let the child task do it.
+
+        async def _unregister(token):
+            mcp_tracing.unregister_tool_span(token)
+
+        await _register()
+        # Confirm the dict gained one entry.
+        assert len(mcp_tracing._active_entries) == registered_count_before + 1
+
+        # Unregister from a different task; ContextVar.reset will
+        # ValueError but the dict cleanup must still happen.
+        await _asyncio.create_task(_unregister(token_holder[0]))
+        assert len(mcp_tracing._active_entries) == registered_count_before, (
+            "_active_entries leaked after cross-task unregister_tool_span"
+        )
+
     async def test_mcp_span_orphan_when_no_registered_parent(self, monkeypatch):
         """Without a registered parent, the MCP span starts a new
         root trace. Pinning this so the parented-path test above is
