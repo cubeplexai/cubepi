@@ -5,8 +5,8 @@ title: 安装
 # 安装
 
 CubePi 需要 **Python 3.11 或以上**。核心运行时只有三个依赖：`pydantic`、
-`anthropic`、`openai`。可选功能（SQLite、Postgres、MCP）通过 extras
-按需安装,不用的话不会被拉进来。
+`anthropic`、`openai`。可选功能（SQLite、Postgres、MCP、OpenTelemetry
+追踪）通过 extras 按需安装,不用的话不会被拉进来。
 
 ## 使用 pip
 
@@ -17,10 +17,12 @@ pip install cubepi
 可选 extras:
 
 ```bash
-pip install "cubepi[sqlite]"     # 安装 aiosqlite,启用 SQLiteCheckpointer
-pip install "cubepi[postgres]"   # 安装 asyncpg + sqlalchemy + msgpack
-pip install "cubepi[mcp]"        # 安装 MCP SDK,启用 MCP 工具加载器
-pip install "cubepi[sqlite,mcp]" # 组合
+pip install "cubepi[sqlite]"        # 安装 aiosqlite,启用 SQLiteCheckpointer
+pip install "cubepi[postgres]"      # 安装 asyncpg + sqlalchemy + msgpack
+pip install "cubepi[mcp]"           # 安装 MCP SDK,启用 MCP 工具加载器
+pip install "cubepi[tracing]"       # 安装 opentelemetry-sdk,启用 Tracer / Meter
+pip install "cubepi[tracing-otlp]"  # 加上 OTLP/HTTP 导出器
+pip install "cubepi[sqlite,mcp,tracing]"  # 组合
 ```
 
 ## 使用 uv
@@ -29,7 +31,7 @@ pip install "cubepi[sqlite,mcp]" # 组合
 
 ```bash
 uv add cubepi
-uv add "cubepi[sqlite,postgres,mcp]"
+uv add "cubepi[sqlite,postgres,mcp,tracing,tracing-otlp]"
 ```
 
 在已有 uv 项目里,改完 `pyproject.toml` 后 `uv sync` 会重新锁定环境。
@@ -38,7 +40,7 @@ uv add "cubepi[sqlite,postgres,mcp]"
 
 ```bash
 poetry add cubepi
-poetry add "cubepi[sqlite,postgres,mcp]"
+poetry add "cubepi[sqlite,postgres,mcp,tracing,tracing-otlp]"
 ```
 
 ## 验证安装
@@ -75,10 +77,12 @@ LiteLLM、vLLM）。
 
 | Extra | 拉入什么 | 什么时候装 |
 |---|---|---|
-| (无) | 仅核心 | 只需要内存里的状态,不用 MCP |
+| (无) | 仅核心 | 只需要内存里的状态,不用 MCP,不用追踪 |
 | `[sqlite]` | `aiosqlite` | 单进程应用需要落盘 |
 | `[postgres]` | `asyncpg`、`sqlalchemy`、`msgpack` | 多实例 / 生产环境——见 [Postgres 指南](../guides/checkpointing/postgres) |
 | `[mcp]` | `mcp` | 想把 MCP server 工具挂到 Agent 上 |
+| `[tracing]` | `opentelemetry-sdk` | 想要 OpenTelemetry 追踪（含可选指标）——见 [追踪指南](../guides/tracing/overview) |
+| `[tracing-otlp]` | `opentelemetry-exporter-otlp-proto-http` | 把 trace 发往 OTLP/HTTP 后端（Jaeger ≥1.50、Tempo、Honeycomb、Datadog 等）|
 | `[docs]` | `griffe` | 仅文档站构建（贡献者用） |
 
 ## 下一步

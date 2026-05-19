@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as path from 'path';
+
 import type { Config } from '@docusaurus/types';
 import type { Options as ClassicOptions } from '@docusaurus/preset-classic';
 import { themes as prismThemes } from 'prism-react-renderer';
@@ -9,6 +12,17 @@ import { themes as prismThemes } from 'prism-react-renderer';
 const POSTHOG_KEY = process.env.POSTHOG_KEY || '';
 const POSTHOG_HOST = process.env.POSTHOG_HOST || 'https://us.i.posthog.com';
 const GIT_SHA = process.env.GITHUB_SHA?.slice(0, 7) ?? 'dev';
+
+// Single source of truth for the package version shown in the homepage
+// MetaBar: read pyproject.toml at config-load time so the site never
+// drifts from the actual released version. Plain regex parse — avoids
+// a TOML-parser dep just for one field.
+const PYPROJECT_TOML = fs.readFileSync(
+  path.join(__dirname, '..', 'pyproject.toml'),
+  'utf-8',
+);
+const VERSION_MATCH = PYPROJECT_TOML.match(/^version\s*=\s*"([^"]+)"/m);
+const PACKAGE_VERSION = VERSION_MATCH ? VERSION_MATCH[1] : 'dev';
 
 const classicOptions: ClassicOptions = {
   docs: {
@@ -50,7 +64,7 @@ const config: Config = {
     },
   },
 
-  customFields: { POSTHOG_KEY, POSTHOG_HOST, GIT_SHA },
+  customFields: { POSTHOG_KEY, POSTHOG_HOST, GIT_SHA, PACKAGE_VERSION },
 
   clientModules: [require.resolve('./src/clientModules/posthog.ts')],
 

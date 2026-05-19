@@ -134,6 +134,41 @@ class Checkpointer(Protocol):
 `MemoryCheckpointer`、`SQLiteCheckpointer`、`PostgresCheckpointer`。
 见 [Checkpointing → SQLite](../guides/checkpointing/sqlite)。
 
+## Tracer（可选）
+
+`Tracer` 输出符合 [OpenTelemetry GenAI 语义约定](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+的 span,任何 OTLP 后端（Jaeger、Tempo、Honeycomb、Datadog、AWS
+X-Ray 等）都能直接接收,无需额外 instrumentation。先装 extra：
+
+```bash
+pip install "cubepi[tracing]"           # OTel SDK
+pip install "cubepi[tracing-otlp]"      # + OTLP/HTTP 导出器
+```
+
+然后用 `async with` 包住 Agent：
+
+```python
+from cubepi.tracing import Tracer
+from cubepi.tracing.exporters import JsonlSpanExporter
+
+async with (
+    Tracer(
+        service_name="my-bot",
+        agent_name="assistant",
+        exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+    ) as tracer,
+    tracer.attached(agent),
+):
+    await agent.prompt("…")
+```
+
+每次 run 会发出一个 `invoke_agent` 根 span,其下每轮 LLM 往返对应
+一个 `cubepi.turn`,再嵌套 `chat`（CLIENT）和 `execute_tool` 子
+span。**默认不记录任何 prompt 内容或模型输出** —— 需要的话用
+`Tracer(record_content=True)` 显式打开,搭配 `redact` 回调脱敏。配
+合 `Meter(...)` 还能拿到 token / 时延 / TTFC 直方图。完整指南：
+[追踪 → 概览](../guides/tracing/overview)。
+
 ## 拼起来
 
 ```

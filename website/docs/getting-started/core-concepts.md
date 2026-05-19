@@ -143,6 +143,44 @@ on the first `prompt()`. Built-in backends: `MemoryCheckpointer`,
 `SQLiteCheckpointer`, `PostgresCheckpointer`. See
 [Checkpointing → SQLite](../guides/checkpointing/sqlite).
 
+## Tracer (optional)
+
+`Tracer` produces OpenTelemetry spans aligned with the
+[GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/),
+so any OTLP backend (Jaeger, Tempo, Honeycomb, Datadog, AWS X-Ray, …)
+can ingest agent runs without custom instrumentation. Install the
+extra:
+
+```bash
+pip install "cubepi[tracing]"           # OTel SDK
+pip install "cubepi[tracing-otlp]"      # + OTLP/HTTP exporter
+```
+
+then wrap your agent in an `async with`:
+
+```python
+from cubepi.tracing import Tracer
+from cubepi.tracing.exporters import JsonlSpanExporter
+
+async with (
+    Tracer(
+        service_name="my-bot",
+        agent_name="assistant",
+        exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+    ) as tracer,
+    tracer.attached(agent),
+):
+    await agent.prompt("…")
+```
+
+Each run emits an `invoke_agent` root span containing one
+`cubepi.turn` per LLM round-trip, plus `chat` (CLIENT) and
+`execute_tool` children. By default **no prompt content or model
+output is recorded** — opt in with `Tracer(record_content=True)` and
+a `redact` callback for PII. Pair with `Meter(...)` for token /
+duration / TTFC histograms. Full guide:
+[Tracing → Overview](../guides/tracing/overview).
+
 ## Putting it together
 
 ```
