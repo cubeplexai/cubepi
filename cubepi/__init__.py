@@ -35,6 +35,11 @@ from cubepi.providers import (
     UserMessage,
     adjust_max_tokens_for_thinking,
 )
+from cubepi.providers.capability import (
+    CapabilityDescriptor,
+    ReasoningLevelSpec,
+    TemperatureSpec,
+)
 
 __all__ = [
     "__version__",
@@ -44,13 +49,16 @@ __all__ = [
     "AgentToolResult",
     "AssistantMessage",
     "BaseProvider",
+    "CapabilityDescriptor",
     "Message",
     "MessageStream",
     "Middleware",
     "Model",
     "Provider",
+    "ReasoningLevelSpec",
     "StreamEvent",
     "StreamOptions",
+    "TemperatureSpec",
     "TextContent",
     "ThinkingBudgets",
     "ThinkingLevel",
