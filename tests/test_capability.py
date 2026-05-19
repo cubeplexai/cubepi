@@ -61,3 +61,46 @@ def test_temperature_default_must_be_within_range():
 
     with pytest.raises(ValidationError):
         TemperatureSpec(min=0.0, max=1.0, default=2.0)
+
+
+from cubepi.providers.capability import merge_capability_payload
+
+
+def test_merge_empty_patch_is_noop():
+    kwargs = {"a": 1, "extra_body": {"b": 2}}
+    merge_capability_payload(kwargs, {})
+    assert kwargs == {"a": 1, "extra_body": {"b": 2}}
+
+
+def test_merge_adds_new_top_level_keys():
+    kwargs = {"a": 1}
+    merge_capability_payload(kwargs, {"reasoning_effort": "low"})
+    assert kwargs == {"a": 1, "reasoning_effort": "low"}
+
+
+def test_merge_recurses_into_nested_dicts():
+    kwargs: dict = {"extra_body": {"existing": True}}
+    merge_capability_payload(kwargs, {"extra_body": {"enable_thinking": False}})
+    assert kwargs == {"extra_body": {"existing": True, "enable_thinking": False}}
+
+
+def test_merge_capability_wins_on_leaf_collision():
+    kwargs = {"extra_body": {"enable_thinking": True}}
+    merge_capability_payload(kwargs, {"extra_body": {"enable_thinking": False}})
+    assert kwargs == {"extra_body": {"enable_thinking": False}}
+
+
+def test_merge_arrays_are_atomic_capability_wins():
+    """Arrays at colliding keys are replaced, not unioned."""
+    kwargs = {"stop": ["\n", "."]}
+    merge_capability_payload(kwargs, {"stop": ["END"]})
+    assert kwargs == {"stop": ["END"]}
+
+
+def test_merge_does_not_mutate_patch():
+    """The patch dict the caller passes in must be left untouched."""
+    patch = {"extra_body": {"enable_thinking": False}}
+    kwargs: dict = {}
+    merge_capability_payload(kwargs, patch)
+    kwargs["extra_body"]["enable_thinking"] = True
+    assert patch == {"extra_body": {"enable_thinking": False}}
