@@ -73,6 +73,18 @@ def _spans_by_name(exporter: InMemoryExporter) -> dict[str, list[ReadableSpan]]:
     return out
 
 
+def _find_attached_recorder(provider):
+    """Walk a provider's request_listeners to return the cubepi
+    Recorder instance — used by tests that need to drive recorder
+    callbacks directly with synthetic provider events."""
+    from cubepi.tracing.recorder import Recorder
+
+    for cb in getattr(provider, "_request_listeners", []):
+        if hasattr(cb, "__self__") and isinstance(cb.__self__, Recorder):
+            return cb.__self__
+    return None
+
+
 def _attrs(span: ReadableSpan) -> dict[str, Any]:
     return dict(span.attributes or {})
 
@@ -398,9 +410,17 @@ class TestErrorAndAbort:
         of sync with the turn/root which TurnEnd marks aborted (codex
         P2 round on PR #82).
 
+        The (None, None) shape is only treated as abort when the
+        agent's ``_active_signal`` is set — otherwise it's a benign
+        provider-side fallback (e.g. OpenAIResponsesProvider
+        finalizing an incomplete stream). See the companion
+        ``test_no_body_without_signal_keeps_chat_unset`` below.
+
         Drive the recorder's listeners directly with the (None, None)
         shape — reproducing real provider behaviour without needing
         the provider to actually cooperate."""
+        import asyncio as _asyncio
+
         provider = FauxProvider()
         agent = Agent(provider=provider, model=MODEL, system_prompt="s")
         exporter = InMemoryExporter()
@@ -408,44 +428,70 @@ class TestErrorAndAbort:
         tracer.attach(agent)
 
         # First, do a real run so a turn span is open via normal flow.
-        # Then, while still inside an agent run, fire provider request +
-        # an abort-shaped response onto the recorder.
         provider.append_responses([faux_assistant_message("warmup")])
         await agent.prompt("warmup")
 
-        # The recorder is subscribed to provider events; call those
-        # listeners with the abort-shaped (None, None) tuple. The
-        # listener registry exposes the live callable list.
-        from cubepi.tracing.recorder import Recorder
-
-        recorder = None
-        for cb in provider._request_listeners:
-            if hasattr(cb, "__self__") and isinstance(cb.__self__, Recorder):
-                recorder = cb.__self__
-                break
+        recorder = _find_attached_recorder(provider)
         assert recorder is not None
-        # Open a fresh agent + turn span via the recorder's events.
-        from cubepi.agent.types import (
-            AgentStartEvent,
-            TurnStartEvent,
-        )
+        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
 
         await recorder._on_agent_event(AgentStartEvent())
         await recorder._on_agent_event(TurnStartEvent())
-        # Provider request -> chat span opens.
         recorder._on_provider_request({"messages": []}, MODEL)
+        # Simulate that the user called agent.abort() before the
+        # response listener fires.
+        agent._active_signal = _asyncio.Event()
+        agent._active_signal.set()
         # Provider abort branch -> (body=None, exc=None).
         recorder._on_provider_response(None, MODEL, None)
 
         await tracer.shutdown()
         chats = [s for s in exporter.spans if s.name.startswith("chat ")]
-        # Last chat span (the simulated abort) must carry the markers.
         assert len(chats) >= 2
         aborted_chat = chats[-1]
         attrs = _attrs(aborted_chat)
         assert attrs.get("cubepi.aborted") is True
         assert attrs.get("error.type") == "cubepi.aborted"
         assert aborted_chat.status.status_code == StatusCode.UNSET
+
+    async def test_no_body_without_signal_keeps_chat_unset(self):
+        """``OpenAIResponsesProvider`` finalizes a stream that ends
+        without ``response.completed`` by firing response listeners
+        with ``(body=None, exc=None)`` — a successful (if incomplete)
+        completion. The chat span MUST NOT be marked aborted in that
+        case; only a (None, None) shape coinciding with the agent's
+        abort signal counts as a real abort (codex P2 follow-up on
+        PR #87)."""
+        provider = FauxProvider()
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        tracer.attach(agent)
+
+        provider.append_responses([faux_assistant_message("warmup")])
+        await agent.prompt("warmup")
+
+        recorder = _find_attached_recorder(provider)
+        assert recorder is not None
+        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
+
+        await recorder._on_agent_event(AgentStartEvent())
+        await recorder._on_agent_event(TurnStartEvent())
+        recorder._on_provider_request({"messages": []}, MODEL)
+        # Provider's non-abort fallback path — no signal set.
+        agent._active_signal = None
+        recorder._on_provider_response(None, MODEL, None)
+
+        await tracer.shutdown()
+        chats = [s for s in exporter.spans if s.name.startswith("chat ")]
+        assert len(chats) >= 2
+        fallback_chat = chats[-1]
+        attrs = _attrs(fallback_chat)
+        assert "cubepi.aborted" not in attrs, (
+            "non-abort (None, None) fallback must not be marked aborted"
+        )
+        assert attrs.get("error.type") != "cubepi.aborted"
+        assert fallback_chat.status.status_code == StatusCode.UNSET
 
 
 class TestLifecycle:

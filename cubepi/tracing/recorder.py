@@ -285,6 +285,27 @@ class Recorder:
     # invoke_agent
     # ------------------------------------------------------------------
 
+    def _agent_signal_is_set(self) -> bool:
+        """True iff the attached agent's active abort signal is set.
+
+        Used to disambiguate a provider response listener firing as
+        ``(body=None, exc=None)``: that shape can mean either a real
+        cooperative abort (we should mark the chat span aborted) or a
+        provider-side non-abort fallback like
+        ``OpenAIResponsesProvider`` finalizing an incomplete stream
+        (we must NOT mark it aborted).
+        """
+        agent = self._agent
+        if agent is None:
+            return False
+        sig = getattr(agent, "_active_signal", None)
+        if sig is None:
+            return False
+        try:
+            return bool(sig.is_set())
+        except Exception:
+            return False
+
     def _sweep_tool_span_tokens(self, run: "_RunState | None") -> None:
         """Drain ``run.tool_span_tokens`` through ``unregister_tool_span``.
 
@@ -776,7 +797,7 @@ class Recorder:
                 span.set_attribute(CUBEPI_ABORTED, True)
                 span.set_attribute(ERROR_TYPE, "cubepi.aborted")
 
-            if exc is None and body is None:
+            if exc is None and body is None and self._agent_signal_is_set():
                 # Provider abort branches (anthropic/openai/openai_responses)
                 # return from the stream before assembling a body, so the
                 # response listener is invoked as (None, model, None). The
@@ -785,6 +806,14 @@ class Recorder:
                 # UNSET — out of sync with the turn/root which TurnEnd
                 # marks aborted. Match the cancellation contract: leave
                 # Status UNSET, set cubepi.aborted + error.type.
+                #
+                # Gate on ``agent._active_signal.is_set()`` so we don't
+                # mistake provider-side non-abort fallbacks for aborts:
+                # OpenAIResponsesProvider, for example, finalizes a
+                # stream that ends without ``response.completed`` by
+                # firing response listeners with body=None / exc=None
+                # — a successful (if incomplete) completion that must
+                # NOT be marked aborted (codex P2 follow-up on PR #87).
                 span.set_attribute(CUBEPI_ABORTED, True)
                 span.set_attribute(ERROR_TYPE, "cubepi.aborted")
             elif exc is None:
