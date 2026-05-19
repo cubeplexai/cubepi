@@ -299,9 +299,7 @@ async def test_signal_abort_cancels_in_flight_mcp_call() -> None:
             "MCP adapter ignored abort signal; tools/call did not bail out"
         )
     # The inner call_remote should have been cancelled too.
-    assert finished.is_set(), (
-        "call_remote was not cancelled when signal fired"
-    )
+    assert finished.is_set(), "call_remote was not cancelled when signal fired"
 
 
 async def test_signal_already_set_before_call_aborts_immediately() -> None:

@@ -511,9 +511,7 @@ class TestSafeToolName:
         from cubepi.tracing.recorder import _safe_tool_name
 
         assert (
-            _safe_tool_name(
-                {"type": "function", "function": {"name": "fetch"}}
-            )
+            _safe_tool_name({"type": "function", "function": {"name": "fetch"}})
             == "fetch"
         )
 
@@ -588,8 +586,7 @@ class TestDetachFlushGuarantee:
         await agent.wait_for_idle()
         result = detach()
         assert result is not None, (
-            "detach() inside running loop must return a flush Task; "
-            "got None"
+            "detach() inside running loop must return a flush Task; got None"
         )
         assert asyncio.isfuture(result) or asyncio.iscoroutine(result), (
             f"detach() must return an awaitable; got {type(result).__name__}"

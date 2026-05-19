@@ -153,9 +153,7 @@ def make_mcp_agent_tool(
             server_port=server_port,
             parent_tool_call_id=tool_call_id,
         ) as span:
-            result = await _await_with_signal(
-                call_remote(name, args_dict), signal
-            )
+            result = await _await_with_signal(call_remote(name, args_dict), signal)
             # MCP server-reported tool failure (``isError: true``): the
             # JSON-RPC call succeeded but the tool's logic failed. Mark
             # the CLIENT span ERROR so backends count it as a failure,
