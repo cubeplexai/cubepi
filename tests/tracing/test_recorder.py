@@ -494,6 +494,55 @@ class TestErrorAndAbort:
         assert fallback_chat.status.status_code == StatusCode.UNSET
 
 
+class TestCancellationExportsSpans:
+    """``asyncio.CancelledError`` bypasses cubepi's agent-loop
+    ``except Exception``, so no AgentEnd / TurnEnd / ToolExecutionEnd
+    event is emitted on cancel. Without an explicit close path the
+    open spans never reach ``span.end()`` and ``BatchSpanProcessor``
+    drops them — cancelled runs simply disappear from the backend
+    (codex overall-review BLOCKING)."""
+
+    async def test_cancelled_run_still_exports_invoke_agent_span(self):
+        provider = FauxProvider(tokens_per_second=10.0)
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        detach = tracer.attach(agent)
+
+        provider.append_responses([faux_assistant_message("x" * 600)])
+
+        run = asyncio.create_task(agent.prompt("hi"))
+        await asyncio.sleep(0.05)
+        run.cancel()
+        try:
+            await run
+        except asyncio.CancelledError:
+            pass
+
+        detach()
+        await tracer.shutdown()
+
+        # invoke_agent + cubepi.turn + chat must all have been ended
+        # and exported, even though no AgentEnd/TurnEnd fired.
+        names = {s.name for s in exporter.spans}
+        assert "invoke_agent" in names, (
+            f"cancelled run's invoke_agent span not exported; got {names}"
+        )
+        assert "cubepi.turn" in names
+        assert any(n.startswith("chat ") for n in names)
+
+        # Each must carry cubepi.aborted so the backend sees the
+        # interruption rather than thinking the run completed.
+        for span in exporter.spans:
+            if span.name in ("invoke_agent", "cubepi.turn") or span.name.startswith(
+                "chat "
+            ):
+                attrs = _attrs(span)
+                assert attrs.get("cubepi.aborted") is True, (
+                    f"{span.name} missing cubepi.aborted after cancellation"
+                )
+
+
 class TestAgentSignalHelper:
     """Unit-level coverage for the defensive branches of
     ``Recorder._agent_signal_is_set`` introduced in PR #87. The
