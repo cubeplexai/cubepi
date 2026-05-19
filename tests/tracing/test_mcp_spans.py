@@ -77,11 +77,11 @@ def _patch_mcp_trace(monkeypatch, provider: TracerProvider) -> None:
     monkeypatch.setattr(mcp_tracing, "_otel_trace", _ShimTraceMod)
     monkeypatch.setattr(mcp_tracing, "_OTEL_AVAILABLE", True)
     # Other tests' Tracer.attach() may have left entries on the provider
-    # stack; clear so this test resolves via the shim above. Also clear
-    # the tool-span registry — leftover entries would make subsequent
-    # mcp spans nest under a stale execute_tool span.
+    # stack; clear so this test resolves via the shim above. The
+    # current-tool contextvar is per-task and won't leak between tests
+    # (pytest-asyncio runs each test in a fresh task), so no reset
+    # needed there.
     monkeypatch.setattr(mcp_tracing, "_provider_stack", [])
-    monkeypatch.setattr(mcp_tracing, "_active_tool_spans", {})
 
 
 async def _make_tool(
@@ -564,7 +564,7 @@ class TestMCPSpanParentage:
 
         tracer = provider.get_tracer("test")
         tool_span = tracer.start_span("execute_tool search")
-        mcp_tracing.register_tool_span("tc1", tool_span)
+        token = mcp_tracing.register_tool_span("tc1", tool_span)
         try:
 
             async def call_remote(name, args):
@@ -573,7 +573,7 @@ class TestMCPSpanParentage:
             tool = await _make_tool(call_remote)
             await tool.execute("tc1", tool.parameters.model_validate({"q": "x"}))
         finally:
-            mcp_tracing.unregister_tool_span("tc1")
+            mcp_tracing.unregister_tool_span(token)
             tool_span.end()
 
         mcp_spans = [s for s in exporter.spans if s.name.startswith("tools/call ")]
@@ -676,6 +676,109 @@ class TestMCPSpanParentage:
             assert (
                 execute[0].get_span_context().trace_id
                 == mcp[0].get_span_context().trace_id
+            )
+
+    async def test_concurrent_agents_with_colliding_tool_call_ids(self):
+        """Two agents executing MCP tools concurrently with the SAME
+        tool_call_id (``tc1``, mimicking how Faux/OpenAI-style providers
+        mint ids per conversation). A global dict keyed by tool_call_id
+        would let the second registration overwrite the first; the MCP
+        span lookup could then parent/export agent A's CLIENT span
+        through agent B's owning provider, reintroducing the cross-
+        Tracer misrouting that the sequential test does not cover.
+
+        ContextVars scope per asyncio task, so each agent's run sees
+        only its own parent (codex round-8 review on PR #86)."""
+        import asyncio as _asyncio
+
+        from cubepi.agent.agent import Agent
+        from cubepi.mcp._adapter import make_mcp_agent_tool
+        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.faux import FauxProvider, faux_assistant_message
+        from cubepi.tracing import Tracer
+
+        # Gate that holds both agents' MCP calls inside the
+        # ``execute_tool`` span at the same time, so any global-dict
+        # collision would be exercised. Without the gate the calls
+        # would serialize trivially.
+        in_call = _asyncio.Event()
+        release = _asyncio.Event()
+
+        async def call_remote(name, args):
+            in_call.set()
+            await release.wait()
+            return {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+        def _make_agent():
+            mcp_tool = make_mcp_agent_tool(
+                name="search",
+                description="search",
+                input_schema={
+                    "type": "object",
+                    "properties": {"q": {"type": "string"}},
+                },
+                call_remote=call_remote,
+            )
+            prov = FauxProvider()
+            prov.append_responses(
+                [
+                    faux_assistant_message(
+                        [ToolCall(id="tc1", name="search", arguments={"q": "x"})],
+                        stop_reason="tool_use",
+                    ),
+                    faux_assistant_message("done"),
+                ]
+            )
+            return Agent(
+                provider=prov,
+                model=Model(id="faux-1", provider="faux"),
+                system_prompt="s",
+                tools=[mcp_tool],
+            )
+
+        exporter_a = _CaptureExporter()
+        exporter_b = _CaptureExporter()
+        agent_a = _make_agent()
+        agent_b = _make_agent()
+        tracer_a = Tracer(service_name="a", agent_name="a", exporters=[exporter_a])
+        tracer_b = Tracer(service_name="b", agent_name="b", exporters=[exporter_b])
+        detach_a = tracer_a.attach(agent_a)
+        detach_b = tracer_b.attach(agent_b)
+
+        async def _run(agent):
+            await agent.prompt("go")
+            await agent.wait_for_idle()
+
+        try:
+            task_a = _asyncio.create_task(_run(agent_a))
+            task_b = _asyncio.create_task(_run(agent_b))
+
+            # Both agents have entered their MCP call_remote.
+            await in_call.wait()
+            in_call.clear()
+            # Give the second one a moment to also enter; the gate keeps
+            # it parked there.
+            await _asyncio.sleep(0.05)
+            release.set()
+            await _asyncio.gather(task_a, task_b)
+        finally:
+            detach_a()
+            detach_b()
+            await tracer_a.shutdown()
+            await tracer_b.shutdown()
+
+        for exporter, who in ((exporter_a, "a"), (exporter_b, "b")):
+            execute = [s for s in exporter.spans if s.name.startswith("execute_tool ")]
+            mcp = [s for s in exporter.spans if s.name.startswith("tools/call ")]
+            assert len(execute) == 1, f"agent_{who}: execute_tool count"
+            assert len(mcp) == 1, f"agent_{who}: tools/call count"
+            assert (
+                execute[0].get_span_context().trace_id
+                == mcp[0].get_span_context().trace_id
+            ), f"agent_{who}: MCP span landed in wrong trace"
+            assert mcp[0].parent is not None
+            assert mcp[0].parent.span_id == execute[0].get_span_context().span_id, (
+                f"agent_{who}: MCP span parented to the wrong execute_tool"
             )
 
     async def test_mcp_span_orphan_when_no_registered_parent(self, monkeypatch):

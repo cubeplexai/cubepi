@@ -29,6 +29,7 @@ W3C trace-context spec §3 permits either.
 
 from __future__ import annotations
 
+import contextvars
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
@@ -105,41 +106,63 @@ def _get_tracer(scope_name: str) -> Any:
     return _otel_trace.get_tracer(scope_name)
 
 
-# When the cubepi Recorder opens an ``execute_tool`` span, it registers
-# (span, owning_provider) here keyed by ``tool_call_id``. The MCP
-# adapter looks up the parent span by tool_call_id and passes it as an
-# explicit context to :func:`mcp_client_span`, so the MCP CLIENT span
-# becomes a child of the agent's ``execute_tool`` span rather than
-# starting an orphan trace under the OTel "current span" (which the
-# recorder doesn't bother making current — see docs/specs/2026-05-18-
-# cubepi-tracing-design.md §9).
+# When the cubepi Recorder opens an ``execute_tool`` span, it publishes
+# ``(span, owning_provider)`` here so an MCP tool call running inside
+# the AgentTool body can make its CLIENT span a child of this span
+# (rather than starting an orphan root trace — recorder doesn't bother
+# installing ``execute_tool`` as the OTel current span; see
+# docs/specs/2026-05-18-cubepi-tracing-design.md §9), and route the
+# CLIENT span through the parent's owning provider so trace_ids and
+# exporter destination stay consistent (codex round-7).
 #
-# We store the owning provider alongside the span so that when multiple
-# ``Tracer`` instances are attached to different agents in the same
-# process, each MCP CLIENT span is exported through *its parent's*
-# Tracer (matching trace IDs), not whichever Tracer's registration is
-# at the top of the LIFO ``_provider_stack`` (codex round-7 review on
-# PR #86). The stack is now only consulted when there is no parent —
-# e.g., a bare ``mcp_client_span`` outside an agent's tool execution.
-_active_tool_spans: dict[str, tuple[Any, Any]] = {}
+# We use a ``ContextVar`` rather than a global dict keyed by
+# ``tool_call_id`` because tool-call ids are provider-local (Faux and
+# OpenAI-style providers commonly mint ``tc1`` / ``call_...`` per
+# conversation), so concurrent agents in one process can collide on the
+# same id and overwrite each other's parent registration. ContextVars
+# scope per-task: each agent run sees its own value, and asyncio's
+# ``create_task`` copies the parent's context — so sequential AND
+# parallel tool execution within the same agent both inherit the right
+# parent (codex round-8).
+_current_tool_entry: contextvars.ContextVar[tuple[Any, Any] | None] = (
+    contextvars.ContextVar("_cubepi_mcp_current_tool_entry", default=None)
+)
 
 
 def register_tool_span(
     tool_call_id: str,
     span: Any,
     provider: Any = None,
+) -> contextvars.Token[tuple[Any, Any] | None]:
+    """Publish ``span`` (and its owning ``provider``) as the current
+    ``execute_tool`` parent for the calling task. Returns a token that
+    :func:`unregister_tool_span` uses to restore the previous value.
+
+    ``tool_call_id`` is accepted for API symmetry / debug context but no
+    longer used as a lookup key — see module-level comment.
+    """
+    del tool_call_id  # reserved: kept in signature for future debug attrs.
+    return _current_tool_entry.set((span, provider))
+
+
+def unregister_tool_span(
+    token: contextvars.Token[tuple[Any, Any] | None] | None,
 ) -> None:
-    _active_tool_spans[tool_call_id] = (span, provider)
+    """Restore the contextvar to its prior value. ``None`` is a no-op
+    so callers can safely unregister even when the import-time hook
+    failed."""
+    if token is None:
+        return
+    try:
+        _current_tool_entry.reset(token)
+    except (ValueError, LookupError):  # pragma: no cover — token mismatch
+        pass
 
 
-def unregister_tool_span(tool_call_id: str) -> None:
-    _active_tool_spans.pop(tool_call_id, None)
-
-
-def _get_tool_span_entry(tool_call_id: str | None) -> tuple[Any, Any] | None:
-    if tool_call_id is None:
-        return None
-    return _active_tool_spans.get(tool_call_id)
+def _get_tool_span_entry() -> tuple[Any, Any] | None:
+    """Return the (span, provider) entry for the current task, or
+    ``None`` when no ``execute_tool`` is active in this context."""
+    return _current_tool_entry.get()
 
 
 def _current_span_via_registered() -> Any:
@@ -190,14 +213,20 @@ async def mcp_client_span(
         return
 
     span_name = f"{method} {tool_name}" if tool_name else method
-    # Resolve explicit parent + owning provider: if the caller passed a
-    # tool_call_id and the cubepi recorder has an active
-    # ``execute_tool`` span for it, make the MCP CLIENT span its child
-    # rather than an orphan trace, AND route it through the parent's
-    # owning provider so trace_ids and exporter destination stay
-    # consistent (codex round-7 fix). Fall back to the registered-
-    # provider stack only when there is no parent.
-    entry = _get_tool_span_entry(parent_tool_call_id)
+    # Resolve explicit parent + owning provider from the per-task
+    # contextvar published by the cubepi recorder on
+    # ``_on_tool_exec_start``. If present, the MCP CLIENT span becomes a
+    # child of the agent's execute_tool span AND is exported through
+    # the parent's owning provider so trace_ids and exporter
+    # destination stay consistent across concurrent Tracers (codex
+    # round-7 + round-8). When no parent is active, fall back to the
+    # registered-provider stack — used by bare ``mcp_client_span``
+    # calls outside an agent run.
+    #
+    # ``parent_tool_call_id`` is accepted for API symmetry / future
+    # debug attrs; the lookup is purely contextvar-scoped now.
+    del parent_tool_call_id
+    entry = _get_tool_span_entry()
     if entry is not None:
         parent_span, parent_provider = entry
         parent_context = _otel_trace.set_span_in_context(parent_span)

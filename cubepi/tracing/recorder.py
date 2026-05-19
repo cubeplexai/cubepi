@@ -129,6 +129,10 @@ class _RunState:
     chat_open_ns: int | None = None
     chat_first_chunk_recorded: bool = False
     tool_spans: dict[str, Any] = field(default_factory=dict)
+    # contextvars.Token per tool_call_id, returned by
+    # ``cubepi.mcp._tracing.register_tool_span``. Passed back on
+    # ``unregister_tool_span`` to restore the prior contextvar state.
+    tool_span_tokens: dict[str, Any] = field(default_factory=dict)
     # Caller-supplied extra attrs for this run (set via run_scope, future).
     extra_attrs: dict[str, Any] = field(default_factory=dict)
     # Counts for invoke_agent attrs.
@@ -439,22 +443,23 @@ class Recorder:
             attributes=attrs,
         )
         run.tool_spans[event.tool_call_id] = span
-        # Expose this execute_tool span to ``cubepi.mcp._tracing`` so an
-        # MCP tool call running inside this span (in the AgentTool body)
-        # can look it up by ``tool_call_id`` and make its CLIENT span a
-        # child. Pass the owning provider alongside so the MCP CLIENT
-        # span is exported through *this* Tracer's exporter rather than
-        # whichever Tracer was attached most recently in the process —
-        # otherwise concurrent Tracers misroute spans across each other
-        # (codex round-6 + round-7 reviews on PR #86).
+        # Expose this execute_tool span (and its owning provider) to
+        # ``cubepi.mcp._tracing`` via a per-task contextvar so an MCP
+        # tool call running inside the AgentTool body inherits the
+        # right parent. Per-task scoping avoids the global-dict
+        # collision when concurrent agents reuse the same tool_call_id
+        # (e.g. Faux/OpenAI-style providers minting ``tc1`` per
+        # conversation — codex round-8). The recorder stashes the
+        # contextvar reset token on _RunState to undo on exec_end.
         try:
             from cubepi.mcp import _tracing as _mcp_tracing
 
-            _mcp_tracing.register_tool_span(
+            cv_token = _mcp_tracing.register_tool_span(
                 event.tool_call_id,
                 span,
                 provider=self._tracer._provider,
             )
+            run.tool_span_tokens[event.tool_call_id] = cv_token
         except ImportError:  # pragma: no cover — mcp module always present
             pass
         if self._record_content and event.args is not None:
@@ -467,10 +472,11 @@ class Recorder:
         if run is None:
             return
         span = run.tool_spans.pop(event.tool_call_id, None)
+        cv_token = run.tool_span_tokens.pop(event.tool_call_id, None)
         try:
             from cubepi.mcp import _tracing as _mcp_tracing
 
-            _mcp_tracing.unregister_tool_span(event.tool_call_id)
+            _mcp_tracing.unregister_tool_span(cv_token)
         except ImportError:  # pragma: no cover — mcp module always present
             pass
         if span is None:
