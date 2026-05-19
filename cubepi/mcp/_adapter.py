@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Awaitable, Callable, Literal
 
 from pydantic import BaseModel, Field, create_model
@@ -152,7 +153,9 @@ def make_mcp_agent_tool(
             server_port=server_port,
             parent_tool_call_id=tool_call_id,
         ) as span:
-            result = await call_remote(name, args_dict)
+            result = await _await_with_signal(
+                call_remote(name, args_dict), signal
+            )
             # MCP server-reported tool failure (``isError: true``): the
             # JSON-RPC call succeeded but the tool's logic failed. Mark
             # the CLIENT span ERROR so backends count it as a failure,
@@ -187,3 +190,62 @@ def make_mcp_agent_tool(
         parameters=parameters_model,
         execute=_execute,
     )
+
+
+async def _await_with_signal(coro: Awaitable[Any], signal: Any) -> Any:
+    """Await ``coro``, but bail out with ``asyncio.CancelledError`` if
+    ``signal`` (an ``asyncio.Event`` set by ``agent.abort()``) fires
+    while the awaitable is in flight.
+
+    ``Agent.abort()`` only sets the cooperative signal — it does NOT
+    cancel the running task — so without a co-watching coroutine an
+    in-flight MCP ``tools/call`` would block until response or
+    transport timeout regardless of abort. Cancellation latency would
+    be bounded by the MCP timeout (30s default), not by the user's
+    intent. Racing the signal here lets ``abort()`` propagate
+    through MCP within a tick (codex overall-review MAJOR).
+
+    When ``signal`` is ``None`` (e.g. tool invoked outside the agent
+    loop, or by a non-cubepi caller), just await the coroutine.
+    """
+    if signal is None or not hasattr(signal, "wait"):
+        return await coro
+    if signal.is_set():
+        # Already aborted before we even started. Close the coroutine
+        # so the caller doesn't get a "coroutine was never awaited"
+        # warning — ``coro`` is fresh and hasn't started executing.
+        if hasattr(coro, "close"):
+            coro.close()
+        raise asyncio.CancelledError("aborted via signal before MCP call")
+    call_task = asyncio.ensure_future(coro)
+    signal_task = asyncio.ensure_future(signal.wait())
+    try:
+        done, pending = await asyncio.wait(
+            {call_task, signal_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    except BaseException:
+        # Outer cancellation: clean up both tasks and re-raise.
+        for t in (call_task, signal_task):
+            if not t.done():
+                t.cancel()
+        raise
+    if signal_task in done:
+        # Cooperative abort fired first — cancel the in-flight RPC
+        # and bubble up CancelledError so the recorder's chat/tool
+        # span machinery marks this as aborted.
+        if not call_task.done():
+            call_task.cancel()
+            try:
+                await call_task
+            except BaseException:
+                pass
+        raise asyncio.CancelledError("MCP tools/call aborted via signal")
+    # call_task completed first; tidy the signal watcher.
+    if not signal_task.done():
+        signal_task.cancel()
+        try:
+            await signal_task
+        except BaseException:
+            pass
+    return call_task.result()
