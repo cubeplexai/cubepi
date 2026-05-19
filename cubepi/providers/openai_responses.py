@@ -126,47 +126,53 @@ class OpenAIResponsesProvider(BaseProvider):
         if tools:
             kwargs["tools"] = [self._convert_tool(t) for t in tools]
 
-        if self._cap_active:
-            # Capability-driven path. Inject defaults via setdefault so a
-            # caller's on_payload override survives, then let the capability
-            # mutate the payload. The max_tokens_field rename used by the
-            # chat-completions OpenAIProvider doesn't apply here — Responses
-            # always uses ``max_output_tokens`` natively, so we skip it.
-            kwargs.setdefault("temperature", model.temperature)
-            if model.max_tokens:
-                kwargs.setdefault("max_output_tokens", model.max_tokens)
-            cap = self._resolve_capability(model.id)
-            apply_temperature(kwargs, cap.temperature)
-            if opts.thinking == "off":
-                merge_capability_payload(kwargs, cap.reasoning_off_payload)
-            else:
-                merge_capability_payload(kwargs, cap.reasoning_on_payload)
-                if cap.reasoning_level is not None:
-                    write_reasoning_level(kwargs, cap.reasoning_level, opts.thinking)
-        else:
-            # Legacy path: configure reasoning effort via the inline map.
-            effort = _THINKING_TO_EFFORT.get(opts.thinking)
-            if model.reasoning and effort is not None:
-                kwargs["reasoning"] = {
-                    "effort": effort,
-                    "summary": "auto",
-                }
-                kwargs["include"] = ["reasoning.encrypted_content"]
-
-            if model.max_tokens:
-                kwargs["max_output_tokens"] = model.max_tokens
-
-            # Forward temperature for non-reasoning models; reasoning models
-            # don't support temperature on the Responses API.
-            if not model.reasoning:
-                kwargs["temperature"] = model.temperature
-
         async def _produce() -> None:
             body: dict | None = None
             exc: BaseException | None = None
             try:
                 nonlocal kwargs
                 kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
+
+                # Capability-driven payload mutations run AFTER on_payload so a
+                # caller's explicit values survive via setdefault. Mirrors the
+                # ordering used by OpenAIProvider. Spec §3.5.
+                if self._cap_active:
+                    # The max_tokens_field rename used by the chat-completions
+                    # OpenAIProvider doesn't apply here — Responses always uses
+                    # ``max_output_tokens`` natively, so we skip it. Reasoning
+                    # models reject ``temperature``, so guard the setdefault.
+                    if not model.reasoning:
+                        kwargs.setdefault("temperature", model.temperature)
+                    if model.max_tokens:
+                        kwargs.setdefault("max_output_tokens", model.max_tokens)
+                    cap = self._resolve_capability(model.id)
+                    apply_temperature(kwargs, cap.temperature)
+                    if opts.thinking == "off":
+                        merge_capability_payload(kwargs, cap.reasoning_off_payload)
+                    else:
+                        merge_capability_payload(kwargs, cap.reasoning_on_payload)
+                        if cap.reasoning_level is not None:
+                            write_reasoning_level(
+                                kwargs, cap.reasoning_level, opts.thinking
+                            )
+                else:
+                    # Legacy path: configure reasoning effort via the inline map.
+                    effort = _THINKING_TO_EFFORT.get(opts.thinking)
+                    if model.reasoning and effort is not None:
+                        kwargs["reasoning"] = {
+                            "effort": effort,
+                            "summary": "auto",
+                        }
+                        kwargs["include"] = ["reasoning.encrypted_content"]
+
+                    if model.max_tokens:
+                        kwargs["max_output_tokens"] = model.max_tokens
+
+                    # Forward temperature for non-reasoning models; reasoning
+                    # models don't support temperature on the Responses API.
+                    if not model.reasoning:
+                        kwargs["temperature"] = model.temperature
+
                 await _fire_request_listeners(self._request_listeners, kwargs, model)
 
                 response = await self._client.responses.create(**kwargs)
