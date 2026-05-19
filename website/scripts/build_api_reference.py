@@ -18,7 +18,8 @@ MODULES = [
     ("cubepi.checkpointer", "Checkpointing", 3),
     ("cubepi.middleware",   "Middleware",    4),
     ("cubepi.mcp",          "MCP",           5),
-    ("cubepi.utils",        "Utils",         6),
+    ("cubepi.tracing",      "Tracing",       6),
+    ("cubepi.utils",        "Utils",         7),
 ]
 
 

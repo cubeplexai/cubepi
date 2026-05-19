@@ -39,6 +39,11 @@ working tool-using agent in under five minutes.
 - **MCP loaders.** Point at any
   [Model Context Protocol](https://modelcontextprotocol.io) server
   (HTTP or stdio) and get back a list of `AgentTool`s.
+- **OpenTelemetry built in.** Attach a `Tracer` and every prompt
+  produces a tree of OTel spans aligned with the GenAI Semantic
+  Conventions — works with Jaeger, Tempo, Honeycomb, Datadog, or any
+  OTLP-compatible backend. No payloads recorded by default; opt in
+  with `record_content=True` and a `redact` callback.
 
 ## Where to go next
 
@@ -48,6 +53,7 @@ working tool-using agent in under five minutes.
 | Understand the building blocks | [Getting Started → Core Concepts](./getting-started/core-concepts) |
 | Wire a real tool-using agent | [Guides → Building Your First Agent](./guides/agents/first-agent) |
 | Persist a conversation across restarts | [Guides → SQLite Checkpointing](./guides/checkpointing/sqlite) |
+| Ship traces to Jaeger / Tempo / Honeycomb | [Guides → Tracing](./guides/tracing/overview) |
 | Look up a specific symbol | [API Reference](./api/) |
 | See full working examples | [Recipes](./recipes/weather-agent) |
 | Port an existing langgraph agent | [Migration → From langgraph](./migration/from-langgraph) |

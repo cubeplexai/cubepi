@@ -42,6 +42,13 @@ const sidebars: SidebarsConfig = {
           'guides/mcp/loading',
           'guides/mcp/auth',
         ]},
+        { type: 'category', label: 'Tracing', items: [
+          'guides/tracing/overview',
+          'guides/tracing/getting-started',
+          'guides/tracing/otlp',
+          'guides/tracing/content-recording',
+          'guides/tracing/metrics',
+        ]},
       ],
     },
     {
@@ -54,6 +61,7 @@ const sidebars: SidebarsConfig = {
         'api/cubepi-checkpointer',
         'api/cubepi-middleware',
         'api/cubepi-mcp',
+        'api/cubepi-tracing',
         'api/cubepi-utils',
       ],
     },
