@@ -28,6 +28,12 @@ from cubepi.providers.base import (
     invoke_on_payload,
     invoke_on_response,
 )
+from cubepi.providers.capability import (
+    CapabilityDescriptor,
+    apply_temperature,
+    merge_capability_payload,
+    write_reasoning_level,
+)
 
 # Map cubepi ThinkingLevel to OpenAI reasoning.effort values.
 # "off" means no reasoning parameter is sent.
@@ -50,7 +56,12 @@ class OpenAIResponsesProvider(BaseProvider):
     """
 
     def __init__(
-        self, *, api_key: str | None = None, base_url: str | None = None
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        capability: CapabilityDescriptor | None = None,
+        model_capability_overrides: dict[str, CapabilityDescriptor] | None = None,
     ) -> None:
         super().__init__()
         import openai
@@ -61,6 +72,20 @@ class OpenAIResponsesProvider(BaseProvider):
         if base_url:
             kwargs["base_url"] = base_url
         self._client = openai.AsyncOpenAI(**kwargs)
+
+        # Track whether capability was explicitly passed so the Responses path
+        # stays behavior-identical for legacy callers (who rely on the inline
+        # _THINKING_TO_EFFORT map). Spec §3.5.
+        self._cap_active: bool = (
+            capability is not None or model_capability_overrides is not None
+        )
+        self._capability: CapabilityDescriptor = capability or CapabilityDescriptor()
+        self._model_overrides: dict[str, CapabilityDescriptor] = (
+            model_capability_overrides or {}
+        )
+
+    def _resolve_capability(self, model_id: str) -> CapabilityDescriptor:
+        return self._model_overrides.get(model_id, self._capability)
 
     @staticmethod
     def _assemble_response(resp: Any) -> dict[str, Any] | None:
@@ -101,22 +126,40 @@ class OpenAIResponsesProvider(BaseProvider):
         if tools:
             kwargs["tools"] = [self._convert_tool(t) for t in tools]
 
-        # Configure reasoning effort for reasoning models
-        effort = _THINKING_TO_EFFORT.get(opts.thinking)
-        if model.reasoning and effort is not None:
-            kwargs["reasoning"] = {
-                "effort": effort,
-                "summary": "auto",
-            }
-            kwargs["include"] = ["reasoning.encrypted_content"]
+        if self._cap_active:
+            # Capability-driven path. Inject defaults via setdefault so a
+            # caller's on_payload override survives, then let the capability
+            # mutate the payload. The max_tokens_field rename used by the
+            # chat-completions OpenAIProvider doesn't apply here — Responses
+            # always uses ``max_output_tokens`` natively, so we skip it.
+            kwargs.setdefault("temperature", model.temperature)
+            if model.max_tokens:
+                kwargs.setdefault("max_output_tokens", model.max_tokens)
+            cap = self._resolve_capability(model.id)
+            apply_temperature(kwargs, cap.temperature)
+            if opts.thinking == "off":
+                merge_capability_payload(kwargs, cap.reasoning_off_payload)
+            else:
+                merge_capability_payload(kwargs, cap.reasoning_on_payload)
+                if cap.reasoning_level is not None:
+                    write_reasoning_level(kwargs, cap.reasoning_level, opts.thinking)
+        else:
+            # Legacy path: configure reasoning effort via the inline map.
+            effort = _THINKING_TO_EFFORT.get(opts.thinking)
+            if model.reasoning and effort is not None:
+                kwargs["reasoning"] = {
+                    "effort": effort,
+                    "summary": "auto",
+                }
+                kwargs["include"] = ["reasoning.encrypted_content"]
 
-        if model.max_tokens:
-            kwargs["max_output_tokens"] = model.max_tokens
+            if model.max_tokens:
+                kwargs["max_output_tokens"] = model.max_tokens
 
-        # Forward temperature for non-reasoning models; reasoning models don't
-        # support temperature on the Responses API.
-        if not model.reasoning:
-            kwargs["temperature"] = model.temperature
+            # Forward temperature for non-reasoning models; reasoning models
+            # don't support temperature on the Responses API.
+            if not model.reasoning:
+                kwargs["temperature"] = model.temperature
 
         async def _produce() -> None:
             body: dict | None = None
