@@ -25,7 +25,7 @@ A Pythonic, async-native agent framework — a leaner, more readable take on age
 | **Tool execution** | Tools are graph nodes with manual wiring | Declare tools as functions, framework handles routing and parallel execution |
 | **Multi-provider** | Via langchain chat model adapters | Native `Provider` protocol — Anthropic, OpenAI built in, add your own with one class |
 | **Middleware** | Graph-level middleware on node entry/exit | Agent-level middleware with 5 typed hooks and declarative composition rules |
-| **Observability** | LangSmith / Langfuse integration, full trace visualization | Events + middleware hooks — bring your own tracing |
+| **Observability** | LangSmith / Langfuse integration, full trace visualization | Native OpenTelemetry — `Tracer`, `Meter`, GenAI semconv, OTLP / JSONL exporters built in |
 
 ## Install
 
@@ -36,13 +36,15 @@ pip install cubepi
 pip install cubepi[sqlite]     # SQLite checkpointer
 pip install cubepi[postgres]   # Postgres checkpointer
 pip install cubepi[mcp]        # MCP tool loaders
+pip install cubepi[tracing]    # OpenTelemetry tracing + metrics
+pip install cubepi[tracing-otlp]  # Adds the OTLP/HTTP span exporter
 ```
 
 Or with [uv](https://github.com/astral-sh/uv):
 
 ```bash
 uv add cubepi
-uv add cubepi[sqlite,postgres,mcp]
+uv add cubepi[sqlite,postgres,mcp,tracing]
 ```
 
 ## Quick Start
@@ -109,7 +111,14 @@ cubepi/
 │   ├── memory.py     # In-memory (dev/test)
 │   ├── sqlite.py     # SQLite (lightweight persistence)
 │   └── postgres/     # Postgres (production persistence)
-└── mcp/              # MCP tool loaders (HTTP + stdio transports)
+├── mcp/              # MCP tool loaders (HTTP + stdio transports)
+└── tracing/          # OpenTelemetry tracing + metrics (optional extra)
+    ├── tracer.py     # Tracer entry point — TracerProvider + recorder wiring
+    ├── recorder.py   # Maps agent + provider events to OTel spans
+    ├── meter.py      # gen_ai.* histograms (duration, TTFC, token usage)
+    ├── context.py    # tracing_context(tags=…, metadata=…) per-run tagging
+    ├── schema.py     # OTel GenAI semconv attribute names
+    └── exporters/    # JsonlSpanExporter + helpers (OTLP via opentelemetry-sdk)
 ```
 
 ## Core Concepts
@@ -228,11 +237,50 @@ await agent.prompt("Search for python")
 # Streams realistic deltas — content_block_start, text_delta, etc.
 ```
 
+### Tracing
+
+Attach a `Tracer` and every agent run produces OpenTelemetry spans
+aligned with the [GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) —
+ingestible by Jaeger, Tempo, Honeycomb, Datadog, AWS X-Ray, or any
+OTLP-compatible backend without custom instrumentation:
+
+```python
+from cubepi.tracing import Tracer, tracing_context
+from cubepi.tracing.exporters import JsonlSpanExporter
+
+async with (
+    Tracer(
+        service_name="my-bot",
+        agent_name="assistant",
+        exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+    ) as tracer,
+    tracer.attached(agent),
+):
+    with tracing_context(tags=["beta-arm"], metadata={"user_id": "u-42"}):
+        await agent.prompt("Hello.")
+# On exit: detach (closes any cancelled-run spans + flush) + tracer shutdown.
+```
+
+Span tree per run:
+
+```
+invoke_agent <agent_name>              [INTERNAL]
+└── cubepi.turn                        [INTERNAL]
+    ├── chat <model>                   [CLIENT]   ← the LLM call itself
+    └── execute_tool <tool_name>       [INTERNAL] ← each tool invocation
+        └── tools/call <tool_name>     [CLIENT]   ← MCP-backed tools only
+```
+
+No prompts / model outputs are recorded by default. Opt in with
+`Tracer(record_content=True)` plus a `redact` callback for PII. Pair
+with `Meter(...)` for `gen_ai.client.operation.duration` / TTFC /
+token-usage histograms. Full guide: https://cubepi.pages.dev/guides/tracing/overview
+
 ## Requirements
 
 - Python >= 3.11
 - Core: `pydantic`, `anthropic`, `openai`
-- Optional: `aiosqlite` (`[sqlite]`), `asyncpg` + `sqlalchemy` + `msgpack` (`[postgres]`), `mcp` (`[mcp]`)
+- Optional: `aiosqlite` (`[sqlite]`), `asyncpg` + `sqlalchemy` + `msgpack` (`[postgres]`), `mcp` (`[mcp]`), `opentelemetry-sdk` (`[tracing]`), `opentelemetry-exporter-otlp-proto-http` (`[tracing-otlp]`)
 
 ## Credits
 
