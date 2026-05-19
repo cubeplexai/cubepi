@@ -5,6 +5,8 @@ slug: /
 sidebar_position: 0
 ---
 
+import PackageVersion from '@site/src/components/PackageVersion';
+
 # CubePi
 
 **CubePi** is a Pythonic, async-native agent framework — a leaner, more
@@ -64,11 +66,11 @@ You are reading the **Next 🚧** channel — unreleased docs that track
 the `main` branch. APIs documented here can still change before they
 ship in a tagged release.
 
-The latest released version is `v0.4.0` ([switch to it from the
-version picker, top-right](pathname:///)). New since 0.3: a native
+The latest released version is `v<PackageVersion/>` ([switch to it
+from the version picker, top-right](pathname:///)). The native
 OpenTelemetry tracing module ([guide →](./guides/tracing/overview))
-with `Tracer`, `Meter`, content recording, MCP CLIENT spans, and
-per-run `tracing_context` tags.
+— `Tracer`, `Meter`, content recording, MCP CLIENT spans, per-run
+`tracing_context` tags — landed in 0.4.
 
 Source, issues, and discussion live on
 [GitHub](https://github.com/cubeplexai/cubepi).
