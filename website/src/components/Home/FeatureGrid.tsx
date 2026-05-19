@@ -36,6 +36,14 @@ const IconMcp: Icon = (p) => (
     <path d="M2 8h12M8 2v12" />
   </svg>
 );
+const IconTrace: Icon = (p) => (
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M2 3h9M5 7h9M3 11h11" />
+    <circle cx="2" cy="3" r="1" fill="currentColor" />
+    <circle cx="5" cy="7" r="1" fill="currentColor" />
+    <circle cx="3" cy="11" r="1" fill="currentColor" />
+  </svg>
+);
 
 const CARDS = [
   { Icon: IconBox,    title: 'Agents',        body: 'One async loop, fully typed events.',     href: '/docs/guides/agents/first-agent' },
@@ -44,6 +52,7 @@ const CARDS = [
   { Icon: IconPlug,   title: 'Providers',     body: 'Anthropic, OpenAI, or write your own.',   href: '/docs/guides/providers/anthropic' },
   { Icon: IconDisk,   title: 'Checkpointing', body: 'Append-only, O(1) per turn.',             href: '/docs/guides/checkpointing/sqlite' },
   { Icon: IconMcp,    title: 'MCP',           body: 'Load remote tools at startup.',           href: '/docs/guides/mcp/loading' },
+  { Icon: IconTrace,  title: 'Tracing',       body: 'OpenTelemetry, OTLP / JSONL, GenAI semconv.', href: '/docs/guides/tracing/overview' },
 ];
 
 export default function FeatureGrid() {

@@ -6,8 +6,8 @@ title: Installation
 
 CubePi runs on **Python 3.11+**. The core has three runtime
 dependencies: `pydantic`, `anthropic`, `openai`. Optional features
-(SQLite, Postgres, MCP) are gated behind extras so you only install
-what you use.
+(SQLite, Postgres, MCP, OpenTelemetry tracing) are gated behind extras
+so you only install what you use.
 
 ## With pip
 
@@ -18,10 +18,12 @@ pip install cubepi
 Optional extras:
 
 ```bash
-pip install "cubepi[sqlite]"     # adds aiosqlite for SQLiteCheckpointer
-pip install "cubepi[postgres]"   # adds asyncpg + sqlalchemy + msgpack
-pip install "cubepi[mcp]"        # adds the MCP SDK for tool loaders
-pip install "cubepi[sqlite,mcp]" # combine
+pip install "cubepi[sqlite]"        # adds aiosqlite for SQLiteCheckpointer
+pip install "cubepi[postgres]"      # adds asyncpg + sqlalchemy + msgpack
+pip install "cubepi[mcp]"           # adds the MCP SDK for tool loaders
+pip install "cubepi[tracing]"       # adds opentelemetry-sdk for Tracer / Meter
+pip install "cubepi[tracing-otlp]"  # adds the OTLP/HTTP span exporter
+pip install "cubepi[sqlite,mcp,tracing]"  # combine
 ```
 
 ## With uv
@@ -31,7 +33,7 @@ pip and is the recommended workflow:
 
 ```bash
 uv add cubepi
-uv add "cubepi[sqlite,postgres,mcp]"
+uv add "cubepi[sqlite,postgres,mcp,tracing,tracing-otlp]"
 ```
 
 In an existing uv project, `uv sync` re-locks the environment after
@@ -41,7 +43,7 @@ edits to `pyproject.toml`.
 
 ```bash
 poetry add cubepi
-poetry add "cubepi[sqlite,postgres,mcp]"
+poetry add "cubepi[sqlite,postgres,mcp,tracing,tracing-otlp]"
 ```
 
 ## Verifying the install
@@ -79,10 +81,12 @@ For the [FauxProvider](../guides/providers/custom#using-fauxprovider-in-tests)
 
 | Extra | Pulls in | Install when |
 |---|---|---|
-| (none) | core only | You only need in-memory state, no MCP |
+| (none) | core only | You only need in-memory state, no MCP, no tracing |
 | `[sqlite]` | `aiosqlite` | Single-process app needs disk persistence |
 | `[postgres]` | `asyncpg`, `sqlalchemy`, `msgpack` | Multi-instance / production — see [Postgres guide](../guides/checkpointing/postgres) |
 | `[mcp]` | `mcp` | You want to mount MCP server tools into your agent |
+| `[tracing]` | `opentelemetry-sdk` | You want OpenTelemetry traces (and optionally metrics) — see [Tracing guide](../guides/tracing/overview) |
+| `[tracing-otlp]` | `opentelemetry-exporter-otlp-proto-http` | Ship traces to an OTLP/HTTP backend (Jaeger ≥1.50, Tempo, Honeycomb, Datadog, …) |
 | `[docs]` | `griffe` | You're building the docs site (contributors only) |
 
 ## Next steps

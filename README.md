@@ -274,7 +274,7 @@ invoke_agent <agent_name>              [INTERNAL]
 No prompts / model outputs are recorded by default. Opt in with
 `Tracer(record_content=True)` plus a `redact` callback for PII. Pair
 with `Meter(...)` for `gen_ai.client.operation.duration` / TTFC /
-token-usage histograms. Full guide: https://cubepi.pages.dev/guides/tracing/overview
+token-usage histograms. Full guide: https://cubepi.pages.dev/docs/guides/tracing/overview
 
 ## Requirements
 
