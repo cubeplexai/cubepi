@@ -946,8 +946,8 @@ class TestTracingContext:
 
         root = next(s for s in exporter.spans if s.name == "invoke_agent")
         attrs = _attrs(root)
-        assert attrs.get("cubepi.user_id") == "u-42"
-        assert attrs.get("cubepi.ab_arm") == "control"
+        assert attrs.get("cubepi.metadata.user_id") == "u-42"
+        assert attrs.get("cubepi.metadata.ab_arm") == "control"
 
     async def test_no_context_means_no_tag_attr(self):
         agent, provider, exporter, tracer = await _build()
@@ -1005,8 +1005,8 @@ class TestTracingContext:
         root = next(s for s in exporter.spans if s.name == "invoke_agent")
         attrs = _attrs(root)
         assert attrs.get("cubepi.tags") == ("outer", "inner")
-        assert attrs.get("cubepi.k") == "inner-val"
-        assert attrs.get("cubepi.x") == "new"
+        assert attrs.get("cubepi.metadata.k") == "inner-val"
+        assert attrs.get("cubepi.metadata.x") == "new"
 
     async def test_unsupported_metadata_value_is_dropped(self):
         """OTel attributes can't hold dicts or arbitrary objects."""
@@ -1028,9 +1028,34 @@ class TestTracingContext:
 
         root = next(s for s in exporter.spans if s.name == "invoke_agent")
         attrs = _attrs(root)
-        assert attrs.get("cubepi.good_str") == "yes"
-        assert attrs.get("cubepi.good_int") == 42
-        assert "cubepi.bad_dict" not in attrs
+        assert attrs.get("cubepi.metadata.good_str") == "yes"
+        assert attrs.get("cubepi.metadata.good_int") == 42
+        assert "cubepi.metadata.bad_dict" not in attrs
+
+    async def test_metadata_cannot_clobber_reserved_cubepi_attrs(self):
+        """User-supplied metadata keys must not be able to overwrite
+        recorder-owned schema attributes like ``cubepi.run_id`` —
+        the JSONL exporter shards spans by that key, so an
+        invoke_agent span with a clobbered ``run_id`` ends up in a
+        different file than its turn/chat/tool spans (codex P2 on
+        PR #92). The fix is the ``cubepi.metadata.*`` sub-namespace."""
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        with tracing_context(metadata={"run_id": "hijacked", "turn.index": "x"}):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        # The genuine recorder-owned value is unchanged…
+        assert attrs.get("cubepi.run_id") and attrs["cubepi.run_id"] != "hijacked"
+        # …and the user-supplied values land under the safe namespace.
+        assert attrs.get("cubepi.metadata.run_id") == "hijacked"
+        assert attrs.get("cubepi.metadata.turn.index") == "x"
 
 
 class TestLifecycle:

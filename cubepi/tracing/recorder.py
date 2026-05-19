@@ -435,6 +435,14 @@ class Recorder:
         # for this run. Per-task contextvar scoping means concurrent
         # agents each see their own values; nested ``tracing_context``
         # blocks merge before reaching here.
+        #
+        # User metadata is namespaced under ``cubepi.metadata.*`` so
+        # that keys like ``run_id`` / ``turn_index`` / ``agent.tools``
+        # — which the recorder owns under ``cubepi.*`` — can never be
+        # overwritten by caller-supplied values. Reserved cubepi
+        # schema keys (especially ``cubepi.run_id`` which the JSONL
+        # exporter shards on) must stay recorder-controlled (codex P2
+        # on PR #92).
         try:
             from cubepi.tracing.context import _current_metadata, _current_tags
 
@@ -448,7 +456,7 @@ class Recorder:
                 # dropped here — better to lose one tag than corrupt the
                 # whole span.
                 try:
-                    span.set_attribute(f"cubepi.{key}", value)
+                    span.set_attribute(f"cubepi.metadata.{key}", value)
                 except (TypeError, ValueError):
                     pass
         except ImportError:  # pragma: no cover — context module always available

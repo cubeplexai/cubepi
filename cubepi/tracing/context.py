@@ -3,9 +3,15 @@
 Sets a contextvar-scoped ``tags`` / ``metadata`` payload that the
 :class:`~cubepi.tracing.recorder.Recorder` reads on ``AgentStartEvent``
 and stamps onto the ``invoke_agent`` span. Inspired by LangSmith's
-``langsmith.run_helpers.tracing_context`` (same contextvar mechanism;
-different attribute namespace — cubepi uses ``cubepi.*`` to avoid
-colliding with the OTel GenAI semconv reserved names).
+``langsmith.run_helpers.tracing_context`` (same contextvar mechanism).
+
+Namespacing:
+
+- Tags use a single attribute ``cubepi.tags`` (tuple of strings).
+- User metadata is namespaced under ``cubepi.metadata.*`` so that
+  recorder-owned schema keys (``cubepi.run_id``,
+  ``cubepi.turn.index``, …) can never be overridden by
+  caller-supplied values.
 
 Usage::
 
@@ -20,7 +26,7 @@ Usage::
 Resulting ``invoke_agent`` span attributes:
 
 - ``cubepi.tags`` = ``("beta-arm",)``
-- ``cubepi.user_id`` = ``"u-42"``
+- ``cubepi.metadata.user_id`` = ``"u-42"``
 
 Multiple nested ``tracing_context`` blocks merge: inner tags are
 appended, inner metadata keys override outer ones (last-write-wins).
@@ -54,9 +60,12 @@ def tracing_context(
     stamps them on the ``invoke_agent`` span as:
 
     - ``cubepi.tags`` — tuple of strings (OTel attribute type)
-    - one attribute per metadata key, prefixed with ``cubepi.``
-      (e.g. ``metadata={"user_id": "u-42"}`` →
-      ``cubepi.user_id = "u-42"``)
+    - one attribute per metadata key, namespaced under
+      ``cubepi.metadata.*`` (e.g. ``metadata={"user_id": "u-42"}`` →
+      ``cubepi.metadata.user_id = "u-42"``). The dedicated
+      sub-namespace keeps recorder-owned schema keys
+      (``cubepi.run_id``, ``cubepi.turn.index``, …) safe from
+      caller-supplied collisions.
 
     The contextvar nature means this works for concurrent agents:
     each asyncio task tree gets its own value. Nested blocks merge
