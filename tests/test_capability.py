@@ -4,6 +4,7 @@ from cubepi.providers.capability import (
     TemperatureSpec,
     apply_temperature,
     merge_capability_payload,
+    write_reasoning_level,
 )
 
 
@@ -174,3 +175,58 @@ def test_apply_temperature_free_clamp_inclusive_at_max():
     kwargs = {"temperature": 2.0}
     apply_temperature(kwargs, TemperatureSpec(mode="free", min=0.0, max=2.0))
     assert kwargs == {"temperature": 2.0}
+
+
+def test_int_budget_writes_top_level_path():
+    kwargs: dict = {}
+    spec = ReasoningLevelSpec(
+        path="thinking.budget_tokens",
+        kind="int_budget",
+        level_budgets={"off": 0, "low": 4000, "medium": 10000, "high": 32000},
+    )
+    write_reasoning_level(kwargs, spec, "medium")
+    assert kwargs == {"thinking": {"budget_tokens": 10000}}
+
+
+def test_int_budget_skips_when_level_absent_in_map():
+    kwargs: dict = {}
+    spec = ReasoningLevelSpec(
+        path="thinking.budget_tokens",
+        kind="int_budget",
+        level_budgets={"low": 4000},
+    )
+    write_reasoning_level(kwargs, spec, "xhigh")
+    assert kwargs == {}
+
+
+def test_effort_writes_string():
+    kwargs: dict = {}
+    spec = ReasoningLevelSpec(
+        path="reasoning_effort",
+        kind="effort",
+        level_to_effort={"low": "low", "medium": "medium", "high": "high"},
+    )
+    write_reasoning_level(kwargs, spec, "high")
+    assert kwargs == {"reasoning_effort": "high"}
+
+
+def test_enum_writes_nested_extra_body():
+    kwargs: dict = {}
+    spec = ReasoningLevelSpec(
+        path="extra_body.thinking.type",
+        kind="enum",
+        level_to_enum={"off": "disabled", "low": "enabled", "medium": "enabled", "high": "enabled"},
+    )
+    write_reasoning_level(kwargs, spec, "medium")
+    assert kwargs == {"extra_body": {"thinking": {"type": "enabled"}}}
+
+
+def test_writes_into_existing_nested_dict():
+    kwargs: dict = {"extra_body": {"other": True}}
+    spec = ReasoningLevelSpec(
+        path="extra_body.thinking.type",
+        kind="enum",
+        level_to_enum={"off": "disabled", "medium": "enabled"},
+    )
+    write_reasoning_level(kwargs, spec, "off")
+    assert kwargs == {"extra_body": {"other": True, "thinking": {"type": "disabled"}}}

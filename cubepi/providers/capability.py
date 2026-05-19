@@ -113,3 +113,58 @@ def apply_temperature(kwargs: dict[str, Any], spec: TemperatureSpec) -> None:
     if "temperature" in kwargs:
         value = kwargs["temperature"]
         kwargs["temperature"] = max(spec.min, min(spec.max, value))
+
+
+from cubepi.providers.base import ThinkingLevel
+
+
+def _resolve_level_value(spec: ReasoningLevelSpec, level: ThinkingLevel) -> Any | None:
+    """Return the wire value for ``level`` per ``spec``, or None to skip writing."""
+    if spec.kind == "int_budget":
+        if spec.level_budgets is None:
+            raise RuntimeError(
+                "ReasoningLevelSpec(kind='int_budget') reached _resolve_level_value "
+                "with no level_budgets — validator was bypassed"
+            )
+        return spec.level_budgets.get(level)
+    if spec.kind == "effort":
+        if spec.level_to_effort is None:
+            raise RuntimeError(
+                "ReasoningLevelSpec(kind='effort') reached _resolve_level_value "
+                "with no level_to_effort — validator was bypassed"
+            )
+        return spec.level_to_effort.get(level)
+    if spec.kind == "enum":
+        if spec.level_to_enum is None:
+            raise RuntimeError(
+                "ReasoningLevelSpec(kind='enum') reached _resolve_level_value "
+                "with no level_to_enum — validator was bypassed"
+            )
+        return spec.level_to_enum.get(level)
+    return None
+
+
+def _write_dotted_path(target: dict[str, Any], path: str, value: Any) -> None:
+    """Walk a dotted path into ``target``, creating dicts as needed; set the leaf."""
+    parts = path.split(".")
+    cursor: Any = target
+    for part in parts[:-1]:
+        if part not in cursor or not isinstance(cursor[part], dict):
+            cursor[part] = {}
+        cursor = cursor[part]
+    cursor[parts[-1]] = value
+
+
+def write_reasoning_level(
+    kwargs: dict[str, Any],
+    spec: ReasoningLevelSpec,
+    level: ThinkingLevel,
+) -> None:
+    """Write the resolved wire value for ``level`` at ``spec.path`` inside ``kwargs``.
+
+    If the level is not in the spec's level map (i.e. unsupported), no write happens.
+    """
+    value = _resolve_level_value(spec, level)
+    if value is None:
+        return
+    _write_dotted_path(kwargs, spec.path, value)
