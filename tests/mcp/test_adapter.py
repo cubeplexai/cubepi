@@ -1,5 +1,7 @@
 """MCP adapter unit tests (D2.1)."""
 
+from contextlib import asynccontextmanager
+
 import pytest
 
 from cubepi.mcp._adapter import (
@@ -371,6 +373,60 @@ async def test_agent_abort_during_mcp_call_does_not_raise() -> None:
     except _asyncio.TimeoutError:
         prompt_task.cancel()
         raise AssertionError("prompt_task did not complete after abort()")
+
+
+async def test_signal_abort_swallows_span_set_attribute_errors(monkeypatch) -> None:
+    """The cooperative-abort branch in ``_execute`` marks the CLIENT
+    span aborted before returning the synthetic result. If
+    ``span.set_attribute`` raises (broken OTel SDK, recording-only
+    span, …) the helper must swallow rather than corrupt the abort
+    path (defensive-branch coverage)."""
+    import asyncio as _asyncio
+
+    from cubepi.mcp._adapter import make_mcp_agent_tool
+    from cubepi.mcp import _tracing as mcp_tracing
+
+    # Force mcp_client_span to yield a span whose set_attribute raises.
+    class _BoomSpan:
+        def set_attribute(self, *_a, **_kw):
+            raise RuntimeError("set_attribute boom")
+
+        def end(self):
+            pass
+
+        def get_span_context(self):
+            class _Ctx:
+                is_valid = False
+
+            return _Ctx()
+
+    @asynccontextmanager
+    async def _fake_span(**_kw):
+        yield _BoomSpan()
+
+    monkeypatch.setattr("cubepi.mcp._adapter.mcp_client_span", _fake_span)
+
+    async def _call(_name, _args):
+        return {"content": [], "isError": False}
+
+    tool = make_mcp_agent_tool(
+        name="t",
+        description="t",
+        input_schema={"type": "object", "properties": {}, "required": []},
+        call_remote=_call,
+    )
+    signal = _asyncio.Event()
+    signal.set()
+    # set_attribute will raise; the abort branch must swallow it
+    # and still return the synthetic aborted result.
+    result = await tool.execute(
+        "tc-x", tool.parameters(), signal=signal, on_update=None
+    )
+    assert result.details.get("aborted") is True
+
+    # Silence the unused-import guard for mcp_tracing — it's documented
+    # context for why span methods exist.
+    del mcp_tracing
 
 
 async def test_signal_abort_does_not_block_on_slow_call_cleanup() -> None:

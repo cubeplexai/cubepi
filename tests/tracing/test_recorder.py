@@ -657,6 +657,39 @@ class TestCancellationExportsSpans:
                 )
 
 
+class TestCloseOpenSpansDefensive:
+    """``_close_open_spans`` swallows any exception raised while
+    marking a span aborted — the cleanup must continue across all
+    open spans even if one raises. Pin those defensive branches
+    (codex overall-review BLOCKING follow-up: pure coverage)."""
+
+    def test_close_open_spans_swallows_set_attribute_errors(self):
+        from cubepi.tracing.recorder import Recorder, _RunState
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+
+        class _BoomSpan:
+            def set_attribute(self, *_a, **_kw):
+                raise RuntimeError("set_attribute boom")
+
+            def end(self):
+                raise RuntimeError("end boom")
+
+        run = _RunState(run_id="r", agent_span=_BoomSpan())
+        run.tool_spans = {"tc1": _BoomSpan(), "tc2": _BoomSpan()}
+        run.chat_span = _BoomSpan()
+        run.turn_span = _BoomSpan()
+
+        # All four branches' exception handlers must fire without
+        # propagating. Post-condition: tool_spans cleared, others
+        # nulled, no exception raised.
+        recorder._close_open_spans(run)
+        assert run.tool_spans == {}
+        assert run.chat_span is None
+        assert run.turn_span is None
+
+
 class TestAgentSignalHelper:
     """Unit-level coverage for the defensive branches of
     ``Recorder._agent_signal_is_set`` introduced in PR #87. The
