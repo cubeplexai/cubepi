@@ -261,3 +261,20 @@ async def test_reasoning_on_payload_and_level_both_applied():
     p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
     payload = await _capture_payload_openai(p, _model(), thinking="medium")
     assert payload["thinking"] == {"type": "enabled", "budget_tokens": 8192}
+
+
+@pytest.mark.asyncio
+async def test_max_tokens_field_renamed_preserves_on_payload_value():
+    """When on_payload sets max_tokens explicitly, the value survives the rename.
+    Mirrors test_temperature_free_preserves_caller_value_via_on_payload but for
+    max_tokens / max_completion_tokens."""
+    cap = CapabilityDescriptor(max_tokens_field="max_completion_tokens")
+    p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
+
+    async def set_caller_max(kwargs, model):
+        kwargs["max_tokens"] = 1234
+        return kwargs
+
+    payload = await _capture_payload_openai(p, _model(), on_payload=set_caller_max)
+    assert payload["max_completion_tokens"] == 1234
+    assert "max_tokens" not in payload
