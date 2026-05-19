@@ -18,9 +18,13 @@ class TemperatureSpec(BaseModel):
     fixed_value: float | None = None
 
     @model_validator(mode="after")
-    def _validate_fixed(self) -> "TemperatureSpec":
+    def _validate_fixed(self) -> TemperatureSpec:
         if self.mode == "fixed" and self.fixed_value is None:
             raise ValueError("TemperatureSpec(mode='fixed') requires fixed_value")
+        if not (self.min <= self.default <= self.max):
+            raise ValueError(
+                f"TemperatureSpec.default ({self.default}) must be within [min={self.min}, max={self.max}]"
+            )
         return self
 
 
@@ -34,13 +38,13 @@ class ReasoningLevelSpec(BaseModel):
     level_to_enum: dict[str, str] | None = None
 
     @model_validator(mode="after")
-    def _validate_kind_map(self) -> "ReasoningLevelSpec":
+    def _validate_kind_map(self) -> ReasoningLevelSpec:
         if self.kind == "int_budget" and not self.level_budgets:
-            raise ValueError("kind='int_budget' requires level_budgets")
+            raise ValueError("kind='int_budget' requires a non-empty level_budgets map")
         if self.kind == "effort" and not self.level_to_effort:
-            raise ValueError("kind='effort' requires level_to_effort")
+            raise ValueError("kind='effort' requires a non-empty level_to_effort map")
         if self.kind == "enum" and not self.level_to_enum:
-            raise ValueError("kind='enum' requires level_to_enum")
+            raise ValueError("kind='enum' requires a non-empty level_to_enum map")
         return self
 
 

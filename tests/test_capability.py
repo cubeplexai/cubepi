@@ -14,6 +14,7 @@ def test_descriptor_defaults_are_legacy_safe():
     assert cap.temperature.mode == "free"
     assert cap.temperature.min == 0.0
     assert cap.temperature.max == 2.0
+    assert cap.temperature.default == 1.0
     assert cap.max_tokens_field == "max_tokens"
     assert cap.supports_tools is True
     assert cap.supports_images is False
@@ -52,3 +53,11 @@ def test_reasoning_level_enum_requires_map():
 
     with pytest.raises(ValidationError):
         ReasoningLevelSpec(path="extra_body.thinking.type", kind="enum")
+
+
+def test_temperature_default_must_be_within_range():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        TemperatureSpec(min=0.0, max=1.0, default=2.0)
