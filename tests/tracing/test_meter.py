@@ -160,6 +160,58 @@ class TestRequestModelOnChatMetrics:
             )
 
 
+class TestProviderOnToolMetrics:
+    async def test_tool_duration_carries_provider_name(self):
+        """``execute_tool`` duration observations must carry
+        ``gen_ai.provider.name`` so they can be filtered alongside
+        chat metrics. Tool execution starts AFTER the chat request,
+        so the meter must read the active provider at tool-start time
+        instead of relying on the chat-request stamp loop (which by
+        then has no tool entries to update). Codex P2 finding on PR #85."""
+        from pydantic import BaseModel
+
+        from cubepi.agent.types import AgentTool, AgentToolResult
+        from cubepi.providers.base import TextContent, ToolCall
+
+        class P(BaseModel):
+            pass
+
+        async def run(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="ok")])
+
+        tool = AgentTool(name="t", description="t", parameters=P, execute=run)
+        provider = FauxProvider()
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    [ToolCall(id="c1", name="t", arguments={})],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("final"),
+            ]
+        )
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s", tools=[tool])
+        meter, reader = _build_meter()
+        meter.attach(agent)
+
+        await agent.prompt("kick off")
+        await agent.wait_for_idle()
+
+        points = _all_metric_points(reader)
+        tool_durations = [
+            dp
+            for n, dp in points
+            if n == "gen_ai.client.operation.duration"
+            and dict(dp.attributes).get("gen_ai.operation.name") == "execute_tool"
+        ]
+        assert tool_durations
+        for dp in tool_durations:
+            attrs = dict(dp.attributes)
+            assert attrs.get("gen_ai.provider.name") == "faux", (
+                f"execute_tool metric missing gen_ai.provider.name; got {attrs}"
+            )
+
+
 class TestNoMetricsWithoutListeners:
     async def test_detach_stops_emission(self):
         provider = FauxProvider()

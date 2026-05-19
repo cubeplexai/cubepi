@@ -345,9 +345,7 @@ class TestChatInputForContinuedHistory:
         # Earlier user content survived.
         assert any("earlier prompt" in p.get("content", "") for p in inp[0]["parts"])
         # Earlier assistant content survived.
-        assert any(
-            "ok, working on it" in p.get("content", "") for p in inp[1]["parts"]
-        )
+        assert any("ok, working on it" in p.get("content", "") for p in inp[1]["parts"])
         # New prompt is last.
         assert any("now continue" in p.get("content", "") for p in inp[2]["parts"])
 

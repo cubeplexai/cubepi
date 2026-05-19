@@ -202,9 +202,22 @@ class Meter:
                 self._agent_attrs = {}
             elif type_name == "tool_execution_start":
                 self._tool_open_ns[event.tool_call_id] = time.time_ns()
-                self._tool_attrs[event.tool_call_id] = {
-                    GEN_AI_OPERATION_NAME: OP_EXECUTE_TOOL,
-                }
+                # Carry the most-recent provider onto tool metrics so
+                # ``execute_tool`` duration observations can be filtered
+                # alongside chat metrics. ``_on_provider_request`` fires
+                # before any tool in a normal run, so its setdefault
+                # loop has nothing to update by then; stamp at creation
+                # time here from the latest chat attrs instead
+                # (codex P2 finding on PR #85).
+                attrs: dict[str, Any] = {GEN_AI_OPERATION_NAME: OP_EXECUTE_TOOL}
+                provider_name = self._chat_attrs.get(GEN_AI_PROVIDER_NAME) or (
+                    self._agent_attrs.get(GEN_AI_PROVIDER_NAME)
+                    if self._agent_attrs
+                    else None
+                )
+                if provider_name is not None:
+                    attrs[GEN_AI_PROVIDER_NAME] = provider_name
+                self._tool_attrs[event.tool_call_id] = attrs
             elif type_name == "tool_execution_end":
                 start = self._tool_open_ns.pop(event.tool_call_id, None)
                 attrs = self._tool_attrs.pop(event.tool_call_id, None)
