@@ -137,24 +137,38 @@ tracer = Tracer(
 ## Flushing
 
 `Tracer` uses `BatchSpanProcessor` under the hood, so spans are exported in
-the background. To make sure buffered spans land before your process exits:
+the background. The recommended pattern — and the one that exercises all
+the cleanup paths automatically — is the `async with` form:
 
 ```python
-finally:
-    detach()                    # closes any spans a cancelled run left open
-    await tracer.shutdown()     # awaits force_flush, then shuts the SDK down
+async with Tracer(...) as tracer, tracer.attached(agent):
+    await agent.prompt("...")
+# On exit:
+#   - detach() runs synchronously: closes any spans a cancelled run left
+#     open, then schedules the flush as an asyncio.Task and awaits it.
+#   - tracer.shutdown() flushes again (idempotent) and closes exporters.
 ```
 
-`detach()` runs its synchronous cleanup (unsubscribe + close any spans an
-in-flight cancellation left open) immediately, then schedules a flush as
-an `asyncio.Task` on the running loop and returns it. Two valid patterns:
+If you've stored `detach` from a manual `tracer.attach(agent)` call, it
+returns the scheduled flush `Task`. Two valid manual patterns:
 
-- **Both** `detach(); await tracer.shutdown()` — the safest belt-and-braces
-  approach; `shutdown()` is idempotent.
-- **Awaited detach** `await detach()` — the returned Task awaits
-  `force_flush`, so this single call is enough when you're not also
-  shutting down the Tracer.
+```python
+# (a) Belt-and-braces — safest, both run.
+finally:
+    detach()                    # closes cancelled-run spans, schedules flush
+    await tracer.shutdown()     # awaits force_flush, then shuts the SDK down
+
+# (b) Awaited detach — single call when you're not also shutting down.
+finally:
+    await detach()              # awaits the scheduled flush
+```
 
 Outside an async context (no running loop) `detach()` returns `None` — the
 sync part has run, but the flush is the caller's responsibility via
 `await tracer.shutdown()`.
+
+If even that gets missed — say a script raises before reaching `finally` —
+`Tracer(atexit_flush=True)` (the default) registers a process-exit handler
+that sync-flushes buffered spans through `BatchSpanProcessor`. Doesn't run
+on `SIGKILL` / `os._exit`; for guaranteed delivery there, use
+`SimpleSpanProcessor` (sync export per span).
