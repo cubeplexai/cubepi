@@ -4,7 +4,7 @@ from cubepi.providers.catalog import get_provider_preset, list_provider_presets
 from cubepi.providers.catalog.types import (
     AuthSpec, ModelPreset, ProviderPreset, WireApi,
 )
-from cubepi.providers.capability import CapabilityDescriptor, TemperatureSpec
+from cubepi.providers.capability import CapabilityDescriptor
 
 
 def test_wire_api_values():
