@@ -494,6 +494,95 @@ class TestErrorAndAbort:
         assert fallback_chat.status.status_code == StatusCode.UNSET
 
 
+class TestAgentSignalHelper:
+    """Unit-level coverage for the defensive branches of
+    ``Recorder._agent_signal_is_set`` introduced in PR #87. The
+    main-path branch (signal is set / not set) is already exercised
+    by the abort-handling chat-span tests; here we pin the
+    no-agent and signal-raises edges so codecov accepts the patch."""
+
+    def test_returns_false_when_no_agent_attached(self):
+        from cubepi.tracing.recorder import Recorder
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+        # Default: no agent attached.
+        assert recorder._agent_signal_is_set() is False
+
+    def test_returns_false_when_agent_has_no_signal(self):
+        from cubepi.tracing.recorder import Recorder
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+
+        class _Bare:
+            pass  # no _active_signal attribute
+
+        recorder._agent = _Bare()
+        assert recorder._agent_signal_is_set() is False
+
+    def test_returns_false_when_signal_is_set_raises(self):
+        from cubepi.tracing.recorder import Recorder
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+
+        class _Boom:
+            def is_set(self):
+                raise RuntimeError("broken signal")
+
+        class _Agent:
+            _active_signal = _Boom()
+
+        recorder._agent = _Agent()
+        # Exception is swallowed; helper degrades to False rather than
+        # crashing the response-listener callback chain.
+        assert recorder._agent_signal_is_set() is False
+
+
+class TestTranscriptSeedingDefensiveBranches:
+    """The transcript-seeding path on ``_on_agent_start`` reads
+    ``agent.state.messages`` defensively — pin the no-state and
+    raising-state branches so the patch is fully covered."""
+
+    async def test_no_seed_when_agent_has_no_state(self):
+        from cubepi.tracing.recorder import Recorder
+        from cubepi.agent.types import AgentStartEvent
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+
+        class _Bare:
+            pass  # no `state` attribute
+
+        recorder._agent = _Bare()
+        await recorder._on_agent_event(AgentStartEvent())
+        # _RunState was created (otherwise other handlers crash) but
+        # transcript stays empty.
+        assert recorder._run is not None
+        assert recorder._run.transcript == []
+
+    async def test_seed_handles_exception_in_state_messages(self):
+        from cubepi.tracing.recorder import Recorder
+        from cubepi.agent.types import AgentStartEvent
+
+        tracer = Tracer(service_name="t", exporters=[])
+        recorder = Recorder(tracer)
+
+        class _BoomState:
+            @property
+            def messages(self):
+                raise RuntimeError("state broken")
+
+        class _Agent:
+            state = _BoomState()
+
+        recorder._agent = _Agent()
+        await recorder._on_agent_event(AgentStartEvent())
+        assert recorder._run is not None
+        assert recorder._run.transcript == []
+
+
 class TestLifecycle:
     async def test_shutdown_is_idempotent(self):
         agent, provider, exporter, tracer = await _build()
