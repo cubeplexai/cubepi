@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from cubepi.providers.base import ThinkingLevel
+
 
 class TemperatureSpec(BaseModel):
     mode: Literal["free", "fixed", "ignored"] = "free"
@@ -113,9 +115,6 @@ def apply_temperature(kwargs: dict[str, Any], spec: TemperatureSpec) -> None:
     if "temperature" in kwargs:
         value = kwargs["temperature"]
         kwargs["temperature"] = max(spec.min, min(spec.max, value))
-
-
-from cubepi.providers.base import ThinkingLevel
 
 
 def _resolve_level_value(spec: ReasoningLevelSpec, level: ThinkingLevel) -> Any | None:
