@@ -7,7 +7,10 @@ from typing import Any, Literal
 
 from cubepi.utils.json_parse import parse_streaming_json
 
-from cubepi.providers.capability import CapabilityDescriptor
+from cubepi.providers.capability import (
+    CapabilityDescriptor,
+    apply_temperature,
+)
 from cubepi.providers.base import (
     AssistantMessage,
     BaseProvider,
@@ -130,6 +133,18 @@ class OpenAIProvider(BaseProvider):
                 so = kwargs.setdefault("stream_options", {})
                 if "include_usage" not in so:
                     so["include_usage"] = True
+
+                # Capability-driven payload mutations. Gated on _cap_active so
+                # legacy callers (no capability kwarg) keep today's wire bytes
+                # exactly — the OpenAI path historically does not inject
+                # temperature or max_tokens. Spec §3.5.
+                cap = self._resolve_capability(model.id)
+                if self._cap_active:
+                    kwargs.setdefault("temperature", model.temperature)
+                    kwargs.setdefault("max_tokens", model.max_tokens)
+                    apply_temperature(kwargs, cap.temperature)
+                    if cap.max_tokens_field != "max_tokens" and "max_tokens" in kwargs:
+                        kwargs[cap.max_tokens_field] = kwargs.pop("max_tokens")
 
                 # Fire request listeners AFTER all kwargs mutations so observers
                 # see the final wire payload (including extra_body merges,
