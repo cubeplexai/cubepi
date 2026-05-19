@@ -17,6 +17,7 @@ except ImportError as exc:  # pragma: no cover — exercised only without the ex
         "Install it via: pip install cubepi[tracing]"
     ) from exc
 
+from cubepi.tracing.context import tracing_context
 from cubepi.tracing.exporters import JsonlSpanExporter
 from cubepi.tracing.meter import Meter
 from cubepi.tracing.schema import SCHEMA_URL
@@ -27,4 +28,5 @@ __all__ = [
     "Meter",
     "SCHEMA_URL",
     "Tracer",
+    "tracing_context",
 ]

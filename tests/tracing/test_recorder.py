@@ -915,6 +915,187 @@ class TestAttachedContextManager:
         assert exporter.spans
 
 
+class TestTracingContext:
+    """``cubepi.tracing.tracing_context`` sets per-task tags +
+    metadata that the recorder stamps onto the invoke_agent span."""
+
+    async def test_tags_land_on_invoke_agent_span(self):
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        with tracing_context(tags=["beta-arm", "test-suite"]):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        assert attrs.get("cubepi.tags") == ("beta-arm", "test-suite")
+
+    async def test_metadata_keys_land_with_prefix(self):
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        with tracing_context(metadata={"user_id": "u-42", "ab_arm": "control"}):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        assert attrs.get("cubepi.metadata.user_id") == "u-42"
+        assert attrs.get("cubepi.metadata.ab_arm") == "control"
+
+    async def test_no_context_means_no_tag_attr(self):
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("hi")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        assert "cubepi.tags" not in attrs
+
+    async def test_context_does_not_leak_across_runs(self):
+        """The contextvar resets on block exit — the next run started
+        outside the block must NOT carry the previous tags."""
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses(
+            [
+                faux_assistant_message("first"),
+                faux_assistant_message("second"),
+            ]
+        )
+
+        with tracing_context(tags=["scoped"]):
+            await agent.prompt("first")
+            await agent.wait_for_idle()
+        await agent.prompt("second")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        roots = sorted(
+            [s for s in exporter.spans if s.name == "invoke_agent"],
+            key=lambda s: s.start_time or 0,
+        )
+        assert len(roots) == 2
+        assert _attrs(roots[0]).get("cubepi.tags") == ("scoped",)
+        assert "cubepi.tags" not in _attrs(roots[1])
+
+    async def test_nested_contexts_merge_additively(self):
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        with tracing_context(tags=["outer"], metadata={"k": "outer-val"}):
+            with tracing_context(
+                tags=["inner"], metadata={"k": "inner-val", "x": "new"}
+            ):
+                await agent.prompt("hi")
+                await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        assert attrs.get("cubepi.tags") == ("outer", "inner")
+        assert attrs.get("cubepi.metadata.k") == "inner-val"
+        assert attrs.get("cubepi.metadata.x") == "new"
+
+    async def test_unsupported_metadata_value_is_dropped(self):
+        """OTel attributes can't hold dicts or arbitrary objects."""
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        with tracing_context(
+            metadata={
+                "good_str": "yes",
+                "good_int": 42,
+                "bad_dict": {"nested": 1},
+            }
+        ):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        assert attrs.get("cubepi.metadata.good_str") == "yes"
+        assert attrs.get("cubepi.metadata.good_int") == 42
+        assert "cubepi.metadata.bad_dict" not in attrs
+
+    async def test_metadata_set_attribute_typeerror_is_swallowed(self, monkeypatch):
+        """OTel SDK silently drops most invalid attribute values, but
+        a non-conforming type could in principle raise TypeError /
+        ValueError from ``set_attribute``. The recorder must swallow
+        per-key so one bad metadata entry can't crash the whole span
+        (covers the defensive ``except (TypeError, ValueError)``
+        branch)."""
+        from cubepi.tracing import tracing_context
+        from opentelemetry.sdk.trace import Span as _SdkSpan
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        # Patch set_attribute to raise on a specific cubepi.metadata.*
+        # key while letting every other attribute go through. The
+        # recorder writes many cubepi.* / gen_ai.* attrs at agent
+        # start, so we need to be surgical.
+        original = _SdkSpan.set_attribute
+
+        def _selective_set_attribute(self, key, value):
+            if key == "cubepi.metadata.boom":
+                raise TypeError("simulated OTel reject")
+            return original(self, key, value)
+
+        monkeypatch.setattr(_SdkSpan, "set_attribute", _selective_set_attribute)
+
+        with tracing_context(metadata={"boom": object(), "good": "yes"}):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        # bad key swallowed; good key landed.
+        assert "cubepi.metadata.boom" not in attrs
+        assert attrs.get("cubepi.metadata.good") == "yes"
+
+    async def test_metadata_cannot_clobber_reserved_cubepi_attrs(self):
+        """User-supplied metadata keys must not be able to overwrite
+        recorder-owned schema attributes like ``cubepi.run_id`` —
+        the JSONL exporter shards spans by that key, so an
+        invoke_agent span with a clobbered ``run_id`` ends up in a
+        different file than its turn/chat/tool spans (codex P2 on
+        PR #92). The fix is the ``cubepi.metadata.*`` sub-namespace."""
+        from cubepi.tracing import tracing_context
+
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        with tracing_context(metadata={"run_id": "hijacked", "turn.index": "x"}):
+            await agent.prompt("hi")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = next(s for s in exporter.spans if s.name == "invoke_agent")
+        attrs = _attrs(root)
+        # The genuine recorder-owned value is unchanged…
+        assert attrs.get("cubepi.run_id") and attrs["cubepi.run_id"] != "hijacked"
+        # …and the user-supplied values land under the safe namespace.
+        assert attrs.get("cubepi.metadata.run_id") == "hijacked"
+        assert attrs.get("cubepi.metadata.turn.index") == "x"
+
+
 class TestLifecycle:
     async def test_shutdown_is_idempotent(self):
         agent, provider, exporter, tracer = await _build()
