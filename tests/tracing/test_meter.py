@@ -130,6 +130,36 @@ class TestTimeToFirstChunkMetric:
         assert len(ttfc) == 1
 
 
+class TestRequestModelOnChatMetrics:
+    async def test_chat_duration_carries_request_model(self):
+        """Every chat metric must carry ``gen_ai.request.model`` so that
+        failed / cancelled requests (no response body, no response.model)
+        can still be grouped by the requested model. Codex P2 finding
+        on PR #85."""
+        provider = FauxProvider()
+        provider.append_responses([faux_assistant_message("ok")])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        meter, reader = _build_meter()
+        meter.attach(agent)
+
+        await agent.prompt("hello")
+        await agent.wait_for_idle()
+
+        points = _all_metric_points(reader)
+        chat_durations = [
+            dp
+            for n, dp in points
+            if n == "gen_ai.client.operation.duration"
+            and dict(dp.attributes).get("gen_ai.operation.name") == "chat"
+        ]
+        assert chat_durations
+        for dp in chat_durations:
+            attrs = dict(dp.attributes)
+            assert attrs.get("gen_ai.request.model") == MODEL.id, (
+                f"chat metric missing gen_ai.request.model; got {attrs}"
+            )
+
+
 class TestNoMetricsWithoutListeners:
     async def test_detach_stops_emission(self):
         provider = FauxProvider()

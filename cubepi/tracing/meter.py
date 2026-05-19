@@ -30,6 +30,7 @@ import cubepi
 from cubepi.tracing.schema import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_MODEL,
     GEN_AI_RESPONSE_MODEL,
     OP_CHAT,
     OP_EXECUTE_TOOL,
@@ -217,9 +218,14 @@ class Meter:
         provider_name = map_provider_name(model.provider)
         self._chat_open_ns = time.time_ns()
         self._chat_first_chunk_ns = None
+        # Include gen_ai.request.model so failed/cancelled chat metrics
+        # (where the response body never lands and gen_ai.response.model
+        # cannot be set) can still be grouped by the requested model
+        # (codex P2 finding on PR #85).
         self._chat_attrs = {
             GEN_AI_OPERATION_NAME: OP_CHAT,
             GEN_AI_PROVIDER_NAME: provider_name,
+            GEN_AI_REQUEST_MODEL: model.id,
         }
         # Stamp the agent + tool attrs with provider too, so all metrics
         # from this run can be filtered by provider in one shot.
