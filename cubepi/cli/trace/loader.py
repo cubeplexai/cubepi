@@ -51,9 +51,14 @@ def load_run(files: list[Path]) -> tuple[list[Span], int]:
                 if not line:
                     continue
                 try:
-                    spans.append(Span(json.loads(line)))
+                    obj = json.loads(line)
                 except json.JSONDecodeError:
                     skipped += 1
+                    continue
+                if not isinstance(obj, dict):
+                    skipped += 1
+                    continue
+                spans.append(Span(obj))
     spans.sort(key=lambda s: s.sort_start)
     return spans, skipped
 

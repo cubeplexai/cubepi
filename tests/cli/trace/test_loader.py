@@ -70,6 +70,21 @@ def test_load_run_skips_malformed(tmp_path):
     assert skipped == 1
 
 
+def test_load_run_skips_non_dict_json(tmp_path):
+    f = tmp_path / "2026-05-20" / "r1.jsonl"
+    f.parent.mkdir(parents=True)
+    with f.open("w") as fh:
+        fh.write("null\n")  # valid JSON, but not a span object
+        fh.write("[1, 2]\n")  # valid JSON array, not a span object
+        fh.write(
+            json.dumps(_span("0x1", None, "invoke_agent", "2026-05-20T00:00:00Z", "r1"))
+            + "\n"
+        )
+    spans, skipped = load_run([f])
+    assert len(spans) == 1
+    assert skipped == 2
+
+
 def test_list_runs(tmp_path):
     f = tmp_path / "2026-05-20" / "r1.jsonl"
     _write(
