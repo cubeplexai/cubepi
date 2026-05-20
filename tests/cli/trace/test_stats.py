@@ -55,6 +55,34 @@ def test_aggregate_by_model_tokens():
     assert row.error_rate == 0.0
 
 
+def test_percentile_interpolates_median():
+    spans = [_chat("gpt-x", 1, 1, 100), _chat("gpt-x", 1, 1, 300)]
+    row = aggregate(spans, by="model")[0]
+    assert row.percentile(50) == 200.0
+
+
+def test_null_token_attr_does_not_crash():
+    sp = Span(
+        {
+            "name": "chat",
+            "context": {"trace_id": "0xt", "span_id": "0x1"},
+            "parent_id": "0x0",
+            "start_time": "2026-05-20T00:00:00Z",
+            "end_time": "2026-05-20T00:00:00.1Z",
+            "status": {"status_code": "UNSET"},
+            "attributes": {
+                "gen_ai.operation.name": "chat",
+                "gen_ai.request.model": "gpt-x",
+                "gen_ai.usage.input_tokens": None,
+                "gen_ai.usage.output_tokens": 5,
+            },
+        }
+    )
+    row = aggregate([sp], by="model")[0]
+    assert row.input_tokens == 0
+    assert row.output_tokens == 5
+
+
 def test_aggregate_by_tool_no_tokens_counts_aborts():
     spans = [_tool("read", 50), _tool("read", 150, aborted=True)]
     rows = aggregate(spans, by="tool")

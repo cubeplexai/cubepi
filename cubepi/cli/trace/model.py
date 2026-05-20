@@ -108,6 +108,11 @@ class Span:
         """start_time, or epoch when missing — for stable ordering."""
         return self.start or _EPOCH
 
+    @property
+    def sort_end(self) -> datetime:
+        """end_time (falling back to start, then epoch) — completion order."""
+        return self.end or self.start or _EPOCH
+
 
 @dataclass
 class TreeNode:

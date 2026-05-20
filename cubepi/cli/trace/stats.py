@@ -27,8 +27,14 @@ class StatRow:
         vals = sorted(d for d in self.durations_ms if d is not None)
         if not vals:
             return None
-        idx = min(len(vals) - 1, int(round((p / 100.0) * (len(vals) - 1))))
-        return vals[idx]
+        if len(vals) == 1:
+            return vals[0]
+        # Linear interpolation between closest ranks (so p50 of [100, 300] is 200).
+        rank = (p / 100.0) * (len(vals) - 1)
+        lo = int(rank)
+        hi = min(lo + 1, len(vals) - 1)
+        frac = rank - lo
+        return vals[lo] + (vals[hi] - vals[lo]) * frac
 
 
 def aggregate(spans: list[Span], by: str) -> list[StatRow]:
@@ -70,10 +76,11 @@ def aggregate(spans: list[Span], by: str) -> list[StatRow]:
             row.aborted += 1
         if want_tokens:
             a = sp.attributes
-            row.input_tokens += int(a.get(schema.GEN_AI_USAGE_INPUT_TOKENS, 0))
-            row.output_tokens += int(a.get(schema.GEN_AI_USAGE_OUTPUT_TOKENS, 0))
+            # `or 0` guards against the attr being present but JSON null.
+            row.input_tokens += int(a.get(schema.GEN_AI_USAGE_INPUT_TOKENS) or 0)
+            row.output_tokens += int(a.get(schema.GEN_AI_USAGE_OUTPUT_TOKENS) or 0)
             # Cache total = read + creation (both are cache-related input tokens).
             row.cache_tokens += int(
-                a.get(schema.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, 0)
-            ) + int(a.get(schema.GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, 0))
+                a.get(schema.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS) or 0
+            ) + int(a.get(schema.GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS) or 0)
     return sorted(rows.values(), key=lambda r: r.count, reverse=True)

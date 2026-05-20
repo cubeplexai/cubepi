@@ -38,10 +38,14 @@ def iter_new_spans(path: Path, state: dict[str, Any]):
         if not line:
             continue
         try:
-            yield Span(json.loads(line))
+            obj = json.loads(line)
         except json.JSONDecodeError:
             state["skipped"] = state.get("skipped", 0) + 1
             continue
+        if not isinstance(obj, dict):
+            state["skipped"] = state.get("skipped", 0) + 1
+            continue
+        yield Span(obj)
 
 
 def is_run_complete(span: Span) -> bool:
@@ -76,17 +80,22 @@ def follow_run(
     last_activity = time.monotonic()
     try:
         while True:
-            saw_any = False
-            done = False
+            # Collect this poll's new spans across all files, then print in
+            # end-time order so a cross-midnight run (old + new date file both
+            # with backlog) stays chronological.
+            batch: list[Span] = []
             for path in resolve_files():
                 state = states.setdefault(
                     path, {"offset": 0, "buffer": "", "skipped": 0}
                 )
-                for span in iter_new_spans(path, state):
-                    print(format_event(span), flush=True)
-                    saw_any = True
-                    if is_run_complete(span):
-                        done = True
+                batch.extend(iter_new_spans(path, state))
+            batch.sort(key=lambda s: s.sort_end)
+            saw_any = bool(batch)
+            done = False
+            for span in batch:
+                print(format_event(span), flush=True)
+                if is_run_complete(span):
+                    done = True
             if done:
                 break
             now = time.monotonic()
