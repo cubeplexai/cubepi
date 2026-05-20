@@ -18,13 +18,24 @@ def _raw(span_id, parent_id, name, attrs=None, status="UNSET"):
 
 def test_render_tree_includes_names_and_markers():
     spans = [
-        Span(_raw("0x1", None, "invoke_agent",
-                  {"cubepi.run_id": "r1", "gen_ai.operation.name": "invoke_agent"})),
-        Span(_raw("0x2", "0x1", "execute_tool read",
-                  {"gen_ai.operation.name": "execute_tool",
-                   "gen_ai.tool.name": "read"}, status="ERROR")),
-        Span(_raw("0x9", "0xMISSING", "chat gpt-x",
-                  {"gen_ai.operation.name": "chat"})),
+        Span(
+            _raw(
+                "0x1",
+                None,
+                "invoke_agent",
+                {"cubepi.run_id": "r1", "gen_ai.operation.name": "invoke_agent"},
+            )
+        ),
+        Span(
+            _raw(
+                "0x2",
+                "0x1",
+                "execute_tool read",
+                {"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "read"},
+                status="ERROR",
+            )
+        ),
+        Span(_raw("0x9", "0xMISSING", "chat gpt-x", {"gen_ai.operation.name": "chat"})),
     ]
     forest = build_forest(spans)
     text = render_tree_to_text(forest)

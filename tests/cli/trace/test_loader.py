@@ -56,11 +56,15 @@ def test_load_run_skips_malformed(tmp_path):
     f = tmp_path / "2026-05-20" / "r1.jsonl"
     f.parent.mkdir(parents=True)
     with f.open("w") as fh:
-        fh.write(json.dumps(_span("0x1", None, "invoke_agent",
-                                   "2026-05-20T00:00:00Z", "r1")) + "\n")
+        fh.write(
+            json.dumps(_span("0x1", None, "invoke_agent", "2026-05-20T00:00:00Z", "r1"))
+            + "\n"
+        )
         fh.write("{ not json\n")
-        fh.write(json.dumps(_span("0x2", "0x1", "chat",
-                                  "2026-05-20T00:00:00.1Z", "r1")) + "\n")
+        fh.write(
+            json.dumps(_span("0x2", "0x1", "chat", "2026-05-20T00:00:00.1Z", "r1"))
+            + "\n"
+        )
     spans, skipped = load_run([f])
     assert len(spans) == 2
     assert skipped == 1
@@ -68,10 +72,13 @@ def test_load_run_skips_malformed(tmp_path):
 
 def test_list_runs(tmp_path):
     f = tmp_path / "2026-05-20" / "r1.jsonl"
-    _write(f, [
-        _span("0x1", None, "invoke_agent", "2026-05-20T00:00:00Z", "r1"),
-        _span("0x2", "0x1", "chat", "2026-05-20T00:00:00.1Z", "r1"),
-    ])
+    _write(
+        f,
+        [
+            _span("0x1", None, "invoke_agent", "2026-05-20T00:00:00Z", "r1"),
+            _span("0x2", "0x1", "chat", "2026-05-20T00:00:00.1Z", "r1"),
+        ],
+    )
     runs = list_runs(tmp_path)
     assert len(runs) == 1
     assert runs[0].run_id == "r1"

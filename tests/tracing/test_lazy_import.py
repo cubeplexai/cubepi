@@ -1,4 +1,5 @@
 """schema constants must be importable without the opentelemetry SDK."""
+
 from __future__ import annotations
 
 import subprocess

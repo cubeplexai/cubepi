@@ -1,5 +1,6 @@
 """rich-based rendering. rich is imported lazily so the package import does
 not require the trace-cli extra until something is actually rendered."""
+
 from __future__ import annotations
 
 import json

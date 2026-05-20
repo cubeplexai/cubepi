@@ -5,6 +5,7 @@ before their parents, so a live tree cannot be drawn correctly. Instead we
 print one line per span in the order it completes. The run is considered
 finished when the root ``invoke_agent`` span (``parent_id == null``) appears.
 """
+
 from __future__ import annotations
 
 import json
