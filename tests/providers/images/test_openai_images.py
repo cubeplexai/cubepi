@@ -1,0 +1,98 @@
+import base64
+from types import SimpleNamespace
+
+import pytest
+
+from cubepi.providers.base import ImageContent
+from cubepi.providers.images.openai_images import OpenAIImagesProvider
+from cubepi.providers.images.types import ImagesContext, ImagesModel
+
+
+class _FakeImages:
+    def __init__(self):
+        self.generate_kwargs = None
+        self.edit_kwargs = None
+
+    async def generate(self, **kwargs):
+        self.generate_kwargs = kwargs
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=base64.b64encode(b"GEN").decode())])
+
+    async def edit(self, **kwargs):
+        self.edit_kwargs = kwargs
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=base64.b64encode(b"EDIT").decode())])
+
+
+class _FakeClient:
+    def __init__(self):
+        self.images = _FakeImages()
+
+
+def _provider_with_fake():
+    p = OpenAIImagesProvider(api_key="sk-test")
+    p._client = _FakeClient()
+    return p
+
+
+@pytest.mark.asyncio
+async def test_generate_text_to_image():
+    p = _provider_with_fake()
+    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images",
+                        size="1024x1024", quality="high")
+    out = await p.generate_images(model, ImagesContext(prompt="a cat"))
+    assert out.stop_reason == "stop"
+    assert out.output[0].type == "image"
+    assert p._client.images.generate_kwargs["model"] == "gpt-image-1"
+    assert p._client.images.generate_kwargs["size"] == "1024x1024"
+    assert p._client.images.generate_kwargs["quality"] == "high"
+    assert p._client.images.edit_kwargs is None
+
+
+@pytest.mark.asyncio
+async def test_auto_size_quality_omitted():
+    p = _provider_with_fake()
+    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    await p.generate_images(model, ImagesContext(prompt="x"))
+    assert "size" not in p._client.images.generate_kwargs
+    assert "quality" not in p._client.images.generate_kwargs
+
+
+@pytest.mark.asyncio
+async def test_edit_branch_uses_input_images():
+    p = _provider_with_fake()
+    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    ctx = ImagesContext(
+        prompt="make it blue",
+        input_images=[ImageContent(source=base64.b64encode(b"SRC").decode(), media_type="image/png")],
+    )
+    out = await p.generate_images(model, ctx)
+    assert p._client.images.edit_kwargs is not None
+    assert p._client.images.generate_kwargs is None
+    assert out.output[0].type == "image"
+
+
+@pytest.mark.asyncio
+async def test_empty_data_returns_error():
+    p = _provider_with_fake()
+
+    async def _empty(**kwargs):
+        return SimpleNamespace(data=[])
+
+    p._client.images.generate = _empty
+    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    out = await p.generate_images(model, ImagesContext(prompt="x"))
+    assert out.stop_reason == "error"
+    assert out.error_message
+
+
+@pytest.mark.asyncio
+async def test_sdk_exception_returns_error():
+    p = _provider_with_fake()
+
+    async def _boom(**kwargs):
+        raise RuntimeError("rate limited")
+
+    p._client.images.generate = _boom
+    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    out = await p.generate_images(model, ImagesContext(prompt="x"))
+    assert out.stop_reason == "error"
+    assert "rate limited" in out.error_message
