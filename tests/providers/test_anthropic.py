@@ -576,6 +576,110 @@ class TestAnthropicStreamToolCall:
         assert result.content[0].id == "toolu_abc"
         assert result.content[0].arguments == {"q": "test"}
 
+    @pytest.mark.asyncio
+    async def test_toolcall_end_partial_carries_parsed_arguments(self):
+        """The streaming toolcall_end event must expose the parsed arguments.
+
+        Live consumers (the SSE tool_call event → frontend tool cards showing
+        the web_search query / web_fetch url) read the toolcall_end partial. If
+        args are only assembled in the final message, the card stays blank until
+        reload.
+        """
+        events = [
+            _make_event(
+                "content_block_start",
+                index=0,
+                content_block=_make_content_block(
+                    "tool_use", id="toolu_abc", name="search"
+                ),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(partial_json='{"q": '),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(partial_json='"test"}'),
+            ),
+            _make_event("content_block_stop", index=0),
+        ]
+        final = _make_final_message(
+            content=[
+                SimpleNamespace(
+                    type="tool_use", id="toolu_abc", name="search", input={"q": "test"}
+                )
+            ],
+            stop_reason="tool_use",
+        )
+        provider = _make_provider("none")
+        _inject_mock_stream(provider, _MockAnthropicStream(events, final))
+
+        ms = await provider.stream(
+            _anthropic_model(),
+            [UserMessage(content=[TextContent(text="search for test")])],
+        )
+        stream_events = []
+        async for event in ms:
+            stream_events.append(event)
+        await ms.result()
+
+        end_events = [e for e in stream_events if e.type == "toolcall_end"]
+        assert end_events, "expected a toolcall_end event"
+        partial = end_events[-1].partial
+        tool_blocks = [b for b in partial.content if isinstance(b, ToolCall)]
+        assert tool_blocks, "toolcall_end partial should contain the ToolCall block"
+        assert tool_blocks[-1].arguments == {"q": "test"}
+
+    @pytest.mark.asyncio
+    async def test_toolcall_end_partial_tolerates_malformed_args_json(self):
+        """Incomplete/garbled partial_json falls back to {} without raising;
+        the final message still carries authoritative args."""
+        events = [
+            _make_event(
+                "content_block_start",
+                index=0,
+                content_block=_make_content_block(
+                    "tool_use", id="toolu_x", name="search"
+                ),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(
+                    partial_json='{"q": "te'
+                ),  # truncated, invalid JSON
+            ),
+            _make_event("content_block_stop", index=0),
+        ]
+        final = _make_final_message(
+            content=[
+                SimpleNamespace(
+                    type="tool_use", id="toolu_x", name="search", input={"q": "te"}
+                )
+            ],
+            stop_reason="tool_use",
+        )
+        provider = _make_provider("none")
+        _inject_mock_stream(provider, _MockAnthropicStream(events, final))
+
+        ms = await provider.stream(
+            _anthropic_model(),
+            [UserMessage(content=[TextContent(text="x")])],
+        )
+        stream_events = []
+        async for event in ms:
+            stream_events.append(event)
+        await ms.result()
+
+        end_events = [e for e in stream_events if e.type == "toolcall_end"]
+        assert end_events
+        tool_blocks = [
+            b for b in end_events[-1].partial.content if isinstance(b, ToolCall)
+        ]
+        assert tool_blocks[-1].arguments == {}
+
 
 class TestAnthropicStreamKwargsBuilding:
     """Verify kwargs sent to the Anthropic SDK."""
