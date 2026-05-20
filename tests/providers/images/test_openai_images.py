@@ -137,3 +137,18 @@ def test_register_openai_images_registers_provider():
 def test_base_url_is_accepted():
     p = OpenAIImagesProvider(api_key="sk-test", base_url="https://example.test/v1")
     assert p.api == "openai-images"
+
+
+@pytest.mark.asyncio
+async def test_options_are_forwarded_to_request():
+    p = _provider_with_fake()
+    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    await p.generate_images(
+        model,
+        ImagesContext(prompt="x"),
+        options={"n": 2, "output_format": "jpeg", "background": "transparent"},
+    )
+    kw = p._client.images.generate_kwargs
+    assert kw["n"] == 2
+    assert kw["output_format"] == "jpeg"
+    assert kw["background"] == "transparent"

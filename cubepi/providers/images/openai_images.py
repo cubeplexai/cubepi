@@ -42,6 +42,10 @@ class OpenAIImagesProvider:
             params["size"] = model.size
         if model.quality != "auto":
             params["quality"] = model.quality
+        # Caller passthrough: output_format, output_compression, background, n, …
+        # Merged last so callers can override the defaults above.
+        if options:
+            params.update(options)
 
         def _err(message: str) -> AssistantImages:
             return AssistantImages(
