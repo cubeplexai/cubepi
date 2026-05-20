@@ -5,6 +5,10 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
+
+import cubepi.tracing
+
 
 def test_schema_importable_without_opentelemetry():
     # Run in a subprocess with opentelemetry hidden, so the lazy __init__
@@ -26,3 +30,14 @@ def test_schema_importable_without_opentelemetry():
     )
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
+
+
+def test_unknown_attribute_raises_attribute_error():
+    with pytest.raises(AttributeError):
+        cubepi.tracing.does_not_exist
+
+
+def test_dir_lists_public_names():
+    names = dir(cubepi.tracing)
+    assert "Tracer" in names
+    assert "JsonlSpanExporter" in names
