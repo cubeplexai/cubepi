@@ -77,8 +77,9 @@ Wire-shape differences between OpenAI and OpenAI-compatible backends
 temperature handling) are configured through a
 [`CapabilityDescriptor`](pathname:///pydoc/cubepi/providers/capability.html)
 passed at construction. For example, `max_tokens_field="max_completion_tokens"`
-renames the key on the way out. See the capability/preset catalog
-(cubepi `0.5+`) for the full set of knobs and ready-made model presets.
+renames the key on the way out. See
+[Capabilities & Preset Catalog](./capability-and-presets) for the full
+set of knobs and 20+ ready-made provider presets (cubepi `0.5+`).
 
 ### Pointing at vLLM / LiteLLM / DeepSeek
 
@@ -98,6 +99,9 @@ provider = OpenAIProvider(
     base_url="https://litellm.internal/v1",
 )
 ```
+
+Many of these backends already have a ready-made preset — see
+[Capabilities & Preset Catalog](./capability-and-presets).
 
 ## Responses API: `OpenAIResponsesProvider`
 
