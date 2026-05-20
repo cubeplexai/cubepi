@@ -9,6 +9,9 @@ silent fallback on attach / flush failures.
 
 from __future__ import annotations
 
+import asyncio
+
+import pytest
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 from cubepi.agent.agent import Agent
@@ -112,3 +115,94 @@ async def test_trace_swallows_flush_failure(monkeypatch):
         # Restore the real force_flush so shutdown() can clean up.
         monkeypatch.undo()
         await tracer.shutdown()
+
+
+async def test_trace_swallows_detach_failure(monkeypatch):
+    agent, _provider, tracer = _build()
+    try:
+
+        def _raising_detach():  # noqa: ANN202
+            raise RuntimeError("detach boom")
+
+        monkeypatch.setattr(tracer, "attach", lambda _agent: _raising_detach)
+
+        ran = False
+        async with trace(tracer, agent):  # must not raise
+            ran = True
+        assert ran, "body must run even when the detach callable itself raises"
+    finally:
+        await tracer.shutdown()
+
+
+async def test_trace_awaits_flush_task_on_exit(monkeypatch):
+    agent, _provider, tracer = _build()
+    flushed = {"done": False}
+
+    async def _flush() -> None:
+        await asyncio.sleep(0)
+        flushed["done"] = True
+
+    def _detach():  # noqa: ANN202
+        return asyncio.get_running_loop().create_task(_flush())
+
+    monkeypatch.setattr(tracer, "attach", lambda _agent: _detach)
+    try:
+        async with trace(tracer, agent):
+            pass
+        assert flushed["done"], "trace must await the flush task before the scope exits"
+    finally:
+        await tracer.shutdown()
+
+
+async def test_trace_preserves_body_exception_when_cleanup_fails(monkeypatch):
+    agent, _provider, tracer = _build()
+
+    class _Sentinel(Exception):
+        pass
+
+    def _raising_detach():  # noqa: ANN202
+        raise RuntimeError("detach boom")
+
+    monkeypatch.setattr(tracer, "attach", lambda _agent: _raising_detach)
+    try:
+        with pytest.raises(_Sentinel):
+            async with trace(tracer, agent):
+                raise _Sentinel("body failed")
+    finally:
+        await tracer.shutdown()
+
+
+async def test_trace_swallows_mcp_unregister_failure(monkeypatch):
+    # Real attach registers the MCP provider; make unregister blow up on detach.
+    # The body must still run and the failure must not propagate.
+    agent, _provider, tracer = _build()
+    try:
+        import cubepi.mcp._tracing as mcp_tracing
+
+        def _boom(_token):  # noqa: ANN202
+            raise RuntimeError("unregister boom")
+
+        monkeypatch.setattr(mcp_tracing, "unregister_provider", _boom)
+
+        ran = False
+        async with trace(tracer, agent):
+            ran = True
+        assert ran, "body must run even when MCP unregister fails on detach"
+    finally:
+        await tracer.shutdown()
+
+
+async def test_trace_does_not_shutdown_tracer(monkeypatch):
+    agent, _provider, tracer = _build()
+    calls = {"n": 0}
+
+    async def _spy_shutdown(*_args, **_kwargs) -> None:  # noqa: ANN202
+        calls["n"] += 1
+
+    monkeypatch.setattr(tracer, "shutdown", _spy_shutdown)
+    async with trace(tracer, agent):
+        pass
+    assert calls["n"] == 0, "trace must not shut the tracer down — the owner does"
+    # Real cleanup.
+    monkeypatch.undo()
+    await tracer.shutdown()

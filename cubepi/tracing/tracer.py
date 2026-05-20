@@ -209,13 +209,17 @@ class Tracer:
             # an async context it's an ``asyncio.Task`` for the
             # flush; callers can ``await detach()`` to wait for
             # buffered spans to land (codex overall-review MAJOR).
-            flush_task = recorder_detach()
-            if mcp_tracing is not None and mcp_token is not None:
-                try:
-                    mcp_tracing.unregister_provider(mcp_token)
-                except Exception:
-                    pass
-            return flush_task
+            #
+            # Unregister MCP in a ``finally`` so a raising recorder detach
+            # can't leak the provider registration.
+            try:
+                return recorder_detach()
+            finally:
+                if mcp_tracing is not None and mcp_token is not None:
+                    try:
+                        mcp_tracing.unregister_provider(mcp_token)
+                    except Exception:
+                        pass
 
         return detach
 
@@ -439,7 +443,11 @@ async def trace(
 def _log_tracing_warning(message: str, exc: BaseException) -> None:
     """Log a swallowed tracing fault via stdlib ``logging`` — cubepi does not
     depend on loguru. Hosts that use loguru can intercept stdlib logging to
-    route these records through it."""
-    logging.getLogger("cubepi.tracing").warning(
-        "cubepi tracing: %s", message, exc_info=exc
-    )
+    route these records through it. The log call itself is guarded so a raising
+    logging handler can't defeat the best-effort guarantee."""
+    try:
+        logging.getLogger("cubepi.tracing").warning(
+            "cubepi tracing: %s", message, exc_info=exc
+        )
+    except Exception:  # noqa: BLE001 — logging must never break the run  # pragma: no cover
+        pass
