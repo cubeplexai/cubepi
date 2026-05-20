@@ -22,6 +22,7 @@ __all__ = [
     "Meter",
     "SCHEMA_URL",
     "Tracer",
+    "trace",
     "tracing_context",
 ]
 
@@ -30,7 +31,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from cubepi.tracing.exporters import JsonlSpanExporter
     from cubepi.tracing.meter import Meter
     from cubepi.tracing.schema import SCHEMA_URL
-    from cubepi.tracing.tracer import Tracer
+    from cubepi.tracing.tracer import Tracer, trace
 
 _LAZY = {
     "tracing_context": ("cubepi.tracing.context", "tracing_context"),
@@ -38,6 +39,7 @@ _LAZY = {
     "Meter": ("cubepi.tracing.meter", "Meter"),
     "SCHEMA_URL": ("cubepi.tracing.schema", "SCHEMA_URL"),
     "Tracer": ("cubepi.tracing.tracer", "Tracer"),
+    "trace": ("cubepi.tracing.tracer", "trace"),
 }
 
 
