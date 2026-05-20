@@ -15,11 +15,15 @@ class _FakeImages:
 
     async def generate(self, **kwargs):
         self.generate_kwargs = kwargs
-        return SimpleNamespace(data=[SimpleNamespace(b64_json=base64.b64encode(b"GEN").decode())])
+        return SimpleNamespace(
+            data=[SimpleNamespace(b64_json=base64.b64encode(b"GEN").decode())]
+        )
 
     async def edit(self, **kwargs):
         self.edit_kwargs = kwargs
-        return SimpleNamespace(data=[SimpleNamespace(b64_json=base64.b64encode(b"EDIT").decode())])
+        return SimpleNamespace(
+            data=[SimpleNamespace(b64_json=base64.b64encode(b"EDIT").decode())]
+        )
 
 
 class _FakeClient:
@@ -36,8 +40,13 @@ def _provider_with_fake():
 @pytest.mark.asyncio
 async def test_generate_text_to_image():
     p = _provider_with_fake()
-    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images",
-                        size="1024x1024", quality="high")
+    model = ImagesModel(
+        id="gpt-image-1",
+        provider="openai",
+        api="openai-images",
+        size="1024x1024",
+        quality="high",
+    )
     out = await p.generate_images(model, ImagesContext(prompt="a cat"))
     assert out.stop_reason == "stop"
     assert out.output[0].type == "image"
@@ -62,7 +71,11 @@ async def test_edit_branch_uses_input_images():
     model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
     ctx = ImagesContext(
         prompt="make it blue",
-        input_images=[ImageContent(source=base64.b64encode(b"SRC").decode(), media_type="image/png")],
+        input_images=[
+            ImageContent(
+                source=base64.b64encode(b"SRC").decode(), media_type="image/png"
+            )
+        ],
     )
     out = await p.generate_images(model, ctx)
     assert p._client.images.edit_kwargs is not None

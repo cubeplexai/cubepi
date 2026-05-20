@@ -12,7 +12,9 @@ from cubepi.providers.images.types import AssistantImages, ImagesContext, Images
 class OpenAIImagesProvider:
     api = "openai-images"
 
-    def __init__(self, *, api_key: str | None = None, base_url: str | None = None) -> None:
+    def __init__(
+        self, *, api_key: str | None = None, base_url: str | None = None
+    ) -> None:
         import openai
 
         kwargs: dict[str, Any] = {}
@@ -73,5 +75,7 @@ class OpenAIImagesProvider:
         return buf
 
 
-def register_openai_images(*, api_key: str | None = None, base_url: str | None = None) -> None:
+def register_openai_images(
+    *, api_key: str | None = None, base_url: str | None = None
+) -> None:
     register_images_provider(OpenAIImagesProvider(api_key=api_key, base_url=base_url))
