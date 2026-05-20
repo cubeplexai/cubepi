@@ -461,15 +461,18 @@ class OpenAIProvider(BaseProvider):
 
             except BaseException as e:
                 exc = e
+                err_text = self._error_message(e, model)
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
-                    error_message=str(e),
+                    error_message=err_text,
                     usage=Usage(),
                     timestamp=time.time(),
+                    provider_id=model.provider,
+                    model_id=model.id,
                 )
                 await self._emit(
-                    ms, StreamEvent(type="error", error_message=str(e)), model
+                    ms, StreamEvent(type="error", error_message=err_text), model
                 )
                 ms.set_result(error_msg)
                 if not isinstance(e, Exception):
