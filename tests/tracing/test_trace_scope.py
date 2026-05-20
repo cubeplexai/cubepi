@@ -176,8 +176,10 @@ async def test_trace_swallows_mcp_unregister_failure(monkeypatch):
     # Real attach registers the MCP provider; make unregister blow up on detach.
     # The body must still run and the failure must not propagate.
     agent, _provider, tracer = _build()
+    import cubepi.mcp._tracing as mcp_tracing
+
+    baseline = len(mcp_tracing._provider_stack)
     try:
-        import cubepi.mcp._tracing as mcp_tracing
 
         def _boom(_token):  # noqa: ANN202
             raise RuntimeError("unregister boom")
@@ -189,6 +191,9 @@ async def test_trace_swallows_mcp_unregister_failure(monkeypatch):
             ran = True
         assert ran, "body must run even when MCP unregister fails on detach"
     finally:
+        # The patched unregister raised before popping, so restore the
+        # module-level provider stack to avoid polluting later tests.
+        del mcp_tracing._provider_stack[baseline:]
         await tracer.shutdown()
 
 
