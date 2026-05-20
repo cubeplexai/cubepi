@@ -1,4 +1,5 @@
 """Discover trace files, resolve a run id to file(s), read spans."""
+
 from __future__ import annotations
 
 import json
@@ -30,8 +31,7 @@ def resolve_run(arg: str, directory: Path) -> list[Path]:
     matches = sorted(directory.glob(f"*/{arg}.jsonl"))
     if not matches:
         raise RunResolutionError(
-            f"no trace file for run {arg!r} under {directory} "
-            f"(try `cubepi trace ls`)"
+            f"no trace file for run {arg!r} under {directory} (try `cubepi trace ls`)"
         )
     return matches
 

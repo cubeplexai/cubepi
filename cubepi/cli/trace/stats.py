@@ -1,4 +1,5 @@
 """Aggregate spans by model or tool."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -37,9 +38,7 @@ def aggregate(spans: list[Span], by: str) -> list[StatRow]:
     None — tokens live on chat spans, not tool spans.
     """
     want_tokens = by == "model"
-    key_attr = (
-        schema.GEN_AI_REQUEST_MODEL if by == "model" else schema.GEN_AI_TOOL_NAME
-    )
+    key_attr = schema.GEN_AI_REQUEST_MODEL if by == "model" else schema.GEN_AI_TOOL_NAME
     rows: dict[str, StatRow] = {}
     for sp in spans:
         # Classify on gen_ai.operation.name, not span name (names carry

@@ -45,9 +45,7 @@ def __getattr__(name: str) -> Any:
     try:
         module_name, attr = _LAZY[name]
     except KeyError:
-        raise AttributeError(
-            f"module {__name__!r} has no attribute {name!r}"
-        ) from None
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
     try:
         import opentelemetry.sdk.trace  # noqa: F401
     except ImportError as exc:  # pragma: no cover — only without the extra.

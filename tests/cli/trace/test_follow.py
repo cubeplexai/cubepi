@@ -7,15 +7,17 @@ from cubepi.cli.trace.model import Span
 
 
 def _line(span_id, parent_id, name):
-    return json.dumps({
-        "name": name,
-        "context": {"trace_id": "0xt", "span_id": span_id},
-        "parent_id": parent_id,
-        "start_time": "2026-05-20T00:00:00Z",
-        "end_time": "2026-05-20T00:00:00.1Z",
-        "status": {"status_code": "UNSET"},
-        "attributes": {"gen_ai.operation.name": name},
-    })
+    return json.dumps(
+        {
+            "name": name,
+            "context": {"trace_id": "0xt", "span_id": span_id},
+            "parent_id": parent_id,
+            "start_time": "2026-05-20T00:00:00Z",
+            "end_time": "2026-05-20T00:00:00.1Z",
+            "status": {"status_code": "UNSET"},
+            "attributes": {"gen_ai.operation.name": name},
+        }
+    )
 
 
 def test_iter_new_spans_incremental(tmp_path):

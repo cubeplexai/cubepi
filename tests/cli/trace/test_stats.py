@@ -6,20 +6,22 @@ from cubepi.cli.trace.stats import aggregate
 
 def _chat(model, in_tok, out_tok, dur_ms, error=False):
     end = f"2026-05-20T00:00:{dur_ms / 1000:09.6f}Z"
-    return Span({
-        "name": "chat",
-        "context": {"trace_id": "0xt", "span_id": "0x1"},
-        "parent_id": "0x0",
-        "start_time": "2026-05-20T00:00:00.000000Z",
-        "end_time": end,
-        "status": {"status_code": "ERROR" if error else "UNSET"},
-        "attributes": {
-            "gen_ai.operation.name": "chat",
-            "gen_ai.request.model": model,
-            "gen_ai.usage.input_tokens": in_tok,
-            "gen_ai.usage.output_tokens": out_tok,
-        },
-    })
+    return Span(
+        {
+            "name": "chat",
+            "context": {"trace_id": "0xt", "span_id": "0x1"},
+            "parent_id": "0x0",
+            "start_time": "2026-05-20T00:00:00.000000Z",
+            "end_time": end,
+            "status": {"status_code": "ERROR" if error else "UNSET"},
+            "attributes": {
+                "gen_ai.operation.name": "chat",
+                "gen_ai.request.model": model,
+                "gen_ai.usage.input_tokens": in_tok,
+                "gen_ai.usage.output_tokens": out_tok,
+            },
+        }
+    )
 
 
 def _tool(name, dur_ms, aborted=False):
@@ -28,15 +30,17 @@ def _tool(name, dur_ms, aborted=False):
     if aborted:
         attrs["cubepi.aborted"] = True
         attrs["error.type"] = "cubepi.aborted"
-    return Span({
-        "name": "execute_tool",
-        "context": {"trace_id": "0xt", "span_id": "0x2"},
-        "parent_id": "0x0",
-        "start_time": "2026-05-20T00:00:00.000000Z",
-        "end_time": end,
-        "status": {"status_code": "UNSET"},
-        "attributes": attrs,
-    })
+    return Span(
+        {
+            "name": "execute_tool",
+            "context": {"trace_id": "0xt", "span_id": "0x2"},
+            "parent_id": "0x0",
+            "start_time": "2026-05-20T00:00:00.000000Z",
+            "end_time": end,
+            "status": {"status_code": "UNSET"},
+            "attributes": attrs,
+        }
+    )
 
 
 def test_aggregate_by_model_tokens():

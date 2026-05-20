@@ -16,9 +16,16 @@ def _raw(span_id, parent_id, name, start, end=None, status="UNSET", attrs=None):
 
 
 def test_span_fields_and_duration():
-    sp = Span(_raw("0x1", None, "invoke_agent",
-                   "2026-05-20T00:00:00.000000Z", "2026-05-20T00:00:01.500000Z",
-                   attrs={"cubepi.run_id": "run-1"}))
+    sp = Span(
+        _raw(
+            "0x1",
+            None,
+            "invoke_agent",
+            "2026-05-20T00:00:00.000000Z",
+            "2026-05-20T00:00:01.500000Z",
+            attrs={"cubepi.run_id": "run-1"},
+        )
+    )
     assert sp.span_id == "0x1"
     assert sp.parent_id is None
     assert sp.name == "invoke_agent"
@@ -28,25 +35,63 @@ def test_span_fields_and_duration():
 
 
 def test_error_and_abort_distinct():
-    err = Span(_raw("0x2", "0x1", "chat gpt-x", "2026-05-20T00:00:00Z",
-                    "2026-05-20T00:00:00.1Z", status="ERROR",
-                    attrs={"gen_ai.operation.name": "chat"}))
-    aborted = Span(_raw("0x3", "0x1", "chat gpt-x", "2026-05-20T00:00:00Z",
-                        "2026-05-20T00:00:00.1Z",
-                        attrs={"gen_ai.operation.name": "chat",
-                               "cubepi.aborted": True,
-                               "error.type": "cubepi.aborted"}))
+    err = Span(
+        _raw(
+            "0x2",
+            "0x1",
+            "chat gpt-x",
+            "2026-05-20T00:00:00Z",
+            "2026-05-20T00:00:00.1Z",
+            status="ERROR",
+            attrs={"gen_ai.operation.name": "chat"},
+        )
+    )
+    aborted = Span(
+        _raw(
+            "0x3",
+            "0x1",
+            "chat gpt-x",
+            "2026-05-20T00:00:00Z",
+            "2026-05-20T00:00:00.1Z",
+            attrs={
+                "gen_ai.operation.name": "chat",
+                "cubepi.aborted": True,
+                "error.type": "cubepi.aborted",
+            },
+        )
+    )
     assert err.is_error is True and err.is_aborted is False
     assert aborted.is_error is False and aborted.is_aborted is True
 
 
 def test_operation_classification():
-    chat = Span(_raw("0x4", "0x1", "chat gpt-x", "2026-05-20T00:00:00Z",
-                     attrs={"gen_ai.operation.name": "chat"}))
-    tool = Span(_raw("0x5", "0x1", "execute_tool read", "2026-05-20T00:00:00Z",
-                     attrs={"gen_ai.operation.name": "execute_tool"}))
-    agent = Span(_raw("0x6", None, "invoke_agent", "2026-05-20T00:00:00Z",
-                      attrs={"gen_ai.operation.name": "invoke_agent"}))
+    chat = Span(
+        _raw(
+            "0x4",
+            "0x1",
+            "chat gpt-x",
+            "2026-05-20T00:00:00Z",
+            attrs={"gen_ai.operation.name": "chat"},
+        )
+    )
+    tool = Span(
+        _raw(
+            "0x5",
+            "0x1",
+            "execute_tool read",
+            "2026-05-20T00:00:00Z",
+            attrs={"gen_ai.operation.name": "execute_tool"},
+        )
+    )
+    agent = Span(
+        _raw(
+            "0x6",
+            None,
+            "invoke_agent",
+            "2026-05-20T00:00:00Z",
+            attrs={"gen_ai.operation.name": "invoke_agent"},
+        )
+    )
     assert chat.is_chat and not chat.is_tool
     assert tool.is_tool and not tool.is_chat
     assert agent.is_invoke_agent

@@ -10,20 +10,32 @@ def _write_run(directory: Path):
     f = directory / "2026-05-20" / "r1.jsonl"
     f.parent.mkdir(parents=True)
     rows = [
-        {"name": "invoke_agent",
-         "context": {"trace_id": "0xt", "span_id": "0x1"}, "parent_id": None,
-         "start_time": "2026-05-20T00:00:00Z", "end_time": "2026-05-20T00:00:02Z",
-         "status": {"status_code": "UNSET"},
-         "attributes": {"cubepi.run_id": "r1",
-                        "gen_ai.operation.name": "invoke_agent"}},
-        {"name": "chat gpt-x",
-         "context": {"trace_id": "0xt", "span_id": "0x2"}, "parent_id": "0x1",
-         "start_time": "2026-05-20T00:00:00Z", "end_time": "2026-05-20T00:00:01Z",
-         "status": {"status_code": "UNSET"},
-         "attributes": {"gen_ai.operation.name": "chat",
-                        "gen_ai.request.model": "gpt-x",
-                        "gen_ai.usage.input_tokens": 10,
-                        "gen_ai.usage.output_tokens": 5}},
+        {
+            "name": "invoke_agent",
+            "context": {"trace_id": "0xt", "span_id": "0x1"},
+            "parent_id": None,
+            "start_time": "2026-05-20T00:00:00Z",
+            "end_time": "2026-05-20T00:00:02Z",
+            "status": {"status_code": "UNSET"},
+            "attributes": {
+                "cubepi.run_id": "r1",
+                "gen_ai.operation.name": "invoke_agent",
+            },
+        },
+        {
+            "name": "chat gpt-x",
+            "context": {"trace_id": "0xt", "span_id": "0x2"},
+            "parent_id": "0x1",
+            "start_time": "2026-05-20T00:00:00Z",
+            "end_time": "2026-05-20T00:00:01Z",
+            "status": {"status_code": "UNSET"},
+            "attributes": {
+                "gen_ai.operation.name": "chat",
+                "gen_ai.request.model": "gpt-x",
+                "gen_ai.usage.input_tokens": 10,
+                "gen_ai.usage.output_tokens": 5,
+            },
+        },
     ]
     with f.open("w") as fh:
         for r in rows:

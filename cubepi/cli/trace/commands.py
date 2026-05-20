@@ -1,4 +1,5 @@
 """argparse wiring for `cubepi trace`."""
+
 from __future__ import annotations
 
 import argparse
@@ -21,19 +22,23 @@ def register(subparsers: "argparse._SubParsersAction") -> None:
     p_view = trace_sub.add_parser("view", help="render a run as a tree")
     p_view.add_argument("run", help="run id or path to a .jsonl file")
     _add_dir(p_view)
-    p_view.add_argument("-v", "--verbose", action="store_true",
-                        help="expand all span attributes")
-    p_view.add_argument("--content", action="store_true",
-                        help="expand gen_ai content messages")
+    p_view.add_argument(
+        "-v", "--verbose", action="store_true", help="expand all span attributes"
+    )
+    p_view.add_argument(
+        "--content", action="store_true", help="expand gen_ai content messages"
+    )
     p_view.set_defaults(handler=cmd_view)
 
     p_follow = trace_sub.add_parser("follow", help="stream spans as they complete")
     p_follow.add_argument("run", help="run id or path to a .jsonl file")
     _add_dir(p_follow)
-    p_follow.add_argument("--interval", type=float, default=0.5,
-                          help="poll interval seconds")
-    p_follow.add_argument("--timeout", type=float, default=None,
-                          help="exit after this many idle seconds")
+    p_follow.add_argument(
+        "--interval", type=float, default=0.5, help="poll interval seconds"
+    )
+    p_follow.add_argument(
+        "--timeout", type=float, default=None, help="exit after this many idle seconds"
+    )
     p_follow.set_defaults(handler=cmd_follow)
 
     p_stats = trace_sub.add_parser("stats", help="aggregate stats across runs")
@@ -45,8 +50,11 @@ def register(subparsers: "argparse._SubParsersAction") -> None:
 
 
 def _add_dir(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--dir", default=str(loader.DEFAULT_DIR),
-                        help="traces directory (default: ./cubepi-traces)")
+    parser.add_argument(
+        "--dir",
+        default=str(loader.DEFAULT_DIR),
+        help="traces directory (default: ./cubepi-traces)",
+    )
 
 
 def _emit_skipped(skipped: int) -> None:

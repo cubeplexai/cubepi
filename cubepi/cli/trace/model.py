@@ -1,4 +1,5 @@
 """Span wrapper + tree building over OTLP/JSON span dicts."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
