@@ -152,3 +152,31 @@ async def test_options_are_forwarded_to_request():
     assert kw["n"] == 2
     assert kw["output_format"] == "jpeg"
     assert kw["background"] == "transparent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "output_format,expected_media_type",
+    [
+        ("jpeg", "image/jpeg"),
+        ("webp", "image/webp"),
+        ("png", "image/png"),
+    ],
+)
+async def test_output_media_type_follows_output_format(
+    output_format, expected_media_type
+):
+    p = _provider_with_fake()
+    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    out = await p.generate_images(
+        model, ImagesContext(prompt="x"), options={"output_format": output_format}
+    )
+    assert out.output[0].media_type == expected_media_type
+
+
+@pytest.mark.asyncio
+async def test_output_media_type_defaults_to_png():
+    p = _provider_with_fake()
+    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    out = await p.generate_images(model, ImagesContext(prompt="x"))
+    assert out.output[0].media_type == "image/png"

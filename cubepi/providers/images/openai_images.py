@@ -15,6 +15,12 @@ _MEDIA_TYPE_EXT = {
     "image/webp": "webp",
 }
 
+_OUTPUT_FORMAT_MEDIA_TYPE = {
+    "png": "image/png",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+}
+
 
 class OpenAIImagesProvider:
     api = "openai-images"
@@ -71,11 +77,14 @@ class OpenAIImagesProvider:
         if not b64:
             return _err("image provider returned no image data")
 
+        out_format = params.get("output_format", "png")
+        media_type = _OUTPUT_FORMAT_MEDIA_TYPE.get(out_format, "image/png")
+
         return AssistantImages(
             api=model.api,
             provider=model.provider,
             model=model.id,
-            output=[ImageContent(source=b64, media_type="image/png")],
+            output=[ImageContent(source=b64, media_type=media_type)],
             stop_reason="stop",
         )
 
