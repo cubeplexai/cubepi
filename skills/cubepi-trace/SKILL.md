@@ -111,10 +111,20 @@ specific attribute. Useful attribute keys:
 
 ## Reading token / cache numbers
 
-`input_tokens` is the **uncached** input; `cache_read.input_tokens` is what was
-served from cache; they're disjoint. Total prompt = input + cache_read
-(+ cache_creation). So cache hit rate = `cache_read / (input + cache_read)` —
-dividing by `input` alone can exceed 100% and is wrong.
+Mind the convention — it differs between the trace and cubebox's UI:
+
+- **In the trace**, `gen_ai.usage.input_tokens` is the **inclusive total prompt**
+  (the recorder reconciles to OTel semconv by recording
+  `input + cache_read + cache_creation`; see `recorder.py
+  _set_usage_anthropic_like` / `_set_usage_openai_like`).
+  `gen_ai.usage.cache_read.input_tokens` is the portion served from cache and is
+  a **subset** of input_tokens. So from trace fields:
+  **cache hit rate = `cache_read / input_tokens`** (always ≤ 100%). Do NOT add
+  cache_read to the denominator here — that double-counts it.
+- **In cubebox's UI / cost layer**, `input_tokens` is the **uncached** new input
+  (cost.py bills input and cache_read separately), so there the rate is
+  `cache_read / (input + cache_read)`. Both yield the same true rate; only the
+  meaning of `input_tokens` differs. Don't mix the two formulas across layers.
 
 ## Tips
 
