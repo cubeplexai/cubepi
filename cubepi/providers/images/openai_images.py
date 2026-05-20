@@ -9,6 +9,13 @@ from cubepi.providers.images.registry import register_images_provider
 from cubepi.providers.images.types import AssistantImages, ImagesContext, ImagesModel
 
 
+_MEDIA_TYPE_EXT = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+}
+
+
 class OpenAIImagesProvider:
     api = "openai-images"
 
@@ -70,8 +77,9 @@ class OpenAIImagesProvider:
 
     @staticmethod
     def _to_file(img: ImageContent) -> io.BytesIO:
+        ext = _MEDIA_TYPE_EXT.get(img.media_type, "png")
         buf = io.BytesIO(base64.b64decode(img.source))
-        buf.name = "source.png"
+        buf.name = f"source.{ext}"
         return buf
 
 

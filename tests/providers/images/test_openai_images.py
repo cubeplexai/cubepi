@@ -109,3 +109,31 @@ async def test_sdk_exception_returns_error():
     out = await p.generate_images(model, ImagesContext(prompt="x"))
     assert out.stop_reason == "error"
     assert "rate limited" in out.error_message
+
+
+@pytest.mark.parametrize(
+    "media_type,expected_name",
+    [
+        ("image/png", "source.png"),
+        ("image/jpeg", "source.jpg"),
+        ("image/webp", "source.webp"),
+        ("image/gif", "source.png"),  # unknown → safe png default
+    ],
+)
+def test_to_file_preserves_input_format(media_type, expected_name):
+    img = ImageContent(source=base64.b64encode(b"SRC").decode(), media_type=media_type)
+    f = OpenAIImagesProvider._to_file(img)
+    assert f.name == expected_name
+
+
+def test_register_openai_images_registers_provider():
+    from cubepi.providers.images.openai_images import register_openai_images
+    from cubepi.providers.images.registry import get_images_provider
+
+    register_openai_images(api_key="sk-test")
+    assert get_images_provider("openai-images") is not None
+
+
+def test_base_url_is_accepted():
+    p = OpenAIImagesProvider(api_key="sk-test", base_url="https://example.test/v1")
+    assert p.api == "openai-images"
