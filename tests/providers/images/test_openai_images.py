@@ -180,3 +180,23 @@ async def test_output_media_type_defaults_to_png():
     model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
     out = await p.generate_images(model, ImagesContext(prompt="x"))
     assert out.output[0].media_type == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_all_images_returned_when_n_gt_1():
+    p = _provider_with_fake()
+
+    async def _multi(**kwargs):
+        return SimpleNamespace(
+            data=[
+                SimpleNamespace(b64_json=base64.b64encode(b"A").decode()),
+                SimpleNamespace(b64_json=base64.b64encode(b"B").decode()),
+                SimpleNamespace(b64_json=None),  # skipped: no image payload
+            ]
+        )
+
+    p._client.images.generate = _multi
+    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    out = await p.generate_images(model, ImagesContext(prompt="x"), options={"n": 2})
+    assert len(out.output) == 2
+    assert all(c.type == "image" for c in out.output)

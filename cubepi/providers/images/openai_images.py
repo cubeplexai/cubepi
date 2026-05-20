@@ -4,7 +4,7 @@ import base64
 import io
 from typing import Any
 
-from cubepi.providers.base import ImageContent
+from cubepi.providers.base import ImageContent, TextContent
 from cubepi.providers.images.registry import register_images_provider
 from cubepi.providers.images.types import AssistantImages, ImagesContext, ImagesModel
 
@@ -72,19 +72,23 @@ class OpenAIImagesProvider:
         except Exception as exc:  # noqa: BLE001
             return _err(str(exc))
 
-        data = getattr(resp, "data", None) or []
-        b64 = getattr(data[0], "b64_json", None) if data else None
-        if not b64:
-            return _err("image provider returned no image data")
-
         out_format = params.get("output_format", "png")
         media_type = _OUTPUT_FORMAT_MEDIA_TYPE.get(out_format, "image/png")
+
+        data = getattr(resp, "data", None) or []
+        images: list[ImageContent | TextContent] = [
+            ImageContent(source=item.b64_json, media_type=media_type)
+            for item in data
+            if getattr(item, "b64_json", None)
+        ]
+        if not images:
+            return _err("image provider returned no image data")
 
         return AssistantImages(
             api=model.api,
             provider=model.provider,
             model=model.id,
-            output=[ImageContent(source=b64, media_type=media_type)],
+            output=images,
             stop_reason="stop",
         )
 
