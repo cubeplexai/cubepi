@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cubepi.cli.trace.model import Span
+from cubepi.tracing import schema
 
 DEFAULT_DIR = Path("./cubepi-traces")
 _MIN = datetime.min.replace(tzinfo=timezone.utc)
@@ -29,11 +30,24 @@ def resolve_run(arg: str, directory: Path) -> list[Path]:
     if path.suffix == ".jsonl" and path.is_file():
         return [path]
     matches = sorted(directory.glob(f"*/{arg}.jsonl"))
-    if not matches:
+    if matches:
+        return matches
+    # No exact run id. `ls` truncates ids, so accept any prefix that names
+    # exactly one run; an ambiguous prefix is reported with its candidates.
+    by_run: dict[str, list[Path]] = {}
+    for f in sorted(directory.glob(f"*/{arg}*.jsonl")):
+        by_run.setdefault(f.stem, []).append(f)
+    if len(by_run) == 1:
+        (only,) = by_run.values()
+        return sorted(only)
+    if len(by_run) > 1:
+        candidates = ", ".join(sorted(by_run))
         raise RunResolutionError(
-            f"no trace file for run {arg!r} under {directory} (try `cubepi trace ls`)"
+            f"run prefix {arg!r} is ambiguous under {directory}: matches {candidates}"
         )
-    return matches
+    raise RunResolutionError(
+        f"no trace file for run {arg!r} under {directory} (try `cubepi trace ls`)"
+    )
 
 
 def load_run(files: list[Path]) -> tuple[list[Span], int]:
@@ -63,6 +77,47 @@ def load_run(files: list[Path]) -> tuple[list[Span], int]:
     return spans, skipped
 
 
+def _run_prompt(spans: list[Span]) -> str | None:
+    """The most recent human turn that drove the run, for `ls` identification.
+
+    Reads ``gen_ai.input.messages`` off the root invoke_agent span (only
+    present when the Tracer records content). Returns the last user text, so
+    successive runs in one thread stay distinguishable. ``None`` when content
+    isn't recorded or no user text is present.
+    """
+    root = next((s for s in spans if s.is_invoke_agent), None)
+    candidates = [root] if root is not None else spans
+    for sp in candidates:
+        raw = sp.attributes.get(schema.GEN_AI_INPUT_MESSAGES)
+        if not raw:
+            continue
+        try:
+            messages = json.loads(raw) if isinstance(raw, str) else raw
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(messages, list):
+            continue
+        last: str | None = None
+        for m in messages:
+            if not isinstance(m, dict) or m.get("role") != "user":
+                continue
+            parts = m.get("parts")
+            if isinstance(parts, list):
+                text = " ".join(
+                    str(p.get("content", ""))
+                    for p in parts
+                    if isinstance(p, dict) and p.get("type") == "text"
+                ).strip()
+            else:
+                content = m.get("content")
+                text = content.strip() if isinstance(content, str) else ""
+            if text:
+                last = text
+        if last is not None:
+            return last
+    return None
+
+
 @dataclass
 class RunSummary:
     run_id: str
@@ -71,6 +126,7 @@ class RunSummary:
     span_count: int
     has_error: bool
     duration_ms: float | None
+    prompt: str | None
 
 
 def list_runs(directory: Path, limit: int | None = None) -> list[RunSummary]:
@@ -101,6 +157,7 @@ def list_runs(directory: Path, limit: int | None = None) -> list[RunSummary]:
                 span_count=len(spans),
                 has_error=any(s.is_error for s in spans),
                 duration_ms=duration,
+                prompt=_run_prompt(spans),
             )
         )
     summaries.sort(key=lambda s: s.start or _MIN, reverse=True)

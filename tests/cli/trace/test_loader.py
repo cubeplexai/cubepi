@@ -52,6 +52,43 @@ def test_resolve_zero_match_errors(tmp_path):
         resolve_run("missing", tmp_path)
 
 
+def test_resolve_by_unique_prefix(tmp_path):
+    # `ls` truncates run ids, so a copied prefix must resolve to its one run.
+    f = tmp_path / "2026-05-20" / "66f1806f-4c90-4d50.jsonl"
+    _write(f, [_span("0x1", None, "invoke_agent", "2026-05-20T00:00:00Z", "r1")])
+    assert resolve_run("66f1806f", tmp_path) == [f]
+
+
+def test_resolve_prefix_merges_cross_midnight(tmp_path):
+    f1 = tmp_path / "2026-05-19" / "abc123def.jsonl"
+    f2 = tmp_path / "2026-05-20" / "abc123def.jsonl"
+    _write(f1, [_span("0x1", None, "invoke_agent", "2026-05-19T23:59:59Z", "r1")])
+    _write(f2, [_span("0x2", "0x1", "chat", "2026-05-20T00:00:01Z", "r1")])
+    assert sorted(resolve_run("abc123", tmp_path)) == sorted([f1, f2])
+
+
+def test_resolve_ambiguous_prefix_errors(tmp_path):
+    _write(
+        tmp_path / "2026-05-20" / "abc111.jsonl", [_span("0x1", None, "x", None, "r1")]
+    )
+    _write(
+        tmp_path / "2026-05-20" / "abc222.jsonl", [_span("0x2", None, "y", None, "r2")]
+    )
+    with pytest.raises(RunResolutionError, match="ambiguous"):
+        resolve_run("abc", tmp_path)
+
+
+def test_resolve_exact_match_preferred_over_prefix(tmp_path):
+    # An exact run id must not be shadowed by a longer-named sibling run.
+    exact = tmp_path / "2026-05-20" / "run1.jsonl"
+    _write(exact, [_span("0x1", None, "x", None, "r1")])
+    _write(
+        tmp_path / "2026-05-20" / "run1extra.jsonl",
+        [_span("0x2", None, "y", None, "r2")],
+    )
+    assert resolve_run("run1", tmp_path) == [exact]
+
+
 def test_load_run_skips_malformed(tmp_path):
     f = tmp_path / "2026-05-20" / "r1.jsonl"
     f.parent.mkdir(parents=True)
@@ -98,6 +135,120 @@ def test_list_runs(tmp_path):
     assert len(runs) == 1
     assert runs[0].run_id == "r1"
     assert runs[0].span_count == 2
+
+
+def test_list_runs_extracts_prompt(tmp_path):
+    msgs = json.dumps(
+        [
+            {"role": "user", "parts": [{"type": "text", "content": "first question"}]},
+            {"role": "assistant", "parts": [{"type": "text", "content": "answer"}]},
+            {
+                "role": "user",
+                "parts": [{"type": "text", "content": "北京明天天气如何\n\n"}],
+            },
+        ]
+    )
+    f = tmp_path / "2026-05-20" / "r1.jsonl"
+    _write(
+        f,
+        [
+            _span(
+                "0x1",
+                None,
+                "invoke_agent",
+                "2026-05-20T00:00:00Z",
+                "r1",
+                **{
+                    "gen_ai.operation.name": "invoke_agent",
+                    "gen_ai.input.messages": msgs,
+                },
+            ),
+        ],
+    )
+    runs = list_runs(tmp_path)
+    # Most recent human turn, so multiple runs in a thread stay distinguishable.
+    assert runs[0].prompt == "北京明天天气如何"
+
+
+def test_list_runs_prompt_from_string_content(tmp_path):
+    # Older message shape: content is a bare string, not parts.
+    msgs = json.dumps([{"role": "user", "content": "  plain string prompt  "}])
+    f = tmp_path / "2026-05-20" / "r1.jsonl"
+    _write(
+        f,
+        [
+            _span(
+                "0x1",
+                None,
+                "invoke_agent",
+                "2026-05-20T00:00:00Z",
+                "r1",
+                **{
+                    "gen_ai.operation.name": "invoke_agent",
+                    "gen_ai.input.messages": msgs,
+                },
+            )
+        ],
+    )
+    assert list_runs(tmp_path)[0].prompt == "plain string prompt"
+
+
+def test_list_runs_prompt_handles_bad_messages(tmp_path):
+    # Malformed JSON and a non-list payload both yield no prompt, never raise.
+    f1 = tmp_path / "2026-05-20" / "r1.jsonl"
+    _write(
+        f1,
+        [
+            _span(
+                "0x1",
+                None,
+                "invoke_agent",
+                "2026-05-20T00:00:00Z",
+                "r1",
+                **{
+                    "gen_ai.operation.name": "invoke_agent",
+                    "gen_ai.input.messages": "{ not json",
+                },
+            )
+        ],
+    )
+    f2 = tmp_path / "2026-05-20" / "r2.jsonl"
+    _write(
+        f2,
+        [
+            _span(
+                "0x2",
+                None,
+                "invoke_agent",
+                "2026-05-20T00:00:01Z",
+                "r2",
+                **{
+                    "gen_ai.operation.name": "invoke_agent",
+                    "gen_ai.input.messages": '"a string"',
+                },
+            )
+        ],
+    )
+    prompts = {r.run_id: r.prompt for r in list_runs(tmp_path)}
+    assert prompts == {"r1": None, "r2": None}
+
+
+def test_list_runs_prompt_none_without_content(tmp_path):
+    f = tmp_path / "2026-05-20" / "r1.jsonl"
+    _write(
+        f,
+        [
+            _span(
+                "0x1",
+                None,
+                "invoke_agent",
+                "2026-05-20T00:00:00Z",
+                "r1",
+                **{"gen_ai.operation.name": "invoke_agent"},
+            )
+        ],
+    )
+    assert list_runs(tmp_path)[0].prompt is None
 
 
 def test_list_runs_merges_cross_midnight(tmp_path):

@@ -71,6 +71,28 @@ class Span:
         return self.status_code == "ERROR"
 
     @property
+    def status_description(self) -> str | None:
+        return (self.raw.get("status") or {}).get("description")
+
+    @property
+    def events(self) -> list[dict[str, Any]]:
+        return self.raw.get("events") or []
+
+    @property
+    def error_message(self) -> str | None:
+        """Human-readable error text for an errored span.
+
+        Prefers the exception event's full message (OTel status descriptions
+        get truncated); falls back to the status description.
+        """
+        for ev in self.events:
+            if ev.get("name") == schema.EVENT_GEN_AI_EXCEPTION:
+                msg = (ev.get("attributes") or {}).get("exception.message")
+                if msg:
+                    return str(msg)
+        return self.status_description
+
+    @property
     def is_aborted(self) -> bool:
         # The recorder sets a boolean cubepi.aborted attribute (and also an
         # error.type="cubepi.aborted" string). The boolean is the canonical

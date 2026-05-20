@@ -71,6 +71,10 @@ def _build_rich_tree(roots: list[TreeNode], verbose: bool, content: bool):
 
     def add(parent_tree, node: TreeNode) -> None:
         branch = parent_tree.add(_node_label(node))
+        if node.span.is_error:
+            msg = node.span.error_message
+            if msg:
+                branch.add(f"[red]error:[/red] {msg}")
         if verbose:
             for k, v in node.span.attributes.items():
                 branch.add(f"[dim]{k}[/dim] = {v!r}")
@@ -128,11 +132,13 @@ def render_runs(runs: list[RunSummary]) -> None:
     table = Table(title="cubepi runs")
     for col in ("started", "run_id", "spans", "status", "duration"):
         table.add_column(col)
+    table.add_column("input", max_width=48, no_wrap=True, overflow="ellipsis")
     for r in runs:
         started = r.start.isoformat() if r.start else "?"
         dur = f"{r.duration_ms:.0f}ms" if r.duration_ms is not None else "?"
         status = "[red]error[/red]" if r.has_error else "ok"
-        table.add_row(started, r.run_id, str(r.span_count), status, dur)
+        prompt = " ".join(r.prompt.split()) if r.prompt else "[dim]—[/dim]"
+        table.add_row(started, r.run_id, str(r.span_count), status, dur, prompt)
     console.print(table)
 
 
