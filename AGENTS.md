@@ -56,8 +56,8 @@ talk through and confirm requirements with the user before writing the spec.
 While forming it, research prior art — **pi-agent-core, langgraph, claude code** —
 to find best practices, but let our own requirements and design philosophy drive
 the result. Call out notable divergences ("library does X, cubepi does Y because
-Z") so they can be reviewed. Specs go in `docs/specs/` (dated
-`YYYY-MM-DD-<topic>.md`), plans in `docs/plans/` — not under `docs/superpowers/`.
+Z") so they can be reviewed. Specs go in `dev/specs/` (dated
+`YYYY-MM-DD-<topic>.md`), plans in `dev/plans/`.
 
 **3. Codex review loop — ask before entering it.** Once spec/plan/code are ready,
 **check with the user before starting the codex review loop.** If they say go: run
