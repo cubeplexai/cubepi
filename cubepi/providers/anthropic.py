@@ -151,10 +151,11 @@ class AnthropicProvider(BaseProvider):
         cap = self._resolve_capability(model.id)
 
         cache_control = self._get_cache_control()
-        api_messages = [self._convert_message(m) for m in messages]
+        api_messages, breakpoints = self._build_api_messages(messages)
         if cache_control:
             indices = self._cache_policy.message_breakpoint_indices(messages)
-            self._apply_indices_markers(api_messages, indices, cache_control)
+            targets = [breakpoints[i] for i in indices if 0 <= i < len(breakpoints)]
+            self._apply_breakpoint_markers(api_messages, targets, cache_control)
 
         kwargs: dict[str, Any] = {
             "model": model.id,
@@ -331,29 +332,40 @@ class AnthropicProvider(BaseProvider):
             cc["ttl"] = "1h"
         return cc
 
-    def _apply_indices_markers(
+    def _apply_breakpoint_markers(
         self,
         api_messages: list[dict[str, Any]],
-        indices: list[int],
+        targets: list[tuple[int, int]],
         cache_control: dict[str, str],
     ) -> None:
-        """Apply cache_control to the last content block of each indexed message."""
-        for idx in indices:
-            if 0 <= idx < len(api_messages):
-                msg = api_messages[idx]
-                content = msg.get("content")
-                if isinstance(content, list) and content:
-                    last_block = content[-1]
-                    if isinstance(last_block, dict):
-                        content[-1] = {**last_block, "cache_control": cache_control}
-                elif isinstance(content, str):
-                    msg["content"] = [
-                        {
-                            "type": "text",
-                            "text": content,
-                            "cache_control": cache_control,
-                        }
-                    ]
+        """Apply cache_control to specific ``(message, block)`` positions.
+
+        ``targets`` come from :meth:`_build_api_messages`, which tracks the exact
+        block each source message contributed. Marking that block (rather than
+        always ``content[-1]``) keeps a breakpoint on its intended message even
+        after parallel tool results are merged into one message.
+        """
+        for msg_idx, block_idx in targets:
+            if not (0 <= msg_idx < len(api_messages)):
+                continue  # pragma: no cover — stream pre-filters indices
+            msg = api_messages[msg_idx]
+            content = msg.get("content")
+            if isinstance(content, list) and content:
+                if 0 <= block_idx < len(content) and isinstance(
+                    content[block_idx], dict
+                ):
+                    content[block_idx] = {
+                        **content[block_idx],
+                        "cache_control": cache_control,
+                    }
+            elif isinstance(content, str):
+                msg["content"] = [
+                    {
+                        "type": "text",
+                        "text": content,
+                        "cache_control": cache_control,
+                    }
+                ]
 
     @staticmethod
     def _apply_message_cache_control(
@@ -382,6 +394,42 @@ class AnthropicProvider(BaseProvider):
             last_msg["content"] = [
                 {"type": "text", "text": content, "cache_control": cache_control}
             ]
+
+    @staticmethod
+    def _build_api_messages(
+        messages: list[Message],
+    ) -> tuple[list[dict[str, Any]], list[tuple[int, int]]]:
+        """Convert messages, coalescing a contiguous run of tool results.
+
+        Anthropic requires every ``tool_result`` for a parallel-tool-call turn
+        to sit in the single ``user`` message immediately after the assistant's
+        ``tool_use`` blocks. cubepi records one ``ToolResultMessage`` per call,
+        so consecutive ones are merged into one user message here.
+
+        Returns ``(api_messages, breakpoints)`` where ``breakpoints[i]`` is the
+        ``(api_index, block_index)`` of the LAST content block that source
+        message ``i`` contributed. Merging several sources into one message
+        gives each a distinct block offset, so a cache breakpoint that targets
+        an interior tool result stays on that result's block instead of sliding
+        to the end of the merge.
+        """
+        api_messages: list[dict[str, Any]] = []
+        breakpoints: list[tuple[int, int]] = []
+        prev_tool_result = False
+        for msg in messages:
+            converted = AnthropicProvider._convert_message(msg)
+            is_tool_result = isinstance(msg, ToolResultMessage)
+            if is_tool_result and prev_tool_result and api_messages:
+                merged = api_messages[-1]["content"]
+                merged.extend(converted["content"])
+                breakpoints.append((len(api_messages) - 1, len(merged) - 1))
+            else:
+                api_messages.append(converted)
+                breakpoints.append(
+                    (len(api_messages) - 1, len(converted["content"]) - 1)
+                )
+            prev_tool_result = is_tool_result
+        return api_messages, breakpoints
 
     @staticmethod
     def _convert_message(msg: Message) -> dict[str, Any]:
