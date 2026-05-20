@@ -571,6 +571,65 @@ class TestOpenAIStreamError:
             assert "error" in types
 
     @pytest.mark.asyncio
+    async def test_error_result_carries_provider_and_model(self):
+        with patch("openai.AsyncOpenAI") as mock_openai:
+            mock_client = MagicMock()
+            mock_openai.return_value = mock_client
+            mock_client.chat = MagicMock()
+            mock_client.chat.completions = MagicMock()
+            mock_client.chat.completions.create = AsyncMock(
+                side_effect=RuntimeError("API down")
+            )
+
+            provider = OpenAIProvider(api_key="test-key")
+            provider._client = mock_client
+
+            ms = await provider.stream(
+                _model(),
+                [UserMessage(content=[TextContent(text="hi")])],
+            )
+            error_events = [e async for e in ms if e.type == "error"]
+            result = await ms.result()
+
+            assert result.provider_id == "openai"
+            assert result.model_id == "gpt-4o"
+            assert "openai/gpt-4o" in (result.error_message or "")
+            assert error_events and "openai/gpt-4o" in (
+                error_events[0].error_message or ""
+            )
+
+    @pytest.mark.asyncio
+    async def test_error_message_surfaces_underlying_cause(self):
+        try:
+            raise OSError("Cannot connect to proxy 192.168.1.111:7892")
+        except OSError as root:
+            api_err = RuntimeError("Connection error.")
+            api_err.__cause__ = root
+
+        with patch("openai.AsyncOpenAI") as mock_openai:
+            mock_client = MagicMock()
+            mock_openai.return_value = mock_client
+            mock_client.chat = MagicMock()
+            mock_client.chat.completions = MagicMock()
+            mock_client.chat.completions.create = AsyncMock(side_effect=api_err)
+
+            provider = OpenAIProvider(api_key="test-key")
+            provider._client = mock_client
+
+            ms = await provider.stream(
+                _model(),
+                [UserMessage(content=[TextContent(text="hi")])],
+            )
+            async for _ in ms:
+                pass
+            result = await ms.result()
+
+            assert "Connection error." in (result.error_message or "")
+            assert "Cannot connect to proxy 192.168.1.111:7892" in (
+                result.error_message or ""
+            )
+
+    @pytest.mark.asyncio
     async def test_base_exception_reraised(self):
         """BaseException subclass (non-Exception) should set error result and re-raise."""
 

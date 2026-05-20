@@ -825,6 +825,26 @@ class TestAnthropicStreamError:
         assert "error" in event_types
 
     @pytest.mark.asyncio
+    async def test_error_result_carries_provider_and_model(self):
+        provider = _make_provider("none")
+        mock_client = MagicMock()
+        mock_client.messages = MagicMock()
+        mock_client.messages.stream = MagicMock(side_effect=RuntimeError("API down"))
+        provider._client = mock_client
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model, [UserMessage(content=[TextContent(text="hi")])]
+        )
+        async for _ in ms:
+            pass
+        result = await ms.result()
+
+        assert result.provider_id == "anthropic"
+        assert result.model_id == model.id
+        assert f"anthropic/{model.id}" in (result.error_message or "")
+
+    @pytest.mark.asyncio
     async def test_base_exception_reraises(self):
         """When the SDK raises BaseException (not Exception), it should be re-raised on the task."""
 
