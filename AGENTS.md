@@ -59,11 +59,24 @@ the result. Call out notable divergences ("library does X, cubepi does Y because
 Z") so they can be reviewed. Specs go in `dev/specs/` (dated
 `YYYY-MM-DD-<topic>.md`), plans in `dev/plans/`.
 
-**3. Codex review loop — ask before entering it.** Once spec/plan/code are ready,
-**check with the user before starting the codex review loop.** If they say go: run
-it autonomously without stopping to ask mid-flow — write the spec → codex review;
-write the plan → codex review; write the code → codex review and iterate until
-codex is OK. Use the `codex:rescue` subagent for reviews.
+Codex reviews happen in **two distinct phases** — local (step 3) and on the PR
+(step 5).
 
-**4. Ship via PR.** Never commit to `main` directly. Open a PR from the worktree
-branch and merge only after review/CI passes.
+**3. Local codex review loop — ask before entering it.** Once spec/plan/code are
+ready, **check with the user before starting the local codex review loop.** If
+they say go: run it autonomously without stopping to ask mid-flow — write the spec
+→ codex review; write the plan → codex review; write the code → codex review and
+iterate until codex is OK. Use the `codex:rescue` subagent for these reviews.
+
+**4. Open the PR.** Never commit to `main` directly (it's a protected branch).
+Open a PR from the worktree branch.
+
+**5. PR codex review loop.** Opening the PR triggers an automatic codex review.
+After that it is **not** automatic — drive it manually:
+
+- Poll for feedback every **~2 minutes** (check the PR's review comments).
+- Resolve every piece of feedback, pushing fixes to the branch.
+- Once resolved, **reply `@codex` on the PR to request another review pass.**
+- Repeat poll → fix → `@codex` until codex reports no remaining issues.
+
+Merge only after the PR codex review is clean and CI passes.
