@@ -68,8 +68,11 @@ they say go: run it autonomously without stopping to ask mid-flow — write the 
 → codex review; write the plan → codex review; write the code → codex review and
 iterate until codex is OK. Use the `codex:rescue` subagent for these reviews.
 
-**4. Open the PR.** Never commit to `main` directly (it's a protected branch).
-Open a PR from the worktree branch.
+**4. Document the feature, then open the PR.** Every completed feature **must**
+ship with its user-facing docs — add or update the relevant page under
+`website/docs/` (e.g. `guides/`, `getting-started/`, `recipes/`) in the same PR.
+A feature without docs is not done. Then open a PR from the worktree branch
+(never commit to `main` directly — it's a protected branch).
 
 **5. PR codex review loop.** Opening the PR triggers an automatic codex review.
 After that it is **not** automatic — drive it manually:
