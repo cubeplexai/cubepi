@@ -824,6 +824,37 @@ class TestAnthropicParallelToolResults:
         assert messages[2]["content"][-1]["cache_control"] == {"type": "ephemeral"}
 
     @pytest.mark.asyncio
+    async def test_breakpoint_on_interior_result_keeps_its_block(self):
+        # A custom policy that targets the FIRST result of a parallel run must
+        # mark THAT result's block, not slide to the last block of the merge.
+        class _FirstResult:
+            def mark_system(self) -> bool:
+                return False
+
+            def mark_last_tool(self) -> bool:
+                return False
+
+            def message_breakpoint_indices(self, messages):
+                return [2]  # the first ToolResultMessage in _history()
+
+        mock_stream = _MockAnthropicStream([], _make_final_message(content=[]))
+        provider = AnthropicProvider(
+            api_key="x", cache_retention="short", cache_policy=_FirstResult()
+        )
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        ms = await provider.stream(_anthropic_model(), self._history())
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        results = mock_client.messages.stream.call_args[1]["messages"][2]["content"]
+        # call_0 (first result) carries the breakpoint; call_1 does not.
+        assert results[0]["tool_use_id"] == "call_0"
+        assert results[0]["cache_control"] == {"type": "ephemeral"}
+        assert "cache_control" not in results[1]
+
+    @pytest.mark.asyncio
     async def test_single_tool_result_not_affected(self):
         history = [
             UserMessage(content=[TextContent(text="time?")]),
