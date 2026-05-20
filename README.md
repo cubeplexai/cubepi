@@ -276,6 +276,18 @@ No prompts / model outputs are recorded by default. Opt in with
 with `Meter(...)` for `gen_ai.client.operation.duration` / TTFC /
 token-usage histograms. Full guide: https://cubepi.pages.dev/docs/guides/tracing/overview
 
+#### Inspecting traces from the terminal
+
+With `JsonlSpanExporter` writing to `./cubepi-traces`, inspect runs with the
+`cubepi trace` CLI (install the extra: `pip install cubepi[trace-cli]`):
+
+```bash
+cubepi trace ls                 # list recent runs
+cubepi trace view <run_id>      # render a run as a tree
+cubepi trace follow <run_id>    # stream spans as they complete
+cubepi trace stats --by model   # token / latency / error aggregates
+```
+
 ## Requirements
 
 - Python >= 3.11
