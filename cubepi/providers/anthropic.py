@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any, Literal, Protocol, runtime_checkable
 
@@ -271,6 +272,10 @@ class AnthropicProvider(BaseProvider):
                         model,
                     )
 
+                    # Accumulate streamed tool-call args JSON per content index
+                    # so toolcall_end can carry parsed arguments (the Anthropic
+                    # stream only delivers them as incremental partial_json).
+                    tool_args_buffers: dict[int, str] = {}
                     async for event in stream:
                         if opts.signal and opts.signal.is_set():
                             aborted = partial.model_copy(
@@ -290,7 +295,9 @@ class AnthropicProvider(BaseProvider):
                             ms.set_result(aborted)
                             return
 
-                        await self._handle_event(event, partial, ms, model)
+                        await self._handle_event(
+                            event, partial, ms, model, tool_args_buffers
+                        )
 
                     final_msg = await stream.get_final_message()
                     result = self._convert_response(final_msg, model)
@@ -502,6 +509,7 @@ class AnthropicProvider(BaseProvider):
         partial: AssistantMessage,
         ms: MessageStream,
         model: Model,
+        tool_args_buffers: dict[int, str],
     ) -> None:
         etype = getattr(event, "type", "")
         if etype == "content_block_start":
@@ -576,6 +584,9 @@ class AnthropicProvider(BaseProvider):
                     model,
                 )
             elif hasattr(delta, "partial_json"):
+                tool_args_buffers[idx] = (
+                    tool_args_buffers.get(idx, "") + delta.partial_json
+                )
                 await self._emit(
                     ms,
                     StreamEvent(
@@ -611,6 +622,19 @@ class AnthropicProvider(BaseProvider):
                         model,
                     )
                 elif isinstance(last, ToolCall):
+                    # Parse the accumulated args JSON onto the block so the
+                    # toolcall_end partial exposes real arguments (not the empty
+                    # dict from toolcall_start). Malformed/empty JSON falls back
+                    # to {} — the final message still carries authoritative args.
+                    raw = tool_args_buffers.get(idx, "")
+                    try:
+                        parsed = json.loads(raw) if raw.strip() else {}
+                    except json.JSONDecodeError:
+                        parsed = {}
+                    if isinstance(parsed, dict) and parsed:
+                        partial.content[-1] = ToolCall(
+                            id=last.id, name=last.name, arguments=parsed
+                        )
                     await self._emit(
                         ms,
                         StreamEvent(
