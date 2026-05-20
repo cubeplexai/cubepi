@@ -151,10 +151,11 @@ class AnthropicProvider(BaseProvider):
         cap = self._resolve_capability(model.id)
 
         cache_control = self._get_cache_control()
-        api_messages = [self._convert_message(m) for m in messages]
+        api_messages, orig_to_api = self._build_api_messages(messages)
         if cache_control:
             indices = self._cache_policy.message_breakpoint_indices(messages)
-            self._apply_indices_markers(api_messages, indices, cache_control)
+            mapped = [orig_to_api[i] for i in indices if 0 <= i < len(orig_to_api)]
+            self._apply_indices_markers(api_messages, mapped, cache_control)
 
         kwargs: dict[str, Any] = {
             "model": model.id,
@@ -382,6 +383,36 @@ class AnthropicProvider(BaseProvider):
             last_msg["content"] = [
                 {"type": "text", "text": content, "cache_control": cache_control}
             ]
+
+    @staticmethod
+    def _build_api_messages(
+        messages: list[Message],
+    ) -> tuple[list[dict[str, Any]], list[int]]:
+        """Convert messages, coalescing a contiguous run of tool results.
+
+        Anthropic requires every ``tool_result`` for a parallel-tool-call turn
+        to sit in the single ``user`` message immediately after the assistant's
+        ``tool_use`` blocks. cubepi records one ``ToolResultMessage`` per call,
+        so consecutive ones are merged into one user message here.
+
+        Returns ``(api_messages, orig_to_api)`` where ``orig_to_api[i]`` is the
+        index in ``api_messages`` that source message ``i`` landed in — several
+        sources can collapse to one. Callers use it to remap cache breakpoints.
+        """
+        api_messages: list[dict[str, Any]] = []
+        orig_to_api: list[int] = []
+        prev_tool_result = False
+        for msg in messages:
+            converted = AnthropicProvider._convert_message(msg)
+            is_tool_result = isinstance(msg, ToolResultMessage)
+            if is_tool_result and prev_tool_result and api_messages:
+                api_messages[-1]["content"].extend(converted["content"])
+                orig_to_api.append(len(api_messages) - 1)
+            else:
+                api_messages.append(converted)
+                orig_to_api.append(len(api_messages) - 1)
+            prev_tool_result = is_tool_result
+        return api_messages, orig_to_api
 
     @staticmethod
     def _convert_message(msg: Message) -> dict[str, Any]:
