@@ -84,3 +84,57 @@ async def test_tracer_attach_unwinds_recorder_on_mcp_register_failure(monkeypatc
         _assert_no_listeners(agent, provider)
     finally:
         await tracer.shutdown()
+
+
+async def test_recorder_attach_cleanup_swallows_detacher_errors(monkeypatch):
+    """Unwind itself must be fault-tolerant: a detach callable raising during
+    cleanup is swallowed so the ORIGINAL subscription error is what surfaces."""
+    agent, provider, tracer = _build_unattached()
+    try:
+
+        def _raising_detacher():  # noqa: ANN202
+            raise RuntimeError("detacher boom")
+
+        def _raising_unsub():  # noqa: ANN202
+            raise RuntimeError("unsub boom")
+
+        # subscribe_request "succeeds" but hands back a detacher that blows up
+        # during unwind; the agent unsubscribe also blows up.
+        monkeypatch.setattr(provider, "subscribe_request", lambda cb: _raising_detacher)
+        monkeypatch.setattr(agent, "subscribe", lambda listener: _raising_unsub)
+
+        def _boom_chunk(cb):  # noqa: ANN001, ANN202
+            raise RuntimeError("subscribe_chunk failed")
+
+        monkeypatch.setattr(provider, "subscribe_chunk", _boom_chunk)
+
+        with pytest.raises(RuntimeError, match="subscribe_chunk failed"):
+            tracer.attach(agent)
+    finally:
+        await tracer.shutdown()
+
+
+async def test_tracer_attach_cleanup_swallows_recorder_detach_error(monkeypatch):
+    """If MCP registration fails AND the recorder's own detach raises during
+    unwind, the original register error must still surface."""
+    agent, provider, tracer = _build_unattached()
+    try:
+
+        def _raising_unsub():  # noqa: ANN202
+            raise RuntimeError("unsub boom")
+
+        # recorder.attach succeeds, but its detach will raise (agent unsub
+        # raises inside the recorder's synchronous cleanup).
+        monkeypatch.setattr(agent, "subscribe", lambda listener: _raising_unsub)
+
+        import cubepi.mcp._tracing as mcp_tracing
+
+        def _boom(_provider):  # noqa: ANN001, ANN202
+            raise RuntimeError("register_provider failed")
+
+        monkeypatch.setattr(mcp_tracing, "register_provider", _boom)
+
+        with pytest.raises(RuntimeError, match="register_provider failed"):
+            tracer.attach(agent)
+    finally:
+        await tracer.shutdown()
