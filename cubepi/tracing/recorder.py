@@ -203,14 +203,32 @@ class Recorder:
         # alias should one be added later.
         provider = getattr(agent, "_provider", None) or getattr(agent, "provider", None)
         provider_detachers: list[Callable[[], None]] = []
-        if isinstance(provider, BaseProvider):
-            provider_detachers.append(
-                provider.subscribe_request(self._on_provider_request)
-            )
-            provider_detachers.append(provider.subscribe_chunk(self._on_provider_chunk))
-            provider_detachers.append(
-                provider.subscribe_response(self._on_provider_response)
-            )
+        # Attach must be all-or-nothing: if a later subscription raises, unwind
+        # the ones already registered (incl. the agent listener) and re-raise,
+        # so a failed attach() leaves no dangling listeners. The caller never
+        # gets a ``detach`` callable on this path, so we cannot defer cleanup.
+        try:
+            if isinstance(provider, BaseProvider):
+                provider_detachers.append(
+                    provider.subscribe_request(self._on_provider_request)
+                )
+                provider_detachers.append(
+                    provider.subscribe_chunk(self._on_provider_chunk)
+                )
+                provider_detachers.append(
+                    provider.subscribe_response(self._on_provider_response)
+                )
+        except BaseException:
+            for d in provider_detachers:
+                try:
+                    d()
+                except Exception:
+                    pass
+            try:
+                unsub_agent()
+            except Exception:
+                pass
+            raise
 
         def _sync_detach() -> None:
             """All synchronous cleanup: unsubscribe + close any spans

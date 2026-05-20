@@ -185,6 +185,10 @@ class Tracer:
         # removes this attach's registration — multiple attaches of the
         # same Tracer to different agents must not clobber each other
         # (see codex round-6 review on PR #86).
+        #
+        # Keep attach all-or-nothing: if MCP registration fails for any reason
+        # other than the optional module being absent, undo the recorder attach
+        # before re-raising so we don't leak its subscriptions.
         mcp_token: object | None = None
         try:
             from cubepi.mcp import _tracing as mcp_tracing
@@ -192,6 +196,12 @@ class Tracer:
             mcp_token = mcp_tracing.register_provider(self._provider)
         except ImportError:  # pragma: no cover — mcp module always present
             mcp_tracing = None
+        except BaseException:
+            try:
+                recorder_detach()
+            except Exception:
+                pass
+            raise
 
         def detach():
             # Forward the recorder's detach return — when called from
