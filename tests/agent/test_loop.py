@@ -225,7 +225,9 @@ class TestAgentLoop:
         async def inject_on_toolcall(message, ctx, *, signal=None):
             if any(isinstance(c, ToolCall) for c in message.content):
                 return TurnAction(
-                    inject_messages=[UserMessage(content=[TextContent(text="REMINDER")])]
+                    inject_messages=[
+                        UserMessage(content=[TextContent(text="REMINDER")])
+                    ]
                 )
             return None
 
