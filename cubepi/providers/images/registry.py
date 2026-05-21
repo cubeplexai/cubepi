@@ -17,12 +17,15 @@ class ImagesProvider(Protocol):
     ) -> AssistantImages: ...
 
 
-_REGISTRY: dict[str, ImagesProvider] = {}
+_PROVIDER_CLASSES: dict[str, type[ImagesProvider]] = {}
 
 
-def register_images_provider(provider: ImagesProvider) -> None:
-    _REGISTRY[provider.api] = provider
+def register_images_provider_class(api: str, cls: type[ImagesProvider]) -> None:
+    _PROVIDER_CLASSES[api] = cls
 
 
-def get_images_provider(api: str) -> ImagesProvider | None:
-    return _REGISTRY.get(api)
+def create_images_provider(api: str, **kwargs: Any) -> ImagesProvider:
+    cls = _PROVIDER_CLASSES.get(api)
+    if cls is None:
+        raise ValueError(f"No images provider registered for api: {api}")
+    return cls(**kwargs)  # type: ignore[call-arg]
