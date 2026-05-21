@@ -195,15 +195,20 @@ There's no built-in branching primitive; flow control happens through
   equivalent. CubePi's flow is linear so the picture would be a single
   line anyway.
 - **Time travel / fork** at arbitrary checkpoints. The Postgres schema
-  has fork columns but no API surface in v0.3.
-- **LangSmith / Langfuse vendor SDKs.** CubePi ships native
-  OpenTelemetry tracing instead — see [Tracing →
-  Overview](../guides/tracing/overview). Anything that speaks OTLP
-  (LangSmith's OTel endpoint, Langfuse v3, Jaeger, Tempo, Honeycomb,
-  Datadog, …) drops in via `Tracer(exporters=[OTLPSpanExporter(...)])`.
+  has fork columns but no API surface in v0.4.
+- **First-party UI for traces.** CubePi doesn't render its own trace
+  visualizer the way LangSmith / Langfuse do; instead it emits
+  vendor-neutral OpenTelemetry — point any OTLP backend
+  (LangSmith's OTel endpoint, Langfuse v3, Jaeger, Tempo,
+  Honeycomb, Datadog, …) at it via
+  `Tracer(exporters=[OTLPSpanExporter(...)])`. See
+  [Tracing → OTLP & Backends](../guides/tracing/otlp).
 
 ## What CubePi does that langgraph doesn't
 
+- **Native OpenTelemetry tracing** — `Tracer` + `Meter` emit OTel
+  spans + GenAI-semconv attributes out of the box, ingestible by
+  any OTLP backend. See [Tracing → Overview](../guides/tracing/overview).
 - **Native async-first** — every entry point is async. No
   `app.invoke` vs. `app.ainvoke` split.
 - **Append-only persistence** — O(1) DB writes, JSONB-queryable

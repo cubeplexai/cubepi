@@ -5,7 +5,7 @@ const ROWS: { tool: string; cmd: string }[] = [
   { tool: 'pip',    cmd: 'pip install cubepi' },
   { tool: 'uv',     cmd: 'uv add cubepi' },
   { tool: 'poetry', cmd: 'poetry add cubepi' },
-  { tool: 'extras', cmd: 'pip install cubepi[sqlite,postgres,mcp]' },
+  { tool: 'extras', cmd: 'pip install cubepi[sqlite,postgres,mcp,tracing,tracing-otlp]' },
 ];
 
 export default function InstallMatrix() {

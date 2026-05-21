@@ -3,10 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any, Literal
+from typing import Any
 
 from cubepi.utils.json_parse import parse_streaming_json
 
+from cubepi.providers.capability import (
+    CapabilityDescriptor,
+    apply_temperature,
+    merge_capability_payload,
+    write_reasoning_level,
+)
 from cubepi.providers.base import (
     AssistantMessage,
     BaseProvider,
@@ -37,9 +43,10 @@ class OpenAIProvider(BaseProvider):
         *,
         api_key: str | None = None,
         base_url: str | None = None,
-        payload_quirks: list[Literal["max_completion_tokens_alias"]] | None = None,
         extra_body: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
+        capability: CapabilityDescriptor | None = None,
+        model_capability_overrides: dict[str, CapabilityDescriptor] | None = None,
     ) -> None:
         super().__init__()
         import openai
@@ -51,9 +58,22 @@ class OpenAIProvider(BaseProvider):
             kwargs["base_url"] = base_url
         if extra_headers:
             kwargs["default_headers"] = extra_headers
-        self._client = openai.AsyncOpenAI(**kwargs)
-        self._payload_quirks: set[str] = set(payload_quirks or [])
+        self._client: openai.AsyncOpenAI = openai.AsyncOpenAI(**kwargs)
         self._extra_body: dict[str, Any] = extra_body or {}
+
+        # Track whether capability was explicitly passed so the OpenAI path
+        # (which today injects no temperature / no max_tokens) can stay
+        # behavior-identical for legacy callers. Spec §3.5.
+        self._cap_active: bool = (
+            capability is not None or model_capability_overrides is not None
+        )
+        self._capability: CapabilityDescriptor = capability or CapabilityDescriptor()
+        self._model_overrides: dict[str, CapabilityDescriptor] = (
+            model_capability_overrides or {}
+        )
+
+    def _resolve_capability(self, model_id: str) -> CapabilityDescriptor:
+        return self._model_overrides.get(model_id, self._capability)
 
     async def stream(
         self,
@@ -92,10 +112,6 @@ class OpenAIProvider(BaseProvider):
                 nonlocal kwargs
                 kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
 
-                if "max_completion_tokens_alias" in self._payload_quirks:
-                    if "max_completion_tokens" in kwargs:
-                        kwargs["max_tokens"] = kwargs.pop("max_completion_tokens")
-
                 # Merge instance-level extra_body into the request kwargs.
                 # Provider-config extra_body (e.g. {"enable_thinking": false}) is
                 # applied here so callers don't need to use on_payload for simple cases.
@@ -114,9 +130,33 @@ class OpenAIProvider(BaseProvider):
                 if "include_usage" not in so:
                     so["include_usage"] = True
 
+                # Capability-driven payload mutations. Gated on _cap_active so
+                # legacy callers (no capability kwarg) keep today's wire bytes
+                # exactly — the OpenAI path historically does not inject
+                # temperature or max_tokens. Spec §3.5.
+                cap = self._resolve_capability(model.id)
+                if self._cap_active:
+                    kwargs.setdefault("temperature", model.temperature)
+                    # Don't inject a default max_tokens when the caller already
+                    # set the renamed target field (e.g. max_completion_tokens
+                    # via on_payload).
+                    if cap.max_tokens_field not in kwargs:
+                        kwargs.setdefault("max_tokens", model.max_tokens)
+                    apply_temperature(kwargs, cap.temperature)
+                    if cap.max_tokens_field != "max_tokens" and "max_tokens" in kwargs:
+                        kwargs[cap.max_tokens_field] = kwargs.pop("max_tokens")
+                    if opts.thinking == "off":
+                        merge_capability_payload(kwargs, cap.reasoning_off_payload)
+                    else:
+                        merge_capability_payload(kwargs, cap.reasoning_on_payload)
+                        if cap.reasoning_level is not None:
+                            write_reasoning_level(
+                                kwargs, cap.reasoning_level, opts.thinking
+                            )
+
                 # Fire request listeners AFTER all kwargs mutations so observers
                 # see the final wire payload (including extra_body merges,
-                # max_completion_tokens_alias rewrite, and stream_options
+                # capability-driven max_tokens field rename, and stream_options
                 # injection). The on_payload mutator already ran above.
                 # _fire_request_listeners deep-copies so a listener cannot
                 # accidentally mutate the dict that's about to be sent.
@@ -461,15 +501,18 @@ class OpenAIProvider(BaseProvider):
 
             except BaseException as e:
                 exc = e
+                err_text = self._error_message(e, model)
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
-                    error_message=str(e),
+                    error_message=err_text,
                     usage=Usage(),
                     timestamp=time.time(),
+                    provider_id=model.provider,
+                    model_id=model.id,
                 )
                 await self._emit(
-                    ms, StreamEvent(type="error", error_message=str(e)), model
+                    ms, StreamEvent(type="error", error_message=err_text), model
                 )
                 ms.set_result(error_msg)
                 if not isinstance(e, Exception):

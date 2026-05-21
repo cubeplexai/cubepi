@@ -50,29 +50,48 @@ def test_provider_uses_custom_policy() -> None:
     assert p._cache_policy.mark_system() is False
 
 
-def test_apply_indices_markers_marks_specified_indices() -> None:
-    """Marker is applied to the last content block of each indexed message."""
+def test_apply_breakpoint_markers_marks_specified_block() -> None:
+    """Marker is applied to the targeted (message, block) position."""
     p = AnthropicProvider(api_key="x")
     api_messages = [
         {"role": "user", "content": [{"type": "text", "text": "a"}]},
         {"role": "user", "content": [{"type": "text", "text": "b"}]},
     ]
-    p._apply_indices_markers(
-        api_messages, indices=[0], cache_control={"type": "ephemeral"}
+    p._apply_breakpoint_markers(
+        api_messages, targets=[(0, 0)], cache_control={"type": "ephemeral"}
     )
-    assert api_messages[0]["content"][-1].get("cache_control") == {"type": "ephemeral"}
+    assert api_messages[0]["content"][0].get("cache_control") == {"type": "ephemeral"}
     # message 1 untouched
     assert "cache_control" not in api_messages[1]["content"][-1]
 
 
-def test_apply_indices_markers_converts_string_content() -> None:
-    """When a message has string content, _apply_indices_markers converts to block list and marks it."""
+def test_apply_breakpoint_markers_marks_interior_block() -> None:
+    """A target block that isn't the last one still gets marked precisely."""
+    p = AnthropicProvider(api_key="x")
+    api_messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "t0"},
+                {"type": "tool_result", "tool_use_id": "t1"},
+            ],
+        },
+    ]
+    p._apply_breakpoint_markers(
+        api_messages, targets=[(0, 0)], cache_control={"type": "ephemeral"}
+    )
+    assert api_messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in api_messages[0]["content"][1]
+
+
+def test_apply_breakpoint_markers_converts_string_content() -> None:
+    """String content is converted to a block list and marked."""
     p = AnthropicProvider(api_key="x")
     api_messages = [
         {"role": "user", "content": "plain string"},
     ]
-    p._apply_indices_markers(
-        api_messages, indices=[0], cache_control={"type": "ephemeral"}
+    p._apply_breakpoint_markers(
+        api_messages, targets=[(0, 0)], cache_control={"type": "ephemeral"}
     )
     assert isinstance(api_messages[0]["content"], list)
     assert api_messages[0]["content"][0] == {
@@ -101,8 +120,9 @@ async def test_custom_policy_drives_message_marker_placement() -> None:
         UserMessage(content=[TextContent(text="zero")]),
         UserMessage(content=[TextContent(text="one")]),
     ]
-    api_msgs = [p._convert_message(m) for m in msgs]
-    p._apply_indices_markers(api_msgs, indices=[0], cache_control={"type": "ephemeral"})
+    api_msgs, breakpoints = p._build_api_messages(msgs)
+    targets = [breakpoints[i] for i in _FirstOnly().message_breakpoint_indices(msgs)]
+    p._apply_breakpoint_markers(api_msgs, targets, cache_control={"type": "ephemeral"})
 
     first_blocks = api_msgs[0]["content"]
     assert isinstance(first_blocks, list)

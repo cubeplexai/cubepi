@@ -175,6 +175,37 @@ class StreamEvent(BaseModel):
     error_message: str | None = None
 
 
+def format_provider_error(
+    exc: BaseException,
+    model: "Model",
+    base_url: str | None = None,
+) -> str:
+    """Build a self-describing error string for a failed provider call.
+
+    SDK exceptions like openai's ``APIConnectionError`` stringify to bare
+    ``"Connection error."`` and drop the transport failure into ``__cause__``
+    / ``__context__``. Without provider/model/cause context, a logged or
+    persisted error tells you nothing about *which* model failed or *why*.
+    """
+    target = f"{model.provider}/{model.id}"
+    if base_url:
+        target = f"{target} @ {base_url}"
+
+    chain: list[str] = [f"{type(exc).__name__}: {exc}"]
+    seen: set[int] = {id(exc)}
+    cur: BaseException | None = exc
+    while cur is not None:
+        nxt = cur.__cause__ or cur.__context__
+        if nxt is None or id(nxt) in seen:
+            break
+        seen.add(id(nxt))
+        chain.append(f"{type(nxt).__name__}: {nxt}")
+        cur = nxt
+
+    detail = " <- ".join(chain)
+    return f"[{target}] {detail}"
+
+
 class MessageStream:
     def __init__(self) -> None:
         self._queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
@@ -582,6 +613,14 @@ class BaseProvider:
         options: StreamOptions | None = None,
     ) -> MessageStream:
         raise NotImplementedError
+
+    def _error_message(self, exc: BaseException, model: Model) -> str:
+        """Format a failed-call error with provider/model/base_url + cause."""
+        base_url: str | None = None
+        client = getattr(self, "_client", None)
+        if client is not None:
+            base_url = str(getattr(client, "base_url", "") or "") or None
+        return format_provider_error(exc, model, base_url)
 
     def subscribe_request(self, cb: OnRequestCallback) -> Callable[[], None]:
         """Register a persistent observer for request payloads.

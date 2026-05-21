@@ -27,7 +27,6 @@ provider = OpenAIProvider(
     base_url=None,        # set for OpenAI-compatible servers
     extra_body=None,      # merged into every request
     extra_headers=None,
-    payload_quirks=None,  # ["max_completion_tokens_alias", …]
 )
 
 model = Model(
@@ -71,18 +70,16 @@ provider = OpenAIProvider(
 
 If you need per-request mutation, use `on_payload` (see below).
 
-### `payload_quirks`
+### Capability descriptor
 
-Some servers require `max_tokens` instead of `max_completion_tokens`:
-
-```python
-provider = OpenAIProvider(
-    api_key="…",
-    payload_quirks=["max_completion_tokens_alias"],
-)
-```
-
-CubePi renames the key on the way out.
+Wire-shape differences between OpenAI and OpenAI-compatible backends
+(e.g. `max_tokens` vs `max_completion_tokens`, reasoning field names,
+temperature handling) are configured through a
+[`CapabilityDescriptor`](pathname:///pydoc/cubepi/providers/capability.html)
+passed at construction. For example, `max_tokens_field="max_completion_tokens"`
+renames the key on the way out. See
+[Capabilities & Preset Catalog](./capability-and-presets) for the full
+set of knobs and 20+ ready-made provider presets (cubepi `0.5+`).
 
 ### Pointing at vLLM / LiteLLM / DeepSeek
 
@@ -102,6 +99,9 @@ provider = OpenAIProvider(
     base_url="https://litellm.internal/v1",
 )
 ```
+
+Many of these backends already have a ready-made preset — see
+[Capabilities & Preset Catalog](./capability-and-presets).
 
 ## Responses API: `OpenAIResponsesProvider`
 
@@ -166,8 +166,9 @@ provider.
   - Set `include_usage=False` in `on_payload` (the field still goes
     out, but is usually accepted as a no-op even by strict
     backends).
-  - Open an issue against cubepi to add a `payload_quirks` entry
-    such as `"no_stream_options"` for native opt-out.
+  - Use the capability/preset catalog (cubepi `0.5+`) — register a
+    `CapabilityDescriptor` for your backend, or open an issue to add
+    one upstream.
 - **Thinking events but no `thinking_*` events** — Your backend
   surfaces reasoning under a non-standard field. Either add a fourth
   branch via PR or transcode it with `on_payload`.

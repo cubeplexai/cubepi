@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any, Literal, Protocol, runtime_checkable
 
@@ -23,13 +24,55 @@ from cubepi.providers.base import (
     UserMessage,
     _fire_request_listeners,
     _fire_response_listeners,
-    adjust_max_tokens_for_thinking,
     invoke_on_payload,
     invoke_on_response,
+)
+from cubepi.providers.capability import (
+    CapabilityDescriptor,
+    ReasoningLevelSpec,
+    TemperatureSpec,
+    apply_temperature,
+    merge_capability_payload,
+    write_reasoning_level,
 )
 from cubepi.providers.models import clamp_thinking_level
 
 CacheRetention = Literal["short", "long", "none"]
+
+
+# Default capability for Anthropic. Unlike OpenAI's empty default, Anthropic
+# always goes through the capability path — capability=None reproduces today's
+# wire bytes exactly because:
+#  - reasoning_off_payload is empty: legacy omits the "thinking" key entirely
+#    when thinking=off, so the default must too (no {"type": "disabled"}).
+#  - reasoning_on_payload writes {"thinking": {"type": "enabled"}}, then
+#    reasoning_level adds budget_tokens at thinking.budget_tokens.
+#  - level_budgets mirrors cubepi.providers.base.ThinkingBudgets defaults
+#    (minimal=1024, low=2048, medium=8192, high=16384). xhigh clamps to high
+#    to match adjust_max_tokens_for_thinking's "xhigh -> high" mapping.
+#    "off" is included for completeness but reasoning_level is never written
+#    on the off-branch.
+#  - temperature mode="free" with min/max [0, 1] matches Anthropic's accepted
+#    range; the stream() method itself decides whether to send temperature
+#    (only when thinking is off — Anthropic rejects temperature with thinking
+#    enabled).
+_ANTHROPIC_DEFAULT_CAPABILITY = CapabilityDescriptor(
+    reasoning_off_payload={},
+    reasoning_on_payload={"thinking": {"type": "enabled"}},
+    reasoning_level=ReasoningLevelSpec(
+        path="thinking.budget_tokens",
+        kind="int_budget",
+        level_budgets={
+            "off": 0,
+            "minimal": 1024,
+            "low": 2048,
+            "medium": 8192,
+            "high": 16384,
+            "xhigh": 16384,
+        },
+    ),
+    temperature=TemperatureSpec(mode="free", min=0.0, max=1.0, default=1.0),
+)
 
 
 @runtime_checkable
@@ -68,6 +111,8 @@ class AnthropicProvider(BaseProvider):
         base_url: str | None = None,
         cache_retention: CacheRetention = "short",
         cache_policy: CacheMarkerPolicy | None = None,
+        capability: CapabilityDescriptor | None = None,
+        model_capability_overrides: dict[str, CapabilityDescriptor] | None = None,
     ) -> None:
         super().__init__()
         import anthropic
@@ -80,6 +125,17 @@ class AnthropicProvider(BaseProvider):
         self._cache_policy: CacheMarkerPolicy = (
             cache_policy or DefaultCacheMarkerPolicy()
         )
+        # Anthropic always runs the capability path; capability=None falls back
+        # to _ANTHROPIC_DEFAULT_CAPABILITY which mirrors legacy wire bytes.
+        self._capability: CapabilityDescriptor = (
+            capability if capability is not None else _ANTHROPIC_DEFAULT_CAPABILITY
+        )
+        self._model_overrides: dict[str, CapabilityDescriptor] = (
+            model_capability_overrides or {}
+        )
+
+    def _resolve_capability(self, model_id: str) -> CapabilityDescriptor:
+        return self._model_overrides.get(model_id, self._capability)
 
     async def stream(
         self,
@@ -93,32 +149,19 @@ class AnthropicProvider(BaseProvider):
         opts = options or StreamOptions()
         ms = MessageStream()
         thinking = clamp_thinking_level(model, opts.thinking)
+        cap = self._resolve_capability(model.id)
 
         cache_control = self._get_cache_control()
-        api_messages = [self._convert_message(m) for m in messages]
+        api_messages, breakpoints = self._build_api_messages(messages)
         if cache_control:
             indices = self._cache_policy.message_breakpoint_indices(messages)
-            self._apply_indices_markers(api_messages, indices, cache_control)
-
-        max_tokens, thinking_budget = adjust_max_tokens_for_thinking(
-            base_max_tokens=model.max_tokens,
-            model_max_tokens=model.context_window,
-            reasoning_level=thinking,
-            custom_budgets=opts.thinking_budgets,
-        )
+            targets = [breakpoints[i] for i in indices if 0 <= i < len(breakpoints)]
+            self._apply_breakpoint_markers(api_messages, targets, cache_control)
 
         kwargs: dict[str, Any] = {
             "model": model.id,
             "messages": api_messages,
-            "max_tokens": max_tokens,
         }
-        # Anthropic disallows temperature modifications when extended
-        # thinking is enabled — see
-        # https://platform.claude.com/docs/en/build-with-claude/extended-thinking#feature-compatibility
-        # The provider request will fail with thinking on if we send a
-        # non-default temperature, so skip the field unless thinking is off.
-        if thinking == "off":
-            kwargs["temperature"] = model.temperature
         if system_prompt:
             if cache_control and self._cache_policy.mark_system():
                 kwargs["system"] = [
@@ -135,11 +178,63 @@ class AnthropicProvider(BaseProvider):
             if cache_control and api_tools and self._cache_policy.mark_last_tool():
                 api_tools[-1]["cache_control"] = cache_control
             kwargs["tools"] = api_tools
-        if thinking != "off" and thinking_budget > 0:
-            kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": thinking_budget,
-            }
+
+        # Capability-driven thinking + temperature. The default capability
+        # (capability=None) reproduces today's wire bytes:
+        #  - thinking off: reasoning_off_payload is empty, so no "thinking"
+        #    key is written; temperature is sent (legacy behavior).
+        #  - thinking on: reasoning_on_payload writes thinking.type=enabled,
+        #    reasoning_level writes thinking.budget_tokens; temperature is
+        #    stripped because Anthropic rejects custom temperature with
+        #    extended thinking enabled. See
+        #    https://platform.claude.com/docs/en/build-with-claude/extended-thinking#feature-compatibility
+        #
+        # max_tokens is computed AFTER the capability writes the budget so it
+        # always accommodates whatever budget actually landed on the wire.
+        # Anthropic rejects requests where budget_tokens >= max_tokens.
+        if thinking == "off":
+            merge_capability_payload(kwargs, cap.reasoning_off_payload)
+            kwargs.setdefault("temperature", model.temperature)
+            apply_temperature(kwargs, cap.temperature)
+            kwargs["max_tokens"] = min(model.max_tokens, model.context_window)
+        else:
+            merge_capability_payload(kwargs, cap.reasoning_on_payload)
+            if cap.reasoning_level is not None:
+                write_reasoning_level(kwargs, cap.reasoning_level, thinking)
+            kwargs.pop("temperature", None)
+
+            # Per-request budget override via StreamOptions.thinking_budgets
+            # takes precedence over the capability's level_budgets. Mirrors
+            # the legacy adjust_max_tokens_for_thinking(custom_budgets=...)
+            # parameter. ThinkingBudgets has no "xhigh" field, so xhigh maps
+            # to "high" (matches legacy clamp behavior).
+            if opts.thinking_budgets is not None and isinstance(
+                kwargs.get("thinking"), dict
+            ):
+                level_for_lookup = "high" if thinking == "xhigh" else thinking
+                custom_budget = getattr(opts.thinking_budgets, level_for_lookup, None)
+                if custom_budget is not None:
+                    kwargs["thinking"]["budget_tokens"] = custom_budget
+
+            budget = 0
+            thinking_block = kwargs.get("thinking")
+            if isinstance(thinking_block, dict):
+                budget = thinking_block.get("budget_tokens", 0) or 0
+            kwargs["max_tokens"] = min(model.max_tokens + budget, model.context_window)
+
+            # If context_window clipped max_tokens such that the budget no
+            # longer fits, reduce the budget in place. Anthropic rejects when
+            # budget_tokens >= max_tokens; reserve at least 1024 output tokens
+            # to mirror adjust_max_tokens_for_thinking's legacy policy.
+            min_output_tokens = 1024
+            if budget > 0 and kwargs["max_tokens"] - budget < min_output_tokens:
+                new_budget = max(0, kwargs["max_tokens"] - min_output_tokens)
+                if isinstance(thinking_block, dict):
+                    if new_budget > 0:
+                        thinking_block["budget_tokens"] = new_budget
+                    else:
+                        # Budget reduced to 0 — disable thinking entirely.
+                        kwargs["thinking"] = {"type": "disabled"}
 
         async def _produce() -> None:
             body: dict | None = None
@@ -177,6 +272,10 @@ class AnthropicProvider(BaseProvider):
                         model,
                     )
 
+                    # Accumulate streamed tool-call args JSON per content index
+                    # so toolcall_end can carry parsed arguments (the Anthropic
+                    # stream only delivers them as incremental partial_json).
+                    tool_args_buffers: dict[int, str] = {}
                     async for event in stream:
                         if opts.signal and opts.signal.is_set():
                             aborted = partial.model_copy(
@@ -196,7 +295,9 @@ class AnthropicProvider(BaseProvider):
                             ms.set_result(aborted)
                             return
 
-                        await self._handle_event(event, partial, ms, model)
+                        await self._handle_event(
+                            event, partial, ms, model, tool_args_buffers
+                        )
 
                     final_msg = await stream.get_final_message()
                     result = self._convert_response(final_msg, model)
@@ -206,15 +307,18 @@ class AnthropicProvider(BaseProvider):
 
             except BaseException as e:
                 exc = e
+                err_text = self._error_message(e, model)
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
-                    error_message=str(e),
+                    error_message=err_text,
                     usage=Usage(),
                     timestamp=time.time(),
+                    provider_id=model.provider,
+                    model_id=model.id,
                 )
                 await self._emit(
-                    ms, StreamEvent(type="error", error_message=str(e)), model
+                    ms, StreamEvent(type="error", error_message=err_text), model
                 )
                 ms.set_result(error_msg)
                 if not isinstance(e, Exception):
@@ -235,29 +339,40 @@ class AnthropicProvider(BaseProvider):
             cc["ttl"] = "1h"
         return cc
 
-    def _apply_indices_markers(
+    def _apply_breakpoint_markers(
         self,
         api_messages: list[dict[str, Any]],
-        indices: list[int],
+        targets: list[tuple[int, int]],
         cache_control: dict[str, str],
     ) -> None:
-        """Apply cache_control to the last content block of each indexed message."""
-        for idx in indices:
-            if 0 <= idx < len(api_messages):
-                msg = api_messages[idx]
-                content = msg.get("content")
-                if isinstance(content, list) and content:
-                    last_block = content[-1]
-                    if isinstance(last_block, dict):
-                        content[-1] = {**last_block, "cache_control": cache_control}
-                elif isinstance(content, str):
-                    msg["content"] = [
-                        {
-                            "type": "text",
-                            "text": content,
-                            "cache_control": cache_control,
-                        }
-                    ]
+        """Apply cache_control to specific ``(message, block)`` positions.
+
+        ``targets`` come from :meth:`_build_api_messages`, which tracks the exact
+        block each source message contributed. Marking that block (rather than
+        always ``content[-1]``) keeps a breakpoint on its intended message even
+        after parallel tool results are merged into one message.
+        """
+        for msg_idx, block_idx in targets:
+            if not (0 <= msg_idx < len(api_messages)):
+                continue  # pragma: no cover — stream pre-filters indices
+            msg = api_messages[msg_idx]
+            content = msg.get("content")
+            if isinstance(content, list) and content:
+                if 0 <= block_idx < len(content) and isinstance(
+                    content[block_idx], dict
+                ):
+                    content[block_idx] = {
+                        **content[block_idx],
+                        "cache_control": cache_control,
+                    }
+            elif isinstance(content, str):
+                msg["content"] = [
+                    {
+                        "type": "text",
+                        "text": content,
+                        "cache_control": cache_control,
+                    }
+                ]
 
     @staticmethod
     def _apply_message_cache_control(
@@ -286,6 +401,42 @@ class AnthropicProvider(BaseProvider):
             last_msg["content"] = [
                 {"type": "text", "text": content, "cache_control": cache_control}
             ]
+
+    @staticmethod
+    def _build_api_messages(
+        messages: list[Message],
+    ) -> tuple[list[dict[str, Any]], list[tuple[int, int]]]:
+        """Convert messages, coalescing a contiguous run of tool results.
+
+        Anthropic requires every ``tool_result`` for a parallel-tool-call turn
+        to sit in the single ``user`` message immediately after the assistant's
+        ``tool_use`` blocks. cubepi records one ``ToolResultMessage`` per call,
+        so consecutive ones are merged into one user message here.
+
+        Returns ``(api_messages, breakpoints)`` where ``breakpoints[i]`` is the
+        ``(api_index, block_index)`` of the LAST content block that source
+        message ``i`` contributed. Merging several sources into one message
+        gives each a distinct block offset, so a cache breakpoint that targets
+        an interior tool result stays on that result's block instead of sliding
+        to the end of the merge.
+        """
+        api_messages: list[dict[str, Any]] = []
+        breakpoints: list[tuple[int, int]] = []
+        prev_tool_result = False
+        for msg in messages:
+            converted = AnthropicProvider._convert_message(msg)
+            is_tool_result = isinstance(msg, ToolResultMessage)
+            if is_tool_result and prev_tool_result and api_messages:
+                merged = api_messages[-1]["content"]
+                merged.extend(converted["content"])
+                breakpoints.append((len(api_messages) - 1, len(merged) - 1))
+            else:
+                api_messages.append(converted)
+                breakpoints.append(
+                    (len(api_messages) - 1, len(converted["content"]) - 1)
+                )
+            prev_tool_result = is_tool_result
+        return api_messages, breakpoints
 
     @staticmethod
     def _convert_message(msg: Message) -> dict[str, Any]:
@@ -358,6 +509,7 @@ class AnthropicProvider(BaseProvider):
         partial: AssistantMessage,
         ms: MessageStream,
         model: Model,
+        tool_args_buffers: dict[int, str],
     ) -> None:
         etype = getattr(event, "type", "")
         if etype == "content_block_start":
@@ -432,6 +584,9 @@ class AnthropicProvider(BaseProvider):
                     model,
                 )
             elif hasattr(delta, "partial_json"):
+                tool_args_buffers[idx] = (
+                    tool_args_buffers.get(idx, "") + delta.partial_json
+                )
                 await self._emit(
                     ms,
                     StreamEvent(
@@ -467,6 +622,19 @@ class AnthropicProvider(BaseProvider):
                         model,
                     )
                 elif isinstance(last, ToolCall):
+                    # Parse the accumulated args JSON onto the block so the
+                    # toolcall_end partial exposes real arguments (not the empty
+                    # dict from toolcall_start). Malformed/empty JSON falls back
+                    # to {} — the final message still carries authoritative args.
+                    raw = tool_args_buffers.get(idx, "")
+                    try:
+                        parsed = json.loads(raw) if raw.strip() else {}
+                    except json.JSONDecodeError:
+                        parsed = {}
+                    if isinstance(parsed, dict) and parsed:
+                        partial.content[-1] = ToolCall(
+                            id=last.id, name=last.name, arguments=parsed
+                        )
                     await self._emit(
                         ms,
                         StreamEvent(

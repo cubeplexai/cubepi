@@ -1,0 +1,1 @@
+"""cubepi command-line interface."""

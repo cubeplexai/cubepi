@@ -576,6 +576,110 @@ class TestAnthropicStreamToolCall:
         assert result.content[0].id == "toolu_abc"
         assert result.content[0].arguments == {"q": "test"}
 
+    @pytest.mark.asyncio
+    async def test_toolcall_end_partial_carries_parsed_arguments(self):
+        """The streaming toolcall_end event must expose the parsed arguments.
+
+        Live consumers (the SSE tool_call event → frontend tool cards showing
+        the web_search query / web_fetch url) read the toolcall_end partial. If
+        args are only assembled in the final message, the card stays blank until
+        reload.
+        """
+        events = [
+            _make_event(
+                "content_block_start",
+                index=0,
+                content_block=_make_content_block(
+                    "tool_use", id="toolu_abc", name="search"
+                ),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(partial_json='{"q": '),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(partial_json='"test"}'),
+            ),
+            _make_event("content_block_stop", index=0),
+        ]
+        final = _make_final_message(
+            content=[
+                SimpleNamespace(
+                    type="tool_use", id="toolu_abc", name="search", input={"q": "test"}
+                )
+            ],
+            stop_reason="tool_use",
+        )
+        provider = _make_provider("none")
+        _inject_mock_stream(provider, _MockAnthropicStream(events, final))
+
+        ms = await provider.stream(
+            _anthropic_model(),
+            [UserMessage(content=[TextContent(text="search for test")])],
+        )
+        stream_events = []
+        async for event in ms:
+            stream_events.append(event)
+        await ms.result()
+
+        end_events = [e for e in stream_events if e.type == "toolcall_end"]
+        assert end_events, "expected a toolcall_end event"
+        partial = end_events[-1].partial
+        tool_blocks = [b for b in partial.content if isinstance(b, ToolCall)]
+        assert tool_blocks, "toolcall_end partial should contain the ToolCall block"
+        assert tool_blocks[-1].arguments == {"q": "test"}
+
+    @pytest.mark.asyncio
+    async def test_toolcall_end_partial_tolerates_malformed_args_json(self):
+        """Incomplete/garbled partial_json falls back to {} without raising;
+        the final message still carries authoritative args."""
+        events = [
+            _make_event(
+                "content_block_start",
+                index=0,
+                content_block=_make_content_block(
+                    "tool_use", id="toolu_x", name="search"
+                ),
+            ),
+            _make_event(
+                "content_block_delta",
+                index=0,
+                delta=SimpleNamespace(
+                    partial_json='{"q": "te'
+                ),  # truncated, invalid JSON
+            ),
+            _make_event("content_block_stop", index=0),
+        ]
+        final = _make_final_message(
+            content=[
+                SimpleNamespace(
+                    type="tool_use", id="toolu_x", name="search", input={"q": "te"}
+                )
+            ],
+            stop_reason="tool_use",
+        )
+        provider = _make_provider("none")
+        _inject_mock_stream(provider, _MockAnthropicStream(events, final))
+
+        ms = await provider.stream(
+            _anthropic_model(),
+            [UserMessage(content=[TextContent(text="x")])],
+        )
+        stream_events = []
+        async for event in ms:
+            stream_events.append(event)
+        await ms.result()
+
+        end_events = [e for e in stream_events if e.type == "toolcall_end"]
+        assert end_events
+        tool_blocks = [
+            b for b in end_events[-1].partial.content if isinstance(b, ToolCall)
+        ]
+        assert tool_blocks[-1].arguments == {}
+
 
 class TestAnthropicStreamKwargsBuilding:
     """Verify kwargs sent to the Anthropic SDK."""
@@ -751,6 +855,175 @@ class TestAnthropicStreamKwargsBuilding:
         assert captured["headers"]["x-request-id"] == "req-xyz"
 
 
+class TestAnthropicParallelToolResults:
+    """Parallel tool calls: all tool_results must land in ONE user message.
+
+    Anthropic rejects a request where an assistant turn emits N parallel
+    tool_use blocks but the immediately-following user message carries fewer
+    than N tool_result blocks. cubepi stores one ToolResultMessage per call,
+    so the provider must coalesce consecutive ones.
+    """
+
+    @staticmethod
+    def _history():
+        return [
+            UserMessage(content=[TextContent(text="weather?")]),
+            AssistantMessage(
+                content=[
+                    ToolCall(id="call_0", name="fetch", arguments={"u": "a"}),
+                    ToolCall(id="call_1", name="fetch", arguments={"u": "b"}),
+                ],
+                stop_reason="tool_use",
+            ),
+            ToolResultMessage(
+                tool_call_id="call_0",
+                tool_name="fetch",
+                content=[TextContent(text="result a")],
+            ),
+            ToolResultMessage(
+                tool_call_id="call_1",
+                tool_name="fetch",
+                content=[TextContent(text="result b")],
+            ),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_consecutive_tool_results_merged_into_one_user_message(self):
+        mock_stream = _MockAnthropicStream([], _make_final_message(content=[]))
+        provider = _make_provider("none")
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        ms = await provider.stream(_anthropic_model(), self._history())
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        messages = mock_client.messages.stream.call_args[1]["messages"]
+        # user, assistant(2 tool_use), user(2 tool_result) — NOT 4 messages.
+        assert len(messages) == 3
+        tool_results = messages[2]["content"]
+        assert messages[2]["role"] == "user"
+        assert [b["tool_use_id"] for b in tool_results] == ["call_0", "call_1"]
+        # Every tool_use id has a matching tool_result in the next message.
+        tool_use_ids = {b["id"] for b in messages[1]["content"]}
+        result_ids = {b["tool_use_id"] for b in tool_results}
+        assert tool_use_ids == result_ids
+
+    @pytest.mark.asyncio
+    async def test_cache_breakpoint_lands_on_merged_message(self):
+        # Default policy marks the last message; after merge it must still be
+        # the (single) tool-result user message that gets the breakpoint.
+        mock_stream = _MockAnthropicStream([], _make_final_message(content=[]))
+        provider = _make_provider("short")
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        ms = await provider.stream(_anthropic_model(), self._history())
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        messages = mock_client.messages.stream.call_args[1]["messages"]
+        assert len(messages) == 3
+        # Breakpoint on the last content block of the merged tool-result message.
+        assert messages[2]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+
+    @pytest.mark.asyncio
+    async def test_breakpoint_on_interior_result_keeps_its_block(self):
+        # A custom policy that targets the FIRST result of a parallel run must
+        # mark THAT result's block, not slide to the last block of the merge.
+        class _FirstResult:
+            def mark_system(self) -> bool:
+                return False
+
+            def mark_last_tool(self) -> bool:
+                return False
+
+            def message_breakpoint_indices(self, messages):
+                return [2]  # the first ToolResultMessage in _history()
+
+        mock_stream = _MockAnthropicStream([], _make_final_message(content=[]))
+        provider = AnthropicProvider(
+            api_key="x", cache_retention="short", cache_policy=_FirstResult()
+        )
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        ms = await provider.stream(_anthropic_model(), self._history())
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        results = mock_client.messages.stream.call_args[1]["messages"][2]["content"]
+        # call_0 (first result) carries the breakpoint; call_1 does not.
+        assert results[0]["tool_use_id"] == "call_0"
+        assert results[0]["cache_control"] == {"type": "ephemeral"}
+        assert "cache_control" not in results[1]
+
+    @pytest.mark.asyncio
+    async def test_single_tool_result_not_affected(self):
+        history = [
+            UserMessage(content=[TextContent(text="time?")]),
+            AssistantMessage(
+                content=[ToolCall(id="call_0", name="now", arguments={})],
+                stop_reason="tool_use",
+            ),
+            ToolResultMessage(
+                tool_call_id="call_0",
+                tool_name="now",
+                content=[TextContent(text="noon")],
+            ),
+        ]
+        mock_stream = _MockAnthropicStream([], _make_final_message(content=[]))
+        provider = _make_provider("none")
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        ms = await provider.stream(_anthropic_model(), history)
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        messages = mock_client.messages.stream.call_args[1]["messages"]
+        assert len(messages) == 3
+        assert messages[2]["content"][0]["tool_use_id"] == "call_0"
+
+    @pytest.mark.asyncio
+    async def test_separate_turns_not_merged(self):
+        # Two single-tool turns separated by an assistant message must stay
+        # as two distinct user messages — merging only spans a contiguous run.
+        history = [
+            UserMessage(content=[TextContent(text="q")]),
+            AssistantMessage(
+                content=[ToolCall(id="c0", name="t", arguments={})],
+                stop_reason="tool_use",
+            ),
+            ToolResultMessage(
+                tool_call_id="c0",
+                tool_name="t",
+                content=[TextContent(text="r0")],
+            ),
+            AssistantMessage(
+                content=[ToolCall(id="c1", name="t", arguments={})],
+                stop_reason="tool_use",
+            ),
+            ToolResultMessage(
+                tool_call_id="c1",
+                tool_name="t",
+                content=[TextContent(text="r1")],
+            ),
+        ]
+        mock_stream = _MockAnthropicStream([], _make_final_message(content=[]))
+        provider = _make_provider("none")
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        ms = await provider.stream(_anthropic_model(), history)
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        messages = mock_client.messages.stream.call_args[1]["messages"]
+        roles = [m["role"] for m in messages]
+        assert roles == ["user", "assistant", "user", "assistant", "user"]
+
+
 class TestAnthropicStreamAbort:
     """Test abort signal handling."""
 
@@ -823,6 +1096,26 @@ class TestAnthropicStreamError:
 
         event_types = [e.type for e in stream_events]
         assert "error" in event_types
+
+    @pytest.mark.asyncio
+    async def test_error_result_carries_provider_and_model(self):
+        provider = _make_provider("none")
+        mock_client = MagicMock()
+        mock_client.messages = MagicMock()
+        mock_client.messages.stream = MagicMock(side_effect=RuntimeError("API down"))
+        provider._client = mock_client
+
+        model = _anthropic_model()
+        ms = await provider.stream(
+            model, [UserMessage(content=[TextContent(text="hi")])]
+        )
+        async for _ in ms:
+            pass
+        result = await ms.result()
+
+        assert result.provider_id == "anthropic"
+        assert result.model_id == model.id
+        assert f"anthropic/{model.id}" in (result.error_message or "")
 
     @pytest.mark.asyncio
     async def test_base_exception_reraises(self):

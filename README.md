@@ -274,7 +274,41 @@ invoke_agent <agent_name>              [INTERNAL]
 No prompts / model outputs are recorded by default. Opt in with
 `Tracer(record_content=True)` plus a `redact` callback for PII. Pair
 with `Meter(...)` for `gen_ai.client.operation.duration` / TTFC /
-token-usage histograms. Full guide: https://cubepi.pages.dev/guides/tracing/overview
+token-usage histograms. Full guide: https://cubepi.pages.dev/docs/guides/tracing/overview
+
+#### Inspecting traces from the terminal
+
+With `JsonlSpanExporter` writing to `./cubepi-traces`, inspect runs with the
+`cubepi trace` CLI (install the extra: `pip install cubepi[trace-cli]`). All
+subcommands take `--dir` (default `./cubepi-traces`):
+
+```bash
+cubepi trace ls                 # recent runs, newest first; the `input`
+                                #   column shows the user message + `status`
+cubepi trace view <run_id>      # render a run as a tree; errors print inline
+                                #   under the failing span (no flag needed).
+                                #   A unique run-id PREFIX is enough.
+cubepi trace view <run> --content   # also expand prompts / tool args / results
+cubepi trace view <run> -v          # expand ALL span attributes (verbose)
+cubepi trace follow <run_id>    # stream spans live as they complete
+cubepi trace stats --by model   # token / latency / error aggregates
+cubepi trace stats --by tool --since 2026-01-01
+```
+
+Typical debugging flow: `ls` (find the run by its `input`), then
+`view <prefix>` and read the inline `error:` line under any `ERROR` span. Need
+content only recorded with `Tracer(record_content=True)`.
+
+**Token / cache fields.** The recorder reconciles to the GenAI semconv, so
+`gen_ai.usage.input_tokens` is the **inclusive** total prompt
+(`input + cache_read + cache_creation`) and `gen_ai.usage.cache_read.input_tokens`
+is a subset of it. From trace fields, cache hit rate is
+`cache_read / input_tokens` (≤ 100%) — do **not** add `cache_read` to the
+denominator.
+
+Coding agents debugging cubepi/consumer apps can install the bundled
+[`cubepi-trace` skill](skills/cubepi-trace/SKILL.md):
+`npx skills add https://github.com/cubeplexai/cubepi/tree/main/skills/cubepi-trace -a claude-code`.
 
 ## Requirements
 

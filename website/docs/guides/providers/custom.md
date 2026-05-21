@@ -227,6 +227,10 @@ Helpers:
 
 ## See also
 
+- [Capabilities & Preset Catalog](./capability-and-presets) — before
+  writing a class from scratch, check whether your backend is just an
+  OpenAI/Anthropic-compatible endpoint a `CapabilityDescriptor` or
+  bundled preset already covers.
 - [API Reference → providers/base](../../api/cubepi-providers) — the
   full type list.
 - [Anthropic Provider source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/anthropic.py)

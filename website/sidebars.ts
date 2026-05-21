@@ -26,6 +26,7 @@ const sidebars: SidebarsConfig = {
         { type: 'category', label: 'Providers', items: [
           'guides/providers/anthropic',
           'guides/providers/openai',
+          'guides/providers/capability-and-presets',
           'guides/providers/custom',
         ]},
         { type: 'category', label: 'Checkpointing', items: [

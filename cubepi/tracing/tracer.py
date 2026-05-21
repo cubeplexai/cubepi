@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import logging
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
@@ -185,6 +186,10 @@ class Tracer:
         # removes this attach's registration — multiple attaches of the
         # same Tracer to different agents must not clobber each other
         # (see codex round-6 review on PR #86).
+        #
+        # Keep attach all-or-nothing: if MCP registration fails for any reason
+        # other than the optional module being absent, undo the recorder attach
+        # before re-raising so we don't leak its subscriptions.
         mcp_token: object | None = None
         try:
             from cubepi.mcp import _tracing as mcp_tracing
@@ -192,19 +197,29 @@ class Tracer:
             mcp_token = mcp_tracing.register_provider(self._provider)
         except ImportError:  # pragma: no cover — mcp module always present
             mcp_tracing = None
+        except BaseException:
+            try:
+                recorder_detach()
+            except Exception:
+                pass
+            raise
 
         def detach():
             # Forward the recorder's detach return — when called from
             # an async context it's an ``asyncio.Task`` for the
             # flush; callers can ``await detach()`` to wait for
             # buffered spans to land (codex overall-review MAJOR).
-            flush_task = recorder_detach()
-            if mcp_tracing is not None and mcp_token is not None:
-                try:
-                    mcp_tracing.unregister_provider(mcp_token)
-                except Exception:
-                    pass
-            return flush_task
+            #
+            # Unregister MCP in a ``finally`` so a raising recorder detach
+            # can't leak the provider registration.
+            try:
+                return recorder_detach()
+            finally:
+                if mcp_tracing is not None and mcp_token is not None:
+                    try:
+                        mcp_tracing.unregister_provider(mcp_token)
+                    except Exception:
+                        pass
 
         return detach
 
@@ -369,3 +384,70 @@ def _build_resource(
         attrs["gen_ai.agent.version"] = agent_version
     # The SDK adds telemetry.sdk.* automatically.
     return Resource.create(attrs, schema_url=SCHEMA_URL)
+
+
+@contextlib.asynccontextmanager
+async def trace(
+    tracer: "Tracer | None",
+    agent: "Agent",
+) -> AsyncIterator[None]:
+    """Best-effort tracing scope for one agent run.
+
+    Attaches ``tracer`` to ``agent`` on enter and detaches + flushes its
+    buffered spans on exit. Every tracing fault — a failed attach, detach, or
+    flush — is logged and swallowed, so tracing can never break or fail the
+    work inside the ``async with`` block. Passing ``tracer=None`` makes the
+    block a no-op, which lets callers gate tracing on config without branching
+    at the call site.
+
+    This does **not** shut the tracer down: the tracer is reusable across runs,
+    so build it once (e.g. per process) and call ``await tracer.shutdown()``
+    when the owning process stops.
+
+    Unlike :meth:`Tracer.attached`, which surfaces flush failures to the caller,
+    this helper swallows them — use it when tracing is auxiliary to the work and
+    must never affect its outcome.
+
+    Example
+    -------
+    ::
+
+        async with trace(tracer, agent):
+            await agent.prompt("...")
+    """
+    if tracer is None:
+        yield
+        return
+
+    detach: "Callable[[], Any] | None" = None
+    try:
+        detach = tracer.attach(agent)
+    except Exception as exc:  # noqa: BLE001 — tracing must never break the run
+        _log_tracing_warning("attach failed; running untraced", exc)
+        detach = None
+
+    try:
+        yield
+    finally:
+        if detach is not None:
+            try:
+                result = detach()
+                # In an async context ``detach()`` returns a flush Task; await
+                # it so this run's spans are exported before the block exits.
+                if result is not None and hasattr(result, "__await__"):
+                    await result
+            except Exception as exc:  # noqa: BLE001 — flush/detach must never break the run
+                _log_tracing_warning("detach/flush failed", exc)
+
+
+def _log_tracing_warning(message: str, exc: BaseException) -> None:
+    """Log a swallowed tracing fault via stdlib ``logging`` — cubepi does not
+    depend on loguru. Hosts that use loguru can intercept stdlib logging to
+    route these records through it. The log call itself is guarded so a raising
+    logging handler can't defeat the best-effort guarantee."""
+    try:
+        logging.getLogger("cubepi.tracing").warning(
+            "cubepi tracing: %s", message, exc_info=exc
+        )
+    except Exception:  # noqa: BLE001 — logging must never break the run  # pragma: no cover
+        pass

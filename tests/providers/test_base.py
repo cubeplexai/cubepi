@@ -16,7 +16,54 @@ from cubepi.providers.base import (
     ToolResultMessage,
     Usage,
     UserMessage,
+    format_provider_error,
 )
+
+
+class TestFormatProviderError:
+    @staticmethod
+    def _model() -> Model:
+        return Model(id="gpt-4o", provider="openai")
+
+    def test_includes_provider_model_and_exception(self):
+        msg = format_provider_error(RuntimeError("boom"), self._model())
+        assert "openai/gpt-4o" in msg
+        assert "RuntimeError" in msg
+        assert "boom" in msg
+
+    def test_includes_base_url_when_given(self):
+        msg = format_provider_error(
+            RuntimeError("boom"),
+            self._model(),
+            base_url="https://api.deepseek.com/anthropic",
+        )
+        assert "https://api.deepseek.com/anthropic" in msg
+
+    def test_surfaces_underlying_cause_chain(self):
+        # Mirrors openai's APIConnectionError("Connection error.") wrapping the
+        # real transport failure in __cause__ — the part users actually need.
+        try:
+            try:
+                raise OSError("Cannot connect to proxy 192.168.1.111:7892")
+            except OSError as root:
+                raise RuntimeError("Connection error.") from root
+        except RuntimeError as exc:
+            msg = format_provider_error(exc, self._model())
+        assert "Connection error." in msg
+        assert "Cannot connect to proxy 192.168.1.111:7892" in msg
+        assert "OSError" in msg
+
+    def test_surfaces_implicit_context_cause(self):
+        # Exceptions raised during handling without `from` keep the original in
+        # __context__; that must still be surfaced.
+        try:
+            try:
+                raise OSError("network down")
+            except OSError:
+                raise RuntimeError("wrapper")
+        except RuntimeError as exc:
+            msg = format_provider_error(exc, self._model())
+        assert "network down" in msg
 
 
 class TestMessageTypes:

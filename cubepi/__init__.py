@@ -35,6 +35,12 @@ from cubepi.providers import (
     UserMessage,
     adjust_max_tokens_for_thinking,
 )
+from cubepi.providers.capability import (
+    CapabilityDescriptor,
+    ReasoningLevelSpec,
+    TemperatureSpec,
+)
+from cubepi.providers.catalog import get_provider_preset, list_provider_presets
 
 __all__ = [
     "__version__",
@@ -44,13 +50,16 @@ __all__ = [
     "AgentToolResult",
     "AssistantMessage",
     "BaseProvider",
+    "CapabilityDescriptor",
     "Message",
     "MessageStream",
     "Middleware",
     "Model",
     "Provider",
+    "ReasoningLevelSpec",
     "StreamEvent",
     "StreamOptions",
+    "TemperatureSpec",
     "TextContent",
     "ThinkingBudgets",
     "ThinkingLevel",
@@ -60,6 +69,8 @@ __all__ = [
     "UserMessage",
     "adjust_max_tokens_for_thinking",
     "compose_middleware",
+    "get_provider_preset",
+    "list_provider_presets",
     "run_agent_loop",
     "run_agent_loop_continue",
 ]

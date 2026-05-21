@@ -62,8 +62,35 @@ Set it per-agent:
 agent = Agent(provider=provider, model=model, thinking="medium")
 ```
 
-Custom budgets are also possible by passing `StreamOptions(thinking_budgets=ThinkingBudgets(low=4096, medium=12288))`
-through your own `on_payload` hook.
+To change the per-level budgets, supply a
+[`CapabilityDescriptor`](./capability-and-presets) with a
+`reasoning_level` of `kind="int_budget"` at construction — its
+`level_budgets` map is the single source of truth for budget values.
+
+```python
+from cubepi import CapabilityDescriptor, ReasoningLevelSpec
+from cubepi.providers.anthropic import AnthropicProvider
+
+provider = AnthropicProvider(
+    api_key="sk-ant-…",
+    capability=CapabilityDescriptor(
+        reasoning_off_payload={"thinking": {"type": "disabled"}},
+        reasoning_on_payload={"thinking": {"type": "enabled"}},
+        reasoning_level=ReasoningLevelSpec(
+            path="thinking.budget_tokens",
+            kind="int_budget",
+            level_budgets={"off": 0, "minimal": 1024, "low": 4096,
+                           "medium": 12288, "high": 16384, "xhigh": 16384},
+        ),
+    ),
+)
+```
+
+:::note Changed in 0.5
+`AnthropicProvider` no longer honors
+`StreamOptions(thinking_budgets=…)` — the capability descriptor's
+`level_budgets` is now the only way to override budgets.
+:::
 
 When thinking is on, CubePi **omits `temperature`** because the
 Anthropic API rejects non-default temperatures alongside extended
@@ -168,6 +195,8 @@ and inject it via a [custom provider](./custom).
 ## See also
 
 - [OpenAI Provider](./openai) — same protocol, different shape.
+- [Capabilities & Preset Catalog](./capability-and-presets) — tune
+  reasoning budgets and temperature handling as data.
 - [Custom Provider](./custom) — wrap a non-built-in API.
 - [Recipes → Multi-Provider Failover](../../recipes/multi-provider-failover)
   — fall back to OpenAI when Anthropic is down.
