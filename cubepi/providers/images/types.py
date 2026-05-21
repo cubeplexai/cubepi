@@ -6,16 +6,11 @@ from pydantic import BaseModel, Field
 
 from cubepi.providers.base import ImageContent, TextContent
 
-ImagesSize = Literal["1024x1024", "1536x1024", "1024x1536", "auto"]
-ImagesQuality = Literal["low", "medium", "high", "auto"]
-
 
 class ImagesModel(BaseModel):
     id: str
     provider: str
     api: str = ""
-    size: ImagesSize = "auto"
-    quality: ImagesQuality = "auto"
 
 
 class ImagesContext(BaseModel):

@@ -6,11 +6,24 @@ from cubepi.providers.images.types import (
 )
 
 
-def test_images_model_defaults():
+def test_images_model_fields():
     m = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    assert m.id == "gpt-image-1"
+    assert m.provider == "openai"
     assert m.api == "openai-images"
-    assert m.size == "auto"
-    assert m.quality == "auto"
+
+
+def test_images_model_api_defaults_to_empty():
+    m = ImagesModel(id="gpt-image-1", provider="openai")
+    assert m.api == ""
+
+
+def test_images_model_no_size_or_quality():
+    # size and quality are not fields on ImagesModel; only id/provider/api exist.
+    m = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    assert not hasattr(m, "size")
+    assert not hasattr(m, "quality")
+    assert set(ImagesModel.model_fields) == {"id", "provider", "api"}
 
 
 def test_images_context_input_content():

@@ -5,7 +5,7 @@ import io
 from typing import Any
 
 from cubepi.providers.base import ImageContent, TextContent
-from cubepi.providers.images.registry import register_images_provider
+from cubepi.providers.images.registry import register_images_provider_class
 from cubepi.providers.images.types import AssistantImages, ImagesContext, ImagesModel
 
 
@@ -43,13 +43,8 @@ class OpenAIImagesProvider:
         context: ImagesContext,
         options: dict[str, Any] | None = None,
     ) -> AssistantImages:
+        # Provider-specific knobs (size, quality, output_format, …) flow through options.
         params: dict[str, Any] = {"model": model.id, "prompt": context.prompt, "n": 1}
-        if model.size != "auto":
-            params["size"] = model.size
-        if model.quality != "auto":
-            params["quality"] = model.quality
-        # Caller passthrough: output_format, output_compression, background, n, …
-        # Merged last so callers can override the defaults above.
         if options:
             params.update(options)
 
@@ -100,7 +95,4 @@ class OpenAIImagesProvider:
         return buf
 
 
-def register_openai_images(
-    *, api_key: str | None = None, base_url: str | None = None
-) -> None:
-    register_images_provider(OpenAIImagesProvider(api_key=api_key, base_url=base_url))
+register_images_provider_class("openai-images", OpenAIImagesProvider)

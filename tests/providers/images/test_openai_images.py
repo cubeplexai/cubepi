@@ -38,16 +38,15 @@ def _provider_with_fake():
 
 
 @pytest.mark.asyncio
-async def test_generate_text_to_image():
+async def test_generate_text_to_image_with_options():
+    """size and quality passed via options flow into the API call."""
     p = _provider_with_fake()
-    model = ImagesModel(
-        id="gpt-image-1",
-        provider="openai",
-        api="openai-images",
-        size="1024x1024",
-        quality="high",
+    model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    out = await p.generate_images(
+        model,
+        ImagesContext(prompt="a cat"),
+        options={"size": "1024x1024", "quality": "high"},
     )
-    out = await p.generate_images(model, ImagesContext(prompt="a cat"))
     assert out.stop_reason == "stop"
     assert out.output[0].type == "image"
     assert p._client.images.generate_kwargs["model"] == "gpt-image-1"
@@ -57,7 +56,8 @@ async def test_generate_text_to_image():
 
 
 @pytest.mark.asyncio
-async def test_auto_size_quality_omitted():
+async def test_no_options_means_no_size_or_quality():
+    """When no options are passed, size and quality are absent from the request."""
     p = _provider_with_fake()
     model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
     await p.generate_images(model, ImagesContext(prompt="x"))
@@ -126,12 +126,12 @@ def test_to_file_preserves_input_format(media_type, expected_name):
     assert f.name == expected_name
 
 
-def test_register_openai_images_registers_provider():
-    from cubepi.providers.images.openai_images import register_openai_images
-    from cubepi.providers.images.registry import get_images_provider
+def test_class_registration_works():
+    """Importing openai_images registers the class; create_images_provider works."""
+    from cubepi.providers.images import create_images_provider
 
-    register_openai_images(api_key="sk-test")
-    assert get_images_provider("openai-images") is not None
+    p = create_images_provider("openai-images", api_key="sk-test")
+    assert isinstance(p, OpenAIImagesProvider)
 
 
 def test_base_url_is_accepted():
