@@ -206,6 +206,9 @@ async def _run_loop(
             # message_end is deferred until here so that a mutated response
             # is what gets persisted via Agent._process_event.
             skip_tool_execution = False
+            # Messages injected by after_model_response that must be appended
+            # AFTER this turn's tool_results, not immediately (see below).
+            deferred_inject_messages: list[Message] = []
             if after_model_response is not None:
                 turn_action = await after_model_response(
                     message,
@@ -225,11 +228,26 @@ async def _run_loop(
                     # Emit message_end now — message reflects any hook mutation.
                     await emit_event(emit, MessageEndEvent(message=message))
                     if turn_action.inject_messages:
-                        for inj in turn_action.inject_messages:
-                            await emit_event(emit, MessageStartEvent(message=inj))
-                            await emit_event(emit, MessageEndEvent(message=inj))
-                            current_context.messages.append(inj)
-                            new_messages.append(inj)
+                        # When this turn still has tool_calls to execute (the
+                        # "natural" decision falls through to tool handling
+                        # below), the tool_results MUST be appended before any
+                        # injected messages. Otherwise an injected (e.g. user)
+                        # message lands between an assistant tool_use and its
+                        # tool_result, which strict Anthropic-style endpoints
+                        # reject ("tool_use ... without tool_result blocks
+                        # immediately after"). Defer such injects until after
+                        # the tool_results are appended.
+                        _will_execute_tools = turn_action.decision == "natural" and any(
+                            isinstance(c, ToolCall) for c in message.content
+                        )
+                        if _will_execute_tools:
+                            deferred_inject_messages = list(turn_action.inject_messages)
+                        else:
+                            for inj in turn_action.inject_messages:
+                                await emit_event(emit, MessageStartEvent(message=inj))
+                                await emit_event(emit, MessageEndEvent(message=inj))
+                                current_context.messages.append(inj)
+                                new_messages.append(inj)
                     if turn_action.decision == "stop":
                         await emit_event(
                             emit, TurnEndEvent(message=message, tool_results=[])
@@ -275,6 +293,14 @@ async def _run_loop(
                 for result in tool_results:
                     current_context.messages.append(result)
                     new_messages.append(result)
+
+            # Append messages deferred from after_model_response so they land
+            # AFTER the tool_results, preserving tool_use/tool_result adjacency.
+            for inj in deferred_inject_messages:
+                await emit_event(emit, MessageStartEvent(message=inj))
+                await emit_event(emit, MessageEndEvent(message=inj))
+                current_context.messages.append(inj)
+                new_messages.append(inj)
 
             await emit_event(
                 emit, TurnEndEvent(message=message, tool_results=tool_results)

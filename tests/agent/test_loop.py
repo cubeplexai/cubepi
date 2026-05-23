@@ -201,6 +201,64 @@ class TestAgentLoop:
         assert "tool_execution_start" in event_types
         assert "tool_execution_end" in event_types
 
+    async def test_after_model_response_inject_lands_after_tool_results(self):
+        """Regression: a message injected by after_model_response on a turn that
+        still executes tool_calls must be appended AFTER the tool_results, never
+        between the assistant tool_use and its tool_result — strict
+        Anthropic-style endpoints 400 on tool_use without an immediately
+        following tool_result."""
+        from cubepi.middleware.base import TurnAction
+        from cubepi.providers.base import ToolCall
+
+        tool = make_echo_tool()
+        provider = FauxProvider()
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [faux_tool_call("echo", {"value": "hello"}, id="tool-1")],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("done"),
+            ]
+        )
+
+        async def inject_on_toolcall(message, ctx, *, signal=None):
+            if any(isinstance(c, ToolCall) for c in message.content):
+                return TurnAction(
+                    inject_messages=[
+                        UserMessage(content=[TextContent(text="REMINDER")])
+                    ]
+                )
+            return None
+
+        context = AgentContext(system_prompt="", messages=[], tools=[tool])
+        result = await run_agent_loop(
+            prompts=[make_user_message("echo something")],
+            context=context,
+            provider=provider,
+            model=make_model(),
+            convert_to_llm=identity_converter,
+            emit=lambda e: None,
+            after_model_response=inject_on_toolcall,
+        )
+
+        roles = [m.role for m in result]
+        tool_use_idx = next(
+            i
+            for i, m in enumerate(result)
+            if m.role == "assistant" and any(isinstance(c, ToolCall) for c in m.content)
+        )
+        # tool_result must immediately follow the assistant tool_use.
+        assert result[tool_use_idx + 1].role == "tool_result", roles
+        # the injected reminder must land after the tool_result, not before it.
+        reminder_idx = next(
+            i
+            for i, m in enumerate(result)
+            if m.role == "user"
+            and any(getattr(c, "text", "") == "REMINDER" for c in m.content)
+        )
+        assert reminder_idx > tool_use_idx + 1, roles
+
     async def test_should_stop_after_turn(self):
         tool = make_echo_tool()
         provider = FauxProvider()
