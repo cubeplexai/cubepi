@@ -162,16 +162,6 @@ async def _run_loop(
     opts = stream_options or StreamOptions()
     first_turn = True
 
-    # Poll for steering messages at start (user may have typed while waiting)
-    if get_steering_messages:
-        pending = await get_steering_messages() or []
-        if pending:
-            for msg in pending:
-                await emit_event(emit, MessageStartEvent(message=msg))
-                await emit_event(emit, MessageEndEvent(message=msg))
-                current_context.messages.append(msg)
-                new_messages.append(msg)
-
     while True:
         has_more_tool_calls = True
 
@@ -326,6 +316,21 @@ async def _run_loop(
                         await emit_event(emit, MessageEndEvent(message=msg))
                         current_context.messages.append(msg)
                         new_messages.append(msg)
+
+        # The in-loop drain only fires when more tool calls remain, so a steer
+        # that arrives while the model is finishing a tool-less turn would be
+        # dropped. Drain it here and re-invoke the model so "steer anytime"
+        # works during a final text turn too.
+        if get_steering_messages:
+            steering = await get_steering_messages() or []
+            if steering:
+                for msg in steering:
+                    await emit_event(emit, MessageStartEvent(message=msg))
+                    await emit_event(emit, MessageEndEvent(message=msg))
+                    current_context.messages.append(msg)
+                    new_messages.append(msg)
+                first_turn = False
+                continue
 
         # After inner loop completes, check for follow-up messages
         if get_follow_up_messages:
