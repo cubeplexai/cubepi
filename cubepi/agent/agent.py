@@ -373,17 +373,23 @@ class Agent(Generic[TMessage]):
         every tool_call id that has no ToolResultMessage yet.
         """
         try:
-            last_assistant: AssistantMessage | None = None
-            for message in reversed(self._state._messages):
-                if isinstance(message, AssistantMessage):
-                    last_assistant = message
+            last_idx = -1
+            for i in range(len(self._state._messages) - 1, -1, -1):
+                if isinstance(self._state._messages[i], AssistantMessage):
+                    last_idx = i
                     break
-            if last_assistant is None:
+            if last_idx == -1:
                 return
+            last_assistant = self._state._messages[last_idx]
+            assert isinstance(last_assistant, AssistantMessage)
 
+            # Only results from this turn count as answered — tool_call ids
+            # are not globally unique, so scanning all history could treat a
+            # reused id from an earlier turn as already answered and skip the
+            # backfill, leaving the thread wedged.
             answered = {
                 m.tool_call_id
-                for m in self._state._messages
+                for m in self._state._messages[last_idx + 1 :]
                 if isinstance(m, ToolResultMessage)
             }
             synthetic: list[Message] = []
