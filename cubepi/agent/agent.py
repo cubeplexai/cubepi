@@ -413,9 +413,9 @@ class Agent(Generic[TMessage]):
             self._state._messages.extend(synthetic)
             if self.checkpointer and self.thread_id:
                 await self.checkpointer.append(self.thread_id, synthetic)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError:  # pragma: no cover - re-raise the trigger
             raise
-        except Exception:
+        except Exception:  # pragma: no cover - cleanup must never mask the cancel
             pass
 
     async def _process_event(self, event: AgentEvent) -> None:

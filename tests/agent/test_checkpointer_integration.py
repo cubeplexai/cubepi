@@ -317,3 +317,52 @@ class TestCheckpointerIntegration:
         assert isinstance(backfilled, ToolResultMessage)
         assert backfilled.tool_call_id == "dup"
         assert backfilled.is_error is True
+
+    async def test_cancel_backfill_only_for_unanswered_calls(self):
+        """Backfill skips already-answered tool_calls and only fills orphans —
+        e.g. one of two parallel calls finished before the cancel landed."""
+        agent = Agent(provider=FauxProvider(), model=make_model())
+        agent._state._messages = [
+            UserMessage(content=[TextContent(text="go")]),
+            AssistantMessage(
+                content=[
+                    TextContent(text="working"),
+                    ToolCall(id="done", name="a", arguments={}),
+                    ToolCall(id="orphan", name="b", arguments={}),
+                ],
+                stop_reason="tool_use",
+            ),
+            ToolResultMessage(
+                tool_call_id="done",
+                tool_name="a",
+                content=[TextContent(text="ok")],
+            ),
+        ]
+        await agent._complete_cancelled_tool_calls()
+        results = [
+            m for m in agent._state._messages if isinstance(m, ToolResultMessage)
+        ]
+        # "done" already answered; only "orphan" is backfilled.
+        assert [r.tool_call_id for r in results] == ["done", "orphan"]
+        assert results[1].is_error is True
+
+    async def test_cancel_backfill_noop_without_orphans(self):
+        """No assistant message, or no unanswered tool_calls — nothing added."""
+        agent = Agent(provider=FauxProvider(), model=make_model())
+        # No assistant at all.
+        agent._state._messages = [UserMessage(content=[TextContent(text="hi")])]
+        await agent._complete_cancelled_tool_calls()
+        assert len(agent._state._messages) == 1
+        # Assistant with a fully-answered tool_call.
+        agent._state._messages = [
+            UserMessage(content=[TextContent(text="go")]),
+            AssistantMessage(
+                content=[ToolCall(id="a", name="t", arguments={})],
+                stop_reason="tool_use",
+            ),
+            ToolResultMessage(
+                tool_call_id="a", tool_name="t", content=[TextContent(text="ok")]
+            ),
+        ]
+        await agent._complete_cancelled_tool_calls()
+        assert len(agent._state._messages) == 3
