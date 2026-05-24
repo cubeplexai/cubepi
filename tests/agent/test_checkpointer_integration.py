@@ -1,3 +1,6 @@
+import asyncio
+
+import pytest
 from pydantic import BaseModel
 
 from cubepi.agent.agent import Agent
@@ -181,3 +184,54 @@ class TestCheckpointerIntegration:
         # New messages
         assert agent2.state.messages[4].role == "user"
         assert agent2.state.messages[5].role == "assistant"
+
+    async def test_cancel_mid_tool_backfills_tool_result(self):
+        """A cancel during tool execution must not leave an orphan tool_call.
+
+        The assistant message (with the tool_call) is checkpointed before the
+        tool runs; if the tool execution is cancelled, the loop backfills a
+        synthetic tool_result so the persisted thread stays resumable.
+        """
+
+        class BlockParams(BaseModel):
+            pass
+
+        async def cancel_execute(tool_call_id, params, *, signal=None, on_update=None):
+            raise asyncio.CancelledError()
+
+        block_tool = AgentTool(
+            name="block",
+            description="Never returns; simulates a cancelled tool call",
+            parameters=BlockParams,
+            execute=cancel_execute,
+        )
+
+        checkpointer = MemoryCheckpointer()
+        provider = FauxProvider()
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    faux_tool_call("block", {}, id="tc-cancel"),
+                    stop_reason="tool_use",
+                ),
+            ]
+        )
+        agent = Agent(
+            provider=provider,
+            model=make_model(),
+            tools=[block_tool],
+            checkpointer=checkpointer,
+            thread_id="thread-cancel",
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await agent.prompt("Run the blocking tool")
+
+        data = await checkpointer.load("thread-cancel")
+        assert data is not None
+        # user + assistant(tool_call) + synthetic tool_result = 3
+        assert [m.role for m in data.messages] == ["user", "assistant", "tool_result"]
+        tool_result = data.messages[2]
+        assert isinstance(tool_result, ToolResultMessage)
+        assert tool_result.tool_call_id == "tc-cancel"
+        assert tool_result.is_error is True

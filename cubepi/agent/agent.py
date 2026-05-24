@@ -26,6 +26,8 @@ from cubepi.providers.base import (
     StreamOptions,
     TextContent,
     ThinkingLevel,
+    ToolCall,
+    ToolResultMessage,
     Usage,
     UserMessage,
 )
@@ -328,6 +330,14 @@ class Agent(Generic[TMessage]):
 
         try:
             await executor(signal)
+        except asyncio.CancelledError:
+            # A cancel can land after the assistant message (carrying
+            # tool_calls) was checkpointed but before the tool_results were.
+            # That leaves the persisted history with orphan tool_calls, which
+            # every provider rejects on the next turn. Backfill synthetic
+            # tool_results so the thread stays resumable, then re-raise.
+            await self._complete_cancelled_tool_calls()
+            raise
         except Exception as error:
             await self._handle_run_failure(error, signal.is_set())
         finally:
@@ -352,6 +362,55 @@ class Agent(Generic[TMessage]):
             TurnEndEvent(message=failure_message, tool_results=[])
         )
         await self._process_event(AgentEndEvent(messages=[failure_message]))
+
+    async def _complete_cancelled_tool_calls(self) -> None:
+        """Backfill tool_results for tool_calls left dangling by a cancel.
+
+        Best-effort: a checkpoint failure here must never mask the
+        CancelledError that triggered cleanup. Only the most recent assistant
+        message can have un-answered tool_calls (the loop appends tool_results
+        immediately after), so we scan back to it and synthesize a result for
+        every tool_call id that has no ToolResultMessage yet.
+        """
+        try:
+            last_assistant: AssistantMessage | None = None
+            for message in reversed(self._state._messages):
+                if isinstance(message, AssistantMessage):
+                    last_assistant = message
+                    break
+            if last_assistant is None:
+                return
+
+            answered = {
+                m.tool_call_id
+                for m in self._state._messages
+                if isinstance(m, ToolResultMessage)
+            }
+            synthetic: list[Message] = []
+            for block in last_assistant.content:
+                if not isinstance(block, ToolCall) or block.id in answered:
+                    continue
+                synthetic.append(
+                    ToolResultMessage(
+                        tool_call_id=block.id,
+                        tool_name=block.name,
+                        content=[
+                            TextContent(text="[Tool execution cancelled by user]")
+                        ],
+                        is_error=True,
+                        timestamp=time.time(),
+                    )
+                )
+
+            if not synthetic:
+                return
+            self._state._messages.extend(synthetic)
+            if self.checkpointer and self.thread_id:
+                await self.checkpointer.append(self.thread_id, synthetic)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
 
     async def _process_event(self, event: AgentEvent) -> None:
         if event.type == "message_start":
