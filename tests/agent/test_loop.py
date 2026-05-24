@@ -370,18 +370,9 @@ class TestAgentLoop:
         roles = [m.role for m in messages]
         assert roles == ["user", "assistant", "tool_result"]
 
-    async def test_steering_messages_drained_at_turn_boundary(self):
-        # Steering is now drained at the turn boundary (after the model replies),
-        # not before the first model call. A steer queued before or during a
-        # tool-less run appears after the first assistant message and causes a
-        # second model invocation.
+    async def test_steering_messages_polled_before_first_turn(self):
         provider = FauxProvider()
-        provider.set_responses(
-            [
-                faux_assistant_message("first answer"),
-                faux_assistant_message("acknowledged steer"),
-            ]
-        )
+        provider.set_responses([faux_assistant_message("Got it")])
 
         context = AgentContext(system_prompt="", messages=[], tools=[])
         call_count = 0
@@ -404,17 +395,51 @@ class TestAgentLoop:
             emit=lambda e: events.append(e),
         )
 
-        # Messages: prompt -> first assistant -> steer -> second assistant
+        # Messages should be: initial prompt, steering message, assistant response
+        roles = [m.role for m in messages]
+        assert roles == ["user", "user", "assistant"]
+
+        # Verify event ordering: message_end events should reflect
+        # initial prompt -> steering message -> assistant response
+        message_ends = [e for e in events if e.type == "message_end"]
+        assert len(message_ends) == 3
+        assert message_ends[0].message.role == "user"  # initial prompt
+        assert message_ends[1].message.role == "user"  # steering message
+        assert message_ends[2].message.role == "assistant"  # response
+
+    async def test_steering_drained_at_turn_boundary_when_no_more_tools(self):
+        # Pre-loop poll returns nothing; the steer arrives at the turn boundary
+        # of a tool-less turn. Without the boundary drain it would be dropped.
+        provider = FauxProvider()
+        provider.set_responses(
+            [
+                faux_assistant_message("first answer"),
+                faux_assistant_message("acknowledged steer"),
+            ]
+        )
+        context = AgentContext(system_prompt="", messages=[], tools=[])
+        call_count = 0
+
+        async def get_steering():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:  # first call = pre-loop (empty); second = turn boundary
+                return [make_user_message("steer msg")]
+            return []
+
+        events: list[AgentEvent] = []
+        messages = await run_agent_loop(
+            prompts=[make_user_message("start")],
+            context=context,
+            provider=provider,
+            model=make_model(),
+            convert_to_llm=identity_converter,
+            get_steering_messages=get_steering,
+            emit=lambda e: events.append(e),
+        )
+
         roles = [m.role for m in messages]
         assert roles == ["user", "assistant", "user", "assistant"]
-
-        # Verify event ordering via message_end events
-        message_ends = [e for e in events if e.type == "message_end"]
-        assert len(message_ends) == 4
-        assert message_ends[0].message.role == "user"  # initial prompt
-        assert message_ends[1].message.role == "assistant"  # first response
-        assert message_ends[2].message.role == "user"  # steering message
-        assert message_ends[3].message.role == "assistant"  # second response
 
     async def test_error_stop_reason_ends_loop(self):
         provider = FauxProvider()

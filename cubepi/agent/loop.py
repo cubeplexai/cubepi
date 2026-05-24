@@ -162,6 +162,16 @@ async def _run_loop(
     opts = stream_options or StreamOptions()
     first_turn = True
 
+    # Poll for steering messages at start (user may have typed while waiting)
+    if get_steering_messages:
+        pending = await get_steering_messages() or []
+        if pending:
+            for msg in pending:
+                await emit_event(emit, MessageStartEvent(message=msg))
+                await emit_event(emit, MessageEndEvent(message=msg))
+                current_context.messages.append(msg)
+                new_messages.append(msg)
+
     while True:
         has_more_tool_calls = True
 
