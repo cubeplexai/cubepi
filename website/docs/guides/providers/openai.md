@@ -78,8 +78,8 @@ temperature handling) are configured through a
 [`CapabilityDescriptor`](pathname:///pydoc/cubepi/providers/capability.html)
 passed at construction. For example, `max_tokens_field="max_completion_tokens"`
 renames the key on the way out. See
-[Capabilities & Preset Catalog](./capability-and-presets) for the full
-set of knobs and 20+ ready-made provider presets (cubepi `0.5+`).
+[Capability Descriptors](./capability-and-presets) for the full set of
+knobs (cubepi `0.5+`).
 
 ### Pointing at vLLM / LiteLLM / DeepSeek
 
@@ -100,8 +100,8 @@ provider = OpenAIProvider(
 )
 ```
 
-Many of these backends already have a ready-made preset — see
-[Capabilities & Preset Catalog](./capability-and-presets).
+For the wire quirks of these backends (reasoning toggles, token-field
+renames, …), see [Capability Descriptors](./capability-and-presets).
 
 ## Responses API: `OpenAIResponsesProvider`
 
@@ -166,9 +166,8 @@ provider.
   - Set `include_usage=False` in `on_payload` (the field still goes
     out, but is usually accepted as a no-op even by strict
     backends).
-  - Use the capability/preset catalog (cubepi `0.5+`) — register a
-    `CapabilityDescriptor` for your backend, or open an issue to add
-    one upstream.
+  - Use a [`CapabilityDescriptor`](./capability-and-presets) (cubepi
+    `0.5+`) to describe your backend's reasoning wiring declaratively.
 - **Thinking events but no `thinking_*` events** — Your backend
   surfaces reasoning under a non-standard field. Either add a fourth
   branch via PR or transcode it with `on_payload`.
