@@ -87,9 +87,12 @@ const config: Config = {
       title: 'CubePi',
       logo: { alt: 'CubePi logo', src: 'img/brand/cubepi-logo.svg' },
       items: [
-        { type: 'doc', docId: 'getting-started/installation', label: 'Docs', position: 'left' },
-        { type: 'doc', docId: 'api/index', label: 'API', position: 'left' },
-        { type: 'doc', docId: 'recipes/weather-agent', label: 'Recipes', position: 'left' },
+        // Version-aware section links (see src/components/VersionAwareDocLink):
+        // active state is path-driven so only one lights up per page, and the
+        // target stays within the version the reader is currently browsing.
+        { type: 'custom-versionAwareDocLink', section: 'docs', label: 'Docs', position: 'left' },
+        { type: 'custom-versionAwareDocLink', section: 'api', label: 'API', position: 'left' },
+        { type: 'custom-versionAwareDocLink', section: 'recipes', label: 'Recipes', position: 'left' },
         { to: '/changelog', label: 'Changelog', position: 'left' },
         { type: 'docsVersionDropdown', position: 'right' },
         { type: 'localeDropdown', position: 'right' },
