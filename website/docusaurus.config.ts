@@ -87,9 +87,29 @@ const config: Config = {
       title: 'CubePi',
       logo: { alt: 'CubePi logo', src: 'img/brand/cubepi-logo.svg' },
       items: [
-        { type: 'doc', docId: 'getting-started/installation', label: 'Docs', position: 'left' },
-        { type: 'doc', docId: 'api/index', label: 'API', position: 'left' },
-        { type: 'doc', docId: 'recipes/weather-agent', label: 'Recipes', position: 'left' },
+        // Path-based active matching so each top-nav item highlights only for
+        // its own docs section. `type: 'doc'` can't do this here because every
+        // doc lives in one shared sidebar, which lights up all three at once.
+        // Each regex tolerates an optional locale prefix (/zh-Hans) and an
+        // optional version segment (e.g. /docs/0.4/) before the section.
+        {
+          to: '/docs/getting-started/installation',
+          label: 'Docs',
+          position: 'left',
+          activeBaseRegex: '^(?:/zh-Hans)?/docs/(?!(?:(?:\\d+\\.\\d+|next)/)?(?:api|recipes)(?:/|$))',
+        },
+        {
+          to: '/docs/api/',
+          label: 'API',
+          position: 'left',
+          activeBaseRegex: '^(?:/zh-Hans)?/docs/(?:(?:\\d+\\.\\d+|next)/)?api(?:/|$)',
+        },
+        {
+          to: '/docs/recipes/weather-agent',
+          label: 'Recipes',
+          position: 'left',
+          activeBaseRegex: '^(?:/zh-Hans)?/docs/(?:(?:\\d+\\.\\d+|next)/)?recipes(?:/|$)',
+        },
         { to: '/changelog', label: 'Changelog', position: 'left' },
         { type: 'docsVersionDropdown', position: 'right' },
         { type: 'localeDropdown', position: 'right' },
