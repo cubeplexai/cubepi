@@ -1,0 +1,739 @@
+---
+id: cubepi-providers
+title: cubepi.providers
+sidebar_position: 2
+hide_table_of_contents: false
+---
+
+# `cubepi.providers`
+
+### AssistantMessage {#assistantmessage}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L124)
+
+
+**Attributes**
+
+- `role`: `Literal['assistant']`
+- `content`: `list[Content | ThinkingContent | ToolCall]`
+- `stop_reason`: `str`
+- `error_message`: `str | None`
+- `usage`: `Usage | None`
+- `timestamp`: `float | None`
+- `provider_id`: `str`
+- `model_id`: `str`
+- `response_id`: `str | None`
+- `metadata`: `dict[str, Any]`
+
+
+### BaseProvider {#baseprovider}
+
+_class_
+
+```python
+BaseProvider(self)
+```
+
+Concrete base class for built-in cubepi providers.
+
+Built-in providers (Anthropic, OpenAI, OpenAI Responses, Faux) inherit
+from this class to gain the persistent listener registry used by
+`cubepi.tracing` and other observers. User-defined providers may also
+inherit from `BaseProvider` to opt in, or remain duck-typed against
+the `Provider` Protocol (which only requires `stream()`).
+
+Concrete subclasses must implement `stream()` and call
+`_fire_listeners` at three points: after the request payload is
+finalized, for each `StreamEvent` pushed onto the stream, and exactly
+once in a `finally` block after the stream terminates.
+
+Per-call mutators (`StreamOptions.on_payload`,
+`StreamOptions.on_response`) retain their existing single-slot
+semantics and fire independently of the persistent listener registry
+below.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L581)
+
+
+**Methods**
+
+#### `stream` {#baseprovider-stream}
+
+```python
+stream(model: Model, messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefinition] | None = None, options: StreamOptions | None = None) -> MessageStream
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L606)
+
+
+#### `subscribe_request` {#baseprovider-subscribe-request}
+
+```python
+subscribe_request(cb: OnRequestCallback) -> Callable[[], None]
+```
+
+Register a persistent observer for request payloads.
+
+Returns a detach callable that removes this specific subscription.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L625)
+
+
+#### `subscribe_chunk` {#baseprovider-subscribe-chunk}
+
+```python
+subscribe_chunk(cb: OnChunkCallback) -> Callable[[], None]
+```
+
+Register a persistent observer for stream chunks.
+
+Returns a detach callable.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L633)
+
+
+#### `subscribe_response` {#baseprovider-subscribe-response}
+
+```python
+subscribe_response(cb: OnResponseBodyCallback) -> Callable[[], None]
+```
+
+Register a persistent observer for assembled responses.
+
+Returns a detach callable.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L641)
+
+
+
+### Content {#content}
+
+_attribute_
+
+```python
+Content = TextContent | ImageContent
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L107)
+
+
+### ImageContent {#imagecontent}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L96)
+
+
+**Attributes**
+
+- `type`: `Literal['image']`
+- `source`: `str`
+- `media_type`: `str`
+
+
+### Message {#message}
+
+_attribute_
+
+```python
+Message = UserMessage | AssistantMessage | ToolResultMessage
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L148)
+
+
+### MessageStream {#messagestream}
+
+_class_
+
+```python
+MessageStream(self)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L209)
+
+
+**Methods**
+
+#### `attach_task` {#messagestream-attach-task}
+
+```python
+attach_task(task: asyncio.Task) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L217)
+
+
+#### `push` {#messagestream-push}
+
+```python
+push(event: StreamEvent) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L229)
+
+
+#### `set_result` {#messagestream-set-result}
+
+```python
+set_result(message: AssistantMessage) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L234)
+
+
+#### `result` {#messagestream-result}
+
+```python
+result() -> AssistantMessage
+```
+
+Return the final assistant message.
+
+Blocks not just on the result future, but also on the producer
+task's completion — the producer's `finally` block runs
+`_fire_response_listeners` (after `set_result`), so
+without waiting for the task, callers under `asyncio.run`
+teardown could exit before async response listeners have run.
+Producer exceptions are NOT re-raised here; they were already
+surfaced via the result future or the stream's error events.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L247)
+
+
+
+### Model {#model}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L79)
+
+
+**Attributes**
+
+- `id`: `str`
+- `provider`: `str`
+- `api`: `str`
+- `reasoning`: `bool`
+- `context_window`: `int`
+- `max_tokens`: `int`
+- `temperature`: `float`
+- `cost`: `ModelCost | None`
+- `thinking_level_map`: `dict[str, str | None] | None`
+
+
+### ModelCost {#modelcost}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L65)
+
+
+**Attributes**
+
+- `input`: `float`
+- `output`: `float`
+- `cache_read`: `float`
+- `cache_write`: `float`
+
+
+### OnChunkCallback {#onchunkcallback}
+
+_attribute_
+
+```python
+OnChunkCallback = Callable[['StreamEvent', Model], Awaitable[None] | None]
+```
+
+Persistent observer. Fires for every StreamEvent pushed onto the stream
+(start, text_delta, thinking_delta, toolcall_delta, done, error, ...).
+Heavy listeners should early-return on irrelevant event types — this hook
+fires hot. Return value is ignored.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L301)
+
+
+### OnPayloadCallback {#onpayloadcallback}
+
+_attribute_
+
+```python
+OnPayloadCallback = Callable[[dict, Model], Awaitable[dict | None] | dict | None]
+```
+
+Optional callback for inspecting/replacing provider payloads before sending.
+Return a dict to replace the payload, or None to keep unchanged.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L288)
+
+
+### OnRequestCallback {#onrequestcallback}
+
+_attribute_
+
+```python
+OnRequestCallback = Callable[[dict, Model], Awaitable[None] | None]
+```
+
+Persistent observer. Fires just before HTTP send, after any per-call
+`StreamOptions.on_payload` mutation has been applied. Receives the final
+wire payload dict and the Model. Return value is ignored.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L296)
+
+
+### OnResponseBodyCallback {#onresponsebodycallback}
+
+_attribute_
+
+```python
+OnResponseBodyCallback = Callable[[dict | None, Model, BaseException | None], Awaitable[None] | None]
+```
+
+Persistent observer. Fires exactly once per `stream()` call, in a
+finally block, after the stream terminates.
+
+- body: assembled provider response as a dict (same shape a non-streaming
+  call to the provider would have returned), or None if the stream failed
+  before a response could be assembled.
+- exc: the exception that ended the stream (including
+  `asyncio.CancelledError`), or None on normal completion.
+Return value is ignored.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L307)
+
+
+### OnResponseCallback {#onresponsecallback}
+
+_attribute_
+
+```python
+OnResponseCallback = Callable[['ProviderResponse', Model], Awaitable[None] | None]
+```
+
+Optional callback invoked after an HTTP response is received.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L292)
+
+
+### Provider {#provider}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L568)
+
+
+**Methods**
+
+#### `stream` {#provider-stream}
+
+```python
+stream(model: Model, messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefinition] | None = None, options: StreamOptions | None = None) -> MessageStream
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L570)
+
+
+
+### ProviderResponse {#providerresponse}
+
+_class_
+
+```python
+ProviderResponse(self, status: int, headers: dict[str, str] = dict())
+```
+
+HTTP response metadata exposed to on_response callbacks.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L280)
+
+
+**Attributes**
+
+- `status`: `int`
+- `headers`: `dict[str, str]`
+
+
+### StreamEvent {#streamevent}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L157)
+
+
+**Attributes**
+
+- `type`: `Literal['start', 'text_start', 'text_delta', 'text_end', 'thinking_start', 'thinking_delta', 'thinking_end', 'toolcall_start', 'toolcall_delta', 'toolcall_end', 'done', 'error']`
+- `content_index`: `int | None`
+- `delta`: `str | None`
+- `partial`: `AssistantMessage | None`
+- `error_message`: `str | None`
+
+
+### StreamOptions {#streamoptions}
+
+_class_
+
+Options bag for Provider.stream(), transparent to the agent loop.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L529)
+
+
+**Attributes**
+
+- `model_config`
+- `thinking`: `ThinkingLevel`
+- `thinking_budgets`: `ThinkingBudgets | None`
+- `signal`: `asyncio.Event | None`
+- `on_payload`: `OnPayloadCallback | None`
+- `on_response`: `OnResponseCallback | None`
+
+
+### TextContent {#textcontent}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L91)
+
+
+**Attributes**
+
+- `type`: `Literal['text']`
+- `text`: `str`
+
+
+### ThinkingBudgets {#thinkingbudgets}
+
+_class_
+
+Token budgets for each thinking level.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L22)
+
+
+**Attributes**
+
+- `minimal`: `int`
+- `low`: `int`
+- `medium`: `int`
+- `high`: `int`
+
+
+### ThinkingContent {#thinkingcontent}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L102)
+
+
+**Attributes**
+
+- `type`: `Literal['thinking']`
+- `thinking`: `str`
+
+
+### ThinkingLevel {#thinkinglevel}
+
+_attribute_
+
+```python
+ThinkingLevel = Literal['off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L19)
+
+
+### ToolCall {#toolcall}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L110)
+
+
+**Attributes**
+
+- `type`: `Literal['tool_call']`
+- `id`: `str`
+- `name`: `str`
+- `arguments`: `dict[str, Any]`
+
+
+### ToolDefinition {#tooldefinition}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L151)
+
+
+**Attributes**
+
+- `name`: `str`
+- `description`: `str`
+- `parameters`: `dict[str, Any]`
+
+
+### ToolResultMessage {#toolresultmessage}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L137)
+
+
+**Attributes**
+
+- `role`: `Literal['tool_result']`
+- `tool_call_id`: `str`
+- `tool_name`: `str`
+- `content`: `list[Content]`
+- `details`: `Any`
+- `is_error`: `bool`
+- `timestamp`: `float | None`
+- `metadata`: `dict[str, Any]`
+
+
+### Usage {#usage}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L72)
+
+
+**Attributes**
+
+- `input_tokens`: `int`
+- `output_tokens`: `int`
+- `cache_read_tokens`: `int`
+- `cache_write_tokens`: `int`
+
+
+### UserMessage {#usermessage}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L117)
+
+
+**Attributes**
+
+- `role`: `Literal['user']`
+- `content`: `list[Content]`
+- `timestamp`: `float | None`
+- `metadata`: `dict[str, Any]`
+
+
+### adjust_max_tokens_for_thinking {#adjust-max-tokens-for-thinking}
+
+_function_
+
+```python
+adjust_max_tokens_for_thinking(base_max_tokens: int, model_max_tokens: int, reasoning_level: ThinkingLevel, custom_budgets: ThinkingBudgets | None = None) -> tuple[int, int]
+```
+
+Adjust max_tokens to reserve space for a thinking budget.
+
+Given a base max_tokens (the desired output capacity), increases it to
+accommodate the thinking budget while respecting the model's hard cap.
+If the model cap is too small to fit both, the thinking budget is reduced
+to leave at least `min_output_tokens` (1024) for output.
+
+
+**Returns**
+
+- A `(max_tokens, thinking_budget)` tuple.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/base.py#L31)
+
+
+### FauxProvider {#fauxprovider}
+
+_class_
+
+```python
+FauxProvider(self, *, tokens_per_second: float | None = None, token_size_min: int = 3, token_size_max: int = 5)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/faux.py#L155)
+
+
+**Attributes**
+
+- `call_count`
+- `pending_response_count`: `int`
+- `prompt_cache`: `dict[str, str]` — Read-only access to the prompt cache for test assertions.
+
+
+**Methods**
+
+#### `set_responses` {#fauxprovider-set-responses}
+
+```python
+set_responses(responses: list[FauxResponseStep]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/faux.py#L213)
+
+
+#### `append_responses` {#fauxprovider-append-responses}
+
+```python
+append_responses(responses: list[FauxResponseStep]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/faux.py#L216)
+
+
+#### `clear_prompt_cache` {#fauxprovider-clear-prompt-cache}
+
+```python
+clear_prompt_cache() -> None
+```
+
+Clear the prompt cache, useful between test scenarios.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/faux.py#L223)
+
+
+#### `stream` {#fauxprovider-stream}
+
+```python
+stream(model: Model, messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefinition] | None = None, options: StreamOptions | None = None) -> MessageStream
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/faux.py#L265)
+
+
+
+### faux_assistant_message {#faux-assistant-message}
+
+_function_
+
+```python
+faux_assistant_message(content: str | FauxContentBlock | list[FauxContentBlock], *, stop_reason: str = 'stop', error_message: str | None = None) -> AssistantMessage
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/faux.py#L63)
+
+
+### faux_text {#faux-text}
+
+_function_
+
+```python
+faux_text(text: str) -> TextContent
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/faux.py#L46)
+
+
+### faux_thinking {#faux-thinking}
+
+_function_
+
+```python
+faux_thinking(thinking: str) -> ThinkingContent
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/faux.py#L50)
+
+
+### faux_tool_call {#faux-tool-call}
+
+_function_
+
+```python
+faux_tool_call(name: str, arguments: dict[str, Any], *, id: str | None = None) -> ToolCall
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/faux.py#L54)
+
+
+### THINKING_LEVELS {#thinking-levels}
+
+_attribute_
+
+```python
+THINKING_LEVELS: list[ThinkingLevel] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/models.py#L12)
+
+
+### clamp_thinking_level {#clamp-thinking-level}
+
+_function_
+
+```python
+clamp_thinking_level(model: Model, level: ThinkingLevel) -> ThinkingLevel
+```
+
+Clamp *level* to the nearest supported level for *model*.
+
+If *level* is already supported, return it unchanged.  Otherwise search
+upward first (higher intensity), then downward, through the ordered level
+list to find the closest available level.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/models.py#L54)
+
+
+### get_supported_thinking_levels {#get-supported-thinking-levels}
+
+_function_
+
+```python
+get_supported_thinking_levels(model: Model) -> list[ThinkingLevel]
+```
+
+Return the thinking levels supported by *model*.
+
+* Non-reasoning models only support `["off"]`.
+* For reasoning models, levels are filtered through the model's
+  `thinking_level_map`.  A level mapped to `None` is unsupported.
+  `"xhigh"` is only included when it has an explicit (non-None) mapping.
+  All other levels are included by default when the map omits them.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/models.py#L22)
+
+
+### models_are_equal {#models-are-equal}
+
+_function_
+
+```python
+models_are_equal(a: Model | None, b: Model | None) -> bool
+```
+
+Return `True` if *a* and *b* refer to the same model.
+
+Comparison is by `id` and `provider`.  Returns `False` when either
+argument is `None`.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/cubepi/providers/models.py#L87)
+
+
+
+<!-- GENERATED by build_api_reference.py — DO NOT EDIT -->

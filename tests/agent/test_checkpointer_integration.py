@@ -1,9 +1,19 @@
+import asyncio
+
+import pytest
 from pydantic import BaseModel
 
 from cubepi.agent.agent import Agent
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.providers.base import Model, TextContent, ToolResultMessage
+from cubepi.providers.base import (
+    AssistantMessage,
+    Model,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
 from cubepi.providers.faux import (
     FauxProvider,
     faux_assistant_message,
@@ -181,3 +191,178 @@ class TestCheckpointerIntegration:
         # New messages
         assert agent2.state.messages[4].role == "user"
         assert agent2.state.messages[5].role == "assistant"
+
+    async def test_cancel_mid_tool_backfills_tool_result(self):
+        """A cancel during tool execution must not leave an orphan tool_call.
+
+        The assistant message (with the tool_call) is checkpointed before the
+        tool runs; if the tool execution is cancelled, the loop backfills a
+        synthetic tool_result so the persisted thread stays resumable.
+        """
+
+        class BlockParams(BaseModel):
+            pass
+
+        async def cancel_execute(tool_call_id, params, *, signal=None, on_update=None):
+            raise asyncio.CancelledError()
+
+        block_tool = AgentTool(
+            name="block",
+            description="Never returns; simulates a cancelled tool call",
+            parameters=BlockParams,
+            execute=cancel_execute,
+        )
+
+        checkpointer = MemoryCheckpointer()
+        provider = FauxProvider()
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    faux_tool_call("block", {}, id="tc-cancel"),
+                    stop_reason="tool_use",
+                ),
+            ]
+        )
+        agent = Agent(
+            provider=provider,
+            model=make_model(),
+            tools=[block_tool],
+            checkpointer=checkpointer,
+            thread_id="thread-cancel",
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await agent.prompt("Run the blocking tool")
+
+        data = await checkpointer.load("thread-cancel")
+        assert data is not None
+        # user + assistant(tool_call) + synthetic tool_result = 3
+        assert [m.role for m in data.messages] == ["user", "assistant", "tool_result"]
+        tool_result = data.messages[2]
+        assert isinstance(tool_result, ToolResultMessage)
+        assert tool_result.tool_call_id == "tc-cancel"
+        assert tool_result.is_error is True
+
+    async def test_cancel_backfill_handles_reused_tool_call_id(self):
+        """A reused tool_call_id from an earlier (answered) turn must not
+        suppress the backfill for the current cancelled turn.
+
+        tool_call ids carry no global-uniqueness guarantee, so 'answered'
+        must be scoped to results after the last assistant message.
+        """
+
+        class BlockParams(BaseModel):
+            pass
+
+        async def cancel_execute(tool_call_id, params, *, signal=None, on_update=None):
+            raise asyncio.CancelledError()
+
+        block_tool = AgentTool(
+            name="block",
+            description="Cancels on execution",
+            parameters=BlockParams,
+            execute=cancel_execute,
+        )
+
+        checkpointer = MemoryCheckpointer()
+        # Pre-seed an earlier, fully-answered turn that already used id "dup".
+        await checkpointer.append(
+            "thread-reuse",
+            [
+                UserMessage(content=[TextContent(text="first")]),
+                AssistantMessage(
+                    content=[ToolCall(id="dup", name="block", arguments={})],
+                    stop_reason="tool_use",
+                ),
+                ToolResultMessage(
+                    tool_call_id="dup",
+                    tool_name="block",
+                    content=[TextContent(text="ok")],
+                ),
+            ],
+        )
+
+        provider = FauxProvider()
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    faux_tool_call("block", {}, id="dup"),
+                    stop_reason="tool_use",
+                ),
+            ]
+        )
+        agent = Agent(
+            provider=provider,
+            model=make_model(),
+            tools=[block_tool],
+            checkpointer=checkpointer,
+            thread_id="thread-reuse",
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await agent.prompt("second")
+
+        data = await checkpointer.load("thread-reuse")
+        assert data is not None
+        # Earlier turn (3) + new user + assistant + synthetic tool_result = 6
+        assert [m.role for m in data.messages] == [
+            "user",
+            "assistant",
+            "tool_result",
+            "user",
+            "assistant",
+            "tool_result",
+        ]
+        backfilled = data.messages[5]
+        assert isinstance(backfilled, ToolResultMessage)
+        assert backfilled.tool_call_id == "dup"
+        assert backfilled.is_error is True
+
+    async def test_cancel_backfill_only_for_unanswered_calls(self):
+        """Backfill skips already-answered tool_calls and only fills orphans —
+        e.g. one of two parallel calls finished before the cancel landed."""
+        agent = Agent(provider=FauxProvider(), model=make_model())
+        agent._state._messages = [
+            UserMessage(content=[TextContent(text="go")]),
+            AssistantMessage(
+                content=[
+                    TextContent(text="working"),
+                    ToolCall(id="done", name="a", arguments={}),
+                    ToolCall(id="orphan", name="b", arguments={}),
+                ],
+                stop_reason="tool_use",
+            ),
+            ToolResultMessage(
+                tool_call_id="done",
+                tool_name="a",
+                content=[TextContent(text="ok")],
+            ),
+        ]
+        await agent._complete_cancelled_tool_calls()
+        results = [
+            m for m in agent._state._messages if isinstance(m, ToolResultMessage)
+        ]
+        # "done" already answered; only "orphan" is backfilled.
+        assert [r.tool_call_id for r in results] == ["done", "orphan"]
+        assert results[1].is_error is True
+
+    async def test_cancel_backfill_noop_without_orphans(self):
+        """No assistant message, or no unanswered tool_calls — nothing added."""
+        agent = Agent(provider=FauxProvider(), model=make_model())
+        # No assistant at all.
+        agent._state._messages = [UserMessage(content=[TextContent(text="hi")])]
+        await agent._complete_cancelled_tool_calls()
+        assert len(agent._state._messages) == 1
+        # Assistant with a fully-answered tool_call.
+        agent._state._messages = [
+            UserMessage(content=[TextContent(text="go")]),
+            AssistantMessage(
+                content=[ToolCall(id="a", name="t", arguments={})],
+                stop_reason="tool_use",
+            ),
+            ToolResultMessage(
+                tool_call_id="a", tool_name="t", content=[TextContent(text="ok")]
+            ),
+        ]
+        await agent._complete_cancelled_tool_calls()
+        assert len(agent._state._messages) == 3
