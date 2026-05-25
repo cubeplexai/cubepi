@@ -61,6 +61,16 @@ class _MessageQueue:
         self._messages = self._messages[1:]
         return [first]
 
+    def remove(self, steer_id: str) -> bool:
+        kept = [
+            m
+            for m in self._messages
+            if getattr(m, "metadata", {}).get("steer_id") != steer_id
+        ]
+        removed = len(kept) != len(self._messages)
+        self._messages = kept
+        return removed
+
     def clear(self) -> None:
         self._messages = []
 
@@ -180,6 +190,14 @@ class Agent(Generic[TMessage]):
 
     def steer(self, message: Message) -> None:
         self._steering_queue.enqueue(message)
+
+    def cancel_steer(self, steer_id: str) -> bool:
+        """Remove a not-yet-drained steering message by its steer_id.
+
+        Returns True if a queued message was removed; False if it was already
+        drained or never queued (best-effort cancel).
+        """
+        return self._steering_queue.remove(steer_id)
 
     def follow_up(self, message: Message) -> None:
         self._follow_up_queue.enqueue(message)

@@ -531,3 +531,38 @@ class TestAgentPromptInputTypes:
         assert "first" in texts
         assert "second" in texts
         assert isinstance(agent.state.messages[-1], AssistantMessage)
+
+
+def _steer_msg(text: str, steer_id: str) -> UserMessage:
+    return UserMessage(
+        content=[TextContent(text=text)], metadata={"steer_id": steer_id}
+    )
+
+
+def test_message_queue_remove_by_steer_id():
+    q = _MessageQueue(mode="all")
+    q.enqueue(_steer_msg("a", "s1"))
+    q.enqueue(_steer_msg("b", "s2"))
+    assert q.remove("s1") is True
+    assert [m.content[0].text for m in q.drain()] == ["b"]
+
+
+def test_message_queue_remove_missing_returns_false():
+    q = _MessageQueue(mode="all")
+    q.enqueue(_steer_msg("a", "s1"))
+    assert q.remove("nope") is False
+    assert len(q.drain()) == 1
+
+
+def test_message_queue_remove_ignores_messages_without_steer_id():
+    q = _MessageQueue(mode="all")
+    q.enqueue(UserMessage(content=[TextContent(text="x")]))  # no metadata.steer_id
+    assert q.remove("s1") is False
+
+
+@pytest.mark.asyncio
+async def test_agent_cancel_steer_removes_queued_steer():
+    agent = Agent(provider=FauxProvider(), model=make_model())
+    agent.steer(_steer_msg("hi", "s1"))
+    assert agent.cancel_steer("s1") is True
+    assert agent.cancel_steer("s1") is False
