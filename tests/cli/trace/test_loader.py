@@ -272,7 +272,11 @@ def test_run_prompt_prefers_root_over_subagent_invoke_agent():
 
     sub = Span(
         _span(
-            "0x9", "0x5", "invoke_agent", "2026-05-20T00:00:02Z", "r-sub",
+            "0x9",
+            "0x5",
+            "invoke_agent",
+            "2026-05-20T00:00:02Z",
+            "r-sub",
             **{
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.input.messages": json.dumps(
@@ -283,7 +287,11 @@ def test_run_prompt_prefers_root_over_subagent_invoke_agent():
     )
     root = Span(
         _span(
-            "0x1", None, "invoke_agent", "2026-05-20T00:00:00Z", "r-root",
+            "0x1",
+            None,
+            "invoke_agent",
+            "2026-05-20T00:00:00Z",
+            "r-root",
             **{
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.input.messages": json.dumps(

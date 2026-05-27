@@ -152,9 +152,7 @@ async def test_cancelled_inner_gate_released_for_parents_next_turn():
             res = detach()
             if res is not None:
                 await res
-        return AgentToolResult(
-            content=[TextContent(text="[cancelled]")], is_error=True
-        )
+        return AgentToolResult(content=[TextContent(text="[cancelled]")], is_error=True)
 
     # Sequential mode so the inner run shares the parent/loop task.
     spawn = AgentTool(
