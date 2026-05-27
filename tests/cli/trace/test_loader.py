@@ -259,3 +259,37 @@ def test_list_runs_merges_cross_midnight(tmp_path):
     runs = list_runs(tmp_path)
     assert len(runs) == 1  # one run, not two
     assert runs[0].span_count == 2
+
+
+def test_run_prompt_prefers_root_over_subagent_invoke_agent():
+    # A trace file now holds the parent run PLUS nested subagent runs, each
+    # with its own invoke_agent span. The prompt shown in `ls` must come from
+    # the ROOT (parent-less) invoke_agent, not a subagent's. The subagent span
+    # is placed FIRST in the list so this distinguishes the parent-less filter
+    # from plain iteration order (which would otherwise pick the subagent).
+    from cubepi.cli.trace.loader import _run_prompt
+    from cubepi.cli.trace.model import Span
+
+    sub = Span(
+        _span(
+            "0x9", "0x5", "invoke_agent", "2026-05-20T00:00:02Z", "r-sub",
+            **{
+                "gen_ai.operation.name": "invoke_agent",
+                "gen_ai.input.messages": json.dumps(
+                    [{"role": "user", "content": "subagent prompt"}]
+                ),
+            },
+        )
+    )
+    root = Span(
+        _span(
+            "0x1", None, "invoke_agent", "2026-05-20T00:00:00Z", "r-root",
+            **{
+                "gen_ai.operation.name": "invoke_agent",
+                "gen_ai.input.messages": json.dumps(
+                    [{"role": "user", "content": "root prompt"}]
+                ),
+            },
+        )
+    )
+    assert _run_prompt([sub, root]) == "root prompt"
