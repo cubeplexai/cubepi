@@ -138,3 +138,14 @@ def test_stats_meta_filters(tmp_path, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "gpt-x" not in out
+
+
+def test_ls_show_meta_columns(tmp_path, capsys):
+    _write_run_with_meta(tmp_path, "tA", "conv_A")
+    rc = main(["trace", "ls", "--dir", str(tmp_path), "--show-meta", "conversation_id"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    # rich may ellipsis-truncate the header at narrow widths ("conversation…"),
+    # so assert on a prefix; the value renders in full.
+    assert "conversation" in out  # column header (possibly truncated)
+    assert "conv_A" in out  # the value

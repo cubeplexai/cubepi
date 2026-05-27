@@ -115,6 +115,9 @@ uv run cubepi trace stats --by tool --since 2026-05-20
 uv run cubepi trace ls --meta conversation_id=conv_123
 uv run cubepi trace ls --meta user_id=usr_9 --meta org_id=org_1
 uv run cubepi trace stats --by model --meta user_id=usr_9
+
+# Show metadata as ls columns (display, not filter):
+uv run cubepi trace ls --show-meta conversation_id,user_id
 ```
 
 If the CLI view still isn't enough, the files are plain JSONL — one span per

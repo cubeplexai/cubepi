@@ -47,8 +47,17 @@ cubepi trace ls --meta user_id=usr_9 --meta org_id=org_1   # repeatable = AND, e
 ```
 
 Each `--meta KEY=VALUE` is matched exactly against the trace's root metadata;
-repeating the flag ANDs the conditions. (See the metadata values with
-`cubepi trace view <id> -v`.)
+repeating the flag ANDs the conditions.
+
+To **display** metadata values as columns (rather than only filter by them),
+add `--show-meta KEY[,KEY…]`:
+
+```bash
+cubepi trace ls --show-meta conversation_id,user_id
+cubepi trace ls --meta org_id=org_1 --show-meta conversation_id   # filter + show
+```
+
+(Or see all of a single trace's metadata with `cubepi trace view <id> -v`.)
 
 ## `view` — render a trace as a span tree
 

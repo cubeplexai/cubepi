@@ -127,20 +127,26 @@ def render_tree_to_text(
     return console.export_text()
 
 
-def render_runs(runs: list[RunSummary]) -> None:
+def render_runs(runs: list[RunSummary], show_meta: list[str] | None = None) -> None:
     from rich.table import Table
 
+    show_meta = show_meta or []
     console = _console()
     table = Table(title="cubepi runs")
     for col in ("started", "trace_id", "spans", "status", "duration"):
         table.add_column(col)
+    for key in show_meta:
+        table.add_column(key)
     table.add_column("input", max_width=48, no_wrap=True, overflow="ellipsis")
     for r in runs:
         started = r.start.isoformat() if r.start else "?"
         dur = f"{r.duration_ms:.0f}ms" if r.duration_ms is not None else "?"
         status = "[red]error[/red]" if r.has_error else "ok"
         prompt = " ".join(r.prompt.split()) if r.prompt else "[dim]—[/dim]"
-        table.add_row(started, r.trace_id, str(r.span_count), status, dur, prompt)
+        meta_cells = [r.metadata.get(k) or "[dim]—[/dim]" for k in show_meta]
+        table.add_row(
+            started, r.trace_id, str(r.span_count), status, dur, *meta_cells, prompt
+        )
     console.print(table)
 
 

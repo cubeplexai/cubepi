@@ -18,6 +18,12 @@ def register(subparsers: "argparse._SubParsersAction") -> None:
     _add_dir(p_ls)
     p_ls.add_argument("-n", type=int, default=20, help="max runs to show")
     _add_meta(p_ls)
+    p_ls.add_argument(
+        "--show-meta",
+        metavar="KEY[,KEY...]",
+        help="also show these run-metadata keys as columns "
+        "(comma-separated); e.g. --show-meta conversation_id,user_id",
+    )
     p_ls.set_defaults(handler=cmd_ls)
 
     p_view = trace_sub.add_parser("view", help="render a run as a tree")
@@ -105,7 +111,8 @@ def cmd_ls(args: argparse.Namespace) -> int:
         scope = f" matching {meta}" if meta else ""
         print(f"no runs found under {directory}{scope}")
         return 1
-    render.render_runs(runs)
+    show_meta = [k.strip() for k in (args.show_meta or "").split(",") if k.strip()]
+    render.render_runs(runs, show_meta=show_meta)
     return 0
 
 
