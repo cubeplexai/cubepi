@@ -61,6 +61,8 @@ def _node_label(node: TreeNode) -> str:
         parts.append("[yellow]aborted[/yellow]")
     if node.orphan:
         parts.append("[dim](orphan)[/dim]")
+    if sp.span_id:
+        parts.append(f"[dim]\\[{sp.span_id[:10]}][/dim]")
     return "  ".join(parts)
 
 
