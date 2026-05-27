@@ -537,6 +537,105 @@ git commit -m "test(tracing): end-to-end nested-subagent subtree"
 
 ---
 
+## Task 3.5: Shard JSONL by trace_id so `trace view` shows the nested subtree (cubepi)
+
+**Why:** After Tasks 1–2 the inner subagent run gets its OWN `cubepi.run_id`, but `JsonlSpanExporter` shards files by `cubepi.run_id` (`<date>/<run_id>.jsonl`). So the inner run's spans (the nested `invoke_agent → turn → chat → execute_tool`) write to a SEPARATE file, and `trace view <run_id>` — which loads only the one run-id file — renders the `execute_tool subagent` node childless again. The parent/child span links are correct (shared `trace_id`, `parent_span_id` set), only the *file layout* hides them.
+
+**Decision (chosen over a loader-merge approach):** shard the JSONL exporter by **`trace_id`** instead of `run_id`. One file per trace = parent + all (nested) subagents together, so `view` is complete with no cross-file merging. The trace-cli becomes trace-keyed. **No backward-compat for old `run_id`-named files** — parse only the new `trace_id` format; pre-existing files may simply not resolve.
+
+**This does NOT affect the OTLP exporter** — OTLP ships spans with full context and backends assemble by `trace_id` natively; sharding is a JSONL-only concern.
+
+**Files:**
+- Modify: `cubepi/tracing/exporters/jsonl.py` (`_path_for`, docstrings)
+- Modify: `cubepi/cli/trace/loader.py` (`resolve_run`→trace semantics, `RunSummary.run_id`→`trace_id`, `list_runs`, `_run_prompt` picks the ROOT invoke_agent)
+- Modify: `cubepi/cli/trace/render.py` (`render_runs` column `run_id`→`trace_id`)
+- Modify: `cubepi/cli/trace/commands.py` (arg help text run→trace; call sites unchanged)
+- Modify: `cubepi/tracing/recorder.py` (update the stale "Per-span run_id so JsonlSpanExporter shards correctly" comments — run_id is still recorded as a span attribute, just not the shard key)
+- Tests: `tests/tracing/` jsonl-exporter coverage + `tests/cli/trace/{test_loader,test_commands,test_follow,test_model,test_schema_roundtrip}.py` (fixtures that build `<run_id>.jsonl` files → `<trace_id>.jsonl`)
+
+- [ ] **Step 1: Write/update the failing exporter test**
+
+Find the existing test that asserts the JSONL filename (grep `tests/` for `_path_for`, `.jsonl`, and `JsonlSpanExporter`). Add/adjust a test asserting the file is named by the span's `trace_id`, and that two spans sharing a `trace_id` but with DIFFERENT `cubepi.run_id` land in the SAME file:
+
+```python
+def test_jsonl_shards_by_trace_id_not_run_id(tmp_path):
+    from opentelemetry.sdk.trace import ReadableSpan  # or reuse the harness's span builder
+    exporter = JsonlSpanExporter(directory=tmp_path)
+    # Two spans, same trace_id, different cubepi.run_id (parent + inner run).
+    parent_span = _make_readable_span(trace_id=0xABC, run_id="run-parent", start_ns=...)
+    inner_span = _make_readable_span(trace_id=0xABC, run_id="run-inner", start_ns=...)
+    exporter.export([parent_span, inner_span])
+    files = list(tmp_path.glob("*/*.jsonl"))
+    assert len(files) == 1, f"expected ONE file per trace_id, got {[f.name for f in files]}"
+    assert files[0].stem == format(0xABC, "032x")
+```
+
+> Build the ReadableSpans with whatever helper the existing exporter/recorder tests use (grep for how `ReadableSpan` or a fake span is constructed in `tests/tracing/`). If the suite only tests the exporter indirectly through the recorder, write the span fixtures the same way the recorder tests produce spans.
+
+- [ ] **Step 2: Run it; expect FAIL** (currently two files, named by run_id).
+
+Run: `cd /home/chris/cubepi && uv run --extra tracing pytest <the exporter test> -v`
+
+- [ ] **Step 3: Shard by trace_id in `jsonl.py`**
+
+Replace the `run_id` lookup in `_path_for`:
+
+```python
+    def _path_for(self, span: ReadableSpan) -> Path:
+        start_ns = span.start_time or 0
+        if start_ns:
+            dt = datetime.fromtimestamp(start_ns / 1_000_000_000, tz=timezone.utc)
+            date_dir = dt.strftime("%Y-%m-%d")
+        else:
+            date_dir = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+        ctx = span.get_span_context()
+        trace_id = format(ctx.trace_id, "032x") if ctx and ctx.trace_id else "unknown-trace"
+        return self._directory / date_dir / f"{_safe_filename(trace_id)}.jsonl"
+```
+
+Drop the now-unused `CUBEPI_RUN_ID` import if nothing else uses it. Update the module + class docstrings (`<run_id>.jsonl` → `<trace_id>.jsonl`; explain one file per trace, subagent runs included).
+
+- [ ] **Step 4: Run the exporter test; expect PASS** (one file, stem = 32-hex trace_id).
+
+- [ ] **Step 5: Update the trace-cli to be trace-keyed**
+
+- `loader.py`:
+  - Rename `RunSummary.run_id` → `trace_id`. In `list_runs`, the file stem is now the trace_id; populate `trace_id=stem`. `span_count` now counts the whole trace (parent + subagents) — that's intended.
+  - `_run_prompt`: pick the ROOT `invoke_agent` (the one whose `parent_id` is falsy), not just the first `is_invoke_agent` — a trace now contains subagent `invoke_agent` spans too. Use: `root = next((s for s in spans if s.is_invoke_agent and not s.parent_id), None)` and fall back to the old behavior if none.
+  - `resolve_run`: keep the stem-glob logic (now matches trace_id stems); update docstring/error text "run" → "trace".
+- `render.py` `render_runs`: change the `"run_id"` column header to `"trace_id"`, read `r.trace_id`.
+- `commands.py`: update `view`/`follow`/`stats` arg help from "run id" to "trace id" (the positional value is now a trace id / prefix). Function names may stay.
+- `recorder.py`: update the two "Per-span run_id so JsonlSpanExporter shards correctly" comments to say run_id is recorded for filtering but sharding is by trace_id.
+
+- [ ] **Step 6: Update affected trace-cli tests**
+
+Run the trace-cli suite to see what breaks, then fix fixtures that hardcode `<run_id>.jsonl`:
+
+Run: `cd /home/chris/cubepi && uv run --extra tracing pytest tests/cli/trace/ -v`
+Update each failing test to build `<trace_id>.jsonl` fixtures and assert on `trace_id` (not `run_id`). Keep the test INTENT; only the file-naming/identifier changes. Verify `test_loader`, `test_commands`, `test_follow`, `test_model`, `test_schema_roundtrip`.
+
+- [ ] **Step 7: Full regression**
+
+Run: `cd /home/chris/cubepi && uv run --extra tracing --extra tracing-otlp pytest tests/tracing/ tests/cli/ -q`
+Expected: PASS.
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd /home/chris/cubepi
+git add cubepi/tracing/exporters/jsonl.py cubepi/cli/trace/ cubepi/tracing/recorder.py tests/
+git commit -m "feat(tracing): shard JSONL by trace_id so subagent runs view as one tree
+
+JsonlSpanExporter sharded by cubepi.run_id, so a nested subagent run (its
+own run_id) wrote to a separate file and trace view rendered the
+execute_tool subagent node childless. Shard by trace_id instead — one file
+per trace, parent + nested subagents together — and make the trace-cli
+trace-keyed. No backward-compat for old run_id-named files. OTLP is
+unaffected (backends assemble by trace_id)."
+```
+
+---
+
 ## Task 4: cubebox — attach the parent Tracer to the inner agent
 
 Make the inner subagent run actually recorded (and, with Tasks 1–2, nested) by attaching the active `Tracer` around `inner.prompt()`.
@@ -711,11 +810,12 @@ cd /home/chris/cubebox/backend && uv lock --upgrade-package cubepi
 
 - [ ] **Step 3: Run a real subagent task and inspect the trace**
 
-Run a subagent-spawning prompt, then:
+Run a subagent-spawning prompt, then list traces and view the trace (the CLI is now trace-keyed — Task 3.5):
 ```bash
-cd /home/chris/cubebox/backend && uv run python -m cubepi.cli trace view <run_id> --dir cubepi-traces
+cd /home/chris/cubebox/backend && uv run python -m cubepi.cli trace ls --dir cubepi-traces      # copy the trace_id
+cd /home/chris/cubebox/backend && uv run python -m cubepi.cli trace view <trace_id> --dir cubepi-traces
 ```
-Expected: under each `execute_tool subagent [..]` node there is now a nested `invoke_agent → cubepi.turn → {chat, execute_tool}` subtree (with span_ids shown), instead of flat sibling chats. Confirm no duplicate chat spans.
+Expected: a SINGLE trace file contains the whole run; under each `execute_tool subagent [..]` node there is now a nested `invoke_agent → cubepi.turn → {chat, execute_tool}` subtree (with span_ids shown), instead of flat sibling chats. Confirm no duplicate chat spans, and that the subagent's spans are present (they no longer land in a separate per-run-id file).
 
 - [ ] **Step 4: Commit the pin bump**
 
