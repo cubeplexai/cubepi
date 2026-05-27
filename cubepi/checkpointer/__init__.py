@@ -11,6 +11,10 @@ def __getattr__(name: str) -> object:
         from cubepi.checkpointer.sqlite import SQLiteCheckpointer
 
         return SQLiteCheckpointer
+    if name == "MySQLCheckpointer":
+        from cubepi.checkpointer.mysql.checkpointer import MySQLCheckpointer
+
+        return MySQLCheckpointer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -20,4 +24,5 @@ __all__ = [
     "MemoryCheckpointer",
     "PostgresCheckpointer",
     "SQLiteCheckpointer",
+    "MySQLCheckpointer",
 ]

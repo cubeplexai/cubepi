@@ -126,7 +126,7 @@ Each is a deliberate MySQL adaptation; called out per project convention.
 | `seq` lock | `pg_advisory_xact_lock(hashtext(tid))` | `SELECT … FROM cubepi_threads WHERE thread_id=%s FOR UPDATE` | MySQL has no advisory xact lock; lock the (lazily-created) thread row via InnoDB row lock, auto-released at txn end |
 | Upsert | `INSERT … ON CONFLICT DO …` | `INSERT … ON DUPLICATE KEY UPDATE …` | MySQL syntax |
 | `extra` merge | `extra \|\| EXCLUDED.extra` (shallow, top-level) | read-modify-write under `FOR UPDATE` (Python `dict.update`) | `JSON_MERGE_PATCH` is **not** equivalent — it deletes keys whose value is JSON `null` and deep-merges nested objects. PG `\|\|` and sqlite `.update()` are shallow top-level replace; RMW reproduces that exactly |
-| Lazy thread insert | `INSERT … ON CONFLICT DO NOTHING` | `INSERT IGNORE INTO cubepi_threads …` | MySQL idiom |
+| Lazy thread insert | `INSERT … ON CONFLICT DO NOTHING` | `INSERT … ON DUPLICATE KEY UPDATE thread_id = thread_id` (no-op) | Precise equivalent of `ON CONFLICT DO NOTHING`. `INSERT IGNORE` was rejected: it also swallows unrelated errors (e.g. data truncation) and emits a duplicate-key warning when the row exists |
 | JSON type | `JSONB` | `JSON` | MySQL has no JSONB |
 | JSON readback | native dict | `str` → `json.loads` (both `metadata` and `extra`) | aiomysql returns JSON columns as text |
 | JSON default | `'{}'::jsonb` | `DEFAULT (JSON_OBJECT())` | MySQL needs an expression default (8.0.13+) |
@@ -146,7 +146,10 @@ thread-row insert in `append`.
 
 ### `__aenter__` / `__aexit__`
 Create pool (`min_pool_size`/`max_pool_size`), run `_verify_schema`, return self.
-Exit closes the pool. Pool is created with **`autocommit=True`**; write methods
+If `_verify_schema` raises, `__aenter__` closes the pool before propagating —
+the context was never entered, so `__aexit__` would not run and the pool (and
+its connections) would leak. Exit closes the pool. Pool is created with
+**`autocommit=True`**; write methods
 (`append`, `save_extra`) wrap their work in an explicit transaction
 (`conn.begin()` / `commit` / rollback on error). This avoids the InnoDB pitfall
 where, under `autocommit=False`, a read-only `load` would open a transaction that
@@ -178,7 +181,8 @@ identical to Postgres).
 ### `append(thread_id, messages)`
 Early-return on empty list (no pool touch — testable without a DB). Otherwise, in
 one transaction:
-1. `INSERT IGNORE INTO cubepi_threads (thread_id) VALUES (%s)` (lazy create).
+1. `INSERT INTO cubepi_threads (thread_id) VALUES (%s) ON DUPLICATE KEY UPDATE thread_id = thread_id`
+   (no-op upsert; lazy create).
 2. `SELECT thread_id FROM cubepi_threads WHERE thread_id=%s FOR UPDATE` (row
    lock serializes concurrent appends to this thread).
 3. `SELECT COALESCE(MAX(seq),0) FROM cubepi_messages WHERE thread_id=%s`.
@@ -191,7 +195,8 @@ Commit. msgpack uses `model_dump(mode="json")`; metadata column gets
 Shallow top-level merge matching Postgres `||` / sqlite `dict.update`. Because
 `JSON_MERGE_PATCH` has different semantics (null-key deletion, deep merge), do a
 read-modify-write inside one transaction:
-1. `INSERT IGNORE INTO cubepi_threads (thread_id) VALUES (%s)` (lazy create).
+1. `INSERT INTO cubepi_threads (thread_id) VALUES (%s) ON DUPLICATE KEY UPDATE thread_id = thread_id`
+   (no-op upsert; lazy create).
 2. `SELECT extra FROM cubepi_threads WHERE thread_id=%s FOR UPDATE` (row lock).
 3. In Python: `merged = {**current, **extra}`.
 4. `UPDATE cubepi_threads SET extra=%s, updated_at=CURRENT_TIMESTAMP WHERE thread_id=%s`

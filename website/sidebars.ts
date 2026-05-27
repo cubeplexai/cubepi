@@ -32,6 +32,7 @@ const sidebars: SidebarsConfig = {
         { type: 'category', label: 'Checkpointing', items: [
           'guides/checkpointing/sqlite',
           'guides/checkpointing/postgres',
+          'guides/checkpointing/mysql',
           'guides/checkpointing/custom',
         ]},
         { type: 'category', label: 'Middleware', items: [
