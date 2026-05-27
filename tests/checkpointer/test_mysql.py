@@ -264,6 +264,33 @@ async def test_mysql_checkpointer_save_extra_merges(clean_mysql_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_mysql_checkpointer_save_extra_shallow_merge_semantics(
+    clean_mysql_db,
+) -> None:
+    """Shallow top-level merge (dict.update), NOT JSON_MERGE_PATCH.
+
+    JSON_MERGE_PATCH would (a) delete keys whose value is null and
+    (b) deep-merge nested objects. dict.update overwrites top-level keys,
+    keeps null values, and replaces nested objects wholesale.
+    """
+    from cubepi.checkpointer.mysql import MySQLCheckpointer
+
+    await _setup_schema(clean_mysql_db)
+    async with MySQLCheckpointer(clean_mysql_db) as cp:
+        await cp.save_extra("t-sem", {"a": 1, "nested": {"x": 1}, "keep": "v"})
+        await cp.save_extra("t-sem", {"a": 2, "nested": {"y": 2}, "z": None})
+        data = await cp.load("t-sem")
+
+    assert data is not None
+    assert data.extra == {
+        "a": 2,  # overwritten
+        "nested": {"y": 2},  # replaced wholesale, not deep-merged
+        "keep": "v",  # untouched
+        "z": None,  # null preserved, not deleted
+    }
+
+
+@pytest.mark.asyncio
 async def test_mysql_checkpointer_seq_monotonic(clean_mysql_db) -> None:
     from cubepi.checkpointer.mysql import MySQLCheckpointer
     from cubepi.providers.base import TextContent, UserMessage
@@ -322,3 +349,102 @@ async def test_empty_thread_load_returns_none(clean_mysql_db) -> None:
     async with MySQLCheckpointer(clean_mysql_db) as cp:
         data = await cp.load("nonexistent-thread")
     assert data is None
+
+
+@pytest.mark.asyncio
+async def test_mysql_checkpointer_rich_content_round_trip(clean_mysql_db) -> None:
+    """Round-trip thinking + tool-call + tool-result content types."""
+    from cubepi.checkpointer.mysql import MySQLCheckpointer
+    from cubepi.providers.base import (
+        AssistantMessage,
+        TextContent,
+        ThinkingContent,
+        ToolCall,
+        ToolResultMessage,
+        Usage,
+    )
+
+    await _setup_schema(clean_mysql_db)
+    async with MySQLCheckpointer(clean_mysql_db) as cp:
+        assistant = AssistantMessage(
+            content=[
+                ThinkingContent(thinking="let me think"),
+                TextContent(text="calling a tool"),
+                ToolCall(id="call-1", name="search", arguments={"q": "cubepi"}),
+            ],
+            usage=Usage(),
+        )
+        tool_result = ToolResultMessage(
+            tool_call_id="call-1",
+            tool_name="search",
+            content=[TextContent(text="result text")],
+        )
+        await cp.append("t-rich", [assistant, tool_result])
+        data = await cp.load("t-rich")
+
+    assert data is not None
+    assert len(data.messages) == 2
+    am, tr = data.messages
+    assert isinstance(am, AssistantMessage)
+    assert isinstance(am.content[0], ThinkingContent)
+    assert am.content[0].thinking == "let me think"
+    assert isinstance(am.content[2], ToolCall)
+    assert am.content[2].id == "call-1"
+    assert am.content[2].arguments == {"q": "cubepi"}
+    assert isinstance(tr, ToolResultMessage)
+    assert tr.tool_call_id == "call-1"
+    assert tr.content[0].text == "result text"
+
+
+@pytest.mark.asyncio
+async def test_mysql_checkpointer_concurrent_append_seq_unique(
+    clean_mysql_db,
+) -> None:
+    """Concurrent appends to one thread serialize via FOR UPDATE.
+
+    Two appends race on the same thread; the row lock must give every
+    message a unique, contiguous seq with no gaps or collisions.
+    """
+    import asyncio
+
+    from cubepi.checkpointer.mysql import MySQLCheckpointer
+    from cubepi.providers.base import TextContent, UserMessage
+
+    await _setup_schema(clean_mysql_db)
+    async with MySQLCheckpointer(clean_mysql_db, max_pool_size=4) as cp:
+        batch_a = [UserMessage(content=[TextContent(text=f"a{i}")]) for i in range(10)]
+        batch_b = [UserMessage(content=[TextContent(text=f"b{i}")]) for i in range(10)]
+        await asyncio.gather(
+            cp.append("t-conc", batch_a),
+            cp.append("t-conc", batch_b),
+        )
+        data = await cp.load("t-conc")
+
+    assert data is not None
+    assert len(data.messages) == 20
+    texts = {m.content[0].text for m in data.messages}
+    assert texts == {f"a{i}" for i in range(10)} | {f"b{i}" for i in range(10)}
+
+
+@pytest.mark.asyncio
+async def test_missing_version_column_raises_uninitialized(clean_mysql_db) -> None:
+    """A malformed cubepi_schema_version table (no `version` column) → 1054 path."""
+    from cubepi.checkpointer.mysql import (
+        CubepiSchemaUninitialized,
+        MySQLCheckpointer,
+    )
+    from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
+
+    conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "CREATE TABLE cubepi_schema_version (wrong_col INT PRIMARY KEY) "
+                "ENGINE=InnoDB"
+            )
+    finally:
+        await conn.ensure_closed()
+
+    with pytest.raises(CubepiSchemaUninitialized):
+        async with MySQLCheckpointer(clean_mysql_db):
+            pass

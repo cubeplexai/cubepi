@@ -26,6 +26,13 @@ def write_schema_version_op() -> str:
     Clears any stale rows from prior cubepi versions then inserts the current
     one. Idempotent. Call inside alembic upgrade() after CREATE TABLE
     cubepi_schema_version.
+
+    Returns two ';'-separated statements (DELETE then INSERT). MySQL/pymysql
+    executes a single statement per call, so split before executing::
+
+        for stmt in write_schema_version_op().split(";"):
+            if stmt.strip():
+                op.execute(stmt)
     """
     return (
         f"DELETE FROM cubepi_schema_version "

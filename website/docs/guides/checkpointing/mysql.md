@@ -105,12 +105,17 @@ def upgrade():
         "ALTER TABLE cubepi_messages " + messages_partition_clause()
     )
     op.create_table("cubepi_schema_version", ...)
-    op.execute(write_schema_version_op())   # records EXPECTED_SCHEMA_VERSION
+    # write_schema_version_op() returns two ';'-separated statements
+    # (DELETE then INSERT). MySQL/pymysql runs one statement per execute,
+    # so split and execute each:
+    for stmt in write_schema_version_op().split(";"):
+        if stmt.strip():
+            op.execute(stmt)
 ```
 
 `write_schema_version_op()` is idempotent: it deletes any rows from a
 prior cubepi version and inserts the current one. When CubePi later
-bumps `EXPECTED_SCHEMA_VERSION`, generate a new revision and call it
+bumps `EXPECTED_SCHEMA_VERSION`, generate a new revision and run it
 again.
 
 ## Data model
