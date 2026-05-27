@@ -102,7 +102,7 @@ def test_render_tree_falls_back_to_status_description():
 def test_render_runs_includes_input_column(capsys):
     runs = [
         RunSummary(
-            run_id="r1",
+            trace_id="r1",
             files=[Path("x.jsonl")],
             start=None,
             span_count=3,

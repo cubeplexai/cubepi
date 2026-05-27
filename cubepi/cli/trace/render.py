@@ -130,7 +130,7 @@ def render_runs(runs: list[RunSummary]) -> None:
 
     console = _console()
     table = Table(title="cubepi runs")
-    for col in ("started", "run_id", "spans", "status", "duration"):
+    for col in ("started", "trace_id", "spans", "status", "duration"):
         table.add_column(col)
     table.add_column("input", max_width=48, no_wrap=True, overflow="ellipsis")
     for r in runs:
@@ -138,7 +138,7 @@ def render_runs(runs: list[RunSummary]) -> None:
         dur = f"{r.duration_ms:.0f}ms" if r.duration_ms is not None else "?"
         status = "[red]error[/red]" if r.has_error else "ok"
         prompt = " ".join(r.prompt.split()) if r.prompt else "[dim]—[/dim]"
-        table.add_row(started, r.run_id, str(r.span_count), status, dur, prompt)
+        table.add_row(started, r.trace_id, str(r.span_count), status, dur, prompt)
     console.print(table)
 
 

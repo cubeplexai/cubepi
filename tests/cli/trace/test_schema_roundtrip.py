@@ -26,7 +26,9 @@ def test_real_exporter_output_parses(tmp_path):
             chat.set_attribute(CUBEPI_RUN_ID, "roundtrip")
     exporter.export([root, chat])
 
-    files = sorted(tmp_path.glob("*/roundtrip.jsonl"))
+    # One file per trace; stem is the 32-hex trace_id, not the run_id.
+    trace_id = format(root.context.trace_id, "032x")
+    files = sorted(tmp_path.glob(f"*/{trace_id}.jsonl"))
     assert files, "exporter wrote no file"
     loaded, skipped = load_run(files)
     assert skipped == 0

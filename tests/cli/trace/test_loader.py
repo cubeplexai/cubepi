@@ -38,7 +38,7 @@ def test_resolve_by_path(tmp_path):
     assert resolve_run(str(f), tmp_path) == [f]
 
 
-def test_resolve_by_run_id_merges_cross_midnight(tmp_path):
+def test_resolve_by_trace_id_merges_cross_midnight(tmp_path):
     f1 = tmp_path / "2026-05-19" / "r1.jsonl"
     f2 = tmp_path / "2026-05-20" / "r1.jsonl"
     _write(f1, [_span("0x1", None, "invoke_agent", "2026-05-19T23:59:59Z", "r1")])
@@ -53,7 +53,7 @@ def test_resolve_zero_match_errors(tmp_path):
 
 
 def test_resolve_by_unique_prefix(tmp_path):
-    # `ls` truncates run ids, so a copied prefix must resolve to its one run.
+    # `ls` truncates trace ids, so a copied prefix must resolve to its one trace.
     f = tmp_path / "2026-05-20" / "66f1806f-4c90-4d50.jsonl"
     _write(f, [_span("0x1", None, "invoke_agent", "2026-05-20T00:00:00Z", "r1")])
     assert resolve_run("66f1806f", tmp_path) == [f]
@@ -79,7 +79,7 @@ def test_resolve_ambiguous_prefix_errors(tmp_path):
 
 
 def test_resolve_exact_match_preferred_over_prefix(tmp_path):
-    # An exact run id must not be shadowed by a longer-named sibling run.
+    # An exact trace id must not be shadowed by a longer-named sibling trace.
     exact = tmp_path / "2026-05-20" / "run1.jsonl"
     _write(exact, [_span("0x1", None, "x", None, "r1")])
     _write(
@@ -133,7 +133,7 @@ def test_list_runs(tmp_path):
     )
     runs = list_runs(tmp_path)
     assert len(runs) == 1
-    assert runs[0].run_id == "r1"
+    assert runs[0].trace_id == "r1"
     assert runs[0].span_count == 2
 
 
@@ -229,7 +229,7 @@ def test_list_runs_prompt_handles_bad_messages(tmp_path):
             )
         ],
     )
-    prompts = {r.run_id: r.prompt for r in list_runs(tmp_path)}
+    prompts = {r.trace_id: r.prompt for r in list_runs(tmp_path)}
     assert prompts == {"r1": None, "r2": None}
 
 

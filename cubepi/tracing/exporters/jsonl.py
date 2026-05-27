@@ -1,8 +1,10 @@
 """Append-only JSONL span exporter.
 
 One span per line, OTLP/JSON-shaped via ``span.to_json()``. Files are
-sharded ``<directory>/<YYYY-MM-DD>/<run_id>.jsonl`` so each run lands
-in its own file and per-day directories don't grow unbounded.
+sharded ``<directory>/<YYYY-MM-DD>/<trace_id>.jsonl`` — one file per trace,
+so a parent run plus any nested subagent runs (which inherit the trace_id
+but get their own run_id) land together and per-day directories don't grow
+unbounded.
 """
 
 from __future__ import annotations
@@ -17,16 +19,15 @@ from typing import Any
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from cubepi.tracing.schema import CUBEPI_RUN_ID
-
 
 class JsonlSpanExporter(SpanExporter):
     """Write each ReadableSpan as one JSON line.
 
-    Files: ``<directory>/<YYYY-MM-DD>/<run_id>.jsonl``. The date used for
-    the subdirectory is the span's start time (UTC). The ``run_id`` comes
-    from the ``cubepi.run_id`` attribute set by the cubepi Recorder;
-    spans without that attribute fall back to ``"unknown-run"``.
+    Files: ``<directory>/<YYYY-MM-DD>/<trace_id>.jsonl``, one file per trace
+    so the parent run and any nested subagent runs (same trace_id, different
+    ``cubepi.run_id``) land together. The date used for the subdirectory is
+    the span's start time (UTC). The ``trace_id`` is the span's 32-hex trace
+    id; spans without a context fall back to ``"unknown-trace"``.
 
     Permissions: files are created mode ``0o600`` (user-only).
     """
@@ -84,11 +85,9 @@ class JsonlSpanExporter(SpanExporter):
             date_dir = dt.strftime("%Y-%m-%d")
         else:
             date_dir = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-        run_id = (span.attributes or {}).get(CUBEPI_RUN_ID, "unknown-run")
-        # Sanitize: run_ids are uuids in practice, but defend against odd
-        # characters slipping through extra_attrs.
-        safe = _safe_filename(str(run_id))
-        return self._directory / date_dir / f"{safe}.jsonl"
+        ctx = span.get_span_context()
+        trace_id = format(ctx.trace_id, "032x") if ctx and ctx.trace_id else "unknown-trace"
+        return self._directory / date_dir / f"{_safe_filename(trace_id)}.jsonl"
 
     @staticmethod
     def _encode(span: ReadableSpan) -> str:
@@ -129,4 +128,4 @@ def _safe_filename(name: str) -> str:
             out.append(ch)
         else:
             out.append("_")
-    return "".join(out) or "unknown-run"
+    return "".join(out) or "unknown-trace"

@@ -517,9 +517,8 @@ class Recorder:
         # that keys like ``run_id`` / ``turn_index`` / ``agent.tools``
         # — which the recorder owns under ``cubepi.*`` — can never be
         # overwritten by caller-supplied values. Reserved cubepi
-        # schema keys (especially ``cubepi.run_id`` which the JSONL
-        # exporter shards on) must stay recorder-controlled (codex P2
-        # on PR #92).
+        # schema keys (especially ``cubepi.run_id``, a per-span filtering
+        # attribute) must stay recorder-controlled (codex P2 on PR #92).
         try:
             from cubepi.tracing.context import _current_metadata, _current_tags
 
@@ -630,8 +629,8 @@ class Recorder:
             attributes={
                 CUBEPI_TURN_INDEX: run.turn_index,
                 # Propagate run_id so every child span carries it —
-                # OTel does NOT inherit attributes from parent spans, and
-                # JsonlSpanExporter shards by ``cubepi.run_id`` per span.
+                # OTel does NOT inherit attributes from parent spans. It's a
+                # filtering attribute; the JSONL exporter shards by trace_id.
                 CUBEPI_RUN_ID: run.run_id,
             },
         )
@@ -705,7 +704,8 @@ class Recorder:
             GEN_AI_TOOL_NAME: event.tool_name,
             GEN_AI_TOOL_CALL_ID: event.tool_call_id,
             GEN_AI_TOOL_TYPE: "function",
-            # Per-span run_id so JsonlSpanExporter shards correctly.
+            # Record run_id as a span attribute (for filtering); the JSONL
+            # exporter now shards by trace_id, not run_id.
             CUBEPI_RUN_ID: run.run_id,
         }
         # NOTE: gen_ai.tool.call.arguments is opt-in content recorded
@@ -848,7 +848,8 @@ class Recorder:
             GEN_AI_PROVIDER_NAME: map_provider_name(model.provider),
             GEN_AI_REQUEST_MODEL: model.id,
             GEN_AI_REQUEST_STREAM: True,
-            # Per-span run_id so JsonlSpanExporter shards correctly.
+            # Record run_id as a span attribute (for filtering); the JSONL
+            # exporter now shards by trace_id, not run_id.
             CUBEPI_RUN_ID: run.run_id,
         }
         # Pull StreamOptions-derived params from the payload where the

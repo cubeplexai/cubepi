@@ -1,4 +1,4 @@
-"""Discover trace files, resolve a run id to file(s), read spans."""
+"""Discover trace files, resolve a trace id to file(s), read spans."""
 
 from __future__ import annotations
 
@@ -15,16 +15,16 @@ _MIN = datetime.min.replace(tzinfo=timezone.utc)
 
 
 class RunResolutionError(Exception):
-    """Raised when a run id / path cannot be resolved to any file."""
+    """Raised when a trace id / path cannot be resolved to any file."""
 
 
 def resolve_run(arg: str, directory: Path) -> list[Path]:
     """Resolve a CLI argument to one or more JSONL files.
 
-    A ``.jsonl`` path is used directly. Otherwise ``arg`` is a run id and we
-    glob ``<dir>/*/{run_id}.jsonl`` across date subdirs — a run that crosses
-    UTC midnight is split across date dirs, so ALL matches are returned and
-    later merged. Zero matches is an error.
+    A ``.jsonl`` path is used directly. Otherwise ``arg`` is a trace id and we
+    glob ``<dir>/*/{trace_id}.jsonl`` across date subdirs — a trace that
+    crosses UTC midnight is split across date dirs, so ALL matches are
+    returned and later merged. Zero matches is an error.
     """
     path = Path(arg)
     if path.suffix == ".jsonl" and path.is_file():
@@ -32,21 +32,21 @@ def resolve_run(arg: str, directory: Path) -> list[Path]:
     matches = sorted(directory.glob(f"*/{arg}.jsonl"))
     if matches:
         return matches
-    # No exact run id. `ls` truncates ids, so accept any prefix that names
-    # exactly one run; an ambiguous prefix is reported with its candidates.
-    by_run: dict[str, list[Path]] = {}
+    # No exact trace id. `ls` truncates ids, so accept any prefix that names
+    # exactly one trace; an ambiguous prefix is reported with its candidates.
+    by_trace: dict[str, list[Path]] = {}
     for f in sorted(directory.glob(f"*/{arg}*.jsonl")):
-        by_run.setdefault(f.stem, []).append(f)
-    if len(by_run) == 1:
-        (only,) = by_run.values()
+        by_trace.setdefault(f.stem, []).append(f)
+    if len(by_trace) == 1:
+        (only,) = by_trace.values()
         return sorted(only)
-    if len(by_run) > 1:
-        candidates = ", ".join(sorted(by_run))
+    if len(by_trace) > 1:
+        candidates = ", ".join(sorted(by_trace))
         raise RunResolutionError(
-            f"run prefix {arg!r} is ambiguous under {directory}: matches {candidates}"
+            f"trace prefix {arg!r} is ambiguous under {directory}: matches {candidates}"
         )
     raise RunResolutionError(
-        f"no trace file for run {arg!r} under {directory} (try `cubepi trace ls`)"
+        f"no trace file for trace {arg!r} under {directory} (try `cubepi trace ls`)"
     )
 
 
@@ -85,7 +85,9 @@ def _run_prompt(spans: list[Span]) -> str | None:
     successive runs in one thread stay distinguishable. ``None`` when content
     isn't recorded or no user text is present.
     """
-    root = next((s for s in spans if s.is_invoke_agent), None)
+    root = next(
+        (s for s in spans if s.is_invoke_agent and not s.parent_id), None
+    ) or next((s for s in spans if s.is_invoke_agent), None)
     candidates = [root] if root is not None else spans
     for sp in candidates:
         raw = sp.attributes.get(schema.GEN_AI_INPUT_MESSAGES)
@@ -120,7 +122,7 @@ def _run_prompt(spans: list[Span]) -> str | None:
 
 @dataclass
 class RunSummary:
-    run_id: str
+    trace_id: str
     files: list[Path]
     start: datetime | None
     span_count: int
@@ -130,16 +132,17 @@ class RunSummary:
 
 
 def list_runs(directory: Path, limit: int | None = None) -> list[RunSummary]:
-    """Summarize each run, newest first.
+    """Summarize each trace, newest first.
 
-    Files are grouped by run_id (stem), so a run split across two date dirs
-    (crossed UTC midnight) is summarized as ONE run, not two.
+    Files are grouped by trace_id (stem), so a trace split across two date
+    dirs (crossed UTC midnight) is summarized as ONE trace, not two. The
+    span_count spans the whole trace — parent run plus nested subagent runs.
     """
-    by_run: dict[str, list[Path]] = {}
+    by_trace: dict[str, list[Path]] = {}
     for f in directory.glob("*/*.jsonl"):
-        by_run.setdefault(f.stem, []).append(f)
+        by_trace.setdefault(f.stem, []).append(f)
     summaries: list[RunSummary] = []
-    for run_id, files in by_run.items():
+    for trace_id, files in by_trace.items():
         spans, _ = load_run(sorted(files))
         if not spans:
             continue
@@ -151,7 +154,7 @@ def list_runs(directory: Path, limit: int | None = None) -> list[RunSummary]:
             duration = (max(ends) - start).total_seconds() * 1000.0
         summaries.append(
             RunSummary(
-                run_id=run_id,
+                trace_id=trace_id,
                 files=sorted(files),
                 start=start,
                 span_count=len(spans),
