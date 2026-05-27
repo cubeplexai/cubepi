@@ -34,8 +34,11 @@ inspect. In cubebox it's config-driven (dynaconf):
 Env override form: `CUBEBOX_TRACING__ENABLED=true`,
 `CUBEBOX_TRACING__RECORD_CONTENT=true`, `CUBEBOX_TRACING__DIRECTORY=...`.
 cubebox's `config.development` already enables this. Files land at
-`<directory>/<YYYY-MM-DD>/<run_id>.jsonl` (a run that crosses UTC midnight is
-split across two date dirs; the CLI merges them).
+`<directory>/<YYYY-MM-DD>/<trace_id>.jsonl` — sharded by `trace_id`, so one
+file holds the whole trace, including any nested subagent runs (they inherit
+the parent's trace). A trace that crosses UTC midnight is split across two date
+dirs; the CLI merges them. (`cubepi.run_id` is still recorded as a per-span
+attribute if you need to distinguish individual runs within a trace.)
 
 Run the CLI from the cubebox backend dir so it picks up the venv that has
 cubepi installed (the `trace-cli` extra provides it):
@@ -50,33 +53,43 @@ elsewhere (e.g. a worktree).
 ## The fast path (this is 90% of debugging)
 
 ```bash
-# 1. List recent runs, newest first. The `input` column shows the user's
-#    message so you can find the right run; `status` flags errors.
+# 1. List recent traces, newest first. The `trace_id` column is the id you
+#    pass to `view`; the `input` column shows the user's message so you can
+#    find the right one; `status` flags errors.
 uv run cubepi trace ls
 
-# 2. View one run as a span tree. A run id PREFIX is enough (ls truncates ids).
-#    Errors are printed inline under the failing span — no flags needed.
-uv run cubepi trace view 66f1806f
+# 2. View one trace as a span tree. A trace id PREFIX is enough (ls truncates
+#    ids). Errors are printed inline under the failing span — no flags needed.
+uv run cubepi trace view 1cd97cdb
 ```
 
-`view` output looks like:
+`view` output looks like (each node ends with a short `span_id` for locating
+the raw span in the JSONL):
 
 ```
 trace
-└── invoke_agent  14425.8ms
-    ├── cubepi.turn  1283.1ms
-    │   ├── chat deepseek-v4-flash  1208.7ms  tok 6845/68
-    │   └── execute_tool datetime  0.3ms  datetime
-    └── cubepi.turn  491.9ms  ERROR
-        └── chat deepseek-v4-flash  427.2ms  ERROR
+└── invoke_agent  14425.8ms  [0x1cd97cdb]
+    ├── cubepi.turn  1283.1ms  [0x5cfda93e]
+    │   ├── chat deepseek-v4-flash  1208.7ms  tok 6845/68  [0x0d130229]
+    │   └── execute_tool subagent  9610.2ms  subagent  [0x38bdd10a]
+    │       └── invoke_agent  9601.0ms  [0x8094f99b]   ← subagent run, nested
+    │           └── cubepi.turn  9598.4ms  [0x57c5cfc7]
+    │               ├── chat deepseek-v4-flash  1190.3ms  [0x8205ca6b]
+    │               └── execute_tool web_search  6500.2ms  web_search  [0xca4e59fc]
+    └── cubepi.turn  491.9ms  ERROR  [0xce25f242]
+        └── chat deepseek-v4-flash  427.2ms  ERROR  [0x0bff68ec]
             └── error: Error code: 400 - ... `tool_use` ids were found without
                 `tool_result` blocks immediately after: call_01_...
 ```
 
-Read the tree top-down: `invoke_agent` (whole run) → `cubepi.turn` (one
-agent loop turn) → `chat <model>` (an LLM call, with `tok <input>/<output>`)
-and `execute_tool <name>` (a tool call). An `ERROR` marker plus the inline
-`error:` line usually tells you the root cause directly.
+Read the tree top-down: `invoke_agent` (one run) → `cubepi.turn` (one agent
+loop turn) → `chat <model>` (an LLM call, with `tok <input>/<output>`) and
+`execute_tool <name>` (a tool call). A **subagent** appears as
+`execute_tool subagent` with the subagent's own `invoke_agent → cubepi.turn →
+…` nested directly beneath it — its chat and tool spans live inside that
+subtree, not flat under the parent turn. The `[0x…]` suffix is the span_id
+(grep it in the raw JSONL to inspect that exact span). An `ERROR` marker plus
+the inline `error:` line usually tells you the root cause directly.
 
 ## Going deeper
 
@@ -128,9 +141,14 @@ Mind the convention — it differs between the trace and cubebox's UI:
 
 ## Tips
 
-- **Prefix match**: `view`/`follow`/`stats` accept a unique run-id prefix;
-  copy the visible chars from `ls`. An ambiguous prefix lists candidates.
-- **Find the run** by the `input` column in `ls` rather than guessing ids.
+- **Prefix match**: `view`/`follow`/`stats` accept a unique trace-id prefix;
+  copy the visible chars from the `trace_id` column in `ls`. An ambiguous
+  prefix lists candidates.
+- **Find the trace** by the `input` column in `ls` rather than guessing ids.
+- **Subagent missing from the tree?** It should nest under
+  `execute_tool subagent`. If a subagent's spans look absent, confirm the run
+  was recorded with a cubepi new enough to shard by `trace_id` (older runs
+  sharded by `run_id`, so a subagent's spans landed in a separate file).
 - **Backend vs frontend**: the trace shows what the backend/agent did. If the
   trace shows correct data but the UI is wrong, the bug is in the frontend
   (SSE handling / rendering) — the trace won't see that; use a browser instead.

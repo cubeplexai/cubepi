@@ -24,7 +24,7 @@ A Pythonic, async-native agent framework — a leaner, more readable take on age
 | **Dependencies** | Pulls in langchain-core, langgraph-sdk, and transitive deps | 3 core deps: `pydantic`, `anthropic`, `openai` |
 | **Tool execution** | Tools are graph nodes with manual wiring | Declare tools as functions, framework handles routing and parallel execution |
 | **Multi-provider** | Via langchain chat model adapters | Native `Provider` protocol — Anthropic, OpenAI built in, add your own with one class |
-| **Middleware** | Graph-level middleware on node entry/exit | Agent-level middleware with 5 typed hooks and declarative composition rules |
+| **Middleware** | Graph-level middleware on node entry/exit | Agent-level middleware with 7 typed hooks and declarative composition rules |
 | **Observability** | LangSmith / Langfuse integration, full trace visualization | Native OpenTelemetry — `Tracer`, `Meter`, GenAI semconv, OTLP / JSONL exporters built in |
 
 ## Install
@@ -105,7 +105,7 @@ cubepi/
 │   ├── tools.py      # Tool execution engine (sequential + parallel)
 │   └── types.py      # Events, AgentTool, AgentContext, hook types
 ├── middleware/       # Composable middleware protocol
-│   └── base.py       # 5 hooks with distinct composition rules
+│   └── base.py       # 7 hooks with distinct composition rules
 ├── checkpointer/     # Persistence
 │   ├── base.py       # Checkpointer protocol
 │   ├── memory.py     # In-memory (dev/test)

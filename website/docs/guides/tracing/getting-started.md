@@ -77,13 +77,17 @@ safety net while you're still building. (Doesn't run on `SIGKILL` or
 `os._exit`; for guaranteed delivery there, use the synchronous
 `SimpleSpanProcessor` from OTel.)
 
-The run produces one JSONL file per agent run:
+The run produces one JSONL file per trace (sharded by `trace_id`):
 
 ```text
 ./cubepi-traces/
   2026-05-19/
-    8e1c…-…-…-….jsonl       ← one run, one file, one span per line
+    8e1c9a3f4b2d…d976a.jsonl   ← one trace, one file, one span per line
 ```
+
+A trace is the whole run, including any nested subagent runs (they inherit the
+parent's `trace_id`, so they land in the same file). Each span still carries
+`cubepi.run_id` as an attribute if you want to filter by individual run.
 
 Open it with any tool that reads OTLP/JSON or with `jq` directly:
 

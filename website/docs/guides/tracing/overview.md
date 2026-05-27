@@ -33,8 +33,11 @@ Each layer carries standard `gen_ai.*` attributes — `gen_ai.operation.name`,
   `gen_ai.client.operation.duration`, `gen_ai.client.operation.time_to_first_chunk`,
   `gen_ai.client.token.usage`.
 - **JsonlSpanExporter** — write one JSON line per span to
-  `./cubepi-traces/<date>/<run_id>.jsonl`. Useful for local dev and offline
-  debugging; works with any OTel viewer that reads JSONL.
+  `./cubepi-traces/<date>/<trace_id>.jsonl`. Files are sharded by `trace_id`,
+  so one file holds a whole trace — the run plus any nested subagent runs
+  (which inherit the trace). Useful for local dev and offline debugging; works
+  with any OTel viewer that reads JSONL, and with the [`cubepi trace`
+  CLI](./cli).
 - **OTLP** — bring your own exporter via `opentelemetry-exporter-otlp-proto-http`
   (HTTP) or `…-grpc` and hand it to `Tracer(exporters=[…])`.
 - **W3C trace context propagation** — outgoing MCP calls inject the active

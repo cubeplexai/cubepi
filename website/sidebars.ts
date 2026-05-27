@@ -46,6 +46,7 @@ const sidebars: SidebarsConfig = {
         { type: 'category', label: 'Tracing', items: [
           'guides/tracing/overview',
           'guides/tracing/getting-started',
+          'guides/tracing/cli',
           'guides/tracing/otlp',
           'guides/tracing/content-recording',
           'guides/tracing/metrics',
