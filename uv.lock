@@ -493,6 +493,7 @@ mcp = [
 ]
 mysql = [
     { name = "aiomysql" },
+    { name = "cryptography" },
     { name = "msgpack" },
     { name = "sqlalchemy" },
 ]
@@ -535,6 +536,7 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'sqlite'", specifier = ">=0.22.1" },
     { name = "anthropic", specifier = ">=0.100.0" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.29" },
+    { name = "cryptography", marker = "extra == 'mysql'", specifier = ">=42" },
     { name = "griffe", marker = "extra == 'docs'", specifier = ">=0.45" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0" },
     { name = "msgpack", marker = "extra == 'mysql'", specifier = ">=1.0" },

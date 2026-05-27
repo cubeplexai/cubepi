@@ -141,7 +141,7 @@ class MySQLCheckpointer:
                             "cubepi tables not found or malformed. Run host "
                             "application's alembic upgrade."
                         ) from e
-                    raise
+                    raise  # pragma: no cover - non-schema DB errors propagate
         if row is None:
             raise CubepiSchemaUninitialized(
                 "cubepi_schema_version table is empty. Host alembic migration "
@@ -237,7 +237,7 @@ class MySQLCheckpointer:
                         rows,
                     )
                 await conn.commit()
-            except BaseException:
+            except BaseException:  # pragma: no cover - defensive txn rollback
                 await conn.rollback()
                 raise
 
@@ -271,6 +271,6 @@ class MySQLCheckpointer:
                         (json.dumps(merged), thread_id),
                     )
                 await conn.commit()
-            except BaseException:
+            except BaseException:  # pragma: no cover - defensive txn rollback
                 await conn.rollback()
                 raise

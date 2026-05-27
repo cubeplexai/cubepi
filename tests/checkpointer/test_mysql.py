@@ -458,6 +458,56 @@ async def test_mysql_checkpointer_concurrent_append_seq_unique(
 
 
 @pytest.mark.asyncio
+async def test_empty_version_table_raises_uninitialized(clean_mysql_db) -> None:
+    """Schema present but cubepi_schema_version has no row → Uninitialized."""
+    from cubepi.checkpointer.mysql import (
+        CubepiSchemaUninitialized,
+        MySQLCheckpointer,
+    )
+    from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
+
+    await _setup_schema(clean_mysql_db)
+    conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM cubepi_schema_version")
+    finally:
+        await conn.ensure_closed()
+
+    with pytest.raises(CubepiSchemaUninitialized):
+        async with MySQLCheckpointer(clean_mysql_db):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_load_unknown_role_raises(clean_mysql_db) -> None:
+    """A message row with an unrecognized role string → ValueError on load."""
+    import msgpack
+
+    from cubepi.checkpointer.mysql import MySQLCheckpointer
+    from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
+
+    await _setup_schema(clean_mysql_db)
+    payload = msgpack.packb({"content": []}, use_bin_type=True)
+    conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute("INSERT INTO cubepi_threads (thread_id) VALUES ('t-bad')")
+            await cur.execute(
+                "INSERT INTO cubepi_messages "
+                "(thread_id, seq, role, metadata, payload) "
+                "VALUES ('t-bad', 1, 'bogus', '{}', %s)",
+                (payload,),
+            )
+    finally:
+        await conn.ensure_closed()
+
+    async with MySQLCheckpointer(clean_mysql_db) as cp:
+        with pytest.raises(ValueError, match="unknown role in DB"):
+            await cp.load("t-bad")
+
+
+@pytest.mark.asyncio
 async def test_missing_version_column_raises_uninitialized(clean_mysql_db) -> None:
     """A malformed cubepi_schema_version table (no `version` column) → 1054 path."""
     from cubepi.checkpointer.mysql import (

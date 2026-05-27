@@ -35,6 +35,9 @@ mysql = [
     "sqlalchemy>=2.0",
     "aiomysql>=0.2",
     "msgpack>=1.0",
+    # Required by PyMySQL/aiomysql for MySQL 8's default caching_sha2_password
+    # RSA password exchange over a non-TLS connection.
+    "cryptography>=42",
 ]
 mcp = [
     "mcp>=1.0",
