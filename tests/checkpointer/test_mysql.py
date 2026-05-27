@@ -163,6 +163,37 @@ def test_top_level_lazy_import() -> None:
     assert "MySQLCheckpointer" in cp_pkg.__all__
 
 
+def test_mysql_import_does_not_require_asyncpg() -> None:
+    """The cubepi[mysql] extra must not pull in asyncpg (the Postgres driver).
+
+    Run in a fresh interpreter with asyncpg import forced to fail, to catch any
+    transitive import into the Postgres package.
+    """
+    import subprocess
+    import sys
+    import textwrap
+
+    code = textwrap.dedent(
+        """
+        import builtins
+        real = builtins.__import__
+        def fake(name, *a, **k):
+            if name == "asyncpg" or name.startswith("asyncpg."):
+                raise ModuleNotFoundError("No module named asyncpg")
+            return real(name, *a, **k)
+        builtins.__import__ = fake
+        from cubepi.checkpointer import MySQLCheckpointer
+        assert MySQLCheckpointer is not None
+        print("OK")
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
 # ---------------------------------------------------------------------------
 # E2E tests — require a real MySQL instance (8.0.13+)
 # ---------------------------------------------------------------------------
