@@ -28,9 +28,22 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: mysql
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
 
     env:
       CUBEPI_TEST_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+      CUBEPI_TEST_MYSQL_DSN: mysql://root:root@localhost:3306/mysql
 
     steps:
       - uses: actions/checkout@v6
