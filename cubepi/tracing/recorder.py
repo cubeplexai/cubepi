@@ -949,6 +949,11 @@ class Recorder:
         run = self._run
         if run is None or run.chat_span is None:
             return
+        # A non-owning recorder normally already bailed in _on_provider_request
+        # (so its chat_span stays None and the guard above catches it). This
+        # gate is the defensive backstop for the case where chat_span is set
+        # but the active task belongs to a different run — never close a span
+        # this recorder didn't open for the current task.
         if _active_run.get() is not run:
             return
         span = run.chat_span

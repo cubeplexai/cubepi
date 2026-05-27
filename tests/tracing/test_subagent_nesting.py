@@ -113,7 +113,14 @@ async def test_shared_provider_does_not_double_mint_inner_chat():
     assert len(chat_spans) == 3, f"expected 3 chat spans, got {len(chat_spans)}"
 
 
-async def test_cancelled_inner_does_not_gate_parents_next_turn():
+async def test_cancelled_inner_gate_released_for_parents_next_turn():
+    """A cancelled inner run must release the active-run gate so the parent's
+    next turn is recorded. The gate-reset path that matters here is `detach()`
+    -> `_close_open_spans` -> `_reset_active_run` (the inner run may skip
+    AgentEndEvent on cancellation). Asserting the parent run has 2 chat spans
+    proves both that the gate was released AND that no inner chat leaked onto
+    the parent run.
+    """
     provider = FauxProvider()
     exporter = InMemoryExporter()
     tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
