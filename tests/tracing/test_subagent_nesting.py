@@ -330,3 +330,36 @@ async def test_full_nested_subtree_via_real_tool():
     assert inner_tool_spans, (
         "inner execute_tool span missing or not nested under the inner run"
     )
+
+
+async def test_provider_chunk_and_response_gated_when_run_not_active():
+    """White-box: the active-run gate in ``_on_provider_chunk`` /
+    ``_on_provider_response`` early-returns when a DIFFERENT run owns the task,
+    even if this recorder's run still has an open chat_span. Defensive backstop
+    beyond the ``chat_span is None`` guard (a non-owning recorder normally never
+    opens a chat_span at all)."""
+    from cubepi.tracing import recorder as rec
+
+    exporter = InMemoryExporter()
+    tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+    r = rec.Recorder(tracer)
+    run = rec._RunState(
+        run_id="r1", agent_span=tracer.otel_tracer.start_span("invoke_agent")
+    )
+    run.chat_span = tracer.otel_tracer.start_span("chat faux-1")
+    r._run = run
+
+    class _Chunk:
+        type = "text_delta"
+
+    token = rec._active_run.set(object())  # a different run owns this task
+    try:
+        r._on_provider_chunk(_Chunk(), MODEL)
+        r._on_provider_response({}, MODEL, None)
+    finally:
+        rec._active_run.reset(token)
+
+    # Gate held: first-chunk timing not recorded and the chat_span was not
+    # closed by this non-owning recorder.
+    assert run.chat_first_chunk_recorded is False
+    assert run.chat_span is not None
