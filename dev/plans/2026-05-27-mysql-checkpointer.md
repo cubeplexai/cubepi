@@ -223,7 +223,7 @@ def test_messages_has_no_metadata_index() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest tests/checkpointer/test_mysql.py -k models -v`
+Run: `uv run pytest tests/checkpointer/test_mysql.py -k "models_import or self_fk or foreign_keys or metadata_index" -v`
 Expected: FAIL — `ModuleNotFoundError` / attribute errors.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -320,7 +320,7 @@ class CubepiSchemaVersion(CubepiBase):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/checkpointer/test_mysql.py -k models -v`
+Run: `uv run pytest tests/checkpointer/test_mysql.py -k "models_import or self_fk or foreign_keys or metadata_index" -v`
 Expected: PASS (4 tests)
 
 - [ ] **Step 5: Commit**
@@ -492,7 +492,9 @@ def test_decode_json_handles_str_and_dict() -> None:
 
 @pytest.mark.asyncio
 async def test_append_empty_messages_is_noop() -> None:
-    from cubepi.checkpointer.mysql import MySQLCheckpointer
+    # Import from the submodule, not the package: the package __init__ does not
+    # export MySQLCheckpointer until Task 5.
+    from cubepi.checkpointer.mysql.checkpointer import MySQLCheckpointer
 
     cp = MySQLCheckpointer("mysql://root@unreachable-host/none")
     assert cp._pool is None
