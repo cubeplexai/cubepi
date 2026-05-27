@@ -114,7 +114,9 @@ def test_ls_meta_bad_format(tmp_path, capsys):
 
 def test_ls_meta_no_match(tmp_path, capsys):
     _write_run(tmp_path)  # has no cubepi.metadata.*
-    rc = main(["trace", "ls", "--dir", str(tmp_path), "--meta", "conversation_id=conv_X"])
+    rc = main(
+        ["trace", "ls", "--dir", str(tmp_path), "--meta", "conversation_id=conv_X"]
+    )
     out = capsys.readouterr().out
     assert rc == 1
     assert "no runs found" in out
@@ -123,12 +125,16 @@ def test_ls_meta_no_match(tmp_path, capsys):
 def test_stats_meta_filters(tmp_path, capsys):
     _write_run_with_meta(tmp_path, "tA", "conv_A")
     # matching meta -> the model shows up
-    rc = main(["trace", "stats", "--dir", str(tmp_path), "--meta", "conversation_id=conv_A"])
+    rc = main(
+        ["trace", "stats", "--dir", str(tmp_path), "--meta", "conversation_id=conv_A"]
+    )
     out = capsys.readouterr().out
     assert rc == 0
     assert "gpt-x" in out
     # non-matching meta -> filtered out, model absent
-    rc = main(["trace", "stats", "--dir", str(tmp_path), "--meta", "conversation_id=zzz"])
+    rc = main(
+        ["trace", "stats", "--dir", str(tmp_path), "--meta", "conversation_id=zzz"]
+    )
     out = capsys.readouterr().out
     assert rc == 0
     assert "gpt-x" not in out

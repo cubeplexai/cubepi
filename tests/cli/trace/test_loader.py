@@ -306,23 +306,57 @@ def test_run_prompt_prefers_root_over_subagent_invoke_agent():
 def test_list_runs_filters_by_meta(tmp_path):
     f1 = tmp_path / "2026-05-20" / "tA.jsonl"
     f2 = tmp_path / "2026-05-20" / "tB.jsonl"
-    _write(f1, [_span("0x1", None, "invoke_agent", "2026-05-20T00:00:00Z", "rA",
-                      **{"gen_ai.operation.name": "invoke_agent",
-                         "cubepi.metadata.conversation_id": "conv_A",
-                         "cubepi.metadata.user_id": "u1"})])
-    _write(f2, [_span("0x2", None, "invoke_agent", "2026-05-20T00:00:01Z", "rB",
-                      **{"gen_ai.operation.name": "invoke_agent",
-                         "cubepi.metadata.conversation_id": "conv_B"})])
+    _write(
+        f1,
+        [
+            _span(
+                "0x1",
+                None,
+                "invoke_agent",
+                "2026-05-20T00:00:00Z",
+                "rA",
+                **{
+                    "gen_ai.operation.name": "invoke_agent",
+                    "cubepi.metadata.conversation_id": "conv_A",
+                    "cubepi.metadata.user_id": "u1",
+                },
+            )
+        ],
+    )
+    _write(
+        f2,
+        [
+            _span(
+                "0x2",
+                None,
+                "invoke_agent",
+                "2026-05-20T00:00:01Z",
+                "rB",
+                **{
+                    "gen_ai.operation.name": "invoke_agent",
+                    "cubepi.metadata.conversation_id": "conv_B",
+                },
+            )
+        ],
+    )
     # metadata surfaced on the summary
     by_id = {r.trace_id: r for r in list_runs(tmp_path)}
     assert by_id["tA"].metadata == {"conversation_id": "conv_A", "user_id": "u1"}
     assert by_id["tB"].metadata == {"conversation_id": "conv_B"}
     # single-key filter
-    assert [r.trace_id for r in list_runs(tmp_path, meta={"conversation_id": "conv_A"})] == ["tA"]
+    assert [
+        r.trace_id for r in list_runs(tmp_path, meta={"conversation_id": "conv_A"})
+    ] == ["tA"]
     # AND: every key must match
-    assert [r.trace_id for r in
-            list_runs(tmp_path, meta={"conversation_id": "conv_A", "user_id": "u1"})] == ["tA"]
-    assert list_runs(tmp_path, meta={"conversation_id": "conv_A", "user_id": "nope"}) == []
+    assert [
+        r.trace_id
+        for r in list_runs(
+            tmp_path, meta={"conversation_id": "conv_A", "user_id": "u1"}
+        )
+    ] == ["tA"]
+    assert (
+        list_runs(tmp_path, meta={"conversation_id": "conv_A", "user_id": "nope"}) == []
+    )
     # unknown key matches nothing
     assert list_runs(tmp_path, meta={"missing": "x"}) == []
 
@@ -332,21 +366,33 @@ def test_filter_spans_by_meta():
     from cubepi.cli.trace.model import Span
 
     def sp(trace_id, span_id, parent, name, **attrs):
-        return Span({
-            "name": name,
-            "context": {"trace_id": trace_id, "span_id": span_id},
-            "parent_id": parent,
-            "start_time": "2026-05-20T00:00:00Z",
-            "end_time": "2026-05-20T00:00:00Z",
-            "status": {"status_code": "UNSET"},
-            "attributes": attrs,
-        })
+        return Span(
+            {
+                "name": name,
+                "context": {"trace_id": trace_id, "span_id": span_id},
+                "parent_id": parent,
+                "start_time": "2026-05-20T00:00:00Z",
+                "end_time": "2026-05-20T00:00:00Z",
+                "status": {"status_code": "UNSET"},
+                "attributes": attrs,
+            }
+        )
 
-    a_root = sp("0xA", "0x1", None, "invoke_agent",
-                **{"gen_ai.operation.name": "invoke_agent", "cubepi.metadata.user_id": "u1"})
+    a_root = sp(
+        "0xA",
+        "0x1",
+        None,
+        "invoke_agent",
+        **{"gen_ai.operation.name": "invoke_agent", "cubepi.metadata.user_id": "u1"},
+    )
     a_chat = sp("0xA", "0x2", "0x1", "chat", **{"gen_ai.operation.name": "chat"})
-    b_root = sp("0xB", "0x3", None, "invoke_agent",
-                **{"gen_ai.operation.name": "invoke_agent", "cubepi.metadata.user_id": "u2"})
+    b_root = sp(
+        "0xB",
+        "0x3",
+        None,
+        "invoke_agent",
+        **{"gen_ai.operation.name": "invoke_agent", "cubepi.metadata.user_id": "u2"},
+    )
     spans = [a_root, a_chat, b_root]
     kept = filter_spans_by_meta(spans, {"user_id": "u1"})
     assert {s.span_id for s in kept} == {"0x1", "0x2"}

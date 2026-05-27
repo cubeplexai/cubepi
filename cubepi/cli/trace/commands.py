@@ -80,9 +80,7 @@ def _parse_meta(items: list[str] | None) -> dict[str, str]:
     for item in items or []:
         key, sep, value = item.partition("=")
         if not sep or not key:
-            raise _MetaParseError(
-                f"--meta expects KEY=VALUE, got {item!r}"
-            )
+            raise _MetaParseError(f"--meta expects KEY=VALUE, got {item!r}")
         out[key] = value
     return out
 
