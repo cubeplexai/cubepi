@@ -86,7 +86,13 @@ class JsonlSpanExporter(SpanExporter):
         else:
             date_dir = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
         ctx = span.get_span_context()
-        trace_id = format(ctx.trace_id, "032x") if ctx and ctx.trace_id else "unknown-trace"
+        # Use is_valid (matches cubepi.mcp._tracing / http_loader convention):
+        # guards trace_id != 0 idiomatically; invalid contexts → unknown-trace.
+        trace_id = (
+            format(ctx.trace_id, "032x")
+            if ctx is not None and ctx.is_valid
+            else "unknown-trace"
+        )
         return self._directory / date_dir / f"{_safe_filename(trace_id)}.jsonl"
 
     @staticmethod
