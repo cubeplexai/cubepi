@@ -36,8 +36,10 @@ verification.
 
 `aiomysql` (matches cubemanus, which depends on
 `langgraph-checkpoint-mysql[aiomysql]`). Pool via `aiomysql.create_pool`.
-Connection configured via discrete params parsed from a DSN-style URL, or passed
-explicitly. Placeholders are `%s` (PyMySQL paramstyle).
+Connection is configured from a `mysql://user:pw@host:port/db` DSN URL (parsed
+into `aiomysql.create_pool` kwargs), matching `PostgresCheckpointer`'s
+DSN-only constructor — no separate explicit-kwargs path (YAGNI; a DSN covers the
+cases). Placeholders are `%s` (PyMySQL paramstyle).
 
 ## Module layout
 

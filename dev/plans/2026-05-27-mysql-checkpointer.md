@@ -41,12 +41,35 @@ Spec: `dev/specs/2026-05-27-mysql-checkpointer.md`.
 
 ---
 
-## Task 1: Package skeleton + exceptions
+## Task 1: Dependency + package skeleton + exceptions
 
 **Files:**
+- Modify: `pyproject.toml`
 - Create: `cubepi/checkpointer/mysql/__init__.py`
 - Create: `cubepi/checkpointer/mysql/exceptions.py`
 - Test: `tests/checkpointer/test_mysql.py`
+
+- [ ] **Step 0: Add the `mysql` extra and dev dep (must precede any aiomysql import)**
+
+In `pyproject.toml`, under `[project.optional-dependencies]` add after the
+`postgres` block:
+
+```toml
+mysql = [
+    "sqlalchemy>=2.0",
+    "aiomysql>=0.2",
+    "msgpack>=1.0",
+]
+```
+
+In `[dependency-groups]` `dev = [ ... ]`, add near the other DB drivers:
+
+```toml
+    "aiomysql>=0.2",
+```
+
+Then run: `uv sync --all-extras --dev`
+Expected: resolves and installs aiomysql (which pulls in PyMySQL).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -100,32 +123,30 @@ __all__ = [
 
 ```python
 # cubepi/checkpointer/mysql/__init__.py
-from cubepi.checkpointer.mysql.checkpointer import MySQLCheckpointer
+"""MySQLCheckpointer package.
+
+Exports are built up incrementally across the plan. Exceptions are available
+immediately; MySQLCheckpointer and model symbols are added once their modules
+exist (Task 5), to avoid importing not-yet-written submodules.
+"""
+
 from cubepi.checkpointer.mysql.exceptions import (
     CubepiSchemaError,
     CubepiSchemaMismatch,
     CubepiSchemaUninitialized,
 )
-from cubepi.checkpointer.mysql.models import (
-    EXPECTED_SCHEMA_VERSION,
-    PARTITION_COUNT,
-    cubepi_metadata,
-)
 
 __all__ = [
-    "MySQLCheckpointer",
     "CubepiSchemaError",
     "CubepiSchemaMismatch",
     "CubepiSchemaUninitialized",
-    "EXPECTED_SCHEMA_VERSION",
-    "PARTITION_COUNT",
-    "cubepi_metadata",
 ]
 ```
 
-Note: `__init__.py` imports `checkpointer` and `models` which don't exist yet —
-this test only imports `exceptions` directly, so it passes. The full `__init__`
-import is exercised in Task 5.
+**Critical:** importing the package runs `__init__.py` first, so it must NOT
+import `checkpointer`/`models` until those modules exist. The full export list
+(adding `MySQLCheckpointer`, `EXPECTED_SCHEMA_VERSION`, `PARTITION_COUNT`,
+`cubepi_metadata`) is written in Task 5 Step 2, after all submodules exist.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -135,8 +156,8 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubepi/checkpointer/mysql/__init__.py cubepi/checkpointer/mysql/exceptions.py tests/checkpointer/test_mysql.py
-git commit -m "feat(checkpointer): mysql package skeleton + exception aliases"
+git add pyproject.toml uv.lock cubepi/checkpointer/mysql/__init__.py cubepi/checkpointer/mysql/exceptions.py tests/checkpointer/test_mysql.py
+git commit -m "feat(checkpointer): mysql package skeleton, exception aliases, mysql extra"
 ```
 
 ---
@@ -177,12 +198,12 @@ def test_threads_parent_self_fk_present() -> None:
 
     threads = cubepi_metadata.tables["cubepi_threads"]
     fk_targets = {
-        list(fk.column.table.name for fk in col.foreign_keys)
+        fk.column.table.name
         for col in threads.columns
-        if col.foreign_keys
+        for fk in col.foreign_keys
     }
     # parent_thread_id references cubepi_threads
-    assert ["cubepi_threads"] in fk_targets
+    assert "cubepi_threads" in fk_targets
 
 
 def test_messages_has_no_foreign_keys() -> None:
@@ -241,6 +262,7 @@ class CubepiBase(DeclarativeBase):
 
 class CubepiThread(CubepiBase):
     __tablename__ = "cubepi_threads"
+    __table_args__ = {"mysql_engine": "InnoDB"}
 
     thread_id: Mapped[str] = mapped_column(_TID, primary_key=True)
     parent_thread_id: Mapped[str | None] = mapped_column(
@@ -268,6 +290,7 @@ class CubepiThread(CubepiBase):
 
 class CubepiMessage(CubepiBase):
     __tablename__ = "cubepi_messages"
+    __table_args__ = {"mysql_engine": "InnoDB"}
 
     thread_id: Mapped[str] = mapped_column(_TID, primary_key=True)
     seq: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True)
@@ -290,6 +313,7 @@ class CubepiMessage(CubepiBase):
 
 class CubepiSchemaVersion(CubepiBase):
     __tablename__ = "cubepi_schema_version"
+    __table_args__ = {"mysql_engine": "InnoDB"}
 
     version: Mapped[int] = mapped_column(sa.Integer, primary_key=True)
 ```
@@ -605,38 +629,47 @@ git commit -m "feat(checkpointer): mysql checkpointer helpers + dsn parsing"
 
 ---
 
-## Task 5: Pool lifecycle + schema verification
+## Task 5: Pool lifecycle + schema verification + package wiring
 
 **Files:**
 - Modify: `cubepi/checkpointer/mysql/checkpointer.py`
+- Modify: `cubepi/checkpointer/mysql/__init__.py`
 - Modify: `cubepi/checkpointer/__init__.py`
-- Modify: `pyproject.toml`
 - Test: `tests/checkpointer/test_mysql.py`
 
-- [ ] **Step 1: Add the `mysql` extra and dev dep**
+(The `mysql` extra and dev dep were already added in Task 1 Step 0.)
 
-In `pyproject.toml`, under `[project.optional-dependencies]` add after the
-`postgres` block:
+- [ ] **Step 1: Complete the mysql package `__init__.py`**
 
-```toml
-mysql = [
-    "sqlalchemy>=2.0",
-    "aiomysql>=0.2",
-    "msgpack>=1.0",
+Now that all submodules exist, replace `cubepi/checkpointer/mysql/__init__.py`
+with the full export surface:
+
+```python
+# cubepi/checkpointer/mysql/__init__.py
+from cubepi.checkpointer.mysql.checkpointer import MySQLCheckpointer
+from cubepi.checkpointer.mysql.exceptions import (
+    CubepiSchemaError,
+    CubepiSchemaMismatch,
+    CubepiSchemaUninitialized,
+)
+from cubepi.checkpointer.mysql.models import (
+    EXPECTED_SCHEMA_VERSION,
+    PARTITION_COUNT,
+    cubepi_metadata,
+)
+
+__all__ = [
+    "MySQLCheckpointer",
+    "CubepiSchemaError",
+    "CubepiSchemaMismatch",
+    "CubepiSchemaUninitialized",
+    "EXPECTED_SCHEMA_VERSION",
+    "PARTITION_COUNT",
+    "cubepi_metadata",
 ]
 ```
 
-In `[dependency-groups]` `dev = [ ... ]`, add (keep list alphabetical-ish near
-the other DB drivers):
-
-```toml
-    "aiomysql>=0.2",
-```
-
-Then run: `uv sync --all-extras --dev`
-Expected: resolves and installs aiomysql.
-
-- [ ] **Step 2: Wire lazy import in checkpointer package**
+- [ ] **Step 2: Wire lazy import in the checkpointer package**
 
 Edit `cubepi/checkpointer/__init__.py` `__getattr__` to add, before the final
 `raise AttributeError`:
@@ -650,7 +683,7 @@ Edit `cubepi/checkpointer/__init__.py` `__getattr__` to add, before the final
 
 And add `"MySQLCheckpointer"` to `__all__`.
 
-- [ ] **Step 3: Write the failing test**
+- [ ] **Step 3: Write the test for the top-level lazy import**
 
 ```python
 # append to tests/checkpointer/test_mysql.py
@@ -661,15 +694,12 @@ def test_top_level_lazy_import() -> None:
     assert "MySQLCheckpointer" in cp_pkg.__all__
 ```
 
-- [ ] **Step 4: Run test to verify it fails**
+- [ ] **Step 4: Run it (verifies the wiring; the class exists from Task 4)**
 
 Run: `uv run pytest tests/checkpointer/test_mysql.py::test_top_level_lazy_import -v`
-Expected: FAIL — full `cubepi.checkpointer.mysql` import chain still hits the
-`NotImplementedError`-free module but `__init__` imports `MySQLCheckpointer`
-class which exists; this should actually PASS once Task 4 class exists. If it
-fails, it indicates an import error to fix.
-
-(Insight: the class already exists from Task 4, so this verifies the wiring.)
+Expected: PASS. A failure here means an import error in the wiring — fix it
+before continuing. (This step verifies wiring rather than following strict
+red→green, because the class already exists from Task 4.)
 
 - [ ] **Step 5: Implement `__aenter__`/`__aexit__`/`_verify_schema`**
 
@@ -701,7 +731,10 @@ Add these methods to `MySQLCheckpointer` (after `__init__`, before `append`):
                         "SELECT version FROM cubepi_schema_version LIMIT 1"
                     )
                     row = await cur.fetchone()
-                except pymysql.err.ProgrammingError as e:
+                except pymysql.err.Error as e:
+                    # PyMySQL maps 1146 (ER_NO_SUCH_TABLE) to ProgrammingError but
+                    # 1054 (ER_BAD_FIELD_ERROR) to OperationalError, so catch the
+                    # common base and branch on the errno.
                     code = e.args[0] if e.args else None
                     if code in (_ER_NO_SUCH_TABLE, _ER_BAD_FIELD_ERROR):
                         raise CubepiSchemaUninitialized(
@@ -732,8 +765,8 @@ Expected: PASS for all non-E2E tests (E2E tests not written yet).
 - [ ] **Step 7: Commit**
 
 ```bash
-git add pyproject.toml uv.lock cubepi/checkpointer/__init__.py cubepi/checkpointer/mysql/checkpointer.py tests/checkpointer/test_mysql.py
-git commit -m "feat(checkpointer): mysql pool lifecycle + schema verification + mysql extra"
+git add cubepi/checkpointer/__init__.py cubepi/checkpointer/mysql/__init__.py cubepi/checkpointer/mysql/checkpointer.py tests/checkpointer/test_mysql.py
+git commit -m "feat(checkpointer): mysql pool lifecycle + schema verification + package wiring"
 ```
 
 ---
@@ -994,7 +1027,7 @@ async def _setup_schema(dsn: str) -> None:
                         ON UPDATE CURRENT_TIMESTAMP,
                     CONSTRAINT fk_parent FOREIGN KEY (parent_thread_id)
                         REFERENCES cubepi_threads (thread_id)
-                )
+                ) ENGINE=InnoDB
             """)
             await cur.execute(
                 """
@@ -1006,13 +1039,13 @@ async def _setup_schema(dsn: str) -> None:
                     payload LONGBLOB NOT NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (thread_id, seq)
-                ) """
+                ) ENGINE=InnoDB """
                 + messages_partition_clause()
             )
             await cur.execute("""
                 CREATE TABLE cubepi_schema_version (
                     version INT PRIMARY KEY
-                )
+                ) ENGINE=InnoDB
             """)
             for stmt in write_schema_version_op().split(";"):
                 if stmt.strip():
