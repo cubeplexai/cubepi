@@ -473,9 +473,23 @@ class Recorder:
         # Open the root invoke_agent span. Caller-context propagation
         # (parent_trace_id / parent_span_id from a host service) lands
         # here in a future run_scope feature.
+        parent_ctx = None
+        try:
+            # TODO(tracing): relocate this "current tool span" helper out of
+            # cubepi.mcp._tracing — it now serves generic nested agents, not
+            # just MCP clients.
+            from cubepi.mcp import _tracing as _mcp_tracing
+
+            entry = _mcp_tracing._get_tool_span_entry()
+            if entry is not None:
+                tool_span, _tool_provider = entry
+                parent_ctx = trace.set_span_in_context(tool_span)
+        except ImportError:  # pragma: no cover — mcp module always present
+            parent_ctx = None
         span = self._tracer.otel_tracer.start_span(
             name=SPAN_NAME_INVOKE_AGENT,
             kind=SpanKind.INTERNAL,
+            context=parent_ctx,
             attributes={
                 GEN_AI_OPERATION_NAME: OP_INVOKE_AGENT,
                 CUBEPI_RUN_ID: run_id,

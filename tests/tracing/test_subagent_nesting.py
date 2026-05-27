@@ -187,3 +187,47 @@ async def test_cancelled_inner_gate_released_for_parents_next_turn():
     assert len(parent_chats) == 2, (
         f"expected 2 parent-run chat spans, got {len(parent_chats)}"
     )
+
+
+async def test_inner_run_nests_under_active_tool_span():
+    """When invoke_agent opens while an execute_tool span is active for the
+    task (a subagent running inside a tool body), the inner agent's root
+    invoke_agent span must nest under that tool span — inheriting trace_id
+    and setting parent_span_id — instead of starting a new root.
+    """
+    from cubepi.mcp import _tracing as mcp_tracing
+
+    provider = FauxProvider()
+    exporter = InMemoryExporter()
+    tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+
+    provider.append_responses([faux_assistant_message("inner-final")])
+
+    parent_span = tracer.otel_tracer.start_span("execute_tool subagent")
+    token = mcp_tracing.register_tool_span("tc1", parent_span, provider=None)
+    try:
+        inner = _make_agent(provider, tools=[])
+        detach = tracer.attach(inner)
+        try:
+            await inner.prompt("hi")
+            await inner.wait_for_idle()
+        finally:
+            res = detach()
+            if res is not None:
+                await res
+    finally:
+        mcp_tracing.unregister_tool_span(token)
+        parent_span.end()
+    await tracer.shutdown()
+
+    root = next(
+        s
+        for s in exporter.spans
+        if (s.attributes or {}).get("gen_ai.operation.name") == "invoke_agent"
+    )
+    pctx = parent_span.get_span_context()
+    assert root.parent is not None, "invoke_agent opened as a new root"
+    assert root.parent.span_id == pctx.span_id, (
+        "invoke_agent not nested under tool span"
+    )
+    assert root.context.trace_id == pctx.trace_id, "trace_id not inherited"
