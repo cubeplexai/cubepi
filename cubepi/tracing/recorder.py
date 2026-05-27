@@ -18,6 +18,7 @@ or error). See ``docs/specs/2026-05-18-cubepi-tracing-design.md`` §9.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import time
 import traceback
@@ -117,6 +118,19 @@ if TYPE_CHECKING:
     from cubepi.tracing.tracer import Tracer
 
 
+# Per-task "active run" gate. A provider instance shared by a parent
+# agent and an inner subagent fires EVERY attached recorder's provider
+# listeners (listeners are per-provider-instance). Without this gate the
+# parent recorder's chat-span listener would also fire for the inner
+# agent's LLM call and mint a duplicate chat span under the parent's
+# turn. Each recorder sets this contextvar to its own ``_RunState`` while
+# its run owns the current asyncio task, and the provider listeners act
+# only when the active run matches their own run.
+_active_run: contextvars.ContextVar[object | None] = contextvars.ContextVar(
+    "cubepi.tracing.active_run", default=None
+)
+
+
 @dataclass
 class _RunState:
     """Per-run mutable state. One per attached agent run."""
@@ -188,6 +202,11 @@ class Recorder:
         # definitions (description, execution_mode) at tool-exec span
         # open. ``None`` if the agent doesn't expose a tool registry.
         self._agent: Any | None = None
+        # Reset token for the per-task ``_active_run`` contextvar, set in
+        # ``_on_agent_start`` and reset in ``_on_agent_end`` /
+        # ``_close_open_spans`` (the latter covers cancelled runs that
+        # never emit AgentEndEvent).
+        self._active_run_token: Any | None = None
 
     # ------------------------------------------------------------------
     # Attach / detach
@@ -365,6 +384,22 @@ class Recorder:
                 pass
         run.tool_span_tokens.clear()
 
+    def _reset_active_run(self) -> None:
+        """Reset the per-task ``_active_run`` gate to its prior value.
+
+        Called from both ``_on_agent_end`` (normal completion) and
+        ``_close_open_spans`` (the detach / cancellation path — a
+        CancelledError-aborted run never emits AgentEndEvent, and
+        ``detach()`` always runs ``_close_open_spans``).
+        """
+        token = getattr(self, "_active_run_token", None)
+        if token is not None:
+            try:
+                _active_run.reset(token)
+            except (ValueError, LookupError):
+                pass
+            self._active_run_token = None
+
     def _close_open_spans(self, run: "_RunState | None") -> None:
         """End any spans still open on ``run``.
 
@@ -416,6 +451,11 @@ class Recorder:
             except Exception:
                 pass
             # Don't null agent_span — _RunState gets dropped wholesale.
+        # Release the per-task active-run gate. A cancelled run never
+        # reaches _on_agent_end, so the only reset opportunity is here
+        # (detach always calls _close_open_spans). Without this a stale
+        # token would keep gating the parent task's next turn.
+        self._reset_active_run()
 
     def _on_agent_start(self) -> None:
         # Defensive cleanup: if a prior run was cancelled
@@ -433,9 +473,23 @@ class Recorder:
         # Open the root invoke_agent span. Caller-context propagation
         # (parent_trace_id / parent_span_id from a host service) lands
         # here in a future run_scope feature.
+        parent_ctx = None
+        try:
+            # TODO(tracing): relocate this "current tool span" helper out of
+            # cubepi.mcp._tracing — it now serves generic nested agents, not
+            # just MCP clients.
+            from cubepi.mcp import _tracing as _mcp_tracing
+
+            entry = _mcp_tracing._get_tool_span_entry()
+            if entry is not None:
+                tool_span, _tool_provider = entry
+                parent_ctx = trace.set_span_in_context(tool_span)
+        except ImportError:  # pragma: no cover — mcp module always present
+            parent_ctx = None
         span = self._tracer.otel_tracer.start_span(
             name=SPAN_NAME_INVOKE_AGENT,
             kind=SpanKind.INTERNAL,
+            context=parent_ctx,
             attributes={
                 GEN_AI_OPERATION_NAME: OP_INVOKE_AGENT,
                 CUBEPI_RUN_ID: run_id,
@@ -448,6 +502,11 @@ class Recorder:
         # Resource carries gen_ai.agent.name at process level — agents
         # that vary per-run set their own value via _ensure_agent_name.
         self._run = _RunState(run_id=run_id, agent_span=span)
+        # Claim the per-task active-run gate for this run so this
+        # recorder's provider listeners act only for LLM calls made on
+        # the task that owns this run (not for an inner subagent sharing
+        # the same provider instance).
+        self._active_run_token = _active_run.set(self._run)
 
         # Stamp any tags / metadata set via ``cubepi.tracing.tracing_context``
         # for this run. Per-task contextvar scoping means concurrent
@@ -458,9 +517,8 @@ class Recorder:
         # that keys like ``run_id`` / ``turn_index`` / ``agent.tools``
         # — which the recorder owns under ``cubepi.*`` — can never be
         # overwritten by caller-supplied values. Reserved cubepi
-        # schema keys (especially ``cubepi.run_id`` which the JSONL
-        # exporter shards on) must stay recorder-controlled (codex P2
-        # on PR #92).
+        # schema keys (especially ``cubepi.run_id``, a per-span filtering
+        # attribute) must stay recorder-controlled (codex P2 on PR #92).
         try:
             from cubepi.tracing.context import _current_metadata, _current_tags
 
@@ -551,6 +609,7 @@ class Recorder:
         # ``_sweep_tool_span_tokens`` docstring.
         self._sweep_tool_span_tokens(run)
         run.agent_span.end()
+        self._reset_active_run()
         self._run = None
 
     # ------------------------------------------------------------------
@@ -570,8 +629,8 @@ class Recorder:
             attributes={
                 CUBEPI_TURN_INDEX: run.turn_index,
                 # Propagate run_id so every child span carries it —
-                # OTel does NOT inherit attributes from parent spans, and
-                # JsonlSpanExporter shards by ``cubepi.run_id`` per span.
+                # OTel does NOT inherit attributes from parent spans. It's a
+                # filtering attribute; the JSONL exporter shards by trace_id.
                 CUBEPI_RUN_ID: run.run_id,
             },
         )
@@ -645,7 +704,8 @@ class Recorder:
             GEN_AI_TOOL_NAME: event.tool_name,
             GEN_AI_TOOL_CALL_ID: event.tool_call_id,
             GEN_AI_TOOL_TYPE: "function",
-            # Per-span run_id so JsonlSpanExporter shards correctly.
+            # Record run_id as a span attribute (for filtering); the JSONL
+            # exporter now shards by trace_id, not run_id.
             CUBEPI_RUN_ID: run.run_id,
         }
         # NOTE: gen_ai.tool.call.arguments is opt-in content recorded
@@ -780,13 +840,16 @@ class Recorder:
         run = self._run
         if run is None or run.turn_span is None:
             return
+        if _active_run.get() is not run:
+            return
         ctx = trace.set_span_in_context(run.turn_span)
         attrs: dict[str, Any] = {
             GEN_AI_OPERATION_NAME: OP_CHAT,
             GEN_AI_PROVIDER_NAME: map_provider_name(model.provider),
             GEN_AI_REQUEST_MODEL: model.id,
             GEN_AI_REQUEST_STREAM: True,
-            # Per-span run_id so JsonlSpanExporter shards correctly.
+            # Record run_id as a span attribute (for filtering); the JSONL
+            # exporter now shards by trace_id, not run_id.
             CUBEPI_RUN_ID: run.run_id,
         }
         # Pull StreamOptions-derived params from the payload where the
@@ -878,6 +941,8 @@ class Recorder:
         run = self._run
         if run is None or run.chat_span is None or run.chat_first_chunk_recorded:
             return
+        if _active_run.get() is not run:
+            return
         # Only count "content" chunks for time-to-first-chunk (not 'start').
         if event.type in (
             "text_delta",
@@ -898,6 +963,13 @@ class Recorder:
         del model
         run = self._run
         if run is None or run.chat_span is None:
+            return
+        # A non-owning recorder normally already bailed in _on_provider_request
+        # (so its chat_span stays None and the guard above catches it). This
+        # gate is the defensive backstop for the case where chat_span is set
+        # but the active task belongs to a different run — never close a span
+        # this recorder didn't open for the current task.
+        if _active_run.get() is not run:
             return
         span = run.chat_span
         try:

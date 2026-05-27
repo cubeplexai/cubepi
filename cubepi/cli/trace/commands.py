@@ -20,7 +20,7 @@ def register(subparsers: "argparse._SubParsersAction") -> None:
     p_ls.set_defaults(handler=cmd_ls)
 
     p_view = trace_sub.add_parser("view", help="render a run as a tree")
-    p_view.add_argument("run", help="run id or path to a .jsonl file")
+    p_view.add_argument("run", help="trace id or path to a .jsonl file")
     _add_dir(p_view)
     p_view.add_argument(
         "-v", "--verbose", action="store_true", help="expand all span attributes"
@@ -31,7 +31,7 @@ def register(subparsers: "argparse._SubParsersAction") -> None:
     p_view.set_defaults(handler=cmd_view)
 
     p_follow = trace_sub.add_parser("follow", help="stream spans as they complete")
-    p_follow.add_argument("run", help="run id or path to a .jsonl file")
+    p_follow.add_argument("run", help="trace id or path to a .jsonl file")
     _add_dir(p_follow)
     p_follow.add_argument(
         "--interval", type=float, default=0.5, help="poll interval seconds"
@@ -42,7 +42,7 @@ def register(subparsers: "argparse._SubParsersAction") -> None:
     p_follow.set_defaults(handler=cmd_follow)
 
     p_stats = trace_sub.add_parser("stats", help="aggregate stats across runs")
-    p_stats.add_argument("runs", nargs="*", help="run ids (default: whole dir)")
+    p_stats.add_argument("runs", nargs="*", help="trace ids (default: whole dir)")
     _add_dir(p_stats)
     p_stats.add_argument("--by", choices=("model", "tool"), default="model")
     p_stats.add_argument("--since", default=None, help="YYYY-MM-DD lower bound")

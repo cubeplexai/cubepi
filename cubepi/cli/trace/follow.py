@@ -69,10 +69,10 @@ def follow_run(
     interval: float = 0.5,
     timeout: float | None = None,
 ) -> None:
-    """Tail a run, printing each span as it completes.
+    """Tail a trace, printing each span as it completes.
 
-    ``resolve_files`` is re-invoked every poll so a run crossing UTC midnight
-    (a new ``<next-date>/<run_id>.jsonl`` file) is picked up without restarting.
+    ``resolve_files`` is re-invoked every poll so a trace crossing UTC midnight
+    (a new ``<next-date>/<trace_id>.jsonl`` file) is picked up without restarting.
     Each file keeps its own offset/buffer/skipped state. Exits when the root
     invoke_agent span appears, after ``timeout`` idle seconds, or on Ctrl-C.
     """
