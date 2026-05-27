@@ -989,6 +989,43 @@ class TestMCPSpanParentage:
             "_active_entries leaked after cross-task unregister_tool_span"
         )
 
+    async def test_nested_tool_falls_back_to_outer_after_inner_unregister_cross_task(
+        self,
+    ):
+        """Parallel-mode shape: an inner tool registers while an outer tool is
+        active, then its ToolExecutionEnd unregisters from a CHILD task — so the
+        per-task contextvar can't be reset. A later lookup in the outer task
+        must fall back to the still-active OUTER tool span, not return None;
+        otherwise a subsequent subagent/MCP call fails to nest under the outer
+        execute_tool span (codex P2, PR #122)."""
+        import asyncio as _asyncio
+
+        from cubepi.mcp import _tracing as mcp_tracing
+
+        tok_outer = mcp_tracing.register_tool_span(
+            "outer", "span-outer", provider="prov-outer"
+        )
+        tok_inner = mcp_tracing.register_tool_span(
+            "inner", "span-inner", provider="prov-inner"
+        )
+        try:
+            # Innermost lookup is the inner tool while it is live.
+            assert mcp_tracing._get_tool_span_entry() == ("span-inner", "prov-inner")
+
+            async def _end_inner() -> None:
+                mcp_tracing.unregister_tool_span(tok_inner)
+
+            # Inner ends in a different task (cross-task reset fails silently).
+            await _asyncio.create_task(_end_inner())
+
+            # Must fall back to the OUTER tool, not None.
+            assert mcp_tracing._get_tool_span_entry() == ("span-outer", "prov-outer")
+        finally:
+            mcp_tracing.unregister_tool_span(tok_outer)
+
+        # Fully unwound: no active tool for this task.
+        assert mcp_tracing._get_tool_span_entry() is None
+
     async def test_mcp_span_orphan_when_no_registered_parent(self, monkeypatch):
         """Without a registered parent, the MCP span starts a new
         root trace. Pinning this so the parented-path test above is
