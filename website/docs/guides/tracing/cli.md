@@ -34,6 +34,22 @@ cubepi trace ls          # newest first; -n N to limit
 | `duration` | wall-clock span of the trace |
 | `input` | the user's prompt, to identify the run |
 
+### Filter by run metadata (`--meta`)
+
+If the host stamped run-scoped metadata onto the trace (via
+`tracing_context(metadata=…)` — e.g. cubebox records `conversation_id`,
+`user_id`, `org_id`, `workspace_id` on the root `invoke_agent` span), filter to
+just those traces:
+
+```bash
+cubepi trace ls --meta conversation_id=conv_123
+cubepi trace ls --meta user_id=usr_9 --meta org_id=org_1   # repeatable = AND, exact match
+```
+
+Each `--meta KEY=VALUE` is matched exactly against the trace's root metadata;
+repeating the flag ANDs the conditions. (See the metadata values with
+`cubepi trace view <id> -v`.)
+
 ## `view` — render a trace as a span tree
 
 A trace-id **prefix** is enough (the table truncates ids); an ambiguous prefix
@@ -86,6 +102,15 @@ cubepi trace follow <id>           # polls as spans complete; good for a run in 
 ```bash
 cubepi trace stats --by model                  # latency p50/p95, error rate, tokens
 cubepi trace stats --by tool --since 2026-05-20
+```
+
+`stats` also accepts `--meta KEY=VALUE` (same semantics as `ls`) to aggregate
+only the traces that match — e.g. latency / error-rate / tokens for one user or
+conversation:
+
+```bash
+cubepi trace stats --by model --meta user_id=usr_9
+cubepi trace stats --by tool --meta conversation_id=conv_123
 ```
 
 ## Beyond the CLI

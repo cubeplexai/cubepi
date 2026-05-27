@@ -17,6 +17,7 @@ def register(subparsers: "argparse._SubParsersAction") -> None:
     p_ls = trace_sub.add_parser("ls", help="list recent runs")
     _add_dir(p_ls)
     p_ls.add_argument("-n", type=int, default=20, help="max runs to show")
+    _add_meta(p_ls)
     p_ls.set_defaults(handler=cmd_ls)
 
     p_view = trace_sub.add_parser("view", help="render a run as a tree")
@@ -46,6 +47,7 @@ def register(subparsers: "argparse._SubParsersAction") -> None:
     _add_dir(p_stats)
     p_stats.add_argument("--by", choices=("model", "tool"), default="model")
     p_stats.add_argument("--since", default=None, help="YYYY-MM-DD lower bound")
+    _add_meta(p_stats)
     p_stats.set_defaults(handler=cmd_stats)
 
 
@@ -55,6 +57,34 @@ def _add_dir(parser: argparse.ArgumentParser) -> None:
         default=str(loader.DEFAULT_DIR),
         help="traces directory (default: ./cubepi-traces)",
     )
+
+
+def _add_meta(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--meta",
+        action="append",
+        metavar="KEY=VALUE",
+        help="filter to traces whose run metadata matches KEY=VALUE "
+        "(repeatable = AND, exact match); e.g. --meta conversation_id=conv_123",
+    )
+
+
+class _MetaParseError(Exception):
+    """Raised for a malformed --meta KEY=VALUE token."""
+
+
+def _parse_meta(items: list[str] | None) -> dict[str, str]:
+    """Parse repeated ``--meta KEY=VALUE`` tokens into a dict. Raises
+    :class:`_MetaParseError` on a token without ``=`` or an empty key."""
+    out: dict[str, str] = {}
+    for item in items or []:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            raise _MetaParseError(
+                f"--meta expects KEY=VALUE, got {item!r}"
+            )
+        out[key] = value
+    return out
 
 
 def _emit_skipped(skipped: int) -> None:
@@ -67,9 +97,15 @@ def cmd_ls(args: argparse.Namespace) -> int:
     if not directory.exists():
         print(f"no traces directory at {directory}")
         return 1
-    runs = loader.list_runs(directory, limit=args.n)
+    try:
+        meta = _parse_meta(args.meta)
+    except _MetaParseError as exc:
+        print(str(exc))
+        return 2
+    runs = loader.list_runs(directory, limit=args.n, meta=meta)
     if not runs:
-        print(f"no runs found under {directory}")
+        scope = f" matching {meta}" if meta else ""
+        print(f"no runs found under {directory}{scope}")
         return 1
     render.render_runs(runs)
     return 0
@@ -125,7 +161,14 @@ def cmd_stats(args: argparse.Namespace) -> int:
     if not files:
         print(f"no runs found under {directory}")
         return 1
+    try:
+        meta = _parse_meta(args.meta)
+    except _MetaParseError as exc:
+        print(str(exc))
+        return 2
     spans, skipped = loader.load_run(files)
+    if meta:
+        spans = loader.filter_spans_by_meta(spans, meta)
     rows = stats.aggregate(spans, by=args.by)
     render.render_stats(rows, by=args.by)
     _emit_skipped(skipped)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,6 +12,52 @@ from cubepi.tracing import schema
 
 DEFAULT_DIR = Path("./cubepi-traces")
 _MIN = datetime.min.replace(tzinfo=timezone.utc)
+
+# Run-scoped metadata is stamped by the recorder as ``cubepi.metadata.<key>``
+# attributes on the root invoke_agent span (set via
+# ``cubepi.tracing.tracing_context(metadata=...)``).
+_META_PREFIX = "cubepi.metadata."
+
+
+def _root_span(spans: list[Span]) -> Span | None:
+    """The trace's root invoke_agent span (parent-less), else any invoke_agent."""
+    return next(
+        (s for s in spans if s.is_invoke_agent and not s.parent_id), None
+    ) or next((s for s in spans if s.is_invoke_agent), None)
+
+
+def _run_metadata(spans: list[Span]) -> dict[str, str]:
+    """The ``cubepi.metadata.*`` attributes off the trace's root span, with the
+    prefix stripped and values stringified. Empty when none were recorded."""
+    root = _root_span(spans)
+    if root is None:
+        return {}
+    return {
+        k[len(_META_PREFIX) :]: str(v)
+        for k, v in root.attributes.items()
+        if k.startswith(_META_PREFIX)
+    }
+
+
+def _meta_matches(have: dict[str, str], want: dict[str, str]) -> bool:
+    """True iff every ``want`` key/value is present (exact match) in ``have``."""
+    return all(have.get(k) == v for k, v in want.items())
+
+
+def filter_spans_by_meta(spans: list[Span], meta: dict[str, str]) -> list[Span]:
+    """Keep only spans belonging to a trace whose root metadata matches all of
+    ``meta`` (AND, exact). Groups by ``trace_id``; a trace with no root span is
+    dropped when a filter is given. No-op when ``meta`` is empty."""
+    if not meta:
+        return spans
+    by_trace: dict[str | None, list[Span]] = {}
+    for sp in spans:
+        by_trace.setdefault(sp.trace_id, []).append(sp)
+    kept: list[Span] = []
+    for trace_spans in by_trace.values():
+        if _meta_matches(_run_metadata(trace_spans), meta):
+            kept.extend(trace_spans)
+    return kept
 
 
 class RunResolutionError(Exception):
@@ -85,9 +131,7 @@ def _run_prompt(spans: list[Span]) -> str | None:
     successive runs in one thread stay distinguishable. ``None`` when content
     isn't recorded or no user text is present.
     """
-    root = next(
-        (s for s in spans if s.is_invoke_agent and not s.parent_id), None
-    ) or next((s for s in spans if s.is_invoke_agent), None)
+    root = _root_span(spans)
     candidates = [root] if root is not None else spans
     for sp in candidates:
         raw = sp.attributes.get(schema.GEN_AI_INPUT_MESSAGES)
@@ -129,14 +173,22 @@ class RunSummary:
     has_error: bool
     duration_ms: float | None
     prompt: str | None
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
-def list_runs(directory: Path, limit: int | None = None) -> list[RunSummary]:
+def list_runs(
+    directory: Path,
+    limit: int | None = None,
+    meta: dict[str, str] | None = None,
+) -> list[RunSummary]:
     """Summarize each trace, newest first.
 
     Files are grouped by trace_id (stem), so a trace split across two date
     dirs (crossed UTC midnight) is summarized as ONE trace, not two. The
     span_count spans the whole trace — parent run plus nested subagent runs.
+
+    ``meta`` filters to traces whose root metadata matches every key/value
+    (AND, exact) — e.g. ``{"conversation_id": "conv_123"}``.
     """
     by_trace: dict[str, list[Path]] = {}
     for f in directory.glob("*/*.jsonl"):
@@ -145,6 +197,9 @@ def list_runs(directory: Path, limit: int | None = None) -> list[RunSummary]:
     for trace_id, files in by_trace.items():
         spans, _ = load_run(sorted(files))
         if not spans:
+            continue
+        metadata = _run_metadata(spans)
+        if meta and not _meta_matches(metadata, meta):
             continue
         starts = [s.start for s in spans if s.start is not None]
         ends = [s.end for s in spans if s.end is not None]
@@ -161,6 +216,7 @@ def list_runs(directory: Path, limit: int | None = None) -> list[RunSummary]:
                 has_error=any(s.is_error for s in spans),
                 duration_ms=duration,
                 prompt=_run_prompt(spans),
+                metadata=metadata,
             )
         )
     summaries.sort(key=lambda s: s.start or _MIN, reverse=True)

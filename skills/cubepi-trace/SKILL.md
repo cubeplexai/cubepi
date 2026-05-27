@@ -108,6 +108,13 @@ uv run cubepi trace follow <run>
 # Aggregate across runs: latency p50/p95, error rate, tokens — by model or tool.
 uv run cubepi trace stats --by model
 uv run cubepi trace stats --by tool --since 2026-05-20
+
+# Filter by run metadata (cubebox stamps conversation_id / user_id / org_id /
+# workspace_id on the root span). Repeatable = AND, exact match. Works on
+# `ls` and `stats` — find all traces for a conversation, or that user's stats.
+uv run cubepi trace ls --meta conversation_id=conv_123
+uv run cubepi trace ls --meta user_id=usr_9 --meta org_id=org_1
+uv run cubepi trace stats --by model --meta user_id=usr_9
 ```
 
 If the CLI view still isn't enough, the files are plain JSONL — one span per
