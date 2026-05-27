@@ -231,3 +231,104 @@ async def test_inner_run_nests_under_active_tool_span():
         "invoke_agent not nested under tool span"
     )
     assert root.context.trace_id == pctx.trace_id, "trace_id not inherited"
+
+
+async def test_full_nested_subtree_via_real_tool():
+    """End-to-end composition of Tasks 1+2: a tool whose body attaches and runs
+    an inner agent (which itself calls a tool) yields the full nested subtree
+    ``execute_tool spawn -> invoke_agent -> cubepi.turn -> {chat,
+    execute_tool inner_tool}`` — the inner chat and inner tool span both descend
+    from the inner run's root, and the inner root nests under the tool span.
+    """
+    provider = FauxProvider()
+    exporter = InMemoryExporter()
+    tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+
+    # FIFO across both agents in CALL order: parent->spawn, inner->inner_tool,
+    # inner-final, parent-final.
+    provider.append_responses(
+        [
+            faux_assistant_message(
+                [ToolCall(id="tc1", name="spawn", arguments={})],
+                stop_reason="tool_use",
+            ),
+            faux_assistant_message(
+                [ToolCall(id="tc2", name="inner_tool", arguments={})],
+                stop_reason="tool_use",
+            ),
+            faux_assistant_message("inner-final"),
+            faux_assistant_message("parent-final"),
+        ]
+    )
+
+    async def _inner_tool(tool_call_id, args, *, signal=None, on_update=None):
+        return AgentToolResult(content=[TextContent(text="inner-tool-ok")])
+
+    inner_tool = AgentTool(
+        name="inner_tool",
+        description="inner tool",
+        parameters=_Empty,
+        execute=_inner_tool,
+    )
+
+    async def _spawn(tool_call_id, args, *, signal=None, on_update=None):
+        inner = _make_agent(provider, tools=[inner_tool])
+        detach = tracer.attach(inner)
+        try:
+            await inner.prompt("do the thing")
+            await inner.wait_for_idle()
+        finally:
+            res = detach()
+            if res is not None:
+                await res
+        return AgentToolResult(content=[TextContent(text="ok")])
+
+    spawn = AgentTool(
+        name="spawn", description="spawn inner", parameters=_Empty, execute=_spawn
+    )
+    parent = _make_agent(provider, tools=[spawn])
+    detach_parent = tracer.attach(parent)
+    try:
+        await parent.prompt("go")
+        await parent.wait_for_idle()
+    finally:
+        res = detach_parent()
+        if res is not None:
+            await res
+    await tracer.shutdown()
+
+    spans = exporter.spans
+    by_id = {s.context.span_id: s for s in spans}
+    tool_span = next(s for s in spans if s.name == "execute_tool spawn")
+    inner_root = next(
+        s
+        for s in spans
+        if (s.attributes or {}).get("gen_ai.operation.name") == "invoke_agent"
+        and s.parent is not None
+        and s.parent.span_id == tool_span.context.span_id
+    )
+
+    def _descends_from(span, ancestor_id):
+        cur = span
+        while cur is not None and cur.parent is not None:
+            if cur.parent.span_id == ancestor_id:
+                return True
+            cur = by_id.get(cur.parent.span_id)
+        return False
+
+    inner_chats = [
+        s
+        for s in spans
+        if (s.attributes or {}).get("gen_ai.operation.name") == "chat"
+        and _descends_from(s, inner_root.context.span_id)
+    ]
+    assert inner_chats, "inner chat span did not nest under the inner run"
+    inner_tool_spans = [
+        s
+        for s in spans
+        if s.name == "execute_tool inner_tool"
+        and _descends_from(s, inner_root.context.span_id)
+    ]
+    assert inner_tool_spans, (
+        "inner execute_tool span missing or not nested under the inner run"
+    )
