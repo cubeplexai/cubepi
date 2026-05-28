@@ -17,7 +17,7 @@ to remember "before" or "after" precedence guesses.
 | `transform_context` | **Chain** — each sees previous output | Yes |
 | `convert_to_llm` | **Last wins** | Only the last one runs |
 | `transform_system_prompt` | **Chain** | Yes |
-| `before_tool_call` | **First block stops** | First in list wins blocks |
+| `before_tool_call` | **First block stops**; non-block accumulates | Block wins; `edited_args` last-writer-wins; `hitl_trace` merges |
 | `after_tool_call` | **Later overrides earlier** | Last write wins |
 | `should_stop_after_turn` | **Any `True` stops** (OR) | No |
 | `after_model_response` | **Chain with merge semantics** | See below |
@@ -53,22 +53,29 @@ both).
 
 ## `before_tool_call`
 
-First `block=True` short-circuits the rest. Use to chain policy
-layers from most-restrictive to least:
+First `block=True` short-circuits the rest. **Non-block returns
+accumulate:** `edited_args` propagates downstream (each middleware sees
+the edited form from the one above), and `hitl_trace` merges across the
+chain (with older keys archived under `_chain` when overwritten).
+
+Use to chain policy layers from most-restrictive to least:
 
 ```python
 agent = Agent(
     middleware=[
         RateLimiter(),       # blocks on rate quota
-        SafetyFilter(),      # blocks on dangerous args
-        AuditLogger(),       # never blocks; just records
+        SafetyFilter(),      # blocks on dangerous args; may edit
+        AuditLogger(),       # never blocks; records for observability
     ],
 )
 ```
 
 If `RateLimiter` returns `block=True`, `SafetyFilter` and
-`AuditLogger`'s `before_tool_call` don't run. `AuditLogger.after_tool_call`
-still fires because that's a different hook.
+`AuditLogger`'s `before_tool_call` don't run. If `SafetyFilter` returns
+`edited_args={"cmd": "rm /tmp/foo"}`, the *tool* runs with the edited
+args and `AuditLogger` sees the edit in `hitl_trace["_chain"]`.
+`AuditLogger.after_tool_call` still fires because that's a different
+hook.
 
 ## `after_tool_call`
 
