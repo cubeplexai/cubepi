@@ -237,7 +237,17 @@ class Agent(Generic[TMessage]):
         self._follow_up_queue.clear()
 
     async def prompt(self, message: str | Message | list[Message]) -> None:
+        # Fail-fast streaming guard MUST happen before the lock — otherwise a
+        # second concurrent prompt() blocks waiting for the lock instead of
+        # raising the expected RuntimeError (regression caught by
+        # test_raises_when_prompt_called_while_streaming).
+        if self._state.is_streaming:
+            raise RuntimeError(
+                "Agent is already processing a prompt. "
+                "Use steer() or follow_up() to queue messages."
+            )
         async with self._run_lock:
+            # Re-check under the lock in case streaming flipped during acquire.
             if self._state.is_streaming:
                 raise RuntimeError(
                     "Agent is already processing a prompt. "
@@ -266,6 +276,11 @@ class Agent(Generic[TMessage]):
             await self._run_prompt(messages)
 
     async def resume(self) -> None:
+        # Same fail-fast pattern as prompt(): check BEFORE the lock.
+        if self._state.is_streaming:
+            raise RuntimeError(
+                "Agent is already processing. Wait for completion before continuing."
+            )
         async with self._run_lock:
             if self._state.is_streaming:
                 raise RuntimeError(
