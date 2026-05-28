@@ -1,5 +1,6 @@
 ---
 title: 快速开始
+description: "在几分钟内构建你的第一个 CubePi agent。"
 ---
 
 # 快速开始

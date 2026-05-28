@@ -1,5 +1,6 @@
 ---
 title: Composition Rules
+description: "Learn how CubePi composes multiple middlewares with per-hook rules: chain, last-wins, first-block-stops, and more."
 ---
 
 # Composition Rules

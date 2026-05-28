@@ -1,5 +1,6 @@
 ---
 title: Content & Redaction
+description: "Configure prompt content recording and redaction in CubePi's OpenTelemetry tracing."
 sidebar_position: 4
 ---
 

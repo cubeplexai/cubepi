@@ -1,5 +1,6 @@
 ---
 title: OTLP & Backends
+description: "Export CubePi OpenTelemetry traces to OTLP-compatible backends like Jaeger, Tempo, or Honeycomb."
 sidebar_position: 3
 ---
 

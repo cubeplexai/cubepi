@@ -1,5 +1,6 @@
 ---
 title: Getting Started
+description: "Get started with OpenTelemetry tracing in CubePi — install, configure, and export spans."
 sidebar_position: 2
 ---
 

@@ -1,5 +1,6 @@
 ---
 title: Tool Use & Parallel Execution
+description: "Register tools, execute them in parallel or sequentially, and handle results with Pydantic validation in CubePi."
 ---
 
 # Tool Use & Parallel Execution

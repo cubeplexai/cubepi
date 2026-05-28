@@ -1,18 +1,16 @@
 ---
-title: Examples
-description: "Working middleware examples for CubePi: rate limiting, retries with backoff, structured logging, context truncation, and HITL."
+title: 示例
+description: "CubePi 中间件实用示例：速率限制、重试、结构化日志、上下文截断和 HITL。"
 ---
 
-# Middleware Examples
+# 中间件示例
 
-Working middleware for the four most common needs: rate limiting,
-retries, structured logging, and context truncation.
+针对四种最常见需求的实用中间件：速率限制、重试、结构化日志和上下文截断。
 
-## Rate limiting
+## 速率限制
 
-Block tool calls when a user exceeds quota. Combine
-`before_tool_call` with an external rate-limiter (a token bucket, a
-Redis INCR, …).
+当用户超过配额时阻止工具调用。将 `before_tool_call` 与外部速率限制器
+（令牌桶、Redis INCR……）结合。
 
 ```python
 import time
@@ -27,7 +25,7 @@ class RateLimitMiddleware(Middleware):
 
     async def before_tool_call(self, ctx, *, signal=None):
         now = time.monotonic()
-        # Drop entries older than 60 s.
+        # 丢弃超过 60 秒的记录。
         self._timestamps = [t for t in self._timestamps if now - t < 60]
         if len(self._timestamps) >= self.max:
             return BeforeToolCallResult(
@@ -38,19 +36,18 @@ class RateLimitMiddleware(Middleware):
         return None
 ```
 
-Use:
+使用：
 
 ```python
 agent = Agent(provider=…, model=…, middleware=[RateLimitMiddleware(max_calls_per_min=30)])
 ```
 
-When the limit hits, the model sees a tool result that says "Rate
-limit exceeded…" and usually waits or asks the user.
+当达到限制时，模型会看到一个工具结果说"Rate limit exceeded…"并通常会等待或询问用户。
 
-## Retries with backoff
+## 带退避的重试
 
-Retry failed tool calls inside `after_tool_call`. Up to N times, with
-exponential backoff, only for transient errors.
+在 `after_tool_call` 中重试失败的工具调用。最多 N 次，指数退避，
+仅针对临时错误。
 
 ```python
 import asyncio
@@ -67,7 +64,7 @@ class RetryMiddleware(Middleware):
         if not ctx.is_error:
             return None
 
-        # Find the tool by name and re-execute up to max_retries times.
+        # 按名称查找工具并重新执行，最多 max_retries 次。
         tool = next(
             (t for t in (ctx.context.tools or []) if t.name == ctx.tool_call.name),
             None,
@@ -92,18 +89,16 @@ class RetryMiddleware(Middleware):
             except Exception:
                 continue
 
-        return None  # give up — original error stays
+        return None  # 放弃——保留原始错误
 ```
 
-Combine with caution: retrying non-idempotent tools (writes, sends,
-deletes) can cause real damage. Mark such tools `execution_mode="sequential"`
-and skip them here based on `ctx.tool_call.name`.
+谨慎组合：重试非幂等工具（写入、发送、删除）可能造成实际损害。
+将这类工具标记为 `execution_mode="sequential"` 并基于 `ctx.tool_call.name` 跳过。
 
-## Structured logging
+## 结构化日志
 
-Log every tool call with its arguments, duration, and outcome.
-Pairs `before_tool_call` (to record start time) with `after_tool_call`
-(to record the result). Stash the start time in `ctx.context.extra`.
+记录每一次工具调用及其参数、时长和结果。将 `before_tool_call`（记录开始时间）
+与 `after_tool_call`（记录结果）配对。将开始时间存储在 `ctx.context.extra` 中。
 
 ```python
 import time, logging
@@ -132,17 +127,15 @@ class ToolLoggingMiddleware(Middleware):
         return None
 ```
 
-`ctx.context.extra` is the right place to stash per-run state because
-it's:
+`ctx.context.extra` 是存储每次运行状态的最佳位置，因为：
 
-- Visible to other middleware via the same `ctx.context`.
-- Persisted by checkpointers via `save_extra` at `agent_end`.
-- Reset when a new conversation starts (a new `thread_id`).
+- 其他中间件可通过同一个 `ctx.context` 看到。
+- Checkpointer 在 `agent_end` 时通过 `save_extra` 持久化。
+- 新对话开始时（新的 `thread_id`）会自动重置。
 
-## Sliding-window truncation
+## 滑动窗口截断
 
-Keep the model's context bounded by retaining only the most recent N
-messages, plus the system prompt:
+通过仅保留最近的 N 条消息（加上 system prompt）来保持模型上下文边界：
 
 ```python
 from cubepi import Middleware
@@ -158,11 +151,10 @@ class SlidingWindow(Middleware):
         return messages[-self.max_messages:]
 ```
 
-`transform_context` doesn't touch `agent.state.messages` — the user
-keeps seeing the full history. The model just sees the last N.
+`transform_context` 不接触 `agent.state.messages`——用户仍然看到完整历史。
+模型只看到最后 N 条。
 
-Pairs well with a `transform_system_prompt` that injects a summary of
-what was dropped:
+与注入被丢弃内容摘要的 `transform_system_prompt` 配合效果很好：
 
 ```python
 class SummaryInjector(Middleware):
@@ -171,9 +163,9 @@ class SummaryInjector(Middleware):
         return f"{system_prompt}\n\nContext: {summary}".strip()
 ```
 
-## Max turns / budget cap
+## 最大轮次 / 预算上限
 
-Hard-stop the agent after a maximum number of turns or a cost cap:
+在达到最大轮次数或成本上限时硬停止 agent：
 
 ```python
 class MaxTurns(Middleware):
@@ -189,7 +181,7 @@ class MaxTurns(Middleware):
 class BudgetCap(Middleware):
     def __init__(self, usd: float, model_cost) -> None:
         self.cap = usd
-        self.cost = model_cost   # cubepi.providers.ModelCost or similar
+        self.cost = model_cost   # cubepi.providers.ModelCost 或类似
         self.spent = 0.0
 
     async def should_stop_after_turn(self, ctx):
@@ -202,9 +194,9 @@ class BudgetCap(Middleware):
         return self.spent >= self.cap
 ```
 
-## Structured output with `after_model_response`
+## 用 `after_model_response` 实现结构化输出
 
-Validate JSON output and re-prompt if it doesn't parse:
+验证 JSON 输出，如果解析失败则重新提示：
 
 ```python
 import json
@@ -224,7 +216,7 @@ class JSONOutputValidator(Middleware):
         try:
             obj = json.loads(text)
             self.schema.model_validate(obj)
-            return None  # valid — proceed naturally
+            return None  # 有效——正常进行
         except Exception as e:
             return TurnAction(
                 inject_messages=[
@@ -234,14 +226,13 @@ class JSONOutputValidator(Middleware):
             )
 ```
 
-The agent will skip tool execution and immediately re-prompt the
-model with the feedback message in context.
+Agent 将跳过工具执行，并立即用上下文中的反馈消息重新提示模型。
 
-## Human-in-the-loop tool confirmation
+## 人机协同工具确认
 
-cubepi ships two built-in HITL middlewares in `cubepi.hitl`:
+cubepi 在 `cubepi.hitl` 中内置了两个 HITL 中间件：
 
-**`ConfirmToolCallMiddleware`** — "always ask the human for this tool":
+**`ConfirmToolCallMiddleware`** —— "对此工具始终询问人类"：
 
 ```python
 from cubepi.hitl import ConfirmToolCallMiddleware, InMemoryChannel
@@ -258,13 +249,11 @@ agent = Agent(
 )
 ```
 
-The agent pauses on every `bash` or `write_file` call and waits for the
-host to `channel.answer(qid, ApproveAnswer(decision="approve"))`. The
-result drives the tool: `approve` runs it, `deny` blocks with a reason,
-`edit` re-validates and runs the edited args.
+Agent 在每次 `bash` 或 `write_file` 调用时暂停，等待宿主调用
+`channel.answer(qid, ApproveAnswer(decision="approve"))`。结果驱动工具：
+`approve` 执行，`deny` 带原因阻止，`edit` 重新校验并运行编辑后的参数。
 
-**`ApprovalPolicyMiddleware`** — for hosts that classify tool calls via
-a policy engine:
+**`ApprovalPolicyMiddleware`** —— 适用于通过策略引擎对工具调用进行分类的宿主：
 
 ```python
 from cubepi.hitl import Approve, ApprovalPolicyMiddleware, AskUser, Deny
@@ -282,16 +271,14 @@ agent = Agent(
 )
 ```
 
-`Deny` skips the channel entirely (hard block). `AskUser` triggers the
-channel's approve flow. `Approve` returns immediately.
+`Deny` 完全跳过 channel（硬阻止）。`AskUser` 触发 channel 的 approve 流程。
+`Approve` 立即返回。
 
-Full details — timeout semantics, edit semantics, events, trace spans,
-cross-process suspend/resume — are in the [HITL guide](../hitl).
+完整细节——超时语义、编辑语义、事件、追踪 span、跨进程挂起/恢复——
+请参见 [HITL 指南](../hitl)。
 
-## See also
+## 另请参阅
 
-- [The 7 Hooks](./hooks) — exact semantics of each hook.
-- [Composition Rules](./composition) — how multiple middlewares
-  combine.
-- [Recipes](../../recipes/weather-agent) — middleware composed into
-  real-world apps.
+- [7 个 Hook](./hooks) —— 每个 hook 的精确语义。
+- [组合规则](./composition) —— 多个中间件如何组合。
+- [配方](../../recipes/weather-agent) —— 中间件在真实应用中的组合。

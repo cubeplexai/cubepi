@@ -1,5 +1,6 @@
 ---
 title: Writing a Custom Provider
+description: "Write a custom provider for CubePi by implementing the Provider protocol."
 ---
 
 # Writing a Custom Provider

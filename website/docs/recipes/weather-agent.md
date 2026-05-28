@@ -1,5 +1,6 @@
 ---
 title: Weather Agent
+description: "Build a weather agent that fetches live API data with CubePi tools."
 ---
 
 # Recipe: Weather Agent

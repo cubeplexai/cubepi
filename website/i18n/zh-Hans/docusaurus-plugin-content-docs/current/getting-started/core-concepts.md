@@ -1,5 +1,6 @@
 ---
 title: 核心概念
+description: "了解 CubePi 的六个核心概念：Agent、Tool、Provider、Stream & Events、Middleware 和 Checkpointer。"
 ---
 
 # 核心概念

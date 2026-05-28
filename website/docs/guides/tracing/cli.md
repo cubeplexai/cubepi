@@ -1,5 +1,6 @@
 ---
 title: The trace CLI
+description: "Use the CubePi trace CLI to inspect, filter, and display OpenTelemetry trace spans."
 ---
 
 # Inspecting traces with `cubepi trace`

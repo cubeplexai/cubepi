@@ -1,5 +1,6 @@
 ---
 title: SQLite Checkpointing
+description: "Use SQLiteCheckpointer for lightweight single-process agent state persistence in CubePi."
 ---
 
 # SQLite Checkpointing

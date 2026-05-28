@@ -1,5 +1,6 @@
 ---
 title: Core Concepts
+description: "Learn the six core concepts of CubePi: Agent, Tool, Provider, Stream & Events, Middleware, and Checkpointer."
 ---
 
 # Core Concepts

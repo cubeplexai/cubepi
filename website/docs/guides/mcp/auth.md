@@ -1,5 +1,6 @@
 ---
 title: MCP Server Authentication
+description: "Configure authentication — API keys, OAuth, and custom headers — for MCP servers in CubePi."
 ---
 
 # MCP Server Authentication

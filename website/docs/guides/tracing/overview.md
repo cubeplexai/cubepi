@@ -1,5 +1,6 @@
 ---
 title: Tracing Overview
+description: "Overview of CubePi's OpenTelemetry-native tracing system — spans, attributes, exporters, and semantic conventions."
 sidebar_position: 1
 ---
 

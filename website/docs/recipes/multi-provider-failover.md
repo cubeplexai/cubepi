@@ -1,5 +1,6 @@
 ---
 title: Multi-Provider Failover
+description: "Configure multi-provider failover in CubePi for resilience — automatic fallback between providers."
 ---
 
 # Recipe: Multi-Provider Failover

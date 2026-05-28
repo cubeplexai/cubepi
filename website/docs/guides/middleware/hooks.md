@@ -1,5 +1,6 @@
 ---
 title: The 7 Hooks
+description: "Reference for the 7 middleware hooks in CubePi — transform_context, convert_to_llm, before_tool_call, after_tool_call, and more."
 ---
 
 # The 7 Hooks

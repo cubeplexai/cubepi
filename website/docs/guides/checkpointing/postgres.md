@@ -1,5 +1,6 @@
 ---
 title: Postgres Checkpointing
+description: "Use PostgresCheckpointer for production-grade agent state persistence with asyncpg and advisory locks."
 ---
 
 # Postgres Checkpointing

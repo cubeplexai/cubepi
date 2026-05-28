@@ -1,5 +1,6 @@
 ---
 title: Human-in-the-Loop (HITL)
+description: "Add human-in-the-loop pauses to your CubePi agent with confirm, approve, and structured ask verbs."
 sidebar_position: 10
 ---
 

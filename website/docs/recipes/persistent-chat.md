@@ -1,5 +1,6 @@
 ---
 title: Persistent Chat
+description: "Build a persistent chat application with CubePi and SQLiteCheckpointer."
 ---
 
 # Recipe: Persistent Chat (SQLite)

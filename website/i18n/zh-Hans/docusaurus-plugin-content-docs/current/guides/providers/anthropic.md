@@ -1,5 +1,6 @@
 ---
 title: Anthropic
+description: "通过 AnthropicProvider 在 CubePi 中使用 Claude 模型——支持思考、缓存和工具调用。"
 ---
 
 # Anthropic Provider

@@ -1,5 +1,6 @@
 ---
 title: Postgres + FastAPI Service
+description: "Deploy a FastAPI-backed CubePi agent with PostgresCheckpointer for production."
 ---
 
 # Recipe: Postgres + FastAPI Service

@@ -40,11 +40,18 @@ const classicOptions: ClassicOptions = {
   theme: {
     customCss: './src/css/custom.css',
   },
+  sitemap: {
+    ignorePatterns: [
+      '/docs/next/**',
+      '/docs/0.3/**',
+      '/docs/0.4/**',
+    ],
+  },
 };
 
 const config: Config = {
   title: 'CubePi',
-  tagline: 'A Pythonic, async-native agent framework',
+  tagline: 'A Pythonic, async-native agent framework — an alternative to langgraph and pi-agent-core',
   favicon: 'img/brand/cubepi-logo.svg',
 
   url: 'https://cubepi.pages.dev',
@@ -65,6 +72,23 @@ const config: Config = {
     },
   },
 
+  headTags: [
+    {
+      tagName: 'script',
+      attributes: { type: 'application/ld+json' },
+      innerHTML: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        name: 'CubePi',
+        description: 'A Pythonic, async-native alternative to langgraph and pi-agent-core. Plain async functions, append-only checkpointing, minimal dependencies.',
+        url: 'https://cubepi.pages.dev',
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'Linux, macOS, Windows',
+        programmingLanguage: 'Python',
+      }),
+    },
+  ],
+
   customFields: { POSTHOG_KEY, POSTHOG_HOST, GIT_SHA, PACKAGE_VERSION },
 
   clientModules: [require.resolve('./src/clientModules/posthog.ts')],
@@ -76,12 +100,17 @@ const config: Config = {
       '@docusaurus/plugin-google-gtag',
       {
         trackingID: 'G-NE2PDN0M91',
-        anonymizeIP: false,
+        anonymizeIP: true,
       },
     ],
   ],
 
   themeConfig: {
+    metadata: [
+      { name: 'keywords', content: 'CubePi, langgraph alternative, pi-agent-core alternative, Python agent framework, async agent, LLM agent, AI agent framework, tool-use agent' },
+      { name: 'twitter:site', content: '@cubeplexai' },
+      { name: 'twitter:creator', content: '@cubeplexai' },
+    ],
     image: 'img/brand/cubepi-social-preview.png',
     navbar: {
       title: 'CubePi',

@@ -1,5 +1,6 @@
 ---
 title: Resumable Long Tasks
+description: "Build crash-resilient long-running tasks with CubePi checkpointing and recovery."
 ---
 
 # Recipe: Resumable Long Tasks

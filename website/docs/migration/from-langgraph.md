@@ -1,5 +1,6 @@
 ---
 title: From langgraph
+description: "Migrate your agents from LangGraph to CubePi."
 ---
 
 # Migrating from langgraph

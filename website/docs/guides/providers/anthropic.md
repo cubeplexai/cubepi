@@ -1,5 +1,6 @@
 ---
 title: Anthropic
+description: "Use Anthropic Claude models with CubePi's AnthropicProvider — supports thinking, caching, and tool use."
 ---
 
 # Anthropic Provider

@@ -1,5 +1,6 @@
 ---
 title: Quick Start
+description: "Build your first CubePi agent in minutes with this step-by-step quick-start guide."
 ---
 
 # Quick Start

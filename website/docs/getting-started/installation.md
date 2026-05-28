@@ -1,5 +1,6 @@
 ---
 title: Installation
+description: "Install CubePi via pip. Python 3.11+ required. Supports Linux, macOS, and Windows."
 ---
 
 # Installation

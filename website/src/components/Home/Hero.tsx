@@ -19,12 +19,12 @@ export default function Hero() {
       <img
         className={styles.banner}
         src={social}
-        alt="CubePi · A Pythonic, async-native agent framework"
+        alt="CubePi · A Pythonic alternative to langgraph and pi-agent-core"
         width={1280}
         height={640}
       />
       <div className={styles.eyebrow}>cubepi · v{version} · alpha</div>
-      <h1 className={styles.h1}>A Pythonic, async-native agent framework.</h1>
+      <h1 className={styles.h1}>A Pythonic alternative to langgraph and pi-agent-core.</h1>
       <p className={styles.lead}>
         Plain async functions instead of graph nodes. 3 deps. Append-only checkpointing.
       </p>

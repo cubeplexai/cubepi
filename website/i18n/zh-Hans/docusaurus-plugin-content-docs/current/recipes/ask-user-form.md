@@ -1,14 +1,14 @@
 ---
-title: Multi-question Form via ask_user
-description: "Build a multi-question form with CubePi's ask_user HITL tool for structured user input."
+title: 通过 ask_user 实现多问题表单
+description: "使用 CubePi 的 ask_user HITL 工具构建多问题表单以收集结构化用户输入。"
 ---
 
-# Recipe: Multi-question Form via `ask_user`
+# 配方：通过 `ask_user` 实现多问题表单
 
-Use case: the agent needs a structured answer from the user before it can
-proceed — a configuration wizard, a preference selector, a feature toggle.
+适用场景：agent 在继续之前需要用户的**结构化答案** —— 配置向导、
+偏好选择器、功能开关。
 
-## Step 1: Register the tool
+## 步骤 1：注册工具
 
 ```python
 from cubepi.agent.agent import Agent
@@ -20,23 +20,23 @@ agent = Agent(
     provider=...,
     model=...,
     system_prompt=(
-        "When you need the user to choose among options, use the ask_user tool. "
-        "For free-form clarification questions, just end your turn with text — "
-        "the user's next message will be your answer."
+        "当您需要用户在选项中选择时，请使用 ask_user 工具。"
+        "对于自由形式的澄清问题，直接用文本结束当前轮次——"
+        "用户的下一条消息就是答案。"
     ),
     tools=[ask_user_tool(channel)],
     channel=channel,
 )
 ```
 
-The `ask_user` tool is registered like any other tool. Its
-`execution_mode="sequential"` makes the tool batch run one-by-one —
-the HITL pause can't overlap with parallel tool execution.
+`ask_user` 工具像其他工具一样注册。它的
+`execution_mode="sequential"` 使工具批次逐一执行——
+HITL 暂停不能与并行工具执行重叠。
 
-## Step 2: Host renders the form
+## 步骤 2：宿主渲染表单
 
-The model invokes `ask_user` with a list of question objects. The host
-receives an `AskRequest` payload on the channel:
+模型调用 `ask_user` 并传入一个问题对象列表。宿主在 channel 上收到
+一个 `AskRequest` payload：
 
 ```python
 async def host():
@@ -45,7 +45,7 @@ async def host():
             answers = {}
             for q in req.payload.questions:
                 if q.options is None:
-                    # Free-text question
+                    # 自由文本问题
                     answers[q.key] = await my_ui.text_input(q.prompt)
                 elif q.multi_select:
                     answers[q.key] = await my_ui.checkbox_group(
@@ -62,77 +62,75 @@ async def host():
             await channel.answer(req.question_id, answers)
 ```
 
-## What the model sees as tool parameters
+## 模型看到的工具参数
 
-The model can pass questions that mix free-text, single-select, and
-multi-select fields in a single call:
+模型可以传入混合了自由文本、单选和多选字段的问题：
 
 ```json
 {
   "questions": [
     {
       "key": "project_type",
-      "prompt": "What kind of project?",
+      "prompt": "什么类型的项目？",
       "options": [
-        {"label": "Web app", "value": "web"},
-        {"label": "CLI tool", "value": "cli"},
-        {"label": "Library", "value": "lib"}
+        {"label": "Web 应用", "value": "web"},
+        {"label": "CLI 工具", "value": "cli"},
+        {"label": "库", "value": "lib"}
       ]
     },
     {
       "key": "framework",
-      "prompt": "Which framework?",
+      "prompt": "哪个框架？",
       "options": [
         {"label": "React", "value": "react"},
         {"label": "Vue", "value": "vue"},
-        {"label": "Other", "value": "other", "allow_input": true}
+        {"label": "其他", "value": "other", "allow_input": true}
       ]
     },
     {
       "key": "features",
-      "prompt": "Which features do you need?",
+      "prompt": "你需要哪些功能？",
       "multi_select": true,
       "options": [
-        {"label": "Authentication", "value": "auth"},
-        {"label": "Payments", "value": "payments"},
-        {"label": "File uploads", "value": "uploads"}
+        {"label": "认证", "value": "auth"},
+        {"label": "支付", "value": "payments"},
+        {"label": "文件上传", "value": "uploads"}
       ]
     },
     {
       "key": "project_name",
-      "prompt": "What should we call this project?"
+      "prompt": "这个项目叫什么名字？"
     }
   ]
 }
 ```
 
-## Answer shape
+## 答案结构
 
-The host answers with a dict mapping `key → value`:
+宿主用一个 `key → value` 的 dict 回答：
 
 ```python
-# Example answer for the above form:
+# 上述表单的答案示例：
 {
     "project_type": "web",
-    "framework": "svelte",       # user chose "Other" and typed "svelte"
+    "framework": "svelte",       # 用户选择了"其他"并输入了"svelte"
     "features": ["auth", "uploads"],
     "project_name": "my-saas"
 }
 ```
 
-The answer is stuffed into the tool result as
-`details["hitl"]["answers"]`. The model receives a human-readable summary
-in the text content and can reference the dict for structured consumption.
+答案被填入工具结果的 `details["hitl"]["answers"]`。
+模型可以通过文本内容看到人类可读的摘要，也可以通过 dict 进行结构化消费。
 
-## Cancel and timeout
+## 取消与超时
 
-If the host cancels via `channel.cancel(qid, reason)`:
+如果宿主通过 `channel.cancel(qid, reason)` 取消：
 
 ```python
 await channel.cancel(req.question_id, reason="user closed the form")
 ```
 
-The tool surfaces an error result to the model:
+工具会向模型显示一个错误结果：
 
 ```
 tool_result.is_error = True
@@ -140,17 +138,17 @@ tool_result.details["hitl"]["outcome"] = "cancelled"
 tool_result.details["hitl"]["reason"] = "user closed the form"
 ```
 
-If the timeout expires:
+如果超时到期：
 
 ```
 tool_result.details["hitl"]["outcome"] = "timed_out"
 tool_result.details["hitl"]["seconds"] = 30.0
 ```
 
-In both cases the model sees a clean error result and can react
-accordingly — ask again, fall back to a default, or report to the user.
+两种情况下模型都会看到干净的错误结果，并能做出相应反应——
+再次提问、回退到默认值或向用户报告。
 
-## In-process example (full runnable snippet)
+## 进程内示例（完整可运行代码段）
 
 ```python
 import asyncio

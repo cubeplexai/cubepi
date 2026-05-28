@@ -9,8 +9,8 @@ import MetaBar from '@site/src/components/Home/MetaBar';
 
 export default function Home(): JSX.Element {
   return (
-    <Layout title="CubePi — Pythonic async-native agent framework"
-            description="CubePi is a Pythonic, async-native agent framework. Plain async functions, append-only checkpointing, 3 core dependencies.">
+    <Layout title="CubePi — a Pythonic langgraph and pi-agent-core alternative"
+            description="CubePi is a Pythonic, async-native alternative to langgraph and pi-agent-core. Plain async functions, append-only checkpointing, 3 core dependencies.">
       <Hero />
       <WhyTable />
       <HelloAgent />

@@ -1,5 +1,6 @@
 ---
 title: Streaming Events
+description: "Stream events and tokens from CubePi agents in real time using subscribers and MessageStream."
 ---
 
 # Streaming Events

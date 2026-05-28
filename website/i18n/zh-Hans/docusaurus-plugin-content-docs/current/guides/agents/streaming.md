@@ -1,5 +1,6 @@
 ---
 title: 流式输出
+description: "通过 subscriber 和 MessageStream 实时流式接收 CubePi agent 的事件和 token。"
 ---
 
 # 流式事件

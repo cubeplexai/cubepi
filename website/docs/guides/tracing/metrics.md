@@ -1,5 +1,6 @@
 ---
 title: Metrics
+description: "Collect token usage, latency, and time-to-first-content metrics in CubePi tracing."
 sidebar_position: 5
 ---
 

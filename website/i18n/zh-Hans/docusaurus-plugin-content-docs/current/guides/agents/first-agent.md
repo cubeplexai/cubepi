@@ -1,5 +1,6 @@
 ---
 title: 第一个 Agent
+description: "从零开始创建并运行你的第一个 CubePi agent。"
 ---
 
 # 构建你的第一个 Agent

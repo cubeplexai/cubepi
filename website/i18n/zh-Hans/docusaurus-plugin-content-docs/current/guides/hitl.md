@@ -1,5 +1,6 @@
 ---
 title: 人机协同 (HITL)
+description: "通过 confirm、approve 和 ask 三种动词为 CubePi agent 添加人机协同暂停能力。"
 sidebar_position: 10
 ---
 

@@ -1,5 +1,6 @@
 ---
 title: Capability Descriptors
+description: "Provider capabilities and model presets in CubePi — compare features across providers."
 ---
 
 # Capability Descriptors

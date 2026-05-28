@@ -1,5 +1,6 @@
 ---
 title: OpenAI
+description: "Use OpenAI GPT models with CubePi's OpenAIProvider — Chat Completions API integration."
 ---
 
 # OpenAI Provider

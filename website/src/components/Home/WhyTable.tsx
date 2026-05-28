@@ -15,7 +15,7 @@ const ROWS: { label: string; langgraph: string; cubepi: string }[] = [
 export default function WhyTable() {
   return (
     <section className={styles.section}>
-      <h2 className={styles.h2}>Why CubePi</h2>
+      <h2 className={styles.h2}>Why CubePi — a langgraph and pi-agent-core alternative</h2>
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>

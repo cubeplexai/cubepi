@@ -1,5 +1,6 @@
 ---
 title: Building Your First Agent
+description: "Create and run your first CubePi agent — choose a provider, define a system prompt, and send a message."
 ---
 
 # Building Your First Agent

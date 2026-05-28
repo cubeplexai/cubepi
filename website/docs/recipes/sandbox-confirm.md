@@ -1,5 +1,6 @@
 ---
 title: Sandbox Confirm with ApprovalPolicyMiddleware
+description: "Implement sandbox tool confirmation with CubePi's ApprovalPolicyMiddleware — auto-allow, deny, or human-confirm."
 ---
 
 # Recipe: Sandbox Confirm with `ApprovalPolicyMiddleware`

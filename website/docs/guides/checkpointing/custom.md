@@ -1,5 +1,6 @@
 ---
 title: Custom Backends
+description: "Implement a custom checkpointer backend for CubePi using the Checkpointer protocol."
 ---
 
 # Custom Checkpointing Backends

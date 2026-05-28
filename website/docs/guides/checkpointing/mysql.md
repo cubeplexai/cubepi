@@ -1,5 +1,6 @@
 ---
 title: MySQL Checkpointing
+description: "Use MySQLCheckpointer for persistent agent state in CubePi with the MySQL backend."
 ---
 
 # MySQL Checkpointing

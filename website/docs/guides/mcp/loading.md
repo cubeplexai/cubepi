@@ -1,5 +1,6 @@
 ---
 title: Loading MCP Tools
+description: "Load tools from MCP servers into your CubePi agent, including SSE-based remote servers."
 ---
 
 # Loading MCP Tools
