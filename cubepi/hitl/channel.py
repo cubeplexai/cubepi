@@ -308,7 +308,12 @@ class _BaseChannel:
         timeout: float | None = None,
         signal: asyncio.Event | None = None,
     ) -> bool:
-        qid = uuid.uuid4().hex
+        # During resume the _resume_slot carries the original question_id;
+        # reuse it so _await_answer's short-circuit matches. The single-pending
+        # invariant guarantees this is the right slot (see ask() for details).
+        qid = (
+            self._resume_slot[0] if self._resume_slot is not None else uuid.uuid4().hex
+        )
         return await self._await_answer(
             ConfirmRequest(prompt=prompt, details=details),
             timeout=timeout,
@@ -345,7 +350,17 @@ class _BaseChannel:
         timeout: float | None = None,
         signal: asyncio.Event | None = None,
     ) -> dict[str, str | list[str]]:
-        qid = uuid.uuid4().hex
+        # Resume short-circuit: when the agent detaches while ask() is pending
+        # and a host later calls Agent.respond(), attach_resume_answer() stores
+        # the original question_id in _resume_slot. On resume the tool body
+        # calls ask() again — if we generate a new random UUID here, the
+        # _await_answer resume match (line 148) will fail and the agent hangs.
+        # Instead, reuse the resume slot's question_id when one exists. The
+        # single-pending invariant guarantees that any unpopped resume slot
+        # belongs to this specific resumption.
+        qid = (
+            self._resume_slot[0] if self._resume_slot is not None else uuid.uuid4().hex
+        )
         return await self._await_answer(
             AskRequest(questions=questions),
             timeout=timeout,
