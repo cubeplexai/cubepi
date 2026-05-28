@@ -425,21 +425,31 @@ async def abort_pending(self, reason: str = "aborted by host") -> None:
     """Cancel any pending HITL request on this thread, fake-deny the gated tool call,
     and CLOSE the conversation (no further model call).
 
-    - If a request is in-flight in the same process: channel.cancel(qid, reason)
-      causes the awaiting tool / middleware to surface a deny tool_result via the
-      normal path. The loop then sees the conversation has an aborted tool_result
-      and exits via a synthesized terminal AssistantMessage(stop_reason="aborted").
-    - If suspended cross-process (in-flight slot empty, checkpointer pending set):
-      load checkpoint + pending; synthesize a ToolResultMessage with
-      is_error=True, content=f"aborted: {reason}", details.hitl={"decision":"aborted","reason":...}
-      and append it for the gated tool_call_id; then append a terminal
-      AssistantMessage with empty content and stop_reason="aborted";
-      clear pending_request; emit AgentSuspendedEvent or a new AgentAbortedEvent.
+    Two-phase implementation (Agent.abort_pending in the plan):
 
-    No new model call is made during abort. The conversation history ends with
+    - Phase 1 (no _run_lock — would deadlock against prompt()):
+      If channel.pending is in-flight, set self._active_signal. The channel's
+      race-against-signal logic raises HitlAborted; the awaiting tool /
+      middleware lets it propagate; _run_loop catches HitlAborted silently
+      (no event from loop); the channel's _on_pending_cleared clears
+      persisted pending (HitlAborted ≠ HitlDetached); prompt() releases
+      _run_lock.
+
+    - Phase 2 (acquires _run_lock — waits for prompt() if Phase 1 fired):
+      Reload messages from checkpoint; for each unresolved tool_call in the
+      tail AssistantMessage, append a synthetic ToolResultMessage with
+      is_error=True, content=f"aborted: {reason}",
+      details.hitl={"decision":"aborted","reason":...}; then append a terminal
+      AssistantMessage(stop_reason="aborted"); defensively clear
+      save_pending_request; emit AgentAbortedEvent.
+
+    AgentAbortedEvent is emitted by Agent.abort_pending (the Agent layer),
+    NOT by the loop. The loop only catches HitlAborted silently.
+
+    No model call is made during abort. The conversation history ends with
     a stop_reason="aborted" assistant turn, which any subsequent prompt() can
-    follow naturally (the new user message simply appends after the aborted
-    assistant turn — providers tolerate this).
+    follow naturally (the new user message appends after the aborted turn —
+    providers tolerate this).
     """
 ```
 
