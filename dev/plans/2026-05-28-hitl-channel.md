@@ -847,11 +847,14 @@ class _BaseChannel:
         self._pending = req
         self._future = asyncio.get_event_loop().create_future()
 
-        await self._on_pending_set(req)
-
         exc_caught: BaseException | None = None
         signal_task: asyncio.Future[Any] | None = None
+        # CRITICAL: _on_pending_set is called INSIDE the try/finally so that
+        # if it raises (e.g. CheckpointedChannel's HitlDurabilityNotGuaranteed
+        # guard), the finally still clears _pending/_future. Otherwise the
+        # channel would be permanently wedged.
         try:
+            await self._on_pending_set(req)
             if signal is None and effective_timeout is None:
                 return await self._future
             tasks: list[asyncio.Future[Any]] = [self._future]
@@ -2698,28 +2701,35 @@ Add to `cubepi/checkpointer/mysql/checkpointer.py`, mirroring the Postgres metho
 
 ```python
     async def save_pending_request(self, thread_id, request):
+        # Matches the explicit-begin/commit/rollback pattern used by
+        # save_extra and append (see cubepi/checkpointer/mysql/checkpointer.py:244).
         assert self._pool is not None
         async with self._pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
-                    "ON DUPLICATE KEY UPDATE thread_id = thread_id",
-                    (thread_id,),
-                )
-                if request is None:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cur:
                     await cur.execute(
-                        "UPDATE cubepi_threads SET pending_request = NULL, "
-                        "updated_at = NOW() WHERE thread_id = %s",
+                        "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
+                        "ON DUPLICATE KEY UPDATE thread_id = thread_id",
                         (thread_id,),
                     )
-                else:
-                    payload = request.model_dump_json()
-                    await cur.execute(
-                        "UPDATE cubepi_threads SET pending_request = %s, "
-                        "updated_at = NOW() WHERE thread_id = %s",
-                        (payload, thread_id),
-                    )
-            await conn.commit()
+                    if request is None:
+                        await cur.execute(
+                            "UPDATE cubepi_threads SET pending_request = NULL, "
+                            "updated_at = CURRENT_TIMESTAMP WHERE thread_id = %s",
+                            (thread_id,),
+                        )
+                    else:
+                        payload = request.model_dump_json()
+                        await cur.execute(
+                            "UPDATE cubepi_threads SET pending_request = %s, "
+                            "updated_at = CURRENT_TIMESTAMP WHERE thread_id = %s",
+                            (payload, thread_id),
+                        )
+                await conn.commit()
+            except BaseException:  # pragma: no cover - defensive txn rollback
+                await conn.rollback()
+                raise
 
     async def load_pending_request(self, thread_id):
         from cubepi.hitl.types import HitlRequest
@@ -3091,6 +3101,17 @@ class CheckpointedChannel(_BaseChannel):
     def __init__(self, *, checkpointer, thread_id: str,
                  default_timeout: float | None = None,
                  allow_inside_custom_tool: bool = False) -> None:
+        # Validate the checkpointer has the HITL methods early — better to
+        # fail at construction than at first ask/approve/confirm (codex pass 3).
+        if not (hasattr(checkpointer, "save_pending_request") and
+                hasattr(checkpointer, "load_pending_request")):
+            from cubepi.hitl.exceptions import HitlError
+            raise HitlError(
+                "CheckpointedChannel requires a checkpointer with "
+                "save_pending_request and load_pending_request methods. "
+                "First-party checkpointers (Memory/SQLite/Postgres/MySQL) "
+                "implement these; third-party Protocol-only impls may not."
+            )
         super().__init__(default_timeout=default_timeout, thread_id=thread_id)
         self._checkpointer = checkpointer
         self._allow_inside_custom_tool = allow_inside_custom_tool
@@ -3103,6 +3124,7 @@ class CheckpointedChannel(_BaseChannel):
                 "Use ApprovalPolicyMiddleware or ask_user_tool, or pass "
                 "allow_inside_custom_tool=True to opt in."
             )
+        # Direct call OK: __init__ validated this method exists.
         await self._checkpointer.save_pending_request(self._thread_id, req)
         await super()._on_pending_set(req)
 
@@ -3110,6 +3132,7 @@ class CheckpointedChannel(_BaseChannel):
         from cubepi.hitl.exceptions import HitlDetached
         if isinstance(exc, HitlDetached):
             return
+        # Direct call OK: __init__ validated this method exists.
         await self._checkpointer.save_pending_request(self._thread_id, None)
 ```
 
@@ -3198,7 +3221,10 @@ Edit `cubepi/agent/agent.py`. Add inside the class:
     async def load_pending_hitl_request(self):
         if self.checkpointer is None or self.thread_id is None:
             return None
-        return await self.checkpointer.load_pending_request(self.thread_id)
+        load_pending = getattr(self.checkpointer, "load_pending_request", None)
+        if load_pending is None:
+            return None  # checkpointer doesn't support HITL — graceful None
+        return await load_pending(self.thread_id)
 
     async def respond(self, *, question_id=None, answer):
         from cubepi.hitl.exceptions import (
@@ -3209,6 +3235,13 @@ Edit `cubepi/agent/agent.py`. Add inside the class:
         if not (self.thread_id and self.checkpointer):
             raise RuntimeError("respond() requires thread_id + checkpointer")
 
+        load_pending = getattr(self.checkpointer, "load_pending_request", None)
+        if load_pending is None:
+            raise HitlError(
+                "respond() requires a checkpointer that implements "
+                "load_pending_request (and save_pending_request)"
+            )
+
         async with self._run_lock:
             if not self._state._messages:
                 data = await self.checkpointer.load(self.thread_id)
@@ -3216,7 +3249,7 @@ Edit `cubepi/agent/agent.py`. Add inside the class:
                     self._state._messages = list(data.messages or [])
                     self._extra = dict(data.extra or {})
 
-            pending = await self.checkpointer.load_pending_request(self.thread_id)
+            pending = await load_pending(self.thread_id)
             if pending is None:
                 raise HitlNoPendingRequest("no pending request on this thread")
             if question_id is None:
@@ -3230,56 +3263,97 @@ Edit `cubepi/agent/agent.py`. Add inside the class:
             await self._run_hitl_resume()
 
     async def abort_pending(self, reason: str = "aborted by host") -> None:
+        """Abort a pending HITL request.
+
+        Two cases, handled WITHOUT a single lock acquisition (codex pass 3:
+        holding _run_lock here would deadlock against prompt() which holds it
+        for the entire HITL await):
+
+        Case A (in-flight, same process):
+          - prompt() is currently holding _run_lock and is suspended in
+            channel.{ask,confirm,approve}.
+          - We MUST NOT acquire _run_lock — call channel.cancel() without it.
+            The cancel surfaces HitlCancelled in the awaiter (which ask_user
+            translates to is_error=True tool_result, or ApprovalPolicyMiddleware
+            translates to a deny block). prompt() proceeds to its natural end
+            via the loop's normal post-tool-call flow, releasing _run_lock.
+          - No synthetic-deny writing needed; the conversation closes the same
+            way any cancelled HITL closes (the model sees a tool error and the
+            loop produces the next assistant turn that handles it, or
+            should_stop_after_turn ends the run).
+
+        Case B (cross-process, no in-flight await on this channel instance):
+          - We are a fresh agent instance loaded from the checkpointer.
+            channel.pending is None but checkpointer has a pending_request.
+          - SAFE to acquire _run_lock (no in-flight prompt to deadlock with).
+          - Synthesize a deny tool_result + terminal stop_reason="aborted"
+            assistant, persist, clear pending, emit AgentAbortedEvent.
+        """
         from cubepi.agent.types import AgentAbortedEvent
-        from cubepi.providers.base import AssistantMessage, ToolResultMessage, TextContent
+        from cubepi.providers.base import (
+            AssistantMessage, TextContent, ToolCall, ToolResultMessage,
+        )
         if self._channel is None:
             raise HitlError("agent has no channel bound")
         if not (self.thread_id and self.checkpointer):
             raise RuntimeError("abort_pending() requires thread_id + checkpointer")
 
-        async with self._run_lock:
-            # 1. If something is pending in-flight (same process), cancel it.
-            if self._channel.pending is not None:
-                await self._channel.cancel(self._channel.pending.question_id, reason=reason)
+        # === Case A: same-process in-flight ===
+        # Take the channel's _pending atomically; if it's set, cancel and return.
+        # Do NOT take _run_lock — that would deadlock against prompt().
+        in_flight = self._channel.pending
+        if in_flight is not None:
+            await self._channel.cancel(in_flight.question_id, reason=reason)
+            return
 
-            # 2. Load pending from checkpointer (the in-flight cancel may have
-            #    already cleared it via _on_pending_cleared); if still set, build
-            #    the synthetic deny and clear.
-            pending = await self.checkpointer.load_pending_request(self.thread_id)
+        # === Case B: cross-process post-detach ===
+        async with self._run_lock:
+            load_pending = getattr(self.checkpointer, "load_pending_request", None)
+            save_pending = getattr(self.checkpointer, "save_pending_request", None)
+            if load_pending is None or save_pending is None:
+                raise HitlError(
+                    "abort_pending() requires a checkpointer that implements "
+                    "load_pending_request and save_pending_request"
+                )
+            pending = await load_pending(self.thread_id)
             if pending is None:
                 return  # nothing to abort
 
-            # Find the gated tool_call_id in the last assistant message.
+            # Ensure messages are loaded from checkpoint.
             if not self._state._messages:
                 data = await self.checkpointer.load(self.thread_id)
                 self._state._messages = list(data.messages or []) if data else []
-            from cubepi.providers.base import AssistantMessage
-            last = self._state._messages[-1]
-            if isinstance(last, AssistantMessage):
-                from cubepi.providers.base import ToolCall
-                for content in last.content:
-                    if isinstance(content, ToolCall):
-                        synthetic = ToolResultMessage(
-                            tool_call_id=content.id,
-                            tool_name=content.name,
-                            content=[TextContent(text=f"aborted: {reason}")],
-                            details={"hitl": {"decision": "aborted", "reason": reason}},
-                            is_error=True,
-                            timestamp=time.time(),
-                        )
-                        self._state._messages.append(synthetic)
-                        if self.checkpointer:
-                            await self.checkpointer.append(self.thread_id, [synthetic])
-                # Append a terminal aborted assistant
-                term = AssistantMessage(
-                    content=[TextContent(text=f"Conversation aborted: {reason}")],
-                    stop_reason="aborted",
-                )
-                self._state._messages.append(term)
-                if self.checkpointer:
-                    await self.checkpointer.append(self.thread_id, [term])
 
-            await self.checkpointer.save_pending_request(self.thread_id, None)
+            if not self._state._messages or not isinstance(
+                self._state._messages[-1], AssistantMessage
+            ):
+                raise HitlInconsistentState(
+                    "abort_pending: thread has pending_request but last message "
+                    "is not AssistantMessage"
+                )
+
+            last = self._state._messages[-1]
+            for content in last.content:
+                if isinstance(content, ToolCall):
+                    synthetic = ToolResultMessage(
+                        tool_call_id=content.id,
+                        tool_name=content.name,
+                        content=[TextContent(text=f"aborted: {reason}")],
+                        details={"hitl": {"decision": "aborted", "reason": reason}},
+                        is_error=True,
+                        timestamp=time.time(),
+                    )
+                    self._state._messages.append(synthetic)
+                    await self.checkpointer.append(self.thread_id, [synthetic])
+
+            term = AssistantMessage(
+                content=[TextContent(text=f"Conversation aborted: {reason}")],
+                stop_reason="aborted",
+            )
+            self._state._messages.append(term)
+            await self.checkpointer.append(self.thread_id, [term])
+
+            await save_pending(self.thread_id, None)
             await self._process_event(AgentAbortedEvent(reason=reason))
 
     async def _run_hitl_resume(self) -> None:
@@ -3414,6 +3488,18 @@ async def run_agent_loop_resume(
     # right payload (codex BLOCKING: previous draft emitted []).
     await emit_event(emit, TurnEndEvent(message=last, tool_results=batch_tool_results))
 
+    # Drain steering AFTER tool_results, BEFORE termination check — preserves
+    # the Anthropic adjacency invariant (no user/system message wedged between
+    # tool_use and tool_result) AND matches existing _run_loop ordering, which
+    # drains steering before its terminal AgentEndEvent.
+    if get_steering_messages:
+        steering = await get_steering_messages() or []
+        for msg in steering:
+            await emit_event(emit, MessageStartEvent(message=msg))
+            await emit_event(emit, MessageEndEvent(message=msg))
+            current_context.messages.append(msg)
+            new_messages.append(msg)
+
     # Honor should_stop_after_turn (codex BLOCKING: previous draft skipped this).
     if should_stop_after_turn:
         stop_ctx = ShouldStopAfterTurnContext(
@@ -3430,17 +3516,6 @@ async def run_agent_loop_resume(
     if terminated_by_tool:
         await emit_event(emit, AgentEndEvent(messages=new_messages))
         return new_messages
-
-    # Drain steering AFTER tool_results — preserves the Anthropic adjacency
-    # invariant the existing loop enforces (no user/system message wedged
-    # between tool_use and tool_result).
-    if get_steering_messages:
-        steering = await get_steering_messages() or []
-        for msg in steering:
-            await emit_event(emit, MessageStartEvent(message=msg))
-            await emit_event(emit, MessageEndEvent(message=msg))
-            current_context.messages.append(msg)
-            new_messages.append(msg)
 
     # Fall through to the normal loop for the next model turn.
     await _run_loop(

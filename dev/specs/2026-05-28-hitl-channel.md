@@ -383,7 +383,7 @@ Cross-process concurrency (two processes both calling `respond()` on the same `t
 
 #### Detecting suspension from `agent.prompt(...)`
 
-When `Agent.detach()` is called during a pending HITL request (see §4.5), the loop catches `HitlDetached`, exits cleanly, and emits a new `AgentSuspendedEvent(pending_request=...)` so listeners can react. The assistant message keeps its unresolved tool calls; the next `respond()` will pick up from there.
+When `Agent.detach()` is called during a pending HITL request (see §4.5), `Agent.detach()` itself emits `AgentSuspendedEvent(pending_request=self._channel.pending)` *before* triggering the exception, then the loop catches `HitlDetached` and exits silently. (Earlier drafts had the loop emit the event, but the loop has no channel handle — emitting with `pending_request=None` violated the event contract. The Agent layer has the real handle and emits with the proper payload.) The assistant message keeps its unresolved tool calls; the next `respond()` will pick up from there.
 
 For hosts that need to probe pending state, `Agent` exposes **two** APIs — sync and async — because the in-memory channel slot is cheap to read but the checkpointer is not:
 
@@ -548,7 +548,7 @@ if before_result:
 
 Same selective catch is added around `tool.execute(...)` in `_execute_prepared`.
 
-At the `_run_loop` level, a new outer try-block wraps the inner `_run_loop` body to catch `HitlDetached` / `HitlAborted` and exit cleanly (emit `AgentSuspendedEvent` for detach, `AgentAbortedEvent` for abort).
+At the `_run_loop` level, a new outer try-block wraps the inner `_run_loop` body to catch `HitlDetached` / `HitlAborted` and exit cleanly **without** emitting any extra event — the Agent caller (`Agent.detach()` / `Agent.abort_pending()`) is responsible for emitting `AgentSuspendedEvent` / `AgentAbortedEvent` with the real payload before triggering the exception.
 
 `_PreparedToolCall` and `_ImmediateOutcome`/`_FinalizedOutcome` gain a `hitl_trace: dict | None = None` field. `_make_tool_result_message` merges it defensively (the existing `AgentToolResult.details` is typed `Any`, not `dict` — see SHOULD-FIX 13):
 
@@ -768,7 +768,7 @@ class AgentSuspendedEvent(AgentEvent):
     pending_request: HitlRequest
 ```
 
-Channel implementations emit `HitlRequestEvent` / `HitlAnswerEvent` via the same `emit` callable used by `_run_loop` (wired in by Agent at construction). `AgentSuspendedEvent` is emitted by the loop itself when it catches `HitlDetached`.
+Channel implementations emit `HitlRequestEvent` / `HitlAnswerEvent` via the same `emit` callable used by `_run_loop` (wired in by Agent at construction). `AgentSuspendedEvent` and `AgentAbortedEvent` are emitted by the **Agent layer** (`Agent.detach()` / `Agent.abort_pending()`), not the loop — the Agent has the channel handle needed to populate `pending_request` with the real payload.
 
 ### 6.5 Trace spans
 
@@ -794,7 +794,7 @@ The trace CLI (`cubepi trace view`) renders these spans inline in the run tree, 
 | `timeout` exceeded in **ask_user tool** context | Same shape as cancel-in-ask, but `HitlTimedOut(seconds=N)`; `details["hitl"]={"outcome":"timed_out","seconds":N}`. |
 | `timeout` exceeded in **approve middleware** context | Translated to `deny_reason="approval_timeout"` + `hitl_trace={"decision":"timed_out"}` — a clean fake-deny, *not* a tool error. Matches cubebox's "timeout → fake-deny so LLM keeps reasoning" requirement. |
 | `signal.set()` during pending | Channel observes the `asyncio.Event` (passed in via tool's `execute(signal=...)` and `Middleware.before_tool_call(signal=...)`) racing it against the answer future; if signal wins, channel raises `HitlAborted`. `HitlAborted` propagates through the selective handlers up to `_run_loop`, which emits `AgentAbortedEvent`. `pending_request` is cleared. |
-| `Agent.detach()` | Channel raises `HitlDetached`. `_run_loop` catches at the outer level, emits `AgentSuspendedEvent(pending_request=...)`, exits cleanly with assistant message intact (tool_calls still unresolved). `pending_request` stays persisted; the next `respond()` picks up. |
+| `Agent.detach()` | `Agent.detach()` emits `AgentSuspendedEvent(pending_request=channel.pending)` then sets `HitlDetached` on the channel's future. Channel raises `HitlDetached`; `_run_loop` catches at the outer level and exits silently (no event from loop). Assistant message intact, tool_calls still unresolved, `pending_request` stays persisted; the next `respond()` picks up. |
 | `answer(qid)` with unknown / stale qid | `HitlStaleAnswer` (`HitlError`, regular `Exception`). Host code is expected to log / discard. |
 | `respond(answer=...)` but no `pending_request` | `HitlNoPendingRequest`. |
 | `respond()` (no answer) when there IS a pending | `HitlMissingAnswer`. |
