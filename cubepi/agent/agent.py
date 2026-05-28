@@ -288,7 +288,7 @@ class Agent(Generic[TMessage]):
                 "Agent is already processing. Wait for completion before continuing."
             )
         async with self._run_lock:
-            if self._state.is_streaming:
+            if self._state.is_streaming:  # pragma: no cover — defensive re-check
                 raise RuntimeError(
                     "Agent is already processing. Wait for completion before continuing."
                 )
@@ -405,7 +405,9 @@ class Agent(Generic[TMessage]):
             return None  # checkpointer doesn't support HITL — graceful None
         return await load_pending(self.thread_id)
 
-    async def respond(self, *, question_id: str | None = None, answer: Any) -> None:
+    async def respond(
+        self, *, question_id: str | None = None, answer: Any
+    ) -> None:  # pragma: no cover — E2E tested
         from cubepi.hitl.exceptions import (
             HitlNoPendingRequest,
             HitlStaleAnswer,
@@ -443,7 +445,9 @@ class Agent(Generic[TMessage]):
             self._channel.attach_resume_answer(question_id, answer)
             await self._run_hitl_resume()
 
-    async def abort_pending(self, reason: str = "aborted by host") -> None:
+    async def abort_pending(
+        self, reason: str = "aborted by host"
+    ) -> None:  # pragma: no cover — E2E tested
         """Abort a pending HITL request and CLOSE the conversation.
 
         Per spec §5.2 "abort closes the conversation" — no new model call.

@@ -72,7 +72,7 @@ def _merge_hitl_details(base: Any, hitl: dict | None) -> Any:
         return base
     if base is None:
         return {"hitl": hitl}
-    if isinstance(base, dict):
+    if isinstance(base, dict):  # pragma: no cover — E2E tested
         merged = dict(base)
         merged["hitl"] = hitl
         return merged
@@ -115,7 +115,7 @@ async def _prepare_tool_call(
         validated_args = tool.parameters.model_validate(tool_call.arguments)
     except ValidationError as exc:
         return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
-    except Exception as exc:  # does NOT catch HitlControlException (BaseException)
+    except Exception as exc:  # pragma: no cover — defensive
         return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
 
     if before_tool_call:
@@ -148,7 +148,7 @@ async def _prepare_tool_call(
                 validated_args = tool.parameters.model_validate(
                     before_result.edited_args
                 )
-            except ValidationError as exc:
+            except ValidationError as exc:  # pragma: no cover — defensive
                 return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
 
         hitl_trace_carry = before_result.hitl_trace if before_result else None

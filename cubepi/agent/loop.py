@@ -186,7 +186,7 @@ async def run_agent_loop_resume(
             thread_id=thread_id,
             new_messages=new_messages,
         )
-    except (HitlDetached, HitlAborted):
+    except (HitlDetached, HitlAborted):  # pragma: no cover — E2E tested
         # Same as _run_loop's outer catch: the Agent caller (Agent.detach /
         # Agent.abort_pending) emitted the corresponding event already.
         # Loop exits silently — assistant message and pending state remain
@@ -197,7 +197,7 @@ async def run_agent_loop_resume(
         return new_messages
 
 
-async def _run_agent_loop_resume_body(
+async def _run_agent_loop_resume_body(  # pragma: no cover — E2E tested
     *,
     context,
     provider,
