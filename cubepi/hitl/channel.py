@@ -138,7 +138,7 @@ class _BaseChannel:
             timeout_seconds=effective_timeout,
         )
         self._pending = req
-        self._future = asyncio.get_event_loop().create_future()
+        self._future = asyncio.get_running_loop().create_future()
 
         exc_caught: BaseException | None = None
         signal_task: asyncio.Future[Any] | None = None

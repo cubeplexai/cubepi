@@ -215,6 +215,7 @@ async def test_attach_resume_answer_qid_mismatch_keeps_slot():
     for a different question and should NOT be popped)."""
     ch = InMemoryChannel()
     ch.attach_resume_answer("tc-OLD", True)
+    assert ch._resume_slot == ("tc-OLD", True)  # baseline
 
     async def host():
         while ch.pending is None:
@@ -226,3 +227,6 @@ async def test_attach_resume_answer_qid_mismatch_keeps_slot():
     asyncio.create_task(host())
     ans = await ch.approve(tool_name="bash", tool_call_id="tc-NEW", args={})
     assert ans.decision == "deny"
+    # Slot for the OLD qid is still pre-loaded (the implementation should
+    # NOT pop it just because a different qid came through).
+    assert ch._resume_slot == ("tc-OLD", True)
