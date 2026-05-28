@@ -99,12 +99,12 @@ Streams and events are two layers:
 - **Provider streams** — `MessageStream` yields *provider* events:
   `start`, `text_start`, `text_delta`, `text_end`, `thinking_*`,
   `toolcall_*`, `done`, `error`. This is the raw token stream.
-- **Agent events** — what `agent.subscribe(...)` receives. Eleven
-  types covering the entire loop: `agent_start`, `agent_end`,
+- **Agent events** — what `agent.subscribe(...)` receives. 15
+  types covering the entire loop + HITL: `agent_start`, `agent_end`,
   `turn_start`, `turn_end`, `message_start`, `message_update`,
   `message_end`, `tool_execution_start`, `tool_execution_update`,
-  `tool_execution_end`. `message_update` wraps the provider event
-  inside `event.stream_event`.
+  `tool_execution_end`, `hitl_request`, `hitl_answer`,
+  `agent_suspended`, `agent_aborted`.
 
 Subscribe to agent events for UI; for low-level token routing dig into
 `event.stream_event`. See [Streaming Events](../guides/agents/streaming).
@@ -140,8 +140,51 @@ class Checkpointer(Protocol):
 Bind one to an agent with `Agent(checkpointer=cp, thread_id="…")` and
 the loop will append each new message as it lands, restoring history
 on the first `prompt()`. Built-in backends: `MemoryCheckpointer`,
-`SQLiteCheckpointer`, `PostgresCheckpointer`. See
-[Checkpointing → SQLite](../guides/checkpointing/sqlite).
+`SQLiteCheckpointer`, `PostgresCheckpointer`, `MySQLCheckpointer`.
+
+HITL adds two optional methods for cross-process suspend/resume:
+`save_pending_request` / `load_pending_request`. All first-party
+backends implement them. See [HITL guide](../guides/hitl).
+
+## HITL (Human-in-the-Loop)
+
+cubepi ships a built-in `cubepi.hitl` module for scenarios where the
+agent needs to **pause and wait for a human**:
+
+- **Sandbox confirmation** — a dangerous tool (bash, file write) needs
+  approve / deny / edit before running.
+- **Mid-run questions** — the agent surfaces a structured form to the user
+  and waits for the answer.
+
+```python
+from cubepi.hitl import InMemoryChannel, ConfirmToolCallMiddleware, ask_user_tool
+
+channel = InMemoryChannel()
+
+agent = Agent(
+    provider=…, model=…,
+    tools=[bash_tool, ask_user_tool(channel)],
+    middleware=[ConfirmToolCallMiddleware(channel, require_confirm={"bash"})],
+    channel=channel,
+)
+```
+
+The channel is an `await`-able coroutine collaborator: tool and
+middleware authors write `await channel.ask(...)` or
+`await channel.confirm(...)` and the channel handles the suspend. Host
+code (your web app / TUI) subscribes to `channel.subscribe()` or polls
+`channel.pending`, renders the request to the user, and posts the
+answer via `channel.answer(qid, answer)`.
+
+Two channel backends ship in-box:
+- **`InMemoryChannel`** — single process (CLI, notebook, tests).
+- **`CheckpointedChannel`** — cross-process (web service). The pending
+  request is persisted to the checkpointer; a different process can
+  answer hours later via `Agent.respond(question_id=, answer=)`.
+
+Full details — the three HITL verbs, both built-in middlewares, the
+cross-process suspend/resume protocol, events, trace spans, and error
+reference — are in the [HITL guide](../guides/hitl).
 
 ## Tracer (optional)
 

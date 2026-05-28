@@ -177,6 +177,17 @@ to so the schema is forward-compatible.
   migrations didn't run. Apply the host alembic upgrade first.
 - **`CubepiSchemaMismatch`** — You upgraded cubepi but didn't generate
   a new migration. Generate one, apply it, and CubePi will start.
+  
+  :::info Schema v2 (HITL)
+
+  cubepi ≥ the HITL feature bumps `EXPECTED_SCHEMA_VERSION` from 1 to 2
+  and adds a `pending_request JSONB NULL` column to `cubepi_threads`.
+  Your host alembic upgrade must call
+  `add_pending_request_column_op()` (from
+  `cubepi.checkpointer.postgres.alembic_helpers`) before bumping the
+  schema_version row. See the [HITL guide](../hitl) for the full
+  cross-process flow.
+  :::
 - **Connection pool exhaustion under load** — Default `max_pool_size=10`.
   Bump it if your app's concurrent agent count is higher than that.
 - **`asyncpg.exceptions.UndefinedTableError` outside `__aenter__`** —

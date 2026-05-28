@@ -236,6 +236,57 @@ class JSONOutputValidator(Middleware):
 The agent will skip tool execution and immediately re-prompt the
 model with the feedback message in context.
 
+## Human-in-the-loop tool confirmation
+
+cubepi ships two built-in HITL middlewares in `cubepi.hitl`:
+
+**`ConfirmToolCallMiddleware`** — "always ask the human for this tool":
+
+```python
+from cubepi.hitl import ConfirmToolCallMiddleware, InMemoryChannel
+
+channel = InMemoryChannel()
+agent = Agent(
+    provider=…, model=…,
+    middleware=[
+        ConfirmToolCallMiddleware(
+            channel,
+            require_confirm={"bash", "write_file"},
+        ),
+    ],
+)
+```
+
+The agent pauses on every `bash` or `write_file` call and waits for the
+host to `channel.answer(qid, ApproveAnswer(decision="approve"))`. The
+result drives the tool: `approve` runs it, `deny` blocks with a reason,
+`edit` re-validates and runs the edited args.
+
+**`ApprovalPolicyMiddleware`** — for hosts that classify tool calls via
+a policy engine:
+
+```python
+from cubepi.hitl import Approve, ApprovalPolicyMiddleware, AskUser, Deny
+
+def my_policy(ctx):
+    if ctx.tool_call.name in ("read_file", "grep"):
+        return Approve()
+    if ctx.tool_call.name.startswith("dangerous_"):
+        return Deny(reason="blocked")
+    return AskUser(timeout_seconds=180)
+
+agent = Agent(
+    provider=…, model=…,
+    middleware=[ApprovalPolicyMiddleware(channel, policy=my_policy)],
+)
+```
+
+`Deny` skips the channel entirely (hard block). `AskUser` triggers the
+channel's approve flow. `Approve` returns immediately.
+
+Full details — timeout semantics, edit semantics, events, trace spans,
+cross-process suspend/resume — are in the [HITL guide](../hitl).
+
 ## See also
 
 - [The 7 Hooks](./hooks) — exact semantics of each hook.
