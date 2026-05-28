@@ -31,6 +31,7 @@ Concretely:
 - **Single pending per thread.** cubepi's agent loop is sequential — at most one HITL request is outstanding per `thread_id`. This kills a whole class of correlation / concurrency complexity.
 - **No replay.** Resume re-enters the loop with the answer pre-loaded into the channel. The last assistant message's unresolved tool calls dictate "what we were doing"; the answer flows into the natural tool-execution code path. No side-effects re-run.
 - **Channel emits events** so hosts that prefer event-stream subscription (rather than synchronous coroutines) can also consume.
+- **Prompt-cache prefix invariant (acceptance criterion).** Between pause and resume, the `messages` list must change **only by appending tool-result message(s) and the next assistant turn at the tail.** No inserting, reordering, mutating, or rewriting prior messages — that would invalidate the provider-side prompt cache and cost a fresh prefix re-tokenization on every resume. Every code path that touches `_state._messages` during HITL pause/resume must respect this; the resume tests assert it byte-exactly (see §9.2 `test_resume_preserves_cache_prefix`).
 
 ## 3. Surface Area
 
@@ -42,15 +43,14 @@ A `cubepi.hitl.ask_user_tool(channel)` factory returns an `AgentTool` named `ask
 
 The tool's `execution_mode="sequential"` — HITL cannot share a turn with other parallel tools. Tool description explicitly steers the model away from using `ask_user` for free-form clarification ("for free-form questions, end your turn with text — the user's next message is your answer").
 
-### 3.2 `ConfirmToolCallMiddleware`
+### 3.2 `ApprovalPolicyMiddleware` and `ConfirmToolCallMiddleware`
 
-A middleware configured with either a set of tool names or a predicate. In `before_tool_call`, it calls `channel.approve(tool_name, tool_call_id, args)` and acts on the result:
+Two middlewares for gating tool calls — same internals, different ergonomics:
 
-- `approve` → returns `None` (no interception; tool runs normally)
-- `deny` → returns `BeforeToolCallResult(block=True, deny_reason=...)`
-- `edit` → returns `BeforeToolCallResult(edited_args=...)` so the loop re-validates and runs the tool with new args
+- **`ApprovalPolicyMiddleware(channel, policy)`** — the policy-driven variant for hosts with a rule engine (e.g. cubebox's command-rule catalog). `policy(ctx)` returns one of `Approve()` / `Deny(reason)` / `AskUser(...)`. `Deny` skips the channel entirely (host-side hard reject); `AskUser` triggers the channel.approve flow.
+- **`ConfirmToolCallMiddleware(channel, require_confirm=..., timeout_seconds=...)`** — the simple "always ask the human for these tool names" wrapper. Internally a thin shim over `ApprovalPolicyMiddleware`.
 
-Either decision carries a `hitl_trace: dict` field through to the resulting `ToolResultMessage.details["hitl"]` for audit and trace visibility (see §6.3).
+The channel's three-state human response (`approve` / `deny` / `edit`) plus the two host-side outcomes (`policy_deny`, `timed_out`, `cancelled`) all flow as `hitl_trace: dict` through `BeforeToolCallResult` into the resulting `ToolResultMessage.details["hitl"]` for audit and trace visibility (see §6.3).
 
 ### 3.3 Custom usage
 
@@ -98,6 +98,10 @@ class HitlRequest(BaseModel):
     thread_id: str | None
     payload: ConfirmRequest | ApproveRequest | AskRequest
     created_at: float
+    timeout_seconds: float | None = None # effective timeout for this request
+                                         # (per-call timeout if set, else channel default).
+                                         # Embedded in the envelope so SSE consumers / UIs can
+                                         # render countdowns without separate config.
 
 class ApproveAnswer(BaseModel):
     decision: Literal["approve", "deny", "edit"]
@@ -106,6 +110,12 @@ class ApproveAnswer(BaseModel):
 
 # ask answer: dict[question.key, str | list[str]]
 ```
+
+#### `tool_call_id` ↔ `question_id` for approve requests
+
+For `ApproveRequest` (the dangerous-tool-confirm flow), `tool_call_id` is provided by the LLM's tool call and is **1:1 with `question_id`** for the request's lifetime. Hosts may correlate frontend ↔ backend by either ID: cubebox-style hosts that already track `call_id` from the tool stream can pass that same value through to `Agent.respond()` (see §5.2) and the channel's `answer()` — passing `tool_call_id=…` is accepted as an alias for `question_id=…` in those APIs to make the migration painless.
+
+For `ConfirmRequest` and `AskRequest`, there is no associated tool call, so `question_id` is the only key.
 
 ### 4.2 `HitlChannel` Protocol (`cubepi/hitl/channel.py`)
 
@@ -217,7 +227,13 @@ Backwards compat: existing data without the column reads as `None`; no behavior 
 **Cross-process / post-detach path: new `Agent.respond(...)`.**
 
 ```python
-async def respond(self, *, question_id: str | None = None, answer: Any) -> None:
+async def respond(
+    self,
+    *,
+    question_id: str | None = None,
+    tool_call_id: str | None = None,    # alias for approve-kind pending; see §4.1
+    answer: Any,
+) -> None:
     """Resume an agent whose previous run suspended on a pending HITL request.
 
     Required when the original channel's in-flight future no longer exists —
@@ -238,6 +254,17 @@ async def respond(self, *, question_id: str | None = None, answer: Any) -> None:
     pending = await self.checkpointer.load_pending_request(self.thread_id)
     if pending is None:
         raise HitlNoPendingRequest("no pending request on this thread")
+
+    # Resolve question_id from either arg or the alias.
+    if question_id is None and tool_call_id is not None:
+        if not isinstance(pending.payload, ApproveRequest):
+            raise HitlStaleAnswer("tool_call_id is only valid for approve-kind pending")
+        if pending.payload.tool_call_id != tool_call_id:
+            raise HitlStaleAnswer(
+                f"tool_call_id mismatch: answer for {tool_call_id}, "
+                f"pending tool_call_id is {pending.payload.tool_call_id}"
+            )
+        question_id = pending.question_id
     if question_id is None:
         question_id = pending.question_id
     if question_id != pending.question_id:
@@ -248,11 +275,56 @@ async def respond(self, *, question_id: str | None = None, answer: Any) -> None:
     await self._run_hitl_resume()         # wraps run_agent_loop_resume; see §5.3
 ```
 
+Note on async semantics (design decision §2 in the cubebox alignment): `respond()` is `async` but does **not** return immediately — it runs the loop forward and returns when the next pause or `AgentEndEvent` fires. Hosts that want to free the request thread for an SSE stream wrap it in `asyncio.create_task(agent.respond(...))` and consume events via `agent.add_listener(...)` (existing API) — exactly the pattern used today for `agent.run(...)`.
+
 `agent.run(...)`, like today, returns `None`; persistent state lives in `agent.state` and the checkpointer, and the suspended state is observable by inspecting `_state._messages` (last message is an `AssistantMessage` with unresolved tool calls) and by calling `await checkpointer.load_pending_request(thread_id)`.
 
 #### Detecting suspension from `agent.run(...)`
 
 When `Agent.detach()` is called during a pending HITL request (see §4.5), the loop catches `HitlDetached`, exits cleanly, and emits a new `AgentSuspendedEvent(pending_request=...)` so listeners can react. The assistant message keeps its unresolved tool calls; the next `respond()` will pick up from there.
+
+For hosts that prefer a synchronous-style probe (instead of subscribing to the event stream), `Agent` exposes:
+
+```python
+@property
+def pending_hitl_request(self) -> HitlRequest | None:
+    """Returns the pending HITL request for this agent's thread, or None.
+
+    Reads from the channel's in-memory slot if the run is currently awaiting;
+    otherwise (post-detach / cross-process) falls back to a checkpointer lookup.
+    """
+```
+
+A typical post-`run()` check:
+
+```python
+await agent.run(prompt)
+if (pending := agent.pending_hitl_request) is not None:
+    # render pending.payload to the user; later call agent.respond(...)
+    ...
+```
+
+#### Aborting a suspended thread
+
+For "user closed the conversation" / "admin kill switch", a method beyond per-question `channel.cancel()` is needed: clear persisted pending state and unblock the conversation so the model sees a synthetic denial.
+
+```python
+async def abort_pending(self, reason: str = "aborted by host") -> None:
+    """Cancel any pending HITL request on this thread, fake-deny the gated tool call,
+    and persist the resulting conversation state.
+
+    - If a request is in-flight in the same process: channel.cancel(qid, reason)
+      (the awaiting tool / middleware will surface a deny tool_result naturally).
+    - If suspended cross-process: load checkpoint + pending, synthesize a
+      ToolResultMessage with is_error=True content="aborted: <reason>"
+      (and details.hitl={"decision":"aborted","reason":...}) for the gated
+      tool_call, append it, clear pending_request, emit AgentEndEvent
+      with stop_reason="aborted".
+    - No model call is made; the conversation is effectively closed.
+    """
+```
+
+The synthetic deny path uses the same `hitl_trace` schema as policy/human deny so trace and audit semantics stay uniform.
 
 ### 5.3 The resume code path
 
@@ -314,51 +386,126 @@ if finalized.hitl_trace:
 return ToolResultMessage(..., details=details, ...)
 ```
 
-### 6.3 `ConfirmToolCallMiddleware`
+### 6.3 Middlewares: `ConfirmToolCallMiddleware` and `ApprovalPolicyMiddleware`
+
+Two host-facing middlewares ship in `cubepi.hitl`. They share an internal helper but differ in how policy is expressed.
+
+#### 6.3.1 `ApprovalDecision` — the host policy contract
+
+Hosts whose policy engine needs to express "absolutely deny without asking" (e.g. cubebox's command-rule engine that has an explicit-block tier) need a richer return type than a yes-or-no predicate. The canonical decision type:
 
 ```python
-class ConfirmToolCallMiddleware(Middleware):
-    def __init__(
-        self,
-        channel: HitlChannel,
-        *,
-        require_confirm: Callable[[BeforeToolCallContext], bool] | set[str] | None = None,
-        details_fn: Callable[[BeforeToolCallContext], dict] | None = None,
-    ): ...
+# cubepi/hitl/policy.py
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Approve: pass
+
+@dataclass(frozen=True)
+class Deny:
+    reason: str
+
+@dataclass(frozen=True)
+class AskUser:
+    prompt: str | None = None              # extra context shown to the human
+    timeout_seconds: float | None = None   # overrides channel default for this call
+    details: dict | None = None            # extra payload (e.g. matched rule, impact preview)
+
+ApprovalDecision = Approve | Deny | AskUser
+```
+
+A policy function is `Callable[[BeforeToolCallContext], ApprovalDecision | Awaitable[ApprovalDecision]]`. Returning `Approve()` is the pass-through; `Deny(reason)` skips the channel entirely and goes straight to the block path (with `hitl_trace={"decision":"policy_deny", "reason": ...}` so audits can distinguish policy-deny from human-deny); `AskUser(...)` triggers the channel.
+
+#### 6.3.2 `ApprovalPolicyMiddleware`
+
+```python
+class ApprovalPolicyMiddleware(Middleware):
+    def __init__(self, channel: HitlChannel, policy: Callable[..., ApprovalDecision | Awaitable[ApprovalDecision]]):
+        self._channel = channel
+        self._policy = policy
 
     async def before_tool_call(self, ctx, *, signal=None):
-        if not self._needs_confirm(ctx):
+        decision = self._policy(ctx)
+        if inspect.isawaitable(decision):
+            decision = await decision
+
+        if isinstance(decision, Approve):
             return None
-        answer = await self._channel.approve(
-            tool_name=ctx.tool_call.name,
-            tool_call_id=ctx.tool_call.id,
-            args=ctx.args.model_dump() if hasattr(ctx.args, "model_dump") else dict(ctx.args),
-            details=self._details_fn(ctx) if self._details_fn else None,
-        )
+        if isinstance(decision, Deny):
+            return BeforeToolCallResult(
+                block=True, deny_reason=decision.reason,
+                hitl_trace={"decision": "policy_deny", "reason": decision.reason},
+            )
+        if isinstance(decision, AskUser):
+            return await self._ask_and_translate(ctx, decision)
+        raise TypeError(f"policy returned unexpected {type(decision).__name__}")
+
+    async def _ask_and_translate(self, ctx, ask: AskUser):
+        try:
+            answer = await self._channel.approve(
+                tool_name=ctx.tool_call.name,
+                tool_call_id=ctx.tool_call.id,
+                args=_args_to_dict(ctx.args),
+                details=ask.details,
+                timeout=ask.timeout_seconds,
+            )
+        except HitlTimedOut:
+            return BeforeToolCallResult(
+                block=True, deny_reason="approval_timeout",
+                hitl_trace={"decision": "timed_out"},
+            )
+        except HitlCancelled as exc:
+            return BeforeToolCallResult(
+                block=True, deny_reason=f"cancelled: {exc.reason}",
+                hitl_trace={"decision": "cancelled", "reason": exc.reason},
+            )
         if answer.decision == "approve":
             return None
         if answer.decision == "deny":
             return BeforeToolCallResult(
                 block=True, deny_reason=answer.reason,
-                hitl_trace={"decision": "deny", "reason": answer.reason},
+                hitl_trace={"decision": "human_deny", "reason": answer.reason},
             )
         if answer.decision == "edit":
             return BeforeToolCallResult(
                 edited_args=answer.edited_args,
                 hitl_trace={
                     "decision": "edit",
-                    "original_args": ctx.args.model_dump() if hasattr(ctx.args, "model_dump") else dict(ctx.args),
+                    "original_args": _args_to_dict(ctx.args),
                     "edited_args": answer.edited_args,
                 },
             )
 ```
 
-The middleware does **not** implement `after_tool_call` — `hitl_trace` is plumbed through `BeforeToolCallResult` and merged into `tool_result.details` by the loop (§6.2). This means no per-tool-call dict state in the middleware itself.
+Note the `HitlTimedOut` / `HitlCancelled` catch — they get translated into clean `deny_reason="approval_timeout"` / `"cancelled: …"` blocks rather than raw tool-execution errors (Patch 4 / **§7 timeout-as-deny semantics**).
 
-`require_confirm`:
-- `None` ⇒ every tool requires confirm (rare; explicit opt-in)
-- `set[str]` ⇒ only tools whose name is in the set
-- `Callable[[BeforeToolCallContext], bool]` ⇒ caller-supplied predicate (e.g. inspect args for dangerous flags)
+#### 6.3.3 `ConfirmToolCallMiddleware` — "always ask, ship-and-go" variant
+
+For users who don't have a policy engine and just want "ask the human for these tool names" out of the box:
+
+```python
+class ConfirmToolCallMiddleware(ApprovalPolicyMiddleware):
+    def __init__(
+        self,
+        channel: HitlChannel,
+        *,
+        require_confirm: Callable[[BeforeToolCallContext], bool] | set[str] | None = None,
+        details_fn: Callable[[BeforeToolCallContext], dict] | None = None,
+        timeout_seconds: float | None = None,
+    ):
+        def policy(ctx) -> ApprovalDecision:
+            if require_confirm is None or self._matches(require_confirm, ctx):
+                return AskUser(
+                    details=details_fn(ctx) if details_fn else None,
+                    timeout_seconds=timeout_seconds,
+                )
+            return Approve()
+        super().__init__(channel, policy=policy)
+```
+
+`require_confirm` semantics unchanged from the original sketch (set / predicate / None=all). This is now a thin wrapper around the policy middleware.
+
+Neither middleware implements `after_tool_call` — `hitl_trace` flows through `BeforeToolCallResult` and is merged into `tool_result.details` by the loop (§6.2), so there is no per-tool-call dict state in the middleware itself.
 
 ### 6.4 New events
 
@@ -400,8 +547,10 @@ The trace CLI (`cubepi trace view`) renders these spans inline in the run tree, 
 
 | Scenario | Behavior |
 |---|---|
-| `channel.cancel(qid, reason)` | Pending future raises `HitlCancelled(reason)`; ask_user / ConfirmToolCallMiddleware lets it propagate; loop catches in tool execution → `tool_result.is_error=True, content="cancelled by user: <reason>"`, `details["hitl"]={"outcome":"cancelled","reason":...}`. `pending_request` cleared from checkpointer. |
-| `timeout` exceeded | Same shape as cancel, but `HitlTimedOut`; `details["hitl"]={"outcome":"timed_out","seconds":N}`. |
+| `channel.cancel(qid, reason)` in **ask_user tool** context | Pending future raises `HitlCancelled(reason)`; tool's `execute` lets it propagate; loop catches → `tool_result.is_error=True, content="cancelled by user: <reason>"`, `details["hitl"]={"outcome":"cancelled","reason":...}`. `pending_request` cleared from checkpointer. |
+| `channel.cancel(qid, reason)` in **approve middleware** context | `ApprovalPolicyMiddleware` catches `HitlCancelled` and returns `BeforeToolCallResult(block=True, deny_reason=f"cancelled: {reason}", hitl_trace={"decision":"cancelled", ...})` — the gated tool never executes, model sees a clean denial (not a raw error). |
+| `timeout` exceeded in **ask_user tool** context | Same shape as cancel-in-ask, but `HitlTimedOut`; `details["hitl"]={"outcome":"timed_out","seconds":N}`. |
+| `timeout` exceeded in **approve middleware** context | Translated to `deny_reason="approval_timeout"` + `hitl_trace={"decision":"timed_out"}` — a clean fake-deny, *not* a tool error. Matches cubebox's "timeout → fake-deny so LLM keeps reasoning" requirement. |
 | `signal.set()` during pending | Channel observes signal (it's passed in via tool's `execute(signal=...)` chain and `Middleware.before_tool_call(signal=...)`) and raises `asyncio.CancelledError`-equivalent; surrounding tool/MW lets it bubble; loop's existing abort path produces `AssistantMessage(stop_reason="aborted")`. `pending_request` is cleared. |
 | `Agent.detach()` | Pending future raises `HitlDetached`; loop catches, exits cleanly with assistant message intact (tool_calls still unresolved); `pending_request` stays persisted; `Agent.run()` returns suspended result. |
 | `answer(qid)` with unknown / stale qid | `HitlStaleAnswer`. Host code is expected to log / discard. |
@@ -469,6 +618,17 @@ A `Callable` answer can inspect the request and dynamically produce a response (
 | `test_checkpointer_migrations` | (per backend) old schema upgrades to include pending_request column; reads/writes work for both old and new rows |
 | `test_event_stream_emits_hitl_events` | agent's event listener receives HitlRequestEvent and HitlAnswerEvent |
 | `test_detach_emits_suspended_event` | Agent.detach() during pending → `AgentSuspendedEvent` fires; `run()` returns; assistant message keeps unresolved tool_calls; pending_request remains in checkpointer |
+| `test_pending_hitl_request_property` | After detach, `agent.pending_hitl_request` reflects checkpointer state; during in-flight ask, reflects channel state; otherwise None |
+| `test_approval_policy_approve_passthrough` | Policy returns `Approve()` → channel never invoked → tool runs |
+| `test_approval_policy_deny_skips_channel` | Policy returns `Deny(reason)` → channel never invoked → block path; `hitl_trace.decision == "policy_deny"` |
+| `test_approval_policy_ask_user_round_trip` | Policy returns `AskUser(timeout=…)` → channel.approve invoked → human reply → tool runs or blocks accordingly |
+| `test_approval_policy_timeout_becomes_deny` | `AskUser(timeout=0.05)` + no answer → block with `deny_reason="approval_timeout"`, `hitl_trace.decision == "timed_out"` (NOT a tool error) |
+| `test_approval_policy_cancel_becomes_deny` | mid-ask `channel.cancel()` → block with `deny_reason="cancelled: …"`, `hitl_trace.decision == "cancelled"` |
+| `test_abort_pending_in_flight` | abort_pending() while same-process await → channel.cancel happens, normal cancel path |
+| `test_abort_pending_cross_process` | abort_pending() on a thread with checkpoint-only pending → synthetic deny tool_result appended; pending cleared; AgentEndEvent stop_reason="aborted"; no model call made |
+| `test_hitl_request_envelope_carries_timeout` | `channel.approve(..., timeout=42)` → emitted `HitlRequest.timeout_seconds == 42`; channel default applies when per-call omitted |
+| `test_resume_preserves_cache_prefix` | Pause-and-resume on a dangerous-tool flow: serialize the messages list before pause and again before the model call after resume; assert the prefix (everything except the new tool_result + new assistant turn) is byte-identical |
+| `test_tool_call_id_alias_for_respond` | `agent.respond(tool_call_id=..., answer=...)` accepted as alias for question_id when the pending request is an ApproveRequest |
 
 All tests use `FauxProvider`. Resume tests use `MemoryCheckpointer`. Per-backend resume tests (SQLite/Postgres/MySQL) are E2E and gated like existing checkpointer tests.
 
@@ -537,10 +697,10 @@ Rough phases, finalized in the writing-plans step:
 
 1. Types + `HitlChannel` protocol + `InMemoryChannel` + tests (no agent integration yet).
 2. `BeforeToolCallResult` extension + `loop.py` `hitl_trace` merge + tests.
-3. `ConfirmToolCallMiddleware` + `ask_user_tool` + integration tests with `FauxProvider`.
-4. New events (`HitlRequestEvent`, `HitlAnswerEvent`) + agent wiring of channel-to-emit.
+3. `ApprovalDecision` types + `ApprovalPolicyMiddleware` + `ConfirmToolCallMiddleware` shim + `ask_user_tool` + integration tests with `FauxProvider`.
+4. New events (`HitlRequestEvent`, `HitlAnswerEvent`, `AgentSuspendedEvent`) + agent wiring of channel-to-emit + `Agent.pending_hitl_request` property.
 5. `Checkpointer` `save_pending_request` / `load_pending_request` + per-backend migrations.
-6. `CheckpointedChannel` + `Agent.detach()` + `Agent.resume()` resume path + tests.
+6. `CheckpointedChannel` + `Agent.detach()` + `Agent.respond()` resume path + `Agent.abort_pending()` + tests (including `test_resume_preserves_cache_prefix`).
 7. Trace integration (lazy OTel) + trace CLI rendering tweaks if needed.
 8. Subagent channel inheritance + tests.
 9. Documentation (guide, recipes, README).
