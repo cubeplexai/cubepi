@@ -168,26 +168,34 @@ async def _execute_prepared(
     signal: asyncio.Event | None,
     emit_fn: Callable,
 ) -> tuple[AgentToolResult, bool]:
+    from cubepi.hitl.channel import _in_custom_tool_var
+
+    is_builtin = getattr(prepared.tool, "_hitl_builtin", False)
+    token = None if is_builtin else _in_custom_tool_var.set(True)
     try:
-        result = await prepared.tool.execute(
-            prepared.tool_call.id,
-            prepared.args,
-            signal=signal,
-            on_update=lambda partial: emit_event(
-                emit_fn,
-                ToolExecutionUpdateEvent(
-                    tool_call_id=prepared.tool_call.id,
-                    tool_name=prepared.tool_call.name,
-                    args=prepared.tool_call.arguments,
-                    partial_result=partial,
+        try:
+            result = await prepared.tool.execute(
+                prepared.tool_call.id,
+                prepared.args,
+                signal=signal,
+                on_update=lambda partial: emit_event(
+                    emit_fn,
+                    ToolExecutionUpdateEvent(
+                        tool_call_id=prepared.tool_call.id,
+                        tool_name=prepared.tool_call.name,
+                        args=prepared.tool_call.arguments,
+                        partial_result=partial,
+                    ),
                 ),
-            ),
-        )
-        return result, False
-    except HitlControlException:
-        raise
-    except Exception as exc:
-        return _error_result(str(exc)), True
+            )
+            return result, False
+        except HitlControlException:
+            raise
+        except Exception as exc:
+            return _error_result(str(exc)), True
+    finally:
+        if token is not None:
+            _in_custom_tool_var.reset(token)
 
 
 async def _finalize(

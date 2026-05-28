@@ -81,10 +81,15 @@ def ask_user_tool(channel: HitlChannel) -> AgentTool:
             details={"hitl": {"kind": "ask", "answers": answers}},
         )
 
-    return AgentTool(
+    tool = AgentTool(
         name="ask_user",
         description=_DESCRIPTION,
         parameters=AskUserParams,
         execute=execute,
         execution_mode="sequential",
     )
+    # Signal to _execute_prepared that this is a built-in HITL tool so the
+    # ContextVar durability guard is NOT set on entry — only custom tool
+    # bodies trigger CheckpointedChannel's HitlDurabilityNotGuaranteed.
+    tool._hitl_builtin = True
+    return tool

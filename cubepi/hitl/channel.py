@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import time
 import uuid
 from typing import Any, AsyncIterator, Protocol
@@ -19,6 +20,16 @@ from cubepi.hitl.types import (
     ConfirmRequest,
     HitlRequest,
     Question,
+)
+
+# ContextVar used by CheckpointedChannel to enforce the "do not ask HITL
+# from inside a custom tool body" durability guard. Set by
+# cubepi.agent.tools._execute_prepared for non-builtin tools; the guard fires
+# in CheckpointedChannel._on_pending_set when the var is True and
+# allow_inside_custom_tool=False.
+_in_custom_tool_var: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_in_custom_tool_var",
+    default=False,
 )
 
 
@@ -306,4 +317,62 @@ class InMemoryChannel(_BaseChannel):
     """In-process HITL channel; no persistence."""
 
 
-# CheckpointedChannel is implemented in Task 9.
+class CheckpointedChannel(_BaseChannel):
+    """Cross-process HITL channel — persists the pending request via a
+    checkpointer so a separate process can call ``Agent.respond()`` after
+    detach.
+
+    The checkpointer MUST implement ``save_pending_request`` and
+    ``load_pending_request`` (first-party checkpointers do; third-party
+    Protocol-only impls may not).
+    """
+
+    def __init__(
+        self,
+        *,
+        checkpointer: Any,
+        thread_id: str,
+        default_timeout: float | None = None,
+        allow_inside_custom_tool: bool = False,
+    ) -> None:
+        # Validate the checkpointer has the HITL methods early — better to
+        # fail at construction than at first ask/approve/confirm (codex pass 3).
+        if not (
+            hasattr(checkpointer, "save_pending_request")
+            and hasattr(checkpointer, "load_pending_request")
+        ):
+            from cubepi.hitl.exceptions import HitlError
+
+            raise HitlError(
+                "CheckpointedChannel requires a checkpointer with "
+                "save_pending_request and load_pending_request methods. "
+                "First-party checkpointers (Memory/SQLite/Postgres/MySQL) "
+                "implement these; third-party Protocol-only impls may not."
+            )
+        super().__init__(default_timeout=default_timeout, thread_id=thread_id)
+        self._checkpointer = checkpointer
+        self._allow_inside_custom_tool = allow_inside_custom_tool
+
+    async def _on_pending_set(self, req: HitlRequest) -> None:
+        if _in_custom_tool_var.get() and not self._allow_inside_custom_tool:
+            from cubepi.hitl.exceptions import HitlDurabilityNotGuaranteed
+
+            raise HitlDurabilityNotGuaranteed(
+                "CheckpointedChannel called from inside a custom tool body. "
+                "Use ApprovalPolicyMiddleware or ask_user_tool, or pass "
+                "allow_inside_custom_tool=True to opt in."
+            )
+        await self._checkpointer.save_pending_request(self._thread_id, req)
+        await super()._on_pending_set(req)
+
+    async def _on_pending_cleared(
+        self,
+        req: HitlRequest,
+        *,
+        exc: BaseException | None = None,
+    ) -> None:
+        from cubepi.hitl.exceptions import HitlDetached
+
+        if isinstance(exc, HitlDetached):
+            return
+        await self._checkpointer.save_pending_request(self._thread_id, None)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Callable
+from typing import Any, Callable
 
 from cubepi.agent.tools import execute_tool_calls
 from cubepi.agent.types import (
@@ -120,6 +120,174 @@ async def run_agent_loop_continue(
     await emit_event(emit, AgentStartEvent())
     await emit_event(emit, TurnStartEvent())
 
+    await _run_loop(
+        current_context=current_context,
+        new_messages=new_messages,
+        provider=provider,
+        model=model,
+        convert_to_llm=convert_to_llm,
+        transform_context=transform_context,
+        transform_system_prompt=transform_system_prompt,
+        after_model_response=after_model_response,
+        before_tool_call=before_tool_call,
+        after_tool_call=after_tool_call,
+        should_stop_after_turn=should_stop_after_turn,
+        get_steering_messages=get_steering_messages,
+        get_follow_up_messages=get_follow_up_messages,
+        stream_options=stream_options,
+        tool_execution=tool_execution,
+        emit=emit,
+    )
+    return new_messages
+
+
+async def run_agent_loop_resume(
+    *,
+    context: AgentContext,
+    provider: Provider,
+    model: Model,
+    convert_to_llm: Callable,
+    emit: Callable,
+    transform_context: Callable | None = None,
+    transform_system_prompt: Callable | None = None,
+    after_model_response: Callable | None = None,
+    before_tool_call: Callable | None = None,
+    after_tool_call: Callable | None = None,
+    should_stop_after_turn: Callable | None = None,
+    get_steering_messages: Callable | None = None,
+    get_follow_up_messages: Callable | None = None,
+    stream_options: StreamOptions | None = None,
+    tool_execution: str = "parallel",
+    system_prompt: str | None = None,
+    checkpointer: Any = None,
+    thread_id: str | None = None,
+) -> list[Message]:
+    from cubepi.hitl.exceptions import HitlInconsistentState
+
+    new_messages: list[Message] = []
+
+    # Sanity check
+    if not context.messages:
+        raise HitlInconsistentState("resume called with empty message history")
+    last = context.messages[-1]
+    if not isinstance(last, AssistantMessage):
+        raise HitlInconsistentState(
+            f"resume requires last message to be AssistantMessage, got "
+            f"{type(last).__name__}"
+        )
+    unresolved = [c for c in last.content if isinstance(c, ToolCall)]
+    if not unresolved:
+        raise HitlInconsistentState(
+            "resume requires unresolved tool_calls in last message"
+        )
+
+    # Locate `last` by IDENTITY (not value equality). list.index() uses ==, which
+    # would match an earlier assistant message with identical content (rare but
+    # possible after retries or reused prompts).
+    asst_pos = next(
+        (
+            i
+            for i in range(len(context.messages) - 1, -1, -1)
+            if context.messages[i] is last
+        ),
+        -1,
+    )
+    if asst_pos < 0:
+        raise HitlInconsistentState(
+            "could not locate last assistant message by identity"
+        )
+
+    # Idempotency: a previous crashed-mid-execute resume may have already left
+    # ToolResultMessage(s) for some of the unresolved tool_calls after asst_pos.
+    # Skip those — DO NOT re-run side-effecting tool bodies.
+    already_resolved = {
+        m.tool_call_id
+        for m in context.messages[asst_pos + 1 :]
+        if isinstance(m, ToolResultMessage)
+    }
+    remaining = [tc for tc in unresolved if tc.id not in already_resolved]
+
+    await emit_event(emit, AgentStartEvent())
+    await emit_event(emit, TurnStartEvent())
+
+    current_context = context
+    batch_tool_results: list[ToolResultMessage] = []
+    terminated_by_tool = False
+
+    if remaining:
+        # Build a fresh assistant message containing only the remaining
+        # tool_calls so execute_tool_calls processes those exact entries.
+        # We do NOT mutate `last` itself — model_copy gives an independent
+        # AssistantMessage that execute_tool_calls can read from.
+        remaining_ids = {tc.id for tc in remaining}
+        partial_msg = last.model_copy(
+            update={
+                "content": [
+                    c
+                    for c in last.content
+                    if not isinstance(c, ToolCall) or c.id in remaining_ids
+                ],
+            }
+        )
+        batch = await execute_tool_calls(
+            current_context,
+            partial_msg,
+            tool_execution=tool_execution,
+            before_tool_call=before_tool_call,
+            after_tool_call=after_tool_call,
+            signal=(stream_options or StreamOptions()).signal,
+            emit=emit,
+        )
+        batch_tool_results = list(batch.messages)
+        terminated_by_tool = batch.terminate
+
+        for r in batch_tool_results:
+            current_context.messages.append(r)
+            new_messages.append(r)
+
+    # Clear pending_request from checkpointer NOW — after tool_results are
+    # appended (and have been checkpointed by the Agent layer's MessageEndEvent
+    # handler). The pending_request column / row is the cross-process witness;
+    # holding it until here preserves crash-recovery idempotency (see spec §5.2).
+    if checkpointer is not None and thread_id is not None:
+        save_pending = getattr(checkpointer, "save_pending_request", None)
+        if save_pending is not None:
+            await save_pending(thread_id, None)
+
+    # Emit TurnEndEvent with the ACTUAL tool_results so listeners get the
+    # right payload (codex BLOCKING: previous draft emitted []).
+    await emit_event(emit, TurnEndEvent(message=last, tool_results=batch_tool_results))
+
+    # Drain steering AFTER tool_results, BEFORE termination check — preserves
+    # the Anthropic adjacency invariant (no user/system message wedged between
+    # tool_use and tool_result) AND matches existing _run_loop ordering, which
+    # drains steering before its terminal AgentEndEvent.
+    if get_steering_messages:
+        steering = await get_steering_messages() or []
+        for msg in steering:
+            await emit_event(emit, MessageStartEvent(message=msg))
+            await emit_event(emit, MessageEndEvent(message=msg))
+            current_context.messages.append(msg)
+            new_messages.append(msg)
+
+    # Honor should_stop_after_turn (codex BLOCKING: previous draft skipped this).
+    if should_stop_after_turn:
+        stop_ctx = ShouldStopAfterTurnContext(
+            message=last,
+            tool_results=batch_tool_results,
+            context=current_context,
+            new_messages=new_messages,
+        )
+        if await should_stop_after_turn(stop_ctx):
+            await emit_event(emit, AgentEndEvent(messages=new_messages))
+            return new_messages
+
+    # Terminate-by-tool semantics (codex BLOCKING: previous draft ignored).
+    if terminated_by_tool:
+        await emit_event(emit, AgentEndEvent(messages=new_messages))
+        return new_messages
+
+    # Fall through to the normal loop for the next model turn.
     await _run_loop(
         current_context=current_context,
         new_messages=new_messages,

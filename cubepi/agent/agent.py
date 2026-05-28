@@ -5,9 +5,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, TypeVar
 
-from cubepi.agent.loop import run_agent_loop, run_agent_loop_continue
+from cubepi.agent.loop import (
+    run_agent_loop,
+    run_agent_loop_continue,
+    run_agent_loop_resume,
+)
 from cubepi.hitl import HitlError, HitlRequest
 from cubepi.hitl.channel import HitlChannel
+from cubepi.hitl.exceptions import HitlDetached
 from cubepi.middleware.base import Middleware, compose_middleware
 from cubepi.agent.types import (
     AgentContext,
@@ -371,6 +376,200 @@ class Agent(Generic[TMessage]):
             messages=list(self._state._messages),
             tools=list(self._state._tools),
             extra=self._extra,
+        )
+
+    async def detach(self) -> None:
+        from cubepi.agent.types import AgentSuspendedEvent
+
+        if self._channel is None:
+            raise HitlError("agent has no channel bound")
+        pending = self._channel.pending
+        if (
+            pending is None
+            or self._channel._future is None
+            or self._channel._future.done()
+        ):
+            return  # nothing to detach
+        # Emit the suspended event BEFORE triggering the exception, so listeners
+        # see the real pending payload (codex pass 2 BLOCKING: previous draft
+        # emitted from the loop with pending=None — fundamentally wrong).
+        await self._process_event(AgentSuspendedEvent(pending_request=pending))
+        self._channel._future.set_exception(HitlDetached())
+
+    async def load_pending_hitl_request(self) -> HitlRequest | None:
+        if self.checkpointer is None or self.thread_id is None:
+            return None
+        load_pending = getattr(self.checkpointer, "load_pending_request", None)
+        if load_pending is None:
+            return None  # checkpointer doesn't support HITL — graceful None
+        return await load_pending(self.thread_id)
+
+    async def respond(self, *, question_id: str | None = None, answer: Any) -> None:
+        from cubepi.hitl.exceptions import (
+            HitlNoPendingRequest,
+            HitlStaleAnswer,
+        )
+
+        if self._channel is None:
+            raise HitlError("agent has no channel bound")
+        if not (self.thread_id and self.checkpointer):
+            raise RuntimeError("respond() requires thread_id + checkpointer")
+
+        load_pending = getattr(self.checkpointer, "load_pending_request", None)
+        if load_pending is None:
+            raise HitlError(
+                "respond() requires a checkpointer that implements "
+                "load_pending_request (and save_pending_request)"
+            )
+
+        async with self._run_lock:
+            if not self._state._messages:
+                data = await self.checkpointer.load(self.thread_id)
+                if data:
+                    self._state._messages = list(data.messages or [])
+                    self._extra = dict(data.extra or {})
+
+            pending = await load_pending(self.thread_id)
+            if pending is None:
+                raise HitlNoPendingRequest("no pending request on this thread")
+            if question_id is None:
+                question_id = pending.question_id
+            if question_id != pending.question_id:
+                raise HitlStaleAnswer(
+                    f"answer for {question_id}, pending is {pending.question_id}"
+                )
+
+            self._channel.attach_resume_answer(question_id, answer)
+            await self._run_hitl_resume()
+
+    async def abort_pending(self, reason: str = "aborted by host") -> None:
+        """Abort a pending HITL request and CLOSE the conversation.
+
+        Per spec §5.2 "abort closes the conversation" — no new model call.
+        Two-phase: Phase 1 (no lock) interrupts any in-flight HITL await via
+        the agent signal; Phase 2 (with lock) appends synthetic deny
+        tool_results + a terminal stop_reason="aborted" assistant message
+        and emits AgentAbortedEvent.
+        """
+        from cubepi.agent.types import AgentAbortedEvent
+
+        if self._channel is None:
+            raise HitlError("agent has no channel bound")
+        if not (self.thread_id and self.checkpointer):
+            raise RuntimeError("abort_pending() requires thread_id + checkpointer")
+
+        # ============= Phase 1: interrupt any in-flight HITL await =============
+        # If prompt() is currently suspended in channel.{ask,confirm,approve},
+        # set the agent signal. _BaseChannel._await_answer races signal vs
+        # future and raises HitlAborted when signal wins. HitlAborted
+        # propagates through tool/middleware (HitlControlException is re-raised
+        # by the selective handler in _execute_prepared) up to _run_loop's
+        # outer silent catch. The HITL channel's finally calls
+        # _on_pending_cleared(exc=HitlAborted) which clears persisted pending
+        # (HitlAborted != HitlDetached).
+        #
+        # CRITICAL: do NOT acquire _run_lock here — prompt() holds it.
+        in_flight = self._channel.pending
+        if in_flight is not None:
+            if self._active_signal is not None:
+                self._active_signal.set()
+            else:
+                # Edge: channel has pending but agent has no active signal
+                # (e.g. respond() race window). Cancel directly.
+                await self._channel.cancel(in_flight.question_id, reason=reason)
+
+        # ============= Phase 2: append synthetic deny + close conversation =====
+        async with self._run_lock:
+            save_pending = getattr(self.checkpointer, "save_pending_request", None)
+            if save_pending is None:
+                raise HitlError(
+                    "abort_pending() requires a checkpointer that implements "
+                    "save_pending_request"
+                )
+
+            # Reload messages from checkpoint to see whatever prompt() persisted.
+            data = await self.checkpointer.load(self.thread_id)
+            self._state._messages = list(data.messages or []) if data else []
+            if not self._state._messages:
+                # Nothing to close (no in-flight, no persisted history).
+                await self._process_event(AgentAbortedEvent(reason=reason))
+                return
+
+            last = self._state._messages[-1]
+            if not isinstance(last, AssistantMessage):
+                # No unresolved tool_calls in tail — conversation already ended
+                # by some other path. Still emit the event for observability.
+                await save_pending(self.thread_id, None)
+                await self._process_event(AgentAbortedEvent(reason=reason))
+                return
+
+            # Find unresolved tool_calls in `last` (those without a matching
+            # ToolResultMessage anywhere later in the conversation).
+            tool_call_ids = [c.id for c in last.content if isinstance(c, ToolCall)]
+            asst_pos = len(self._state._messages) - 1
+            already_resolved = {
+                m.tool_call_id
+                for m in self._state._messages[asst_pos + 1 :]
+                if isinstance(m, ToolResultMessage)
+            }
+            unresolved = [
+                tc_id for tc_id in tool_call_ids if tc_id not in already_resolved
+            ]
+
+            # Synthesize deny tool_result for each unresolved tool_call.
+            for tc_id in unresolved:
+                tc = next(
+                    c for c in last.content if isinstance(c, ToolCall) and c.id == tc_id
+                )
+                synthetic = ToolResultMessage(
+                    tool_call_id=tc_id,
+                    tool_name=tc.name,
+                    content=[TextContent(text=f"aborted: {reason}")],
+                    details={"hitl": {"decision": "aborted", "reason": reason}},
+                    is_error=True,
+                    timestamp=time.time(),
+                )
+                self._state._messages.append(synthetic)
+                await self.checkpointer.append(self.thread_id, [synthetic])
+
+            # Append terminal aborted assistant only if we actually appended
+            # synthetic denials — otherwise the conversation already closed.
+            if unresolved:
+                term = AssistantMessage(
+                    content=[TextContent(text=f"Conversation aborted: {reason}")],
+                    stop_reason="aborted",
+                    usage=Usage(),
+                    timestamp=time.time(),
+                )
+                self._state._messages.append(term)
+                await self.checkpointer.append(self.thread_id, [term])
+
+            # Defensive clear (Phase 1's _on_pending_cleared usually did this,
+            # but cross-process abort_pending may bypass Phase 1 entirely).
+            await save_pending(self.thread_id, None)
+            await self._process_event(AgentAbortedEvent(reason=reason))
+
+    async def _run_hitl_resume(self) -> None:
+        await self._run_with_lifecycle(
+            lambda signal: run_agent_loop_resume(
+                context=self._create_context_snapshot(),
+                provider=self._provider,
+                model=self._state.model,
+                convert_to_llm=self.convert_to_llm,
+                transform_context=self.transform_context,
+                transform_system_prompt=self.transform_system_prompt,
+                after_model_response=self.after_model_response,
+                before_tool_call=self.before_tool_call,
+                after_tool_call=self.after_tool_call,
+                should_stop_after_turn=self.should_stop_after_turn,
+                get_steering_messages=self._make_async_drain(self._steering_queue),
+                get_follow_up_messages=self._make_async_drain(self._follow_up_queue),
+                stream_options=self._build_stream_options(signal),
+                tool_execution=self.tool_execution,
+                emit=lambda e: self._process_event(e),
+                checkpointer=self.checkpointer,
+                thread_id=self.thread_id,
+            )
         )
 
     async def _run_with_lifecycle(self, executor: Callable) -> None:
