@@ -314,3 +314,28 @@ async def test_cancel_with_stale_qid_raises():
 
     with pytest.raises(HitlStaleAnswer):
         await ch.cancel("not-the-qid")
+
+
+def test_load_pending_hitl_request_with_valid_checkpointer():
+    """Cover the return-await-load_pending path in load_pending_hitl_request."""
+    cp = MemoryCheckpointer()
+    agent = _agent(channel=InMemoryChannel(), checkpointer=cp, thread_id="t-1")
+    result = asyncio.get_event_loop().run_until_complete(
+        agent.load_pending_hitl_request()
+    )
+    # No pending data exists — returns None.
+    assert result is None
+
+
+def test_load_pending_hitl_request_no_hitl_method():
+    """Checkpointer that lacks load_pending_request — graceful None."""
+
+    class _NoHITLCp:
+        async def load(self, tid):
+            return None
+
+    agent = _agent(channel=InMemoryChannel(), checkpointer=_NoHITLCp(), thread_id="t-1")
+    result = asyncio.get_event_loop().run_until_complete(
+        agent.load_pending_hitl_request()
+    )
+    assert result is None
