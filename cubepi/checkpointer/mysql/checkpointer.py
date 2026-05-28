@@ -274,3 +274,54 @@ class MySQLCheckpointer:
             except BaseException:  # pragma: no cover - defensive txn rollback
                 await conn.rollback()
                 raise
+
+    async def save_pending_request(self, thread_id, request):
+        # Matches the explicit-begin/commit/rollback pattern used by
+        # save_extra and append (see cubepi/checkpointer/mysql/checkpointer.py).
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
+                        "ON DUPLICATE KEY UPDATE thread_id = thread_id",
+                        (thread_id,),
+                    )
+                    if request is None:
+                        await cur.execute(
+                            "UPDATE cubepi_threads SET pending_request = NULL, "
+                            "updated_at = CURRENT_TIMESTAMP WHERE thread_id = %s",
+                            (thread_id,),
+                        )
+                    else:
+                        payload = request.model_dump_json()
+                        await cur.execute(
+                            "UPDATE cubepi_threads SET pending_request = %s, "
+                            "updated_at = CURRENT_TIMESTAMP WHERE thread_id = %s",
+                            (payload, thread_id),
+                        )
+                await conn.commit()
+            except BaseException:  # pragma: no cover - defensive txn rollback
+                await conn.rollback()
+                raise
+
+    async def load_pending_request(self, thread_id):
+        from cubepi.hitl.types import HitlRequest
+
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT pending_request FROM cubepi_threads WHERE thread_id = %s",
+                    (thread_id,),
+                )
+                row = await cur.fetchone()
+        if row is None or row[0] is None:
+            return None
+        raw = row[0]
+        # aiomysql returns JSON columns as str; tolerate already-parsed dicts (same
+        # convention as the existing _parse_json helper in this module).
+        if isinstance(raw, str):
+            return HitlRequest.model_validate_json(raw)
+        return HitlRequest.model_validate(raw)

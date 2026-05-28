@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.mysql import JSON, LONGBLOB, VARCHAR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-EXPECTED_SCHEMA_VERSION = 1
+EXPECTED_SCHEMA_VERSION = 2
 PARTITION_COUNT = 64
 
 cubepi_metadata = sa.MetaData()
@@ -43,6 +43,10 @@ class CubepiThread(CubepiBase):
         JSON,
         nullable=False,
         server_default=sa.text("(JSON_OBJECT())"),
+    )
+    pending_request: Mapped[dict[str, Any] | None] = mapped_column(
+        sa.JSON,
+        nullable=True,
     )
     created_at: Mapped[_dt.datetime] = mapped_column(
         sa.TIMESTAMP,

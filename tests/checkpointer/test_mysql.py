@@ -36,7 +36,7 @@ def test_models_import() -> None:
         cubepi_metadata,
     )
 
-    assert EXPECTED_SCHEMA_VERSION == 1
+    assert EXPECTED_SCHEMA_VERSION == 2
     assert PARTITION_COUNT == 64
     assert CubepiThread.__tablename__ == "cubepi_threads"
     assert CubepiMessage.__tablename__ == "cubepi_messages"
@@ -78,11 +78,13 @@ def test_messages_partition_clause() -> None:
 
 
 def test_write_schema_version_op_clears_stale_then_inserts() -> None:
+    from cubepi.checkpointer.mysql.models import EXPECTED_SCHEMA_VERSION
+
     sql = write_schema_version_op()
     assert "DELETE FROM cubepi_schema_version" in sql
-    assert "WHERE version <> 1" in sql
+    assert f"WHERE version <> {EXPECTED_SCHEMA_VERSION}" in sql
     assert "INSERT IGNORE INTO cubepi_schema_version" in sql
-    assert "VALUES (1)" in sql
+    assert f"VALUES ({EXPECTED_SCHEMA_VERSION})" in sql
     assert sql.index("DELETE") < sql.index("INSERT")
 
 
@@ -368,7 +370,7 @@ async def test_version_mismatch_raises(clean_mysql_db) -> None:
     with pytest.raises(CubepiSchemaMismatch) as exc_info:
         async with MySQLCheckpointer(clean_mysql_db):
             pass
-    assert exc_info.value.expected == 1
+    assert exc_info.value.expected == 2
     assert exc_info.value.actual == 999
 
 

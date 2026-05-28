@@ -209,3 +209,45 @@ class PostgresCheckpointer:
                 thread_id,
                 json.dumps(extra),
             )
+
+    async def save_pending_request(self, thread_id: str, request) -> None:
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                # Ensure thread row exists (lazy creation matches save_extra path).
+                await conn.execute(
+                    "INSERT INTO cubepi_threads (thread_id) "
+                    "VALUES ($1) ON CONFLICT DO NOTHING",
+                    thread_id,
+                )
+                if request is None:
+                    await conn.execute(
+                        "UPDATE cubepi_threads SET pending_request = NULL, "
+                        "updated_at = now() WHERE thread_id = $1",
+                        thread_id,
+                    )
+                else:
+                    payload = request.model_dump_json()
+                    await conn.execute(
+                        "UPDATE cubepi_threads SET pending_request = $2::jsonb, "
+                        "updated_at = now() WHERE thread_id = $1",
+                        thread_id,
+                        payload,
+                    )
+
+    async def load_pending_request(self, thread_id: str):
+        from cubepi.hitl.types import HitlRequest
+
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT pending_request FROM cubepi_threads WHERE thread_id = $1",
+                thread_id,
+            )
+        if row is None or row["pending_request"] is None:
+            return None
+        raw = row["pending_request"]
+        # asyncpg returns JSONB as already-parsed dict OR str depending on codec config.
+        if isinstance(raw, str):
+            return HitlRequest.model_validate_json(raw)
+        return HitlRequest.model_validate(raw)

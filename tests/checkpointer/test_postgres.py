@@ -17,7 +17,7 @@ def test_models_import() -> None:
         cubepi_metadata,
     )
 
-    assert EXPECTED_SCHEMA_VERSION == 1
+    assert EXPECTED_SCHEMA_VERSION == 2
     assert PARTITION_COUNT == 64
     # All three model classes are reachable via the public model module
     assert CubepiThread.__tablename__ == "cubepi_threads"
@@ -72,21 +72,23 @@ def test_create_message_partitions_op_partitions_are_zero_padded() -> None:
 
 def test_write_schema_version_op_includes_expected_version() -> None:
     from cubepi.checkpointer.postgres.alembic_helpers import write_schema_version_op
+    from cubepi.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
 
     sql = write_schema_version_op()
     assert "INSERT INTO cubepi_schema_version" in sql
-    assert "VALUES (1)" in sql
+    assert f"VALUES ({EXPECTED_SCHEMA_VERSION})" in sql
     assert "ON CONFLICT" in sql
 
 
 def test_write_schema_version_op_clears_stale_rows() -> None:
     """A prior version's row must be removed so _verify_schema sees the new one."""
     from cubepi.checkpointer.postgres.alembic_helpers import write_schema_version_op
+    from cubepi.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
 
     sql = write_schema_version_op()
     # Must DELETE rows whose version is not the expected one before INSERT.
     assert "DELETE FROM cubepi_schema_version" in sql
-    assert "WHERE version <> 1" in sql
+    assert f"WHERE version <> {EXPECTED_SCHEMA_VERSION}" in sql
     # And the DELETE must come before the INSERT in the statement order.
     assert sql.index("DELETE") < sql.index("INSERT")
 
@@ -320,7 +322,7 @@ async def test_version_mismatch_raises(clean_db) -> None:
     with pytest.raises(CubepiSchemaMismatch) as exc_info:
         async with PostgresCheckpointer(clean_db):
             pass
-    assert exc_info.value.expected == 1
+    assert exc_info.value.expected == 2
     assert exc_info.value.actual == 999
 
 
