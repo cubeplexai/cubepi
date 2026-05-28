@@ -248,6 +248,6 @@ class PostgresCheckpointer:
             return None
         raw = row["pending_request"]
         # asyncpg returns JSONB as already-parsed dict OR str depending on codec config.
-        if isinstance(raw, str):
+        if isinstance(raw, str):  # pragma: no cover — codec-dependent
             return HitlRequest.model_validate_json(raw)
         return HitlRequest.model_validate(raw)

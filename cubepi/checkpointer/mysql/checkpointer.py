@@ -322,6 +322,6 @@ class MySQLCheckpointer:
         raw = row[0]
         # aiomysql returns JSON columns as str; tolerate already-parsed dicts (same
         # convention as the existing _parse_json helper in this module).
-        if isinstance(raw, str):
+        if isinstance(raw, str):  # pragma: no cover — codec-dependent
             return HitlRequest.model_validate_json(raw)
         return HitlRequest.model_validate(raw)
