@@ -20,6 +20,17 @@ def messages_partition_clause() -> str:
     return f"PARTITION BY KEY (thread_id) PARTITIONS {PARTITION_COUNT}"
 
 
+def add_pending_request_column_op() -> str:
+    """Return SQL adding the v2 `pending_request` column to cubepi_threads.
+
+    Call inside the host's alembic v1→v2 upgrade() via op.execute(). MySQL does
+    not support IF NOT EXISTS for ADD COLUMN; guard with a schema check in the
+    alembic migration if idempotence is required. Hosts must also bump
+    `cubepi_schema_version` via write_schema_version_op() (EXPECTED_SCHEMA_VERSION
+    is now 2)."""
+    return "ALTER TABLE cubepi_threads ADD COLUMN pending_request JSON NULL"
+
+
 def write_schema_version_op() -> str:
     """Return SQL setting cubepi_schema_version to the current version.
 

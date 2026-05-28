@@ -20,6 +20,16 @@ def create_message_partitions_op() -> str:
     )
 
 
+def add_pending_request_column_op() -> str:
+    """Return SQL adding the v2 `pending_request` column to cubepi_threads.
+
+    Call inside the host's alembic v1→v2 upgrade() via op.execute(). The new
+    column is JSONB NULL. Idempotent under repeated execution via IF NOT EXISTS.
+    Hosts must also bump `cubepi_schema_version` via write_schema_version_op()
+    (already documented; EXPECTED_SCHEMA_VERSION is now 2)."""
+    return "ALTER TABLE cubepi_threads ADD COLUMN IF NOT EXISTS pending_request JSONB"
+
+
 def write_schema_version_op() -> str:
     """Return SQL setting cubepi_schema_version to the current version.
 

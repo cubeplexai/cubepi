@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-EXPECTED_SCHEMA_VERSION = 1
+EXPECTED_SCHEMA_VERSION = 2
 PARTITION_COUNT = 64
 
 cubepi_metadata = sa.MetaData()
@@ -39,6 +39,11 @@ class CubepiThread(CubepiBase):
         JSONB,
         nullable=False,
         server_default=sa.text("'{}'::jsonb"),
+    )
+    pending_request: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        server_default=sa.text("NULL"),
     )
     created_at: Mapped[_dt.datetime] = mapped_column(
         sa.TIMESTAMP(timezone=True),
