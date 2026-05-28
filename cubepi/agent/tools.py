@@ -7,6 +7,8 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
+from cubepi.hitl.exceptions import HitlControlException
+
 from cubepi.agent.types import (
     AfterToolCallContext,
     AgentContext,
@@ -39,6 +41,7 @@ class _PreparedToolCall:
     tool_call: ToolCall
     tool: AgentTool
     args: Any
+    hitl_trace: dict | None = None
 
 
 @dataclass
@@ -47,6 +50,7 @@ class _ImmediateOutcome:
     is_error: bool
     blocked_by_hook: bool = False
     block_reason: str | None = None
+    hitl_trace: dict | None = None
 
 
 @dataclass
@@ -56,18 +60,32 @@ class _FinalizedOutcome:
     is_error: bool
     blocked_by_hook: bool = False
     block_reason: str | None = None
+    hitl_trace: dict | None = None
 
 
 def _error_result(message: str) -> AgentToolResult:
     return AgentToolResult(content=[TextContent(text=message)])
 
 
+def _merge_hitl_details(base: Any, hitl: dict | None) -> Any:
+    if hitl is None:
+        return base
+    if base is None:
+        return {"hitl": hitl}
+    if isinstance(base, dict):
+        merged = dict(base)
+        merged["hitl"] = hitl
+        return merged
+    return {"_non_dict_details": base, "hitl": hitl}
+
+
 def _make_tool_result_message(finalized: _FinalizedOutcome) -> ToolResultMessage:
+    details = _merge_hitl_details(finalized.result.details, finalized.hitl_trace)
     return ToolResultMessage(
         tool_call_id=finalized.tool_call.id,
         tool_name=finalized.tool_call.name,
         content=finalized.result.content,
-        details=finalized.result.details,
+        details=details,
         is_error=finalized.is_error,
         timestamp=time.time(),
     )
@@ -95,7 +113,9 @@ async def _prepare_tool_call(
 
     try:
         validated_args = tool.parameters.model_validate(tool_call.arguments)
-    except (ValidationError, Exception) as exc:
+    except ValidationError as exc:
+        return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
+    except Exception as exc:  # does NOT catch HitlControlException (BaseException)
         return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
 
     if before_tool_call:
@@ -107,19 +127,40 @@ async def _prepare_tool_call(
                 context=context,
             )
             before_result = await before_tool_call(before_ctx, signal=signal)
-            if before_result and before_result.block:
-                return _ImmediateOutcome(
-                    result=_error_result(
-                        before_result.reason or "Tool execution was blocked"
-                    ),
-                    is_error=True,
-                    blocked_by_hook=True,
-                    block_reason=before_result.reason,
-                )
+        except HitlControlException:
+            raise
         except Exception as exc:
             return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
 
-    return _PreparedToolCall(tool_call=tool_call, tool=tool, args=validated_args)
+        if before_result and before_result.block:
+            return _ImmediateOutcome(
+                result=_error_result(
+                    before_result.reason or "Tool execution was blocked"
+                ),
+                is_error=True,
+                blocked_by_hook=True,
+                block_reason=before_result.deny_reason or before_result.reason,
+                hitl_trace=before_result.hitl_trace,
+            )
+
+        if before_result and before_result.edited_args is not None:
+            try:
+                validated_args = tool.parameters.model_validate(
+                    before_result.edited_args
+                )
+            except ValidationError as exc:
+                return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
+
+        hitl_trace_carry = before_result.hitl_trace if before_result else None
+    else:
+        hitl_trace_carry = None
+
+    return _PreparedToolCall(
+        tool_call=tool_call,
+        tool=tool,
+        args=validated_args,
+        hitl_trace=hitl_trace_carry,
+    )
 
 
 async def _execute_prepared(
@@ -143,6 +184,8 @@ async def _execute_prepared(
             ),
         )
         return result, False
+    except HitlControlException:
+        raise
     except Exception as exc:
         return _error_result(str(exc)), True
 
@@ -195,7 +238,10 @@ async def _finalize(
             is_error = True
 
     return _FinalizedOutcome(
-        tool_call=prepared.tool_call, result=result, is_error=is_error
+        tool_call=prepared.tool_call,
+        result=result,
+        is_error=is_error,
+        hitl_trace=prepared.hitl_trace,
     )
 
 
@@ -275,6 +321,7 @@ async def _execute_sequential(
                 is_error=preparation.is_error,
                 blocked_by_hook=preparation.blocked_by_hook,
                 block_reason=preparation.block_reason,
+                hitl_trace=preparation.hitl_trace,
             )
         else:
             result, is_error = await _execute_prepared(preparation, signal, emit_fn)
@@ -339,6 +386,7 @@ async def _execute_parallel(
                 is_error=preparation.is_error,
                 blocked_by_hook=preparation.blocked_by_hook,
                 block_reason=preparation.block_reason,
+                hitl_trace=preparation.hitl_trace,
             )
             await emit_event(
                 emit_fn,

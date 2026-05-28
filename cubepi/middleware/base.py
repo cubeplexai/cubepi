@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
+from cubepi.agent.types import BeforeToolCallResult
 from cubepi.providers.base import AssistantMessage, Message
 
 
@@ -86,12 +87,52 @@ def compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]:
     before_chain = [m for m in middlewares if _has_method(m, "before_tool_call")]
     if before_chain:
 
+        def _rebuild_ctx_with_args(ctx, new_args):
+            from dataclasses import replace
+
+            return replace(ctx, args=new_args)
+
         async def composed_before(ctx, *, signal=None):
+            accumulated_hitl: dict = {}
+            edited_args = None
+            deny_reason: str | None = None
+            block_reason: str | None = None
+            blocked = False
+
+            cur_ctx = ctx
             for mw in before_chain:
-                result = await mw.before_tool_call(ctx, signal=signal)
-                if result and getattr(result, "block", False):
-                    return result
-            return None
+                if edited_args is not None:
+                    cur_ctx = _rebuild_ctx_with_args(ctx, edited_args)
+                result = await mw.before_tool_call(cur_ctx, signal=signal)
+                if result is None:
+                    continue
+                if result.hitl_trace:
+                    if accumulated_hitl:
+                        accumulated_hitl.setdefault("_chain", []).append(
+                            {k: v for k, v in accumulated_hitl.items() if k != "_chain"}
+                        )
+                        # remove already-archived keys before updating with new
+                        for k in list(accumulated_hitl.keys()):
+                            if k != "_chain":
+                                accumulated_hitl.pop(k)
+                    accumulated_hitl.update(result.hitl_trace)
+                if result.edited_args is not None:
+                    edited_args = result.edited_args
+                if result.block:
+                    blocked = True
+                    block_reason = result.reason or block_reason
+                    deny_reason = result.deny_reason or deny_reason
+                    break
+
+            if not blocked and edited_args is None and not accumulated_hitl:
+                return None
+            return BeforeToolCallResult(
+                block=blocked,
+                reason=block_reason,
+                deny_reason=deny_reason,
+                edited_args=edited_args,
+                hitl_trace=accumulated_hitl or None,
+            )
 
         hooks["before_tool_call"] = composed_before
 
