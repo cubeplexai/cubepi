@@ -455,11 +455,41 @@ Expected: all tests passing.
 Run: `uv run ruff check cubepi/hitl/ tests/hitl/ && uv run ruff format cubepi/hitl/ tests/hitl/`
 Expected: zero issues.
 
-- [ ] **Step 1.13: Commit**
+- [ ] **Step 1.13: Add `tests/hitl/conftest.py` with shared polling helper**
+
+Codex pass 2 flagged the `while ch.pending is None: await asyncio.sleep(0)` pattern as fragile — a failing host task can hang the main await forever. Centralize the pattern in a helper that wraps `asyncio.wait_for`:
+
+```python
+# tests/hitl/conftest.py
+import asyncio
+import pytest
+
+
+async def await_pending(channel, *, timeout: float = 2.0) -> None:
+    """Wait until channel.pending becomes non-None, or fail the test on timeout.
+
+    Use this in tests that race a host coroutine against an awaiting agent.
+    Replaces the `while ch.pending is None: await asyncio.sleep(0)` pattern,
+    which silently hangs if the host task crashes.
+    """
+    async def _wait():
+        while channel.pending is None:
+            await asyncio.sleep(0)
+    try:
+        await asyncio.wait_for(_wait(), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        raise AssertionError(
+            f"channel.pending did not become set within {timeout}s"
+        ) from exc
+```
+
+The tests in Tasks 2 / 6 / 9 / 11 that currently use the raw polling pattern can be updated incrementally to call `await await_pending(ch)` instead — not required for correctness, but it makes failures point at the right line.
+
+- [ ] **Step 1.14: Commit**
 
 ```bash
-git add cubepi/hitl/__init__.py cubepi/hitl/types.py cubepi/hitl/exceptions.py cubepi/hitl/policy.py tests/hitl/
-git commit -m "feat(hitl): types, exception hierarchy, policy enum"
+git add cubepi/hitl/__init__.py cubepi/hitl/types.py cubepi/hitl/exceptions.py cubepi/hitl/policy.py tests/hitl/__init__.py tests/hitl/conftest.py tests/hitl/test_types.py tests/hitl/test_exceptions.py
+git commit -m "feat(hitl): types, exception hierarchy, policy enum, test helpers"
 ```
 
 ---
@@ -819,28 +849,42 @@ class _BaseChannel:
 
         await self._on_pending_set(req)
 
+        exc_caught: BaseException | None = None
+        signal_task: asyncio.Future[Any] | None = None
         try:
             if signal is None and effective_timeout is None:
                 return await self._future
             tasks: list[asyncio.Future[Any]] = [self._future]
             if signal is not None:
-                tasks.append(asyncio.ensure_future(signal.wait()))
-            done, pending = await asyncio.wait(
+                signal_task = asyncio.ensure_future(signal.wait())
+                tasks.append(signal_task)
+            done, pending_tasks = await asyncio.wait(
                 tasks, timeout=effective_timeout,
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            for p in pending:
+            # Clean up pending tasks (the loser of the race + any signal task
+            # we never want to leave hanging).
+            for p in pending_tasks:
                 if p is not self._future:
                     p.cancel()
             if not done:
                 raise HitlTimedOut(effective_timeout)
-            if signal is not None and signal.is_set() and self._future not in done:
+            # Use task identity, not signal.is_set() — Agent.abort() leaves the
+            # signal sticky-set, so signal.is_set() would be true even on the
+            # happy path after a prior abort. The race winner is what matters.
+            if signal_task is not None and signal_task in done and self._future not in done:
                 raise HitlAborted("agent signal fired during HITL pending")
             return self._future.result()
+        except BaseException as exc:
+            exc_caught = exc
+            raise
         finally:
+            # Cancel any still-pending signal task to avoid leaks.
+            if signal_task is not None and not signal_task.done():
+                signal_task.cancel()
             self._pending = None
             self._future = None
-            await self._on_pending_cleared(req)
+            await self._on_pending_cleared(req, exc=exc_caught)
 
     async def _on_pending_set(self, req: HitlRequest) -> None:
         # Emit event and broadcast to subscribers.
@@ -850,8 +894,12 @@ class _BaseChannel:
             from cubepi.agent.types import HitlRequestEvent  # avoid circular
             await self._emit_event(HitlRequestEvent(request=req))
 
-    async def _on_pending_cleared(self, req: HitlRequest) -> None:
-        # No-op in InMemory; CheckpointedChannel overrides to clear DB row.
+    async def _on_pending_cleared(
+        self, req: HitlRequest, *, exc: BaseException | None = None,
+    ) -> None:
+        # No-op in InMemory; CheckpointedChannel overrides to clear DB row
+        # ONLY when the unwind cause is not HitlDetached (which signals a
+        # cross-process suspend that must keep persisted pending).
         pass
 
     async def _emit_event(self, event) -> None:
@@ -1099,6 +1147,14 @@ async def test_compose_before_returns_none_when_no_middleware_speaks():
 Run: `uv run pytest tests/hitl/test_compose_middleware.py -v`
 
 - [ ] **Step 3.7: Rewrite `composed_before` in `cubepi/middleware/base.py`**
+
+First add the missing import at the top of `cubepi/middleware/base.py` (existing imports only include provider message types):
+
+```python
+from cubepi.agent.types import BeforeToolCallResult
+```
+
+(This was missing from the previous draft — leaving it out causes a runtime NameError when `composed_before` returns one.)
 
 Find the existing `composed_before` (around lines 86-96) and replace with:
 
@@ -1394,31 +1450,26 @@ Run: `uv run pytest tests/hitl/test_loop_hitl_passthrough.py -v`
 
 - [ ] **Step 3.13: Patch `_run_loop` outer exception handler in `cubepi/agent/loop.py`**
 
-Wrap the body of `_run_loop` with `try / except HitlDetached / except HitlAborted`:
+Wrap the body of `_run_loop` to **silently** catch `HitlDetached` / `HitlAborted` — the Agent caller that triggered these has already emitted the corresponding `AgentSuspendedEvent` / `AgentAbortedEvent` (see Task 5.5 + Task 9.5). The loop does not emit any extra event:
 
 ```python
 async def _run_loop(*, current_context, new_messages, provider, model, ...):
     try:
         # ... existing _run_loop body ...
-    except HitlDetached:
-        # Emit AgentSuspendedEvent (added in Task 5); for now emit AgentEndEvent
-        # with a marker — Task 5 wires the proper event.
-        from cubepi.agent.types import AgentEndEvent
-        await emit_event(emit, AgentEndEvent(messages=new_messages))
-        return
-    except HitlAborted:
-        from cubepi.agent.types import AgentEndEvent
-        await emit_event(emit, AgentEndEvent(messages=new_messages))
+    except (HitlDetached, HitlAborted):
+        # Caller (Agent.detach / Agent.abort_pending) emitted the event
+        # already. Loop exits silently — assistant message and pending
+        # state remain intact for the next respond() call.
         return
 ```
 
-Add the imports at top of `cubepi/agent/loop.py`:
+Add the import at top of `cubepi/agent/loop.py`:
 
 ```python
 from cubepi.hitl.exceptions import HitlAborted, HitlDetached
 ```
 
-This is a placeholder for the dedicated events; Task 5 replaces the `AgentEndEvent` lines.
+(Only these two — no event-class imports needed in the loop module.)
 
 - [ ] **Step 3.14: Run full test suite — expected PASS, no regressions**
 
@@ -1452,12 +1503,13 @@ import pytest
 from cubepi.agent.agent import Agent
 from cubepi.hitl import HitlError
 from cubepi.hitl.channel import InMemoryChannel
-from cubepi.providers.faux import FauxProvider, FauxScript
+from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubepi.providers.base import Model
 
 
 def _agent(channel=None):
-    provider = FauxProvider(scripts=[FauxScript()])
+    provider = FauxProvider()
+    provider.set_responses([faux_assistant_message("")])
     return Agent(
         provider=provider,
         model=Model(id="faux", provider="faux"),
@@ -1506,8 +1558,22 @@ Add `channel: HitlChannel | None = None` to `Agent.__init__`'s signature. Locate
         self._channel = channel
         if channel is not None:
             channel._bind_emit(lambda e: self._process_event(e))
-        self._run_lock = asyncio.Lock()    # used by respond/abort in Task 7
+        self._run_lock = asyncio.Lock()
 ```
+
+Wrap the **existing** `prompt()` and `resume()` method bodies with `async with self._run_lock:` (codex pass 2 BLOCKING: lock was introduced but never acquired by prompt/resume — `respond()` could race them). Concretely, in [agent.py](cubepi/agent/agent.py), the existing methods become:
+
+```python
+    async def prompt(self, message) -> None:
+        async with self._run_lock:
+            # ... existing body ...
+
+    async def resume(self) -> None:
+        async with self._run_lock:
+            # ... existing body ...
+```
+
+The lock is reentrant-safe in cubepi's usage because `prompt()` / `resume()` never call each other; they only invoke `_run_with_lifecycle` which doesn't re-acquire. Existing `_state.is_streaming` flag stays as a debug signal but the lock is now the source of truth (matches the spec §5.2 "Concurrency guard" paragraph).
 
 Add the type import at top of `agent.py`:
 
@@ -1633,53 +1699,59 @@ NOTE: `request`/`pending_request` are `Any` to avoid the circular import (`cubep
 
 Run: `uv run pytest tests/hitl/test_events.py -v`
 
-- [ ] **Step 5.5: Replace placeholder events in `cubepi/agent/loop.py`**
+- [ ] **Step 5.5: Wire real events at the right layer**
 
-The Task 3 placeholder used `AgentEndEvent`. Now wire the real events:
+Critical correction from codex pass 2: the loop has **no channel handle** in its function signature ([loop.py:143](cubepi/agent/loop.py)), so it cannot emit `AgentSuspendedEvent(pending_request=...)` with a real payload. Emitting it with `pending_request=None` violates the event contract.
+
+The right design: **the Agent layer emits these events, not the loop.**
+
+- **`HitlDetached`** is raised from `Agent.detach()` itself (Task 9.5), which has access to `self._channel.pending`. `Agent.detach()` emits `AgentSuspendedEvent(pending_request=self._channel.pending)` *before* triggering the exception. The loop just catches `HitlDetached` and exits silently — no event emitted from loop.
+- **`HitlAborted`** is raised when a channel's signal fires (Task 9.5's `Agent.abort_pending` is the source). `Agent.abort_pending()` emits the terminal `AgentAbortedEvent` itself. Loop catches `HitlAborted` and exits silently.
+
+Patch `_run_loop` outer handlers (replacing Task 3.13's placeholder):
 
 ```python
     try:
         # ... existing _run_loop body ...
-    except HitlDetached:
-        from cubepi.agent.types import AgentSuspendedEvent
-        from cubepi.hitl.channel import _BaseChannel   # for type check below
-        # Get the pending request from the channel if available.
-        # The detach path means channel's _pending is set; we read it here.
-        # (In practice, _channel is bound via Agent → use the lambda's closure
-        # to access channel from outside — but loop is decoupled from Agent.
-        # So we rely on the channel having persisted the pending; AgentSuspendedEvent
-        # carries it for downstream listeners.)
-        await emit_event(emit, AgentSuspendedEvent(pending_request=None))
-        return
-    except HitlAborted as exc:
-        from cubepi.agent.types import AgentAbortedEvent
-        await emit_event(emit, AgentAbortedEvent(reason=str(exc) or "aborted"))
+    except (HitlDetached, HitlAborted):
+        # Caller (Agent.detach / Agent.abort_pending) has already emitted the
+        # appropriate AgentSuspended/AgentAborted event with the real pending.
+        # Loop exits silently — assistant message and pending state are intact.
         return
 ```
 
-Note: `AgentSuspendedEvent.pending_request` is `None` here because the loop doesn't have a direct handle to the channel. The Agent layer (Task 7) populates it from `agent.channel.pending` or `agent.load_pending_hitl_request()` before re-emitting. For now the event fires with `None` — downstream tests in Task 7 verify the Agent layer fills it.
-
-- [ ] **Step 5.6: Update the import block to use the new event types**
-
-Add to the existing `from cubepi.agent.types import` block in `loop.py`:
+The `loop.py` import block needs **only** the exception types it actually uses:
 
 ```python
-from cubepi.agent.types import (
-    AgentContext,
-    AgentEndEvent,
-    AgentStartEvent,
-    AgentSuspendedEvent,
-    AgentAbortedEvent,
-    HitlRequestEvent,
-    HitlAnswerEvent,
-    MessageEndEvent,
-    MessageStartEvent,
-    MessageUpdateEvent,
-    ShouldStopAfterTurnContext,
-    TurnEndEvent,
-    TurnStartEvent,
+from cubepi.hitl.exceptions import HitlAborted, HitlDetached
+```
+
+Do **not** add `HitlRequestEvent` / `HitlAnswerEvent` / `AgentSuspendedEvent` / `AgentAbortedEvent` imports to `loop.py` — those are emitted by the channel and the Agent class, not by the loop, and adding unused imports trips ruff F401.
+
+- [ ] **Step 5.6: Extend the `AgentEvent` Union in `cubepi/agent/types.py`**
+
+Find the existing union (around line 170-181) and extend it so typed listeners / sinks include the new variants:
+
+```python
+AgentEvent = (
+    AgentStartEvent
+    | AgentEndEvent
+    | TurnStartEvent
+    | TurnEndEvent
+    | MessageStartEvent
+    | MessageUpdateEvent
+    | MessageEndEvent
+    | ToolExecutionStartEvent
+    | ToolExecutionUpdateEvent
+    | ToolExecutionEndEvent
+    | HitlRequestEvent
+    | HitlAnswerEvent
+    | AgentSuspendedEvent
+    | AgentAbortedEvent
 )
 ```
+
+Verify by running mypy-like type checks isn't needed (project has no mypy in CI per CLAUDE.md), but the type alias should be syntactically clean.
 
 - [ ] **Step 5.7: Run full test suite**
 
@@ -2087,6 +2159,38 @@ async def test_ask_user_tool_returns_answers_in_details():
     assert "color" in result.content[0].text
 
 
+async def test_ask_user_tool_cancel_becomes_tool_error():
+    ch = InMemoryChannel()
+
+    async def canceller():
+        while ch.pending is None:
+            await asyncio.sleep(0)
+        await ch.cancel(ch.pending.question_id, reason="closed tab")
+
+    tool = ask_user_tool(ch)
+    asyncio.create_task(canceller())
+    result = await tool.execute(
+        "tc-1",
+        tool.parameters.model_validate({"questions": [{"key": "x", "prompt": "?"}]}),
+        signal=None, on_update=lambda p: None,
+    )
+    assert result.is_error is True
+    assert result.details["hitl"]["outcome"] == "cancelled"
+    assert result.details["hitl"]["reason"] == "closed tab"
+
+
+async def test_ask_user_tool_timeout_becomes_tool_error():
+    ch = InMemoryChannel(default_timeout=0.05)
+    tool = ask_user_tool(ch)
+    result = await tool.execute(
+        "tc-1",
+        tool.parameters.model_validate({"questions": [{"key": "x", "prompt": "?"}]}),
+        signal=None, on_update=lambda p: None,
+    )
+    assert result.is_error is True
+    assert result.details["hitl"]["outcome"] == "timed_out"
+
+
 async def test_ask_user_tool_multi_question_form():
     ch = InMemoryChannel()
 
@@ -2163,6 +2267,7 @@ def _format_answers(answers: dict) -> str:
 
 def ask_user_tool(channel: HitlChannel) -> AgentTool:
     async def execute(call_id: str, args: AskUserParams, *, signal=None, on_update=None) -> AgentToolResult:
+        from cubepi.hitl.exceptions import HitlCancelled, HitlTimedOut
         questions = [
             Question(
                 key=q.key,
@@ -2173,7 +2278,24 @@ def ask_user_tool(channel: HitlChannel) -> AgentTool:
             )
             for q in args.questions
         ]
-        answers = await channel.ask(questions, signal=signal)
+        # Per spec §7: cancel/timeout in ask_user context surface as
+        # tool_result.is_error=True so the model can react. Other HITL control
+        # exceptions (HitlDetached, HitlAborted) DO propagate — those signal
+        # whole-agent state changes that must reach the loop's outer catch.
+        try:
+            answers = await channel.ask(questions, signal=signal)
+        except HitlCancelled as exc:
+            return AgentToolResult(
+                content=[TextContent(text=f"cancelled by user: {exc.reason}")],
+                details={"hitl": {"outcome": "cancelled", "reason": exc.reason}},
+                is_error=True,
+            )
+        except HitlTimedOut as exc:
+            return AgentToolResult(
+                content=[TextContent(text=f"timed out after {exc.seconds} seconds")],
+                details={"hitl": {"outcome": "timed_out", "seconds": exc.seconds}},
+                is_error=True,
+            )
         return AgentToolResult(
             content=[TextContent(text=_format_answers(answers))],
             details={"hitl": {"kind": "ask", "answers": answers}},
@@ -2310,28 +2432,34 @@ async def test_sqlite_create_table_idempotent(sqlite_cp):
 
 Run: `uv run pytest tests/hitl/test_checkpointer_pending_request.py -v`
 
-- [ ] **Step 7.3: Add Protocol methods to `cubepi/checkpointer/base.py`**
+- [ ] **Step 7.3: Extend the `Checkpointer` Protocol (with caller-side fallback)**
 
-Append to the `Checkpointer` Protocol (or base class, depending on current shape):
+Per codex pass 2 (SHOULD-FIX): `Checkpointer` is a `typing.Protocol` ([base.py:13](cubepi/checkpointer/base.py)) — adding "default" method bodies on a Protocol does NOT confer runtime methods to third-party implementations. Third-party checkpointers that don't implement these methods need a caller-side fallback.
+
+Add the method signatures to the Protocol so type-checkers and IDE autocomplete reflect them:
 
 ```python
-    async def save_pending_request(self, thread_id: str, request: Any) -> None:
-        """Persist or clear the pending HITL request for a thread.
-
-        request is a HitlRequest pydantic model or None to clear.
-        Default implementation no-ops (backwards compat for checkpointers
-        that don't support HITL)."""
-        return None
-
-    async def load_pending_request(self, thread_id: str) -> Any:
-        """Load the pending HITL request for a thread, or None.
-
-        Returns a HitlRequest pydantic model or None.
-        Default implementation returns None (no HITL state)."""
-        return None
+# in cubepi/checkpointer/base.py — extend the Protocol class
+class Checkpointer(Protocol):
+    # ... existing methods ...
+    async def save_pending_request(self, thread_id: str, request: Any) -> None: ...
+    async def load_pending_request(self, thread_id: str) -> Any: ...
 ```
 
-If `Checkpointer` is a Protocol (not a base class), provide these as default implementations on a mixin or concrete base. Match the existing pattern in `checkpointer/base.py`.
+Then, in every caller (`Agent.respond`, `Agent.abort_pending`, `run_agent_loop_resume`, `CheckpointedChannel._on_pending_set` / `_on_pending_cleared`), use `getattr(...)` with a None fallback so third-party checkpointers that haven't implemented the methods degrade gracefully:
+
+```python
+save_pending = getattr(self.checkpointer, "save_pending_request", None)
+if save_pending is not None:
+    await save_pending(self.thread_id, request)
+
+load_pending = getattr(self.checkpointer, "load_pending_request", None)
+if load_pending is not None:
+    return await load_pending(self.thread_id)
+return None
+```
+
+The first-party checkpointers (Memory, SQLite, Postgres, MySQL) all implement them — this fallback is purely defensive for third-party impls. Document in the Protocol docstring that HITL-requiring features (`Agent.respond`, `CheckpointedChannel`) raise an informative error if the bound checkpointer doesn't support these methods.
 
 - [ ] **Step 7.4: Implement on `MemoryCheckpointer`**
 
@@ -2423,196 +2551,346 @@ git commit -m "feat(hitl): pending_request storage on Memory + SQLite checkpoint
 
 ### Task 8: Checkpointer pending_request — Postgres + MySQL (schema v1→v2)
 
+**Architectural context** (verified against current code): cubepi does NOT execute database migrations itself. The host application's **alembic** owns schema management. cubepi only:
+- Defines SQLAlchemy declarative models (for the host's alembic autogenerate to detect).
+- Enforces `EXPECTED_SCHEMA_VERSION` at startup via `_verify_schema()`, raising `CubepiSchemaMismatch` if the host's alembic is behind.
+- Ships helpers in `cubepi/checkpointer/postgres/alembic_helpers.py` and `cubepi/checkpointer/mysql/alembic_helpers.py` that hosts call from their `upgrade()` functions (e.g. `write_schema_version_op()` to insert the version row).
+- The actual checkpointer runtime is **raw asyncpg / aiomysql** — NOT SQLAlchemy sessions. All `save_*`/`load_*` methods use `pool.acquire()` + raw SQL with `$1` / `%s` placeholders.
+
+So Task 8 does NOT create `migrations.py` modules. Instead:
+1. Bump `EXPECTED_SCHEMA_VERSION` and add `pending_request` column to the SQLAlchemy models.
+2. Add `save_pending_request` / `load_pending_request` methods using the same raw asyncpg/aiomysql patterns as existing methods.
+3. Document a host-side alembic snippet in the docstrings + recipe (no `migrate_v1_to_v2()` helper that cubepi itself runs).
+4. E2E tests bootstrap their own v2 schema (same pattern as `tests/checkpointer/test_postgres.py::_setup_schema`).
+
 **Files:**
-- Modify: `cubepi/checkpointer/postgres/models.py`
-- Modify: `cubepi/checkpointer/postgres/checkpointer.py`
-- Modify: `cubepi/checkpointer/mysql/models.py`
-- Modify: `cubepi/checkpointer/mysql/checkpointer.py`
-- Create: `cubepi/checkpointer/postgres/migrations.py`
-- Create: `cubepi/checkpointer/mysql/migrations.py`
-- Create: `tests/checkpointer/test_postgres_pending_request.py`
-- Create: `tests/checkpointer/test_mysql_pending_request.py`
+- Modify: `cubepi/checkpointer/postgres/models.py` — bump `EXPECTED_SCHEMA_VERSION` to `2`, add `pending_request` column.
+- Modify: `cubepi/checkpointer/postgres/checkpointer.py` — add `save_pending_request` / `load_pending_request` using raw asyncpg.
+- Modify: `cubepi/checkpointer/postgres/alembic_helpers.py` — add `add_pending_request_column_op()` helper that returns the SQL hosts call from their alembic v1→v2 upgrade.
+- Modify: `cubepi/checkpointer/mysql/models.py` — bump `EXPECTED_SCHEMA_VERSION` to `2`, add `pending_request` column.
+- Modify: `cubepi/checkpointer/mysql/checkpointer.py` — add `save_pending_request` / `load_pending_request` using raw aiomysql.
+- Modify: `cubepi/checkpointer/mysql/alembic_helpers.py` — add `add_pending_request_column_op()` helper.
+- Create: `tests/checkpointer/test_postgres_pending_request.py` — uses `clean_db` fixture and a `_setup_schema_v2` helper local to the test.
+- Create: `tests/checkpointer/test_mysql_pending_request.py` — same pattern, uses `clean_mysql_db` + DSN.
 
 - [ ] **Step 8.1: Bump Postgres EXPECTED_SCHEMA_VERSION + add column**
 
 Edit `cubepi/checkpointer/postgres/models.py`:
 
 ```python
-EXPECTED_SCHEMA_VERSION = 2
+EXPECTED_SCHEMA_VERSION = 2     # was 1
 
 class CubepiThread(CubepiBase):
     __tablename__ = "cubepi_threads"
 
     thread_id: Mapped[str] = mapped_column(sa.Text, primary_key=True)
-    parent_thread_id: Mapped[str | None] = mapped_column(...)
-    forked_at_seq: Mapped[int | None] = mapped_column(...)
-    extra: Mapped[dict[str, Any]] = mapped_column(JSONB, ...)
-    # NEW
-    pending_request: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
-    created_at: Mapped[_dt.datetime] = ...
-    updated_at: Mapped[_dt.datetime] = ...
+    parent_thread_id: Mapped[str | None] = mapped_column(
+        sa.Text,
+        sa.ForeignKey("cubepi_threads.thread_id"),
+        nullable=True,
+    )
+    forked_at_seq: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)
+    extra: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'{}'::jsonb"),
+    )
+    # NEW: HITL pending_request, JSON-encoded HitlRequest (see cubepi/hitl/types.py).
+    # Null when no pending HITL request is outstanding for this thread.
+    pending_request: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True, server_default=sa.text("NULL"),
+    )
+    created_at: Mapped[_dt.datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=sa.text("now()"),
+    )
+    updated_at: Mapped[_dt.datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=sa.text("now()"),
+    )
 ```
 
-- [ ] **Step 8.2: Create `cubepi/checkpointer/postgres/migrations.py`**
+The host's existing `test_write_schema_version_op_includes_expected_version` test in `tests/checkpointer/test_postgres.py` will need its `"VALUES (1)"` assertion updated to `"VALUES (2)"` (or be parameterized) — include that update in this step.
+
+- [ ] **Step 8.2: Add a host-facing alembic helper for v1→v2**
+
+In `cubepi/checkpointer/postgres/alembic_helpers.py` add:
 
 ```python
-"""v1 → v2 migration helpers for cubepi Postgres checkpointer.
+def add_pending_request_column_op() -> str:
+    """Return SQL adding the v2 `pending_request` column to cubepi_threads.
 
-v2 adds the `pending_request` JSONB column to `cubepi_threads` for HITL
-persistence. Hosts run `migrate_v1_to_v2()` once during deployment.
-"""
-
-from __future__ import annotations
-
-import sqlalchemy as sa
-
-
-V1_TO_V2_SQL = [
-    "ALTER TABLE cubepi_threads ADD COLUMN IF NOT EXISTS pending_request JSONB",
-    "INSERT INTO cubepi_schema_version (version) VALUES (2) "
-    "ON CONFLICT (version) DO NOTHING",
-    "DELETE FROM cubepi_schema_version WHERE version = 1",
-]
-
-
-async def migrate_v1_to_v2(connection) -> None:
-    """Run SQL statements that take Postgres schema from v1 to v2.
-
-    `connection` is an asyncpg-compatible AsyncConnection or SQLAlchemy
-    AsyncConnection. Caller is responsible for transaction/commit semantics.
-    """
-    for stmt in V1_TO_V2_SQL:
-        await connection.execute(sa.text(stmt))
+    Call inside the host's alembic v1→v2 upgrade() via op.execute(). The new
+    column is JSONB NULL. Idempotent under repeated execution via IF NOT EXISTS.
+    Hosts must also bump `cubepi_schema_version` via write_schema_version_op()
+    (already documented; EXPECTED_SCHEMA_VERSION is now 2)."""
+    return (
+        "ALTER TABLE cubepi_threads "
+        "ADD COLUMN IF NOT EXISTS pending_request JSONB"
+    )
 ```
 
-- [ ] **Step 8.3: Add methods to `PostgresCheckpointer`**
+- [ ] **Step 8.3: Add raw-asyncpg methods to `PostgresCheckpointer`**
 
-In `cubepi/checkpointer/postgres/checkpointer.py`:
+In `cubepi/checkpointer/postgres/checkpointer.py`, after the existing `save_extra` method (around line 200), add:
+
+```python
+    async def save_pending_request(
+        self, thread_id: str, request: "HitlRequest | None"
+    ) -> None:
+        from cubepi.hitl.types import HitlRequest as _HR  # noqa: F841 (annotation only)
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                # Ensure thread row exists (lazy creation matches save_extra path).
+                await conn.execute(
+                    "INSERT INTO cubepi_threads (thread_id) "
+                    "VALUES ($1) ON CONFLICT DO NOTHING",
+                    thread_id,
+                )
+                if request is None:
+                    await conn.execute(
+                        "UPDATE cubepi_threads SET pending_request = NULL, "
+                        "updated_at = now() WHERE thread_id = $1",
+                        thread_id,
+                    )
+                else:
+                    payload = request.model_dump_json()
+                    await conn.execute(
+                        "UPDATE cubepi_threads SET pending_request = $2::jsonb, "
+                        "updated_at = now() WHERE thread_id = $1",
+                        thread_id, payload,
+                    )
+
+    async def load_pending_request(self, thread_id: str):
+        from cubepi.hitl.types import HitlRequest
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT pending_request FROM cubepi_threads WHERE thread_id = $1",
+                thread_id,
+            )
+        if row is None or row["pending_request"] is None:
+            return None
+        raw = row["pending_request"]
+        # asyncpg returns JSONB as already-parsed dict OR str depending on codec config.
+        if isinstance(raw, str):
+            return HitlRequest.model_validate_json(raw)
+        return HitlRequest.model_validate(raw)
+```
+
+The `INSERT … ON CONFLICT DO NOTHING` is identical to the existing `append()`/`save_extra()` lazy-row pattern (see [postgres/checkpointer.py:164](cubepi/checkpointer/postgres/checkpointer.py) for the original). This is what makes E2E tests robust — no need to call `append()` first.
+
+- [ ] **Step 8.4: Mirror for MySQL**
+
+Edit `cubepi/checkpointer/mysql/models.py`: bump `EXPECTED_SCHEMA_VERSION` to `2`, add `pending_request: Mapped[dict[str, Any] | None] = mapped_column(sa.JSON, nullable=True)` to `CubepiThread`.
+
+Add to `cubepi/checkpointer/mysql/alembic_helpers.py`:
+
+```python
+def add_pending_request_column_op() -> str:
+    return "ALTER TABLE cubepi_threads ADD COLUMN pending_request JSON NULL"
+```
+
+Add to `cubepi/checkpointer/mysql/checkpointer.py`, mirroring the Postgres methods but using aiomysql cursor and `%s` placeholders (matches the existing patterns in `save_extra`/`append`):
 
 ```python
     async def save_pending_request(self, thread_id, request):
-        from cubepi.hitl.types import HitlRequest
-        async with self._session_factory() as session:
-            if request is None:
-                await session.execute(
-                    sa.text("UPDATE cubepi_threads SET pending_request = NULL "
-                            "WHERE thread_id = :tid"),
-                    {"tid": thread_id},
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
+                    "ON DUPLICATE KEY UPDATE thread_id = thread_id",
+                    (thread_id,),
                 )
-            else:
-                payload = request.model_dump(mode="json")
-                await session.execute(
-                    sa.text("UPDATE cubepi_threads SET pending_request = :p "
-                            "WHERE thread_id = :tid"),
-                    {"tid": thread_id, "p": payload},
-                )
-            await session.commit()
+                if request is None:
+                    await cur.execute(
+                        "UPDATE cubepi_threads SET pending_request = NULL, "
+                        "updated_at = NOW() WHERE thread_id = %s",
+                        (thread_id,),
+                    )
+                else:
+                    payload = request.model_dump_json()
+                    await cur.execute(
+                        "UPDATE cubepi_threads SET pending_request = %s, "
+                        "updated_at = NOW() WHERE thread_id = %s",
+                        (payload, thread_id),
+                    )
+            await conn.commit()
 
     async def load_pending_request(self, thread_id):
         from cubepi.hitl.types import HitlRequest
-        async with self._session_factory() as session:
-            row = (await session.execute(
-                sa.text("SELECT pending_request FROM cubepi_threads "
-                        "WHERE thread_id = :tid"),
-                {"tid": thread_id},
-            )).first()
-            if not row or row[0] is None:
-                return None
-            return HitlRequest.model_validate(row[0])
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT pending_request FROM cubepi_threads WHERE thread_id = %s",
+                    (thread_id,),
+                )
+                row = await cur.fetchone()
+        if row is None or row[0] is None:
+            return None
+        raw = row[0]
+        # aiomysql returns JSON columns as str; tolerate already-parsed dicts (same
+        # convention as the existing _parse_json helper in this module).
+        if isinstance(raw, str):
+            return HitlRequest.model_validate_json(raw)
+        return HitlRequest.model_validate(raw)
 ```
 
-NOTE: Replace `self._session_factory` with whatever async-session pattern the existing Postgres checkpointer uses. Read the file to confirm.
+- [ ] **Step 8.5: Failing E2E tests for Postgres (uses real fixtures)**
 
-- [ ] **Step 8.4: Mirror changes for MySQL**
+The existing Postgres test fixtures (see `tests/checkpointer/conftest.py`) are: `pg_dsn` (session-scoped DSN string), `_pg_available` (boolean), and `clean_db` (yields a fresh DSN per test — auto-creates and drops the database). There is no `postgres_url` and no `raw_v1_db_setup` — those were placeholder names; use the real ones.
 
-Edit `cubepi/checkpointer/mysql/models.py`: bump `EXPECTED_SCHEMA_VERSION` to `2`, add `pending_request: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)` to `CubepiThread`.
-
-Create `cubepi/checkpointer/mysql/migrations.py`:
-
-```python
-from __future__ import annotations
-import sqlalchemy as sa
-
-V1_TO_V2_SQL = [
-    "ALTER TABLE cubepi_threads ADD COLUMN pending_request JSON NULL",
-    "INSERT IGNORE INTO cubepi_schema_version (version) VALUES (2)",
-    "DELETE FROM cubepi_schema_version WHERE version = 1",
-]
-
-
-async def migrate_v1_to_v2(connection) -> None:
-    for stmt in V1_TO_V2_SQL:
-        await connection.execute(sa.text(stmt))
-```
-
-In `cubepi/checkpointer/mysql/checkpointer.py`, add `save_pending_request` and `load_pending_request` mirroring the Postgres implementation (use `:p` parameter binding semantics for MySQL — verify against existing query patterns in that file).
-
-- [ ] **Step 8.5: E2E tests for Postgres + MySQL (marker-gated)**
+Existing `tests/checkpointer/test_postgres.py` shows the canonical schema bootstrap: it defines a local `_setup_schema(dsn)` async function that creates `cubepi_threads`, `cubepi_messages` (partitioned), the GIN index, and `cubepi_schema_version`, then calls `write_schema_version_op()`. Our new test mirrors that but uses v2 (includes `pending_request` column) and calls `add_pending_request_column_op()`'s SQL inline (or extends `_setup_schema`).
 
 Create `tests/checkpointer/test_postgres_pending_request.py`:
 
 ```python
+import asyncpg
 import pytest
 
-from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
-from cubepi.checkpointer.postgres.migrations import migrate_v1_to_v2
+from cubepi.checkpointer.postgres import PostgresCheckpointer
+from cubepi.checkpointer.postgres.alembic_helpers import (
+    add_pending_request_column_op, create_message_partitions_op,
+    write_schema_version_op,
+)
 from cubepi.hitl.types import ApproveRequest, HitlRequest
 
-pytestmark = pytest.mark.postgres   # gate matches existing pattern; verify in tests/conftest.py
+
+async def _setup_schema_v2(dsn: str) -> None:
+    """Bootstrap a v2 schema in a fresh DB (mirrors test_postgres.py::_setup_schema)."""
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute("""
+            CREATE TABLE cubepi_threads (
+                thread_id TEXT PRIMARY KEY,
+                parent_thread_id TEXT NULL REFERENCES cubepi_threads(thread_id),
+                forked_at_seq BIGINT NULL,
+                extra JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+        """)
+        # v2 column add
+        await conn.execute(add_pending_request_column_op())
+        await conn.execute("""
+            CREATE TABLE cubepi_messages (
+                thread_id TEXT NOT NULL REFERENCES cubepi_threads(thread_id) ON DELETE CASCADE,
+                seq BIGINT NOT NULL,
+                role TEXT NOT NULL,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                payload BYTEA NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (thread_id, seq)
+            ) PARTITION BY HASH (thread_id);
+        """)
+        await conn.execute(create_message_partitions_op())
+        await conn.execute("""
+            CREATE INDEX ix_cubepi_messages_metadata_gin
+            ON cubepi_messages USING GIN (metadata jsonb_path_ops);
+        """)
+        await conn.execute("""
+            CREATE TABLE cubepi_schema_version (version INTEGER PRIMARY KEY);
+        """)
+        await conn.execute(write_schema_version_op())  # writes version=2 (after step 8.1)
+    finally:
+        await conn.close()
 
 
-@pytest.fixture
-async def pg_cp(postgres_url):    # postgres_url fixture pattern in existing checkpointer tests
-    cp = PostgresCheckpointer(postgres_url)
-    async with cp:
-        yield cp
-
-
-async def test_pending_request_round_trip(pg_cp):
-    req = HitlRequest(
-        question_id="tc-1", thread_id="t-1",
-        payload=ApproveRequest(tool_name="bash", tool_call_id="tc-1", args={"cmd": "ls"}),
-        created_at=0.0,
+def _req(qid="tc-1") -> HitlRequest:
+    return HitlRequest(
+        question_id=qid, thread_id="t-1",
+        payload=ApproveRequest(tool_name="bash", tool_call_id=qid, args={"cmd": "ls"}),
+        created_at=0.0, timeout_seconds=30.0,
     )
-    await pg_cp.append("t-1", [])  # ensure thread row exists
-    await pg_cp.save_pending_request("t-1", req)
-    loaded = await pg_cp.load_pending_request("t-1")
-    assert loaded == req
 
 
-async def test_clear_pending_request(pg_cp):
-    await pg_cp.append("t-1", [])
-    await pg_cp.save_pending_request("t-1", None)
-    assert await pg_cp.load_pending_request("t-1") is None
+@pytest.mark.asyncio
+async def test_postgres_save_and_load_pending_request(clean_db) -> None:
+    await _setup_schema_v2(clean_db)
+    async with PostgresCheckpointer(clean_db) as cp:
+        # Round-trip: save → load.
+        await cp.save_pending_request("t-1", _req())
+        loaded = await cp.load_pending_request("t-1")
+    assert loaded == _req()
 
 
-async def test_v1_to_v2_migration_idempotent(postgres_url, raw_v1_db_setup):
-    """Run migration on a v1 schema; pending_request column should exist after."""
-    # Use raw_v1_db_setup fixture (to be added) that creates a v1 schema
-    async with raw_v1_db_setup(postgres_url) as conn:
-        await migrate_v1_to_v2(conn)
-        # Now PostgresCheckpointer should start without complaint
-        cp = PostgresCheckpointer(postgres_url)
-        async with cp:
-            assert await cp.load_pending_request("any") is None
+@pytest.mark.asyncio
+async def test_postgres_clear_pending_request(clean_db) -> None:
+    await _setup_schema_v2(clean_db)
+    async with PostgresCheckpointer(clean_db) as cp:
+        await cp.save_pending_request("t-1", _req())
+        await cp.save_pending_request("t-1", None)
+        loaded = await cp.load_pending_request("t-1")
+    assert loaded is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_pending_request_creates_thread_row_lazily(clean_db) -> None:
+    """save_pending_request must INSERT … ON CONFLICT DO NOTHING for the thread row,
+    so calling it on an unknown thread doesn't FK-violate."""
+    await _setup_schema_v2(clean_db)
+    async with PostgresCheckpointer(clean_db) as cp:
+        # 'brand-new-thread' has never seen append() or save_extra() — must still work.
+        await cp.save_pending_request("brand-new-thread", _req(qid="tc-x"))
+        loaded = await cp.load_pending_request("brand-new-thread")
+    assert loaded is not None
+    assert loaded.question_id == "tc-x"
+
+
+@pytest.mark.asyncio
+async def test_postgres_v2_schema_version_enforced(clean_db) -> None:
+    """If the host's alembic only ran v1 (no pending_request column, schema_version=1),
+    PostgresCheckpointer().__aenter__ raises CubepiSchemaMismatch."""
+    from cubepi.checkpointer.postgres.exceptions import CubepiSchemaMismatch
+    conn = await asyncpg.connect(clean_db)
+    try:
+        # v1 schema (no pending_request column, version=1)
+        await conn.execute("CREATE TABLE cubepi_schema_version (version INTEGER PRIMARY KEY);")
+        await conn.execute("INSERT INTO cubepi_schema_version (version) VALUES (1);")
+    finally:
+        await conn.close()
+    with pytest.raises(CubepiSchemaMismatch):
+        async with PostgresCheckpointer(clean_db):
+            pass
 ```
 
-Mirror for `tests/checkpointer/test_mysql_pending_request.py`.
+- [ ] **Step 8.6: Failing E2E tests for MySQL**
 
-- [ ] **Step 8.6: Run E2E tests against the MySQL test server**
+Mirror in `tests/checkpointer/test_mysql_pending_request.py`. Use the existing `clean_mysql_db` and `mysql_dsn` fixtures from `tests/checkpointer/conftest.py`. Bootstrap a v2 schema using the helpers in `cubepi/checkpointer/mysql/alembic_helpers.py`. Read `tests/checkpointer/test_mysql.py` for the `_setup_schema_mysql` pattern and adapt it to include the `pending_request` column.
 
-Per memory `reference_mysql_test_server.md`: live MySQL is at `192.168.1.211:6603` via cubemanus .env. Configure the test connection string accordingly. For Postgres, use the existing Postgres test fixture pattern (see `tests/checkpointer/test_postgres_*.py`).
+Tests to write (mirror Postgres list):
+- `test_mysql_save_and_load_pending_request`
+- `test_mysql_clear_pending_request`
+- `test_mysql_pending_request_creates_thread_row_lazily`
+- `test_mysql_v2_schema_version_enforced`
+
+- [ ] **Step 8.7: Run E2E**
+
+The Postgres tests skip if `CUBEPI_TEST_PG_DSN` is not set (existing `_pg_available` fixture). The MySQL test server per memory `reference_mysql_test_server.md` is at `192.168.1.211:6603`; set `CUBEPI_TEST_MYSQL_DSN` accordingly before running.
 
 Run: `uv run pytest tests/checkpointer/test_postgres_pending_request.py tests/checkpointer/test_mysql_pending_request.py -v`
+Expected: all pass against the live test servers.
 
-Expected: tests pass against the live servers (after a one-time schema migration).
+- [ ] **Step 8.8: Update existing version-bound tests**
 
-- [ ] **Step 8.7: Lint + commit**
+In `tests/checkpointer/test_postgres.py`, `test_write_schema_version_op_includes_expected_version` asserts `"VALUES (1)"`. Update to `"VALUES (2)"` (or remove the version-literal assertion and assert via `EXPECTED_SCHEMA_VERSION` import — preferred, since this couples the test to the constant rather than a hardcoded number).
+
+Similarly in `tests/checkpointer/test_mysql.py`.
+
+Run: `uv run pytest tests/checkpointer/test_postgres.py tests/checkpointer/test_mysql.py -v`
+Expected: existing tests continue to pass (after the v2 assertion updates).
+
+- [ ] **Step 8.9: Lint + commit**
 
 ```bash
 uv run ruff check cubepi/checkpointer/ tests/checkpointer/ && uv run ruff format cubepi/checkpointer/ tests/checkpointer/
-git add cubepi/checkpointer/postgres/ cubepi/checkpointer/mysql/ tests/checkpointer/test_postgres_pending_request.py tests/checkpointer/test_mysql_pending_request.py
-git commit -m "feat(hitl): pending_request storage on Postgres + MySQL (schema v2 + migration)"
+git add cubepi/checkpointer/postgres/ cubepi/checkpointer/mysql/ tests/checkpointer/test_postgres_pending_request.py tests/checkpointer/test_mysql_pending_request.py tests/checkpointer/test_postgres.py tests/checkpointer/test_mysql.py
+git commit -m "feat(hitl): pending_request storage on Postgres + MySQL (schema v2)"
 ```
 
 ---
@@ -2689,7 +2967,35 @@ async def test_checkpointed_durability_optin_allows():
 
 - [ ] **Step 9.2: Implement `CheckpointedChannel`**
 
-Add to `cubepi/hitl/channel.py`:
+Critical correction per codex pass 2 (BLOCKING): `_on_pending_cleared` must **only** clear the persisted pending when the await resolved with an answer (happy path) or when the request was explicitly cancelled by host action — NOT when it was interrupted by `HitlDetached`. The detach path is *exactly* the cross-process suspend scenario where pending must remain persisted until `respond()` writes the tool_result.
+
+The cleanest implementation: the `_BaseChannel._await_answer` `finally` already calls `_on_pending_cleared(req)`. But we need to distinguish which exception (if any) caused the unwind. Pass the exception (or `None`) into the hook:
+
+In `cubepi/hitl/channel.py`, modify `_BaseChannel._await_answer`'s finally to capture the exception and pass it down. (Sketch — the engineer should apply this on top of the Task 2 code):
+
+```python
+async def _await_answer(self, payload, timeout, signal, question_id):
+    # ... (resume short-circuit, etc.) ...
+    exc_caught: BaseException | None = None
+    try:
+        # ... (the existing wait/race logic) ...
+    except BaseException as exc:
+        exc_caught = exc
+        raise
+    finally:
+        self._pending = None
+        self._future = None
+        await self._on_pending_cleared(req, exc=exc_caught)
+```
+
+And the default `_on_pending_cleared` in `_BaseChannel`:
+
+```python
+async def _on_pending_cleared(self, req, *, exc: BaseException | None = None) -> None:
+    pass   # InMemory has nothing to do
+```
+
+Then `CheckpointedChannel`:
 
 ```python
 class CheckpointedChannel(_BaseChannel):
@@ -2723,68 +3029,153 @@ class CheckpointedChannel(_BaseChannel):
         await self._checkpointer.save_pending_request(self._thread_id, req)
         await super()._on_pending_set(req)
 
-    async def _on_pending_cleared(self, req):
-        # Normal happy-path clears persisted state too.
+    async def _on_pending_cleared(self, req, *, exc=None):
+        # IMPORTANT: do NOT clear persisted pending on HitlDetached — the
+        # detach path leaves pending persisted so a later respond() can
+        # resume. Clearing happens on the resume path AFTER tool_result
+        # is checkpointed (see run_agent_loop_resume in Task 9.6).
+        from cubepi.hitl.exceptions import HitlDetached
+        if isinstance(exc, HitlDetached):
+            return
+        # Happy path (answered) OR cancelled/timed-out/aborted — clear.
         await self._checkpointer.save_pending_request(self._thread_id, None)
+```
+
+Add a test for this in `tests/hitl/test_checkpointed_channel.py`:
+
+```python
+async def test_detach_leaves_pending_persisted():
+    cp = MemoryCheckpointer()
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
+
+    async def detacher():
+        while ch.pending is None:
+            await asyncio.sleep(0)
+        if ch._future is not None and not ch._future.done():
+            from cubepi.hitl.exceptions import HitlDetached
+            ch._future.set_exception(HitlDetached())
+
+    asyncio.create_task(detacher())
+    from cubepi.hitl.exceptions import HitlDetached
+    with pytest.raises(HitlDetached):
+        await ch.confirm("ok?")
+    # Persisted state must remain
+    assert await cp.load_pending_request("t-1") is not None
 ```
 
 - [ ] **Step 9.3: Run — expected PASS**
 
 Run: `uv run pytest tests/hitl/test_checkpointed_channel.py -v`
 
-- [ ] **Step 9.4: Wire `_enter_custom_tool_context` in the loop**
+- [ ] **Step 9.4: Wire the "inside custom tool" durability guard via ContextVar**
 
-Edit `cubepi/agent/tools.py` — wrap each tool's `execute` call so the channel knows we're inside a (potentially custom) tool body. For built-in tools (`ask_user`) we deliberately skip this. The way to discriminate: ask_user_tool factory sets an attribute on the returned AgentTool: `tool._hitl_builtin = True`.
+Per codex pass 2 (SHOULD-FIX): closure introspection is too brittle (misses callable objects, default args, channels held as instance attributes, etc.) AND not coroutine-local (a shared channel + parallel tools would race the `_in_custom_tool` flag). Use a `contextvars.ContextVar` instead — it's coroutine-local out of the box.
 
-Update `cubepi/hitl/ask_user.py` to add this attribute:
+In `cubepi/hitl/channel.py`, add at module level:
 
 ```python
+import contextvars
+
+# Coroutine-local flag: True while we're inside the execute() body of a tool
+# that is NOT a built-in HITL tool. CheckpointedChannel reads this in
+# _on_pending_set to enforce HitlDurabilityNotGuaranteed.
+_in_custom_tool_var: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_in_custom_tool_var", default=False,
+)
+```
+
+Replace `CheckpointedChannel._enter_custom_tool_context` / `_exit_custom_tool_context` / `self._in_custom_tool` with reads of this ContextVar:
+
+```python
+class CheckpointedChannel(_BaseChannel):
+    def __init__(self, *, checkpointer, thread_id: str,
+                 default_timeout: float | None = None,
+                 allow_inside_custom_tool: bool = False) -> None:
+        super().__init__(default_timeout=default_timeout, thread_id=thread_id)
+        self._checkpointer = checkpointer
+        self._allow_inside_custom_tool = allow_inside_custom_tool
+
+    async def _on_pending_set(self, req):
+        if _in_custom_tool_var.get() and not self._allow_inside_custom_tool:
+            from cubepi.hitl.exceptions import HitlDurabilityNotGuaranteed
+            raise HitlDurabilityNotGuaranteed(
+                "CheckpointedChannel called from inside a custom tool body. "
+                "Use ApprovalPolicyMiddleware or ask_user_tool, or pass "
+                "allow_inside_custom_tool=True to opt in."
+            )
+        await self._checkpointer.save_pending_request(self._thread_id, req)
+        await super()._on_pending_set(req)
+
+    async def _on_pending_cleared(self, req, *, exc=None):
+        from cubepi.hitl.exceptions import HitlDetached
+        if isinstance(exc, HitlDetached):
+            return
+        await self._checkpointer.save_pending_request(self._thread_id, None)
+```
+
+Update the `tests/hitl/test_checkpointed_channel.py` tests in Step 9.1 — instead of calling `ch._enter_custom_tool_context()`, set the ContextVar inside the test:
+
+```python
+async def test_checkpointed_durability_guard_rejects_inside_custom_tool():
+    from cubepi.hitl.channel import _in_custom_tool_var
+    cp = MemoryCheckpointer()
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
+    token = _in_custom_tool_var.set(True)
+    try:
+        with pytest.raises(HitlDurabilityNotGuaranteed):
+            await ch.confirm("ok?", timeout=0.05)
+    finally:
+        _in_custom_tool_var.reset(token)
+```
+
+Wire the flag in `cubepi/agent/tools.py` `_execute_prepared`. Discriminating built-in HITL tools vs custom: ask_user_tool's factory sets `tool._hitl_builtin = True` on the returned `AgentTool` (declarative metadata, not closure-walking):
+
+```python
+# cubepi/hitl/ask_user.py
 def ask_user_tool(channel):
     tool = AgentTool(
         name="ask_user", description=_DESCRIPTION,
         parameters=AskUserParams, execute=execute,
         execution_mode="sequential",
     )
-    tool._hitl_builtin = True   # signal to loop: don't enter custom-tool context
+    tool._hitl_builtin = True
     return tool
 ```
 
-In `cubepi/agent/tools.py` `_execute_prepared`:
+Then in `_execute_prepared`:
 
 ```python
 async def _execute_prepared(prepared, signal, emit_fn):
-    channel = _channel_from_prepared(prepared)
+    from cubepi.hitl.channel import _in_custom_tool_var
     is_builtin = getattr(prepared.tool, "_hitl_builtin", False)
-    if channel is not None and not is_builtin:
-        channel._enter_custom_tool_context()
+    token = None if is_builtin else _in_custom_tool_var.set(True)
     try:
-        result = await prepared.tool.execute(...)   # existing call
-        return result, False
-    except HitlControlException:
-        raise
-    except Exception as exc:
-        return _error_result(str(exc)), True
-    finally:
-        if channel is not None and not is_builtin:
-            channel._exit_custom_tool_context()
-```
-
-`_channel_from_prepared` introspects whether the tool's closure has a `HitlChannel` reference; the simplest approach is to walk `prepared.tool.execute.__closure__` for any `_BaseChannel`. Implement:
-
-```python
-def _channel_from_prepared(prepared):
-    fn = prepared.tool.execute
-    closure = getattr(fn, "__closure__", None) or ()
-    for cell in closure:
         try:
-            val = cell.cell_contents
-        except ValueError:
-            continue
-        from cubepi.hitl.channel import _BaseChannel
-        if isinstance(val, _BaseChannel):
-            return val
-    return None
+            result = await prepared.tool.execute(
+                prepared.tool_call.id,
+                prepared.args,
+                signal=signal,
+                on_update=lambda partial: emit_event(
+                    emit_fn,
+                    ToolExecutionUpdateEvent(
+                        tool_call_id=prepared.tool_call.id,
+                        tool_name=prepared.tool_call.name,
+                        args=prepared.tool_call.arguments,
+                        partial_result=partial,
+                    ),
+                ),
+            )
+            return result, False
+        except HitlControlException:
+            raise
+        except Exception as exc:
+            return _error_result(str(exc)), True
+    finally:
+        if token is not None:
+            _in_custom_tool_var.reset(token)
 ```
+
+The ContextVar is coroutine-local, so parallel tools each get their own value — codex's "shared-channel parallel tools" concern is resolved.
 
 - [ ] **Step 9.5: Implement `Agent.detach`, `load_pending_hitl_request`, `respond`, `abort_pending`**
 
@@ -2792,12 +3183,17 @@ Edit `cubepi/agent/agent.py`. Add inside the class:
 
 ```python
     async def detach(self) -> None:
+        from cubepi.agent.types import AgentSuspendedEvent
         if self._channel is None:
             raise HitlError("agent has no channel bound")
-        # Cause the in-flight HITL await to raise HitlDetached.
-        if self._channel.pending is not None and self._channel._future is not None:
-            if not self._channel._future.done():
-                self._channel._future.set_exception(HitlDetached())
+        pending = self._channel.pending
+        if pending is None or self._channel._future is None or self._channel._future.done():
+            return    # nothing to detach
+        # Emit the suspended event BEFORE triggering the exception, so listeners
+        # see the real pending payload (codex pass 2 BLOCKING: previous draft
+        # emitted from the loop with pending=None — fundamentally wrong).
+        await self._process_event(AgentSuspendedEvent(pending_request=pending))
+        self._channel._future.set_exception(HitlDetached())
 
     async def load_pending_hitl_request(self):
         if self.checkpointer is None or self.thread_id is None:
@@ -2914,6 +3310,12 @@ Imports to add: `from cubepi.agent.loop import run_agent_loop_resume` and `from 
 
 - [ ] **Step 9.6: Implement `run_agent_loop_resume` in `cubepi/agent/loop.py`**
 
+Per codex pass 2 (BLOCKING), this function MUST preserve existing loop behavior — specifically:
+- `batch.terminate` (a tool returned `terminate=True`) must short-circuit before re-entering the model loop. See [tools.py:202](cubepi/agent/tools.py) `_should_terminate`.
+- `should_stop_after_turn(ShouldStopAfterTurnContext(...))` must run *after* tool_results land and before the next model call. See [loop.py:309](cubepi/agent/loop.py).
+- `TurnEndEvent` must carry the actual `tool_results` (the new `ToolResultMessage`s), not an empty list.
+- The "find unresolved assistant message" idempotency check must use **reverse identity search**, not `list.index()` — `context.messages.index(last)` does value equality and can match an earlier assistant message with identical content (e.g. retries).
+
 Add the function (entirety):
 
 ```python
@@ -2928,6 +3330,10 @@ async def run_agent_loop_resume(
     checkpointer=None, thread_id=None,
 ) -> list[Message]:
     from cubepi.providers.base import AssistantMessage, ToolCall, ToolResultMessage
+    from cubepi.agent.types import (
+        AgentEndEvent, AgentStartEvent, MessageEndEvent, MessageStartEvent,
+        ShouldStopAfterTurnContext, TurnEndEvent, TurnStartEvent,
+    )
     from cubepi.hitl.exceptions import HitlInconsistentState
 
     new_messages: list[Message] = []
@@ -2944,10 +3350,20 @@ async def run_agent_loop_resume(
     if not unresolved:
         raise HitlInconsistentState("resume requires unresolved tool_calls in last message")
 
-    # Idempotency: if there's already a ToolResultMessage for one of these in the
-    # tail of the conversation, the previous resume attempt got partway through.
-    # Verify by checking everything after this assistant message position.
-    asst_pos = context.messages.index(last)
+    # Locate `last` by IDENTITY (not value equality). list.index() uses ==, which
+    # would match an earlier assistant message with identical content (rare but
+    # possible after retries or reused prompts).
+    asst_pos = next(
+        (i for i in range(len(context.messages) - 1, -1, -1)
+         if context.messages[i] is last),
+        -1,
+    )
+    if asst_pos < 0:
+        raise HitlInconsistentState("could not locate last assistant message by identity")
+
+    # Idempotency: a previous crashed-mid-execute resume may have already left
+    # ToolResultMessage(s) for some of the unresolved tool_calls after asst_pos.
+    # Skip those — DO NOT re-run side-effecting tool bodies.
     already_resolved = {
         m.tool_call_id for m in context.messages[asst_pos + 1:]
         if isinstance(m, ToolResultMessage)
@@ -2958,9 +3374,14 @@ async def run_agent_loop_resume(
     await emit_event(emit, TurnStartEvent())
 
     current_context = context
+    batch_tool_results: list[ToolResultMessage] = []
+    terminated_by_tool = False
+
     if remaining:
-        # Build a fresh assistant message with only the remaining tool_calls
-        # so execute_tool_calls processes them.
+        # Build a fresh assistant message containing only the remaining
+        # tool_calls so execute_tool_calls processes those exact entries.
+        # We do NOT mutate `last` itself — model_copy gives an independent
+        # AssistantMessage that execute_tool_calls can read from.
         partial_msg = last.model_copy(update={
             "content": [c for c in last.content
                         if not isinstance(c, ToolCall) or c.id in {tc.id for tc in remaining}],
@@ -2973,19 +3394,46 @@ async def run_agent_loop_resume(
             signal=(stream_options or StreamOptions()).signal,
             emit=emit,
         )
-        for r in batch.messages:
+        batch_tool_results = list(batch.messages)
+        terminated_by_tool = batch.terminate
+
+        for r in batch_tool_results:
             current_context.messages.append(r)
             new_messages.append(r)
 
-    # NOW clear pending_request from checkpointer — only after tool_results
-    # are checkpointed (which happens via _process_event on MessageEndEvent
-    # in the Agent layer; for safety we also clear here).
+    # Clear pending_request from checkpointer NOW — after tool_results are
+    # appended (and have been checkpointed by the Agent layer's MessageEndEvent
+    # handler). The pending_request column / row is the cross-process witness;
+    # holding it until here preserves crash-recovery idempotency (see spec §5.2).
     if checkpointer is not None and thread_id is not None:
-        await checkpointer.save_pending_request(thread_id, None)
+        save_pending = getattr(checkpointer, "save_pending_request", None)
+        if save_pending is not None:
+            await save_pending(thread_id, None)
 
-    await emit_event(emit, TurnEndEvent(message=last, tool_results=[]))
+    # Emit TurnEndEvent with the ACTUAL tool_results so listeners get the
+    # right payload (codex BLOCKING: previous draft emitted []).
+    await emit_event(emit, TurnEndEvent(message=last, tool_results=batch_tool_results))
 
-    # Drain steering AFTER tool_results — preserves Anthropic adjacency invariant.
+    # Honor should_stop_after_turn (codex BLOCKING: previous draft skipped this).
+    if should_stop_after_turn:
+        stop_ctx = ShouldStopAfterTurnContext(
+            message=last,
+            tool_results=batch_tool_results,
+            context=current_context,
+            new_messages=new_messages,
+        )
+        if await should_stop_after_turn(stop_ctx):
+            await emit_event(emit, AgentEndEvent(messages=new_messages))
+            return new_messages
+
+    # Terminate-by-tool semantics (codex BLOCKING: previous draft ignored).
+    if terminated_by_tool:
+        await emit_event(emit, AgentEndEvent(messages=new_messages))
+        return new_messages
+
+    # Drain steering AFTER tool_results — preserves the Anthropic adjacency
+    # invariant the existing loop enforces (no user/system message wedged
+    # between tool_use and tool_result).
     if get_steering_messages:
         steering = await get_steering_messages() or []
         for msg in steering:
@@ -3031,7 +3479,9 @@ from cubepi.hitl import (
 )
 from cubepi.hitl.channel import CheckpointedChannel
 from cubepi.hitl.middleware import ApprovalPolicyMiddleware
-from cubepi.providers.faux import FauxProvider, FauxScript, FauxToolCall, FauxText
+from cubepi.providers.faux import (
+    FauxProvider, faux_assistant_message, faux_text, faux_tool_call,
+)
 from cubepi.providers.base import Model
 from pydantic import BaseModel
 from cubepi.agent.types import AgentTool, AgentToolResult
@@ -3052,19 +3502,26 @@ def _bash_tool():
     )
 
 
+def _two_turn_bash_responses():
+    """Turn 1 calls bash; turn 2 (post tool-result) ends."""
+    return [
+        faux_assistant_message(
+            [faux_text("ok"), faux_tool_call("bash", {"cmd": "ls"}, id="tc-1")],
+            stop_reason="tool_use",
+        ),
+        faux_assistant_message("done"),
+    ]
+
+
 async def test_respond_completes_a_suspended_run():
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
-    # FauxProvider: turn 1 calls bash, turn 2 (after tool result) ends.
-    script = FauxScript(turns=[
-        [FauxText("ok"), FauxToolCall(id="tc-1", name="bash", args={"cmd": "ls"})],
-        [FauxText("done")],
-    ])
-    provider = FauxProvider(scripts=[script])
+    provider = FauxProvider()
+    provider.set_responses(_two_turn_bash_responses())
     agent = Agent(
         provider=provider, model=Model(id="faux", provider="faux"),
         tools=[_bash_tool()],
-        middlewares=[ApprovalPolicyMiddleware(
+        middleware=[ApprovalPolicyMiddleware(
             ch, policy=lambda c: AskUser(),
         )],
         channel=ch,
@@ -3101,7 +3558,7 @@ async def test_respond_stale_answer():
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
     agent = Agent(
-        provider=FauxProvider(scripts=[FauxScript()]),
+        provider=_faux_with([faux_assistant_message("")]),
         model=Model(id="faux", provider="faux"),
         channel=ch, checkpointer=cp, thread_id="t-1",
     )
@@ -3120,7 +3577,7 @@ async def test_respond_no_pending():
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
     agent = Agent(
-        provider=FauxProvider(scripts=[FauxScript()]),
+        provider=_faux_with([faux_assistant_message("")]),
         model=Model(id="faux", provider="faux"),
         channel=ch, checkpointer=cp, thread_id="t-1",
     )
@@ -3128,7 +3585,7 @@ async def test_respond_no_pending():
         await agent.respond(answer=ApproveAnswer(decision="approve"))
 ```
 
-NOTE: FauxScript / FauxToolCall / FauxText shapes — verify by reading `cubepi/providers/faux.py`. If the names differ, adjust the imports above; the test intent is what matters.
+NOTE on the FauxProvider API used above: `FauxProvider()` takes no `scripts` kwarg; you preload responses with `provider.set_responses([...])`. Helpers are `faux_text(str)`, `faux_tool_call(name, args, *, id=...)`, `faux_assistant_message(content, *, stop_reason="stop")`. The `_two_turn_bash_responses()` factory in this file shows the canonical multi-turn pattern. To capture inputs the provider received (for cache-prefix tests in Task 9.11), use `provider.subscribe_request(lambda payload, model: captured.append(payload))` — payload has `{"model","messages","system_prompt"}` keys.
 
 - [ ] **Step 9.8: Run respond tests — expected PASS**
 
@@ -3155,15 +3612,19 @@ from cubepi.hitl.middleware import ApprovalPolicyMiddleware
 async def test_abort_pending_closes_conversation():
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
-    # FauxScript: turn 1 calls bash.
-    script = FauxScript(turns=[
-        [FauxText("ok"), FauxToolCall(id="tc-1", name="bash", args={"cmd": "ls"})],
+    # turn 1 calls bash.
+    provider = FauxProvider()
+    provider.set_responses([
+        faux_assistant_message(
+            [faux_text("ok"), faux_tool_call("bash", {"cmd": "ls"}, id="tc-1")],
+            stop_reason="tool_use",
+        ),
     ])
     agent = Agent(
-        provider=FauxProvider(scripts=[script]),
+        provider=provider,
         model=Model(id="faux", provider="faux"),
         tools=[_bash_tool()],
-        middlewares=[ApprovalPolicyMiddleware(ch, policy=lambda c: AskUser())],
+        middleware=[ApprovalPolicyMiddleware(ch, policy=lambda c: AskUser())],
         channel=ch, checkpointer=cp, thread_id="t-1",
     )
     task = asyncio.create_task(agent.prompt("hi"))
@@ -3209,32 +3670,38 @@ from cubepi.hitl.middleware import ApprovalPolicyMiddleware
 
 async def _suspend_resume_and_capture(checkpointer):
     ch = CheckpointedChannel(checkpointer=checkpointer, thread_id="t-1")
-    script = FauxScript(turns=[
-        [FauxText("ok"), FauxToolCall(id="tc-1", name="bash", args={"cmd": "ls"})],
-        [FauxText("done")],
-    ])
+    provider = FauxProvider()
+    provider.set_responses(_two_turn_bash_responses())
+
+    # Capture every payload the provider receives via the public observer hook.
+    captured: list[dict] = []
+    provider.subscribe_request(lambda payload, model: captured.append(payload))
+
     agent = Agent(
-        provider=FauxProvider(scripts=[script]),
+        provider=provider,
         model=Model(id="faux", provider="faux"),
         tools=[_bash_tool()],
-        middlewares=[ApprovalPolicyMiddleware(ch, policy=lambda c: AskUser())],
+        middleware=[ApprovalPolicyMiddleware(ch, policy=lambda c: AskUser())],
         channel=ch, checkpointer=checkpointer, thread_id="t-1",
     )
     task = asyncio.create_task(agent.prompt("hi"))
     for _ in range(100):
-        if ch.pending is not None: break
+        if ch.pending is not None:
+            break
         await asyncio.sleep(0.01)
 
-    # Snapshot pre-resume message bytes
-    pre = [m.model_dump_json() for m in agent.state.messages]
+    # First-turn payload bytes (the one the model already saw before suspend)
+    pre_messages = list(captured[0]["messages"])
+
     await agent.detach()
     await task
 
-    # Capture provider input on second turn
     await agent.respond(question_id="tc-1", answer=ApproveAnswer(decision="approve"))
-    second_turn_input = agent._provider.recorded_calls[1].messages  # FauxProvider records inputs
-    second_turn_pre = [m.model_dump_json() for m in second_turn_input[:len(pre)]]
-    return pre, second_turn_pre
+
+    # Second turn = post-resume model call. The first len(pre_messages) entries
+    # must be byte-identical to the first turn for prompt-cache to hit.
+    second_turn_messages = captured[1]["messages"]
+    return pre_messages, second_turn_messages[: len(pre_messages)]
 
 
 @pytest.mark.asyncio
@@ -3251,13 +3718,30 @@ async def test_resume_preserves_cache_prefix_sqlite(tmp_path):
         assert pre == post
 ```
 
-NOTE: `FauxProvider.recorded_calls` may need to be added; verify by reading the file. If `recorded_calls` doesn't exist, add it: each call to `stream(...)` appends `(messages, system_prompt, tools)` to `provider.recorded_calls`. Adjust the test access accordingly.
+The comparison uses `provider.subscribe_request(...)` (existing public API in `cubepi/providers/base.py`) — no FauxProvider changes needed. Each captured payload is the dict `{"model", "messages", "system_prompt"}` that the provider was called with.
 
 - [ ] **Step 9.12: Run cache-prefix tests**
 
 Run: `uv run pytest tests/hitl/test_resume_cache_prefix.py -v`
 
 If FauxProvider doesn't record calls, patch it to do so in a small edit (justified for HITL testing; mention this in the commit message).
+
+- [ ] **Step 9.12b: Add `CheckpointedChannel` to public exports**
+
+In `cubepi/hitl/__init__.py` (extended in Step 6.11), add `CheckpointedChannel` so the doc examples (Task 12) and host code can import it from the top-level:
+
+```python
+from cubepi.hitl.channel import CheckpointedChannel, HitlChannel, InMemoryChannel
+__all__ += ["CheckpointedChannel"]
+```
+
+Quick smoke test (add to `tests/hitl/test_init.py` or a similar existing file):
+
+```python
+def test_checkpointed_channel_public_export():
+    from cubepi.hitl import CheckpointedChannel
+    assert CheckpointedChannel is not None
+```
 
 - [ ] **Step 9.13: Lint + commit**
 
@@ -3361,7 +3845,9 @@ def hitl_span(kind: str, **attrs):
 
 - [ ] **Step 10.4: Wire spans into `_BaseChannel._await_answer`**
 
-Edit `cubepi/hitl/channel.py`:
+Per codex pass 2 (SHOULD-FIX): HITL control exceptions inherit `BaseException`, not `Exception`, so an `except Exception:` handler in the tracing wrapper would skip them and leave `outcome="unknown"`. Use `BaseException`. Also set `hitl.duration_seconds` per spec §6.5.
+
+Edit `cubepi/hitl/channel.py` — wrap `_await_answer`:
 
 ```python
     async def _await_answer(self, payload, timeout, signal, question_id):
@@ -3371,27 +3857,30 @@ Edit `cubepi/hitl/channel.py`:
             attrs["tool_call_id"] = payload.tool_call_id
             attrs["tool_name"] = payload.tool_name
         from cubepi.hitl._trace import hitl_span
+        import time as _time
         with hitl_span(kind, **attrs) as span:
             outcome = "unknown"
             from_resume = False
+            t0 = _time.monotonic()
             try:
-                # Resume short-circuit (existing logic)
+                # Resume short-circuit
                 if self._resume_slot is not None and self._resume_slot[0] == question_id:
                     _, ans = self._resume_slot
                     self._resume_slot = None
                     from_resume = True
                     outcome = _outcome_from_answer(kind, ans)
                     return ans
-                # ... rest of existing logic ...
-                result = ...   # the result variable
+                # ... existing wait/race logic from Task 2.3 + Step 9.2 ...
+                result = await _the_real_wait_logic(...)   # see Task 2.3
                 outcome = _outcome_from_answer(kind, result)
                 return result
-            except Exception as exc:
+            except BaseException as exc:   # catches HitlControlException too
                 outcome = _outcome_from_exception(exc)
                 raise
             finally:
                 span.set_attribute("hitl.from_resume", from_resume)
                 span.set_attribute("hitl.outcome", outcome)
+                span.set_attribute("hitl.duration_seconds", _time.monotonic() - t0)
 
 
 def _outcome_from_answer(kind, ans):
@@ -3410,6 +3899,8 @@ def _outcome_from_exception(exc):
     if isinstance(exc, HitlDetached): return "detached"
     return "error"
 ```
+
+(The structural change in `_await_answer` is incremental on top of Task 2.3's body — the engineer integrates `with hitl_span(...) as span:` around the existing wait/race logic and adds the `t0` measurement + duration attribute.)
 
 - [ ] **Step 10.5: Run trace tests**
 
@@ -3508,7 +3999,14 @@ from cubepi.hitl.testing import NoopChannel, ScriptedChannel
 from cubepi.hitl.types import Question
 from cubepi.hitl import ApproveAnswer
 from cubepi.providers.base import Model, TextContent
-from cubepi.providers.faux import FauxProvider, FauxScript
+from cubepi.providers.faux import FauxProvider, faux_assistant_message
+
+
+def _faux_with(responses):
+    """Helper: build a FauxProvider preloaded with responses (mirrors real API)."""
+    p = FauxProvider()
+    p.set_responses(responses)
+    return p
 from pydantic import BaseModel
 
 
@@ -3541,7 +4039,7 @@ async def test_subagent_inherits_parent_channel():
     async def subagent_execute(call_id, args, *, signal=None, on_update=None):
         # The subagent factory uses the same channel object as parent.
         inner = Agent(
-            provider=FauxProvider(scripts=[FauxScript()]),
+            provider=_faux_with([faux_assistant_message("")]),
             model=Model(id="faux", provider="faux"),
             channel=parent_ch,
         )
@@ -3556,7 +4054,7 @@ async def test_subagent_inherits_parent_channel():
     )
 
     parent = Agent(
-        provider=FauxProvider(scripts=[FauxScript()]),
+        provider=_faux_with([faux_assistant_message("")]),
         model=Model(id="faux", provider="faux"),
         tools=[subagent_tool],
         channel=parent_ch,
@@ -3617,9 +4115,10 @@ The channel is one primitive with two implementations:
 ## Quick start (in-process)
 
 \`\`\`python
+import asyncio
 from cubepi.agent.agent import Agent
 from cubepi.hitl import (
-    InMemoryChannel, ConfirmToolCallMiddleware, ask_user_tool,
+    ApproveAnswer, ConfirmToolCallMiddleware, InMemoryChannel, ask_user_tool,
 )
 
 channel = InMemoryChannel()
@@ -3627,18 +4126,33 @@ channel = InMemoryChannel()
 agent = Agent(
     provider=..., model=...,
     tools=[bash_tool, ask_user_tool(channel)],
-    middlewares=[ConfirmToolCallMiddleware(channel, require_confirm={"bash"})],
+    middleware=[ConfirmToolCallMiddleware(channel, require_confirm={"bash"})],
     channel=channel,
 )
 
-# Host coroutine renders pending requests and posts answers
+# Host coroutine renders pending requests and posts answers.
+# For approve-kind requests, the answer is an ApproveAnswer; for ask-kind it's
+# a dict[question.key, str | list[str]]; for confirm-kind it's a bool.
 async def host():
     async for req in channel.subscribe():
-        ui_answer = await my_ui.show(req)
-        await channel.answer(req.question_id, ui_answer)
+        if req.payload.kind == "approve":
+            user_decision = await my_ui.show_approve(req)   # returns ApproveAnswer
+            await channel.answer(req.question_id, user_decision)
+        elif req.payload.kind == "ask":
+            answers = await my_ui.show_form(req.payload.questions)
+            await channel.answer(req.question_id, answers)
+        else:  # confirm
+            await channel.answer(req.question_id, await my_ui.show_confirm(req))
 
-# Run agent in parallel with host
-asyncio.gather(agent.prompt("…"), host())
+# Run agent in parallel with host, then exit once the agent finishes.
+async def main():
+    host_task = asyncio.create_task(host())
+    try:
+        await agent.prompt("…")
+    finally:
+        host_task.cancel()
+
+asyncio.run(main())
 \`\`\`
 
 ## Cross-process (web service) flow
@@ -3691,7 +4205,7 @@ def policy(ctx):
 channel = CheckpointedChannel(checkpointer=cp, thread_id=thread_id)
 agent = Agent(
     provider=..., model=..., tools=[bash_tool],
-    middlewares=[ApprovalPolicyMiddleware(channel, policy)],
+    middleware=[ApprovalPolicyMiddleware(channel, policy)],
     channel=channel, checkpointer=cp, thread_id=thread_id,
 )
 \`\`\`
@@ -3839,6 +4353,6 @@ Then drive the PR codex review loop per CLAUDE.md §5 (poll ~2 min, fix, reply `
 **Type/method consistency** — naming is consistent: `agent.channel`, `agent.respond(question_id=, answer=)`, `agent.detach()`, `agent.abort_pending(reason=)`, `agent.in_flight_hitl_request`, `agent.load_pending_hitl_request()`; channel verbs `confirm`/`approve`/`ask`; HITL events all share `Hitl*Event` naming.
 
 Known fragile points (call out for the implementer):
-- **FauxProvider API** — tests reference `FauxScript`, `FauxToolCall`, `FauxText`, `FauxProvider.recorded_calls`. Verify by reading `cubepi/providers/faux.py` before each test task; if helpers are missing, add them as a small justified edit.
+- **FauxProvider API** — the plan uses the *real* API: `FauxProvider()` (no kwargs), `provider.set_responses([...])`, `faux_text(str)`, `faux_tool_call(name, args, *, id=...)`, `faux_assistant_message(content, *, stop_reason="stop")`. Cache-prefix tests capture provider input via `provider.subscribe_request(lambda payload, model: …)` — payload contains `messages`, `model`, `system_prompt`. No new helpers need to be added to FauxProvider for any test in this plan.
 - **Existing checkpointer session/factory patterns** — Task 8 Postgres/MySQL implementation needs to match the existing session pattern in those files; the plan shows the SQL intent but the implementer should read the file first and adapt the Python.
 - **Loop's `_run_loop` body** — Task 3.13 wraps it in a try/except; verify that catching `HitlDetached` at this layer doesn't swallow detach raised by deeply-nested coroutines unexpectedly. Spec §6.2 covers the selective-catch invariant.
