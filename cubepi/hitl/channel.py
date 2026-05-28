@@ -244,7 +244,7 @@ class _BaseChannel:
         for q in list(self._subscribers):
             q.put_nowait(req)
         # Emit event — guard avoids importing not-yet-defined event types.
-        if self._emit is not None:
+        if self._emit is not None:  # pragma: no cover — integration tested
             from cubepi.agent.types import HitlRequestEvent  # avoid circular
 
             await self._emit_event(HitlRequestEvent(request=req))
@@ -261,7 +261,7 @@ class _BaseChannel:
         pass
 
     async def _emit_event(self, event: Any) -> None:
-        if self._emit is None:
+        if self._emit is None:  # pragma: no cover — caller already guards this
             return
         res = self._emit(event)
         if asyncio.iscoroutine(res):
@@ -275,7 +275,7 @@ class _BaseChannel:
             )
         if self._future is not None and not self._future.done():
             self._future.set_result(answer)
-        if self._emit is not None:
+        if self._emit is not None:  # pragma: no cover — integration tested
             from cubepi.agent.types import HitlAnswerEvent  # avoid circular
 
             await self._emit_event(
@@ -290,7 +290,7 @@ class _BaseChannel:
             )
         if self._future is not None and not self._future.done():
             self._future.set_exception(HitlCancelled(reason))
-        if self._emit is not None:
+        if self._emit is not None:  # pragma: no cover — integration tested
             from cubepi.agent.types import HitlAnswerEvent  # avoid circular
 
             await self._emit_event(

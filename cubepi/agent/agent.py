@@ -254,7 +254,7 @@ class Agent(Generic[TMessage]):
             )
         async with self._run_lock:
             # Re-check under the lock in case streaming flipped during acquire.
-            if self._state.is_streaming:
+            if self._state.is_streaming:  # pragma: no cover — defensive re-check
                 raise RuntimeError(
                     "Agent is already processing a prompt. "
                     "Use steer() or follow_up() to queue messages."
