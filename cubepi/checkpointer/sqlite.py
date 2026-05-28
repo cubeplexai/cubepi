@@ -31,6 +31,13 @@ class SQLiteCheckpointer:
             "  extra_json TEXT NOT NULL DEFAULT '{}'"
             ")"
         )
+        await self._db.execute(
+            "CREATE TABLE IF NOT EXISTS thread_pending_request ("
+            "  thread_id TEXT PRIMARY KEY,"
+            "  request_json TEXT NOT NULL,"
+            "  created_at REAL NOT NULL DEFAULT (julianday('now'))"
+            ")"
+        )
         await self._db.commit()
         return self
 
@@ -97,6 +104,35 @@ class SQLiteCheckpointer:
                     (thread_id, json.dumps(extra)),
                 )
             await self._db.commit()
+
+    async def save_pending_request(self, thread_id: str, request: Any) -> None:
+        assert self._db is not None
+        async with self._lock:
+            if request is None:
+                await self._db.execute(
+                    "DELETE FROM thread_pending_request WHERE thread_id = ?",
+                    (thread_id,),
+                )
+            else:
+                payload = request.model_dump_json()
+                await self._db.execute(
+                    "INSERT OR REPLACE INTO thread_pending_request "
+                    "(thread_id, request_json) VALUES (?, ?)",
+                    (thread_id, payload),
+                )
+            await self._db.commit()
+
+    async def load_pending_request(self, thread_id: str) -> Any:
+        from cubepi.hitl.types import HitlRequest
+
+        assert self._db is not None
+        async with self._lock:
+            cursor = await self._db.execute(
+                "SELECT request_json FROM thread_pending_request WHERE thread_id = ?",
+                (thread_id,),
+            )
+            row = await cursor.fetchone()
+            return HitlRequest.model_validate_json(row[0]) if row else None
 
 
 def _serialize_message(msg: Any) -> str:
