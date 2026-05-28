@@ -23,6 +23,9 @@ from cubepi.hitl.policy import (
     AskUser,
     Deny,
 )
+from cubepi.hitl.ask_user import AskUserParams, ask_user_tool
+from cubepi.hitl.channel import HitlChannel, InMemoryChannel
+from cubepi.hitl.middleware import ApprovalPolicyMiddleware, ConfirmToolCallMiddleware
 from cubepi.hitl.types import (
     ApproveAnswer,
     ApproveRequest,
@@ -62,4 +65,13 @@ __all__ = [
     "HitlNoPendingRequest",
     "HitlStaleAnswer",
     "HitlTimedOut",
+    # ask_user
+    "AskUserParams",
+    "ask_user_tool",
+    # channel
+    "HitlChannel",
+    "InMemoryChannel",
+    # middleware
+    "ApprovalPolicyMiddleware",
+    "ConfirmToolCallMiddleware",
 ]
