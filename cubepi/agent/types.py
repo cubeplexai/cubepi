@@ -170,6 +170,29 @@ class ToolExecutionEndEvent(BaseModel):
     no reason)."""
 
 
+class HitlRequestEvent(BaseModel):
+    type: Literal["hitl_request"] = "hitl_request"
+    request: Any  # forward-declared; cubepi.hitl.types.HitlRequest
+
+
+class HitlAnswerEvent(BaseModel):
+    type: Literal["hitl_answer"] = "hitl_answer"
+    question_id: str
+    answer: Any
+    cancelled: bool = False
+    timed_out: bool = False
+
+
+class AgentSuspendedEvent(BaseModel):
+    type: Literal["agent_suspended"] = "agent_suspended"
+    pending_request: Any  # forward-declared; cubepi.hitl.types.HitlRequest
+
+
+class AgentAbortedEvent(BaseModel):
+    type: Literal["agent_aborted"] = "agent_aborted"
+    reason: str
+
+
 AgentEvent = (
     AgentStartEvent
     | AgentEndEvent
@@ -181,6 +204,10 @@ AgentEvent = (
     | ToolExecutionStartEvent
     | ToolExecutionUpdateEvent
     | ToolExecutionEndEvent
+    | HitlRequestEvent
+    | HitlAnswerEvent
+    | AgentSuspendedEvent
+    | AgentAbortedEvent
 )
 
 AgentEventSink = Callable[[AgentEvent], Awaitable[None]]
