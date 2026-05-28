@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, TypeVar
 
 from cubepi.agent.loop import run_agent_loop, run_agent_loop_continue
-from cubepi.hitl import HitlError
+from cubepi.hitl import HitlError, HitlRequest
 from cubepi.hitl.channel import HitlChannel
 from cubepi.middleware.base import Middleware, compose_middleware
 from cubepi.agent.types import (
@@ -194,7 +194,7 @@ class Agent(Generic[TMessage]):
         return self._channel
 
     @property
-    def in_flight_hitl_request(self):
+    def in_flight_hitl_request(self) -> HitlRequest | None:
         if self._channel is None:
             raise HitlError("agent has no channel bound; pass channel= to Agent()")
         return self._channel.pending
