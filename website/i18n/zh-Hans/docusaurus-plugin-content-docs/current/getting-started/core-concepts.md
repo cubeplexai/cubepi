@@ -91,12 +91,12 @@ class Provider(Protocol):
 - **Provider 流** —— `MessageStream` 产出的是 *provider* 事件：
   `start`、`text_start`、`text_delta`、`text_end`、`thinking_*`、
   `toolcall_*`、`done`、`error`。原始 token 流。
-- **Agent 事件** —— `agent.subscribe(...)` 收到的内容。十一种类型
-  覆盖整个循环：`agent_start`、`agent_end`、`turn_start`、`turn_end`、
-  `message_start`、`message_update`、`message_end`、
+- **Agent 事件** —— `agent.subscribe(...)` 收到的内容。十四种类型
+  覆盖整个循环 + HITL：`agent_start`、`agent_end`、`turn_start`、
+  `turn_end`、`message_start`、`message_update`、`message_end`、
   `tool_execution_start`、`tool_execution_update`、
-  `tool_execution_end`。`message_update` 把 provider 事件嵌套在
-  `event.stream_event` 里。
+  `tool_execution_end`、`hitl_request`、`hitl_answer`、
+  `agent_suspended`、`agent_aborted`。
 
 做 UI 订阅 Agent 事件；做底层 token 路由就钻 `event.stream_event`。
 见 [流式事件](../guides/agents/streaming)。
@@ -131,8 +131,48 @@ class Checkpointer(Protocol):
 
 通过 `Agent(checkpointer=cp, thread_id="…")` 绑定到 Agent,循环就会在
 每条消息落定时追加一行,并在第一次 `prompt()` 时恢复历史。内置后端：
-`MemoryCheckpointer`、`SQLiteCheckpointer`、`PostgresCheckpointer`。
+`MemoryCheckpointer`、`SQLiteCheckpointer`、`PostgresCheckpointer`、`MySQLCheckpointer`。
 见 [Checkpointing → SQLite](../guides/checkpointing/sqlite)。
+
+HITL 为跨进程挂起/恢复新增了两个可选方法：`save_pending_request` /
+`load_pending_request`。所有第一方后���都已实现。见 [HITL 指南](../guides/hitl)。
+
+## HITL（人机协同）
+
+cubepi 内置了 `cubepi.hitl` 模块，用于 agent 需要**暂停并等待人类输入**的
+场景：
+
+- **沙箱确认** —— 危险工具（bash、写入文件）在执行前需要人类
+  approve / deny / edit。
+- **运行中提问** —— agent 在运行中途向用户弹出一个结构化表单，等待回答。
+
+```python
+from cubepi.hitl import InMemoryChannel, ConfirmToolCallMiddleware, ask_user_tool
+
+channel = InMemoryChannel()
+
+agent = Agent(
+    provider=…, model=…,
+    tools=[bash_tool, ask_user_tool(channel)],
+    middleware=[ConfirmToolCallMiddleware(channel, require_confirm={"bash"})],
+    channel=channel,
+)
+```
+
+Channel 是一个可 `await` 的协程协作者：工具和中间件作者写
+`await channel.ask(...)` 或 `await channel.confirm(...)`，channel
+处理暂停。宿主代码（你的 web 应用 / TUI）订阅 `channel.subscribe()` 或
+轮询 `channel.pending`，把请求渲染给用户，然后通过
+`channel.answer(qid, answer)` 回填答案。
+
+内置两种 channel 后端：
+- **`InMemoryChannel`** —— 单进程（CLI、notebook、测试）。
+- **`CheckpointedChannel`** —— 跨进程（web 服务）。挂起的请求持久化到
+  checkpointer；另一个进程可以在数小时后通过
+  `Agent.respond(question_id=, answer=)` 回答。
+
+完整细节——三种 HITL 动词、两套内置中间件、跨进程挂起/恢复协议、事件、
+追踪 span 和错误参考——见 [HITL 指南](../guides/hitl)。
 
 ## Tracer（可选）
 

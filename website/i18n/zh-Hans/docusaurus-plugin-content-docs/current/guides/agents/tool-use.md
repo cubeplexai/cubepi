@@ -78,6 +78,10 @@ agent = Agent(
     )
     ```
 
+内置的 `ask_user` HITL 工具（见 [HITL 指南](../hitl)）设置了
+`execution_mode="sequential"` —— 它会暂停 agent 等待人类输入，因此
+工具批次会逐个运行。
+
 工具会修改共享状态（DB、计数器）且你需要确定顺序时,选 sequential。
 
 ## 流式回报工具进度

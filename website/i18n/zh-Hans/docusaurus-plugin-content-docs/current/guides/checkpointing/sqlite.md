@@ -77,6 +77,20 @@ CREATE TABLE thread_extra (
 
 这个 schema 是追加式的。CubePi 从不 update 或 delete 行。
 
+## HITL 挂起表
+
+当使用 [HITL](../hitl) 模块时,每次 `__aenter__` 会自动创建一个额外的表：
+
+```sql
+CREATE TABLE IF NOT EXISTS thread_pending_request (
+    thread_id TEXT PRIMARY KEY,
+    request_json TEXT NOT NULL,
+    created_at REAL NOT NULL DEFAULT (julianday('now'))
+);
+```
+
+无需手动迁移 —— `CREATE TABLE IF NOT EXISTS` 是零等的。
+
 ## CubePi 什么时候读
 
 构造 Agent 后的 **第一次** `prompt()`,CubePi 会调
