@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, TypeVar
 
 from cubepi.agent.loop import run_agent_loop, run_agent_loop_continue
+from cubepi.hitl import HitlError
+from cubepi.hitl.channel import HitlChannel
 from cubepi.middleware.base import Middleware, compose_middleware
 from cubepi.agent.types import (
     AgentContext,
@@ -138,6 +140,7 @@ class Agent(Generic[TMessage]):
         checkpointer: Any = None,
         thread_id: str | None = None,
         middleware: list[Middleware] | None = None,
+        channel: HitlChannel | None = None,
     ) -> None:
         self._provider = provider
         self._state = AgentState(
@@ -169,6 +172,10 @@ class Agent(Generic[TMessage]):
         self.tool_execution = tool_execution
         self.checkpointer = checkpointer
         self.thread_id = thread_id
+        self._channel = channel
+        if channel is not None:
+            channel._bind_emit(lambda e: self._process_event(e))
+        self._run_lock = asyncio.Lock()
 
         self._extra: dict[str, Any] = {}
 
@@ -181,6 +188,16 @@ class Agent(Generic[TMessage]):
     @property
     def state(self) -> AgentState:
         return self._state
+
+    @property
+    def channel(self) -> HitlChannel | None:
+        return self._channel
+
+    @property
+    def in_flight_hitl_request(self):
+        if self._channel is None:
+            raise HitlError("agent has no channel bound; pass channel= to Agent()")
+        return self._channel.pending
 
     def subscribe(self, listener: Callable) -> Callable[[], None]:
         self._listeners.append(listener)
@@ -220,56 +237,60 @@ class Agent(Generic[TMessage]):
         self._follow_up_queue.clear()
 
     async def prompt(self, message: str | Message | list[Message]) -> None:
-        if self._state.is_streaming:
-            raise RuntimeError(
-                "Agent is already processing a prompt. "
-                "Use steer() or follow_up() to queue messages."
-            )
+        async with self._run_lock:
+            if self._state.is_streaming:
+                raise RuntimeError(
+                    "Agent is already processing a prompt. "
+                    "Use steer() or follow_up() to queue messages."
+                )
 
-        if isinstance(message, str):
-            messages = [
-                UserMessage(content=[TextContent(text=message)], timestamp=time.time())
-            ]
-        elif isinstance(message, list):
-            messages = message
-        else:
-            messages = [message]
+            if isinstance(message, str):
+                messages = [
+                    UserMessage(
+                        content=[TextContent(text=message)], timestamp=time.time()
+                    )
+                ]
+            elif isinstance(message, list):
+                messages = message
+            else:
+                messages = [message]
 
-        # Restore history and extra from checkpointer if this is first prompt
-        if self.checkpointer and self.thread_id and not self._state._messages:
-            data = await self.checkpointer.load(self.thread_id)
-            if data:
-                if data.messages:
-                    self._state._messages = list(data.messages)
-                self._extra = dict(data.extra)
+            # Restore history and extra from checkpointer if this is first prompt
+            if self.checkpointer and self.thread_id and not self._state._messages:
+                data = await self.checkpointer.load(self.thread_id)
+                if data:
+                    if data.messages:
+                        self._state._messages = list(data.messages)
+                    self._extra = dict(data.extra)
 
-        await self._run_prompt(messages)
+            await self._run_prompt(messages)
 
     async def resume(self) -> None:
-        if self._state.is_streaming:
-            raise RuntimeError(
-                "Agent is already processing. Wait for completion before continuing."
-            )
+        async with self._run_lock:
+            if self._state.is_streaming:
+                raise RuntimeError(
+                    "Agent is already processing. Wait for completion before continuing."
+                )
 
-        if not self._state._messages:
-            raise RuntimeError("No messages to continue from")
+            if not self._state._messages:
+                raise RuntimeError("No messages to continue from")
 
-        last = self._state._messages[-1]
-        if isinstance(last, AssistantMessage):
-            # Check for queued messages
-            steering = self._steering_queue.drain()
-            if steering:
-                await self._run_prompt(steering)
-                return
+            last = self._state._messages[-1]
+            if isinstance(last, AssistantMessage):
+                # Check for queued messages
+                steering = self._steering_queue.drain()
+                if steering:
+                    await self._run_prompt(steering)
+                    return
 
-            follow_ups = self._follow_up_queue.drain()
-            if follow_ups:
-                await self._run_prompt(follow_ups)
-                return
+                follow_ups = self._follow_up_queue.drain()
+                if follow_ups:
+                    await self._run_prompt(follow_ups)
+                    return
 
-            raise RuntimeError("Cannot continue from message role: assistant")
+                raise RuntimeError("Cannot continue from message role: assistant")
 
-        await self._run_continuation()
+            await self._run_continuation()
 
     def _build_stream_options(self, signal: asyncio.Event) -> StreamOptions:
         return StreamOptions(
