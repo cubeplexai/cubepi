@@ -242,11 +242,12 @@ class Agent(Generic[TMessage]):
         self._follow_up_queue.clear()
 
     async def prompt(self, message: str | Message | list[Message]) -> None:
-        # Fail-fast streaming guard MUST happen before the lock — otherwise a
-        # second concurrent prompt() blocks waiting for the lock instead of
-        # raising the expected RuntimeError (regression caught by
-        # test_raises_when_prompt_called_while_streaming).
-        if self._state.is_streaming:
+        # Fail-fast guard: if the run-lock is already held OR a stream is in
+        # progress, raise immediately instead of queueing on the lock. This
+        # makes two concurrent cold prompt() calls fail-fast deterministically
+        # (lock.locked() is the atomic source of truth — checking is_streaming
+        # alone races against the to-be-set flag inside the lock body).
+        if self._run_lock.locked() or self._state.is_streaming:
             raise RuntimeError(
                 "Agent is already processing a prompt. "
                 "Use steer() or follow_up() to queue messages."
@@ -281,8 +282,8 @@ class Agent(Generic[TMessage]):
             await self._run_prompt(messages)
 
     async def resume(self) -> None:
-        # Same fail-fast pattern as prompt(): check BEFORE the lock.
-        if self._state.is_streaming:
+        # Same fail-fast pattern as prompt(): lock.locked() is the atomic gate.
+        if self._run_lock.locked() or self._state.is_streaming:
             raise RuntimeError(
                 "Agent is already processing. Wait for completion before continuing."
             )
@@ -495,18 +496,40 @@ class Agent(Generic[TMessage]):
                 await self._process_event(AgentAbortedEvent(reason=reason))
                 return
 
-            last = self._state._messages[-1]
-            if not isinstance(last, AssistantMessage):
-                # No unresolved tool_calls in tail — conversation already ended
-                # by some other path. Still emit the event for observability.
+            # Scan BACKWARDS for the most recent AssistantMessage that has
+            # tool_calls still unresolved. We cannot just look at the tail —
+            # an in-flight execute may have partially appended ToolResultMessage(s)
+            # before signal-abort fired, leaving the tail as a ToolResultMessage
+            # but the originating assistant turn still needing synthetic deny
+            # for the OTHER tool_calls in the same batch.
+            asst_pos = -1
+            last_assistant = None
+            for i in range(len(self._state._messages) - 1, -1, -1):
+                msg = self._state._messages[i]
+                if not isinstance(msg, AssistantMessage):
+                    continue
+                tcs = [c for c in msg.content if isinstance(c, ToolCall)]
+                if not tcs:
+                    continue
+                already = {
+                    m.tool_call_id
+                    for m in self._state._messages[i + 1 :]
+                    if isinstance(m, ToolResultMessage)
+                }
+                if any(tc.id not in already for tc in tcs):
+                    asst_pos = i
+                    last_assistant = msg
+                    break
+
+            if last_assistant is None or asst_pos < 0:
+                # No unresolved assistant turn — conversation already closed
+                # by some other path. Still clear pending + emit for observability.
                 await save_pending(self.thread_id, None)
                 await self._process_event(AgentAbortedEvent(reason=reason))
                 return
 
-            # Find unresolved tool_calls in `last` (those without a matching
-            # ToolResultMessage anywhere later in the conversation).
+            last = last_assistant
             tool_call_ids = [c.id for c in last.content if isinstance(c, ToolCall)]
-            asst_pos = len(self._state._messages) - 1
             already_resolved = {
                 m.tool_call_id
                 for m in self._state._messages[asst_pos + 1 :]
