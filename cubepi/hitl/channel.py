@@ -188,10 +188,6 @@ class _BaseChannel:
             await self._on_pending_cleared(req, exc=exc_caught)
 
     async def _on_pending_set(self, req: HitlRequest) -> None:
-        # Yield once so any tasks created just before the ask() / confirm()
-        # call (e.g. asyncio.create_task(subscriber())) can start and register
-        # their subscription queues before we broadcast.
-        await asyncio.sleep(0)
         # Broadcast to subscribers.
         for q in list(self._subscribers):
             q.put_nowait(req)

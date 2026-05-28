@@ -185,6 +185,9 @@ async def test_subscribe_yields_requests():
             await ch.answer(req.question_id, True)
 
     sub = asyncio.create_task(subscriber())
+    # Yield once so subscriber() runs subscribe() and registers its queue
+    # before we start broadcasting.
+    await asyncio.sleep(0)
     await ch.confirm("a")
     await ch.confirm("b")
     sub.cancel()
