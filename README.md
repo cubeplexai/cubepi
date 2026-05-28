@@ -111,6 +111,7 @@ cubepi/
 │   ├── memory.py     # In-memory (dev/test)
 │   ├── sqlite.py     # SQLite (lightweight persistence)
 │   └── postgres/     # Postgres (production persistence)
+├── hitl/             # Human-in-the-Loop channel, middlewares, ask_user tool
 ├── mcp/              # MCP tool loaders (HTTP + stdio transports)
 └── tracing/          # OpenTelemetry tracing + metrics (optional extra)
     ├── tracer.py     # Tracer entry point — TracerProvider + recorder wiring
