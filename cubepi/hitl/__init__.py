@@ -25,6 +25,7 @@ from cubepi.hitl.policy import (
 )
 from cubepi.hitl.ask_user import AskUserParams, ask_user_tool
 from cubepi.hitl.channel import CheckpointedChannel, HitlChannel, InMemoryChannel
+from cubepi.hitl.testing import NoopChannel, ScriptedChannel
 from cubepi.hitl.middleware import ApprovalPolicyMiddleware, ConfirmToolCallMiddleware
 from cubepi.hitl.types import (
     ApproveAnswer,
@@ -75,4 +76,7 @@ __all__ = [
     # middleware
     "ApprovalPolicyMiddleware",
     "ConfirmToolCallMiddleware",
+    # testing
+    "NoopChannel",
+    "ScriptedChannel",
 ]
