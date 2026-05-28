@@ -129,74 +129,105 @@ class _BaseChannel:
         signal: asyncio.Event | None,
         question_id: str,
     ) -> Any:
-        # Resume short-circuit — return immediately, do NOT set _pending.
-        if self._resume_slot is not None and self._resume_slot[0] == question_id:
-            _, ans = self._resume_slot
-            self._resume_slot = None
-            return ans
+        from cubepi.hitl._trace import hitl_span
 
-        if self._pending is not None:
-            raise HitlConcurrencyError(
-                f"channel busy: already pending {self._pending.question_id}"
-            )
+        kind = payload.kind
+        attrs: dict[str, Any] = {"question_id": question_id, "timeout_seconds": timeout}
+        if kind == "approve":
+            attrs["tool_call_id"] = payload.tool_call_id
+            attrs["tool_name"] = payload.tool_name
 
-        effective_timeout = timeout if timeout is not None else self._default_timeout
-        req = HitlRequest(
-            question_id=question_id,
-            thread_id=self._thread_id,
-            payload=payload,
-            created_at=time.time(),
-            timeout_seconds=effective_timeout,
-        )
-        self._pending = req
-        self._future = asyncio.get_running_loop().create_future()
+        outcome = "unknown"
+        from_resume = False
+        t0 = time.monotonic()
+        with hitl_span(kind, **attrs) as span:
+            try:
+                # Resume short-circuit — return immediately, do NOT set _pending.
+                if (
+                    self._resume_slot is not None
+                    and self._resume_slot[0] == question_id
+                ):
+                    _, ans = self._resume_slot
+                    self._resume_slot = None
+                    from_resume = True
+                    outcome = _outcome_from_answer(kind, ans)
+                    return ans
 
-        exc_caught: BaseException | None = None
-        signal_task: asyncio.Future[Any] | None = None
-        # CRITICAL: _on_pending_set is called INSIDE the try/finally so that
-        # if it raises (e.g. CheckpointedChannel's HitlDurabilityNotGuaranteed
-        # guard), the finally still clears _pending/_future. Otherwise the
-        # channel would be permanently wedged.
-        try:
-            await self._on_pending_set(req)
-            if signal is None and effective_timeout is None:
-                return await self._future
-            tasks: list[asyncio.Future[Any]] = [self._future]
-            if signal is not None:
-                signal_task = asyncio.ensure_future(signal.wait())
-                tasks.append(signal_task)
-            done, pending_tasks = await asyncio.wait(
-                tasks,
-                timeout=effective_timeout,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            # Clean up pending tasks (the loser of the race + any signal task
-            # we never want to leave hanging).
-            for p in pending_tasks:
-                if p is not self._future:
-                    p.cancel()
-            if not done:
-                raise HitlTimedOut(effective_timeout)
-            # Use task identity, not signal.is_set() — Agent.abort() leaves the
-            # signal sticky-set, so signal.is_set() would be true even on the
-            # happy path after a prior abort. The race winner is what matters.
-            if (
-                signal_task is not None
-                and signal_task in done
-                and self._future not in done
-            ):
-                raise HitlAborted("agent signal fired during HITL pending")
-            return self._future.result()
-        except BaseException as exc:
-            exc_caught = exc
-            raise
-        finally:
-            # Cancel any still-pending signal task to avoid leaks.
-            if signal_task is not None and not signal_task.done():
-                signal_task.cancel()
-            self._pending = None
-            self._future = None
-            await self._on_pending_cleared(req, exc=exc_caught)
+                if self._pending is not None:
+                    raise HitlConcurrencyError(
+                        f"channel busy: already pending {self._pending.question_id}"
+                    )
+
+                effective_timeout = (
+                    timeout if timeout is not None else self._default_timeout
+                )
+                req = HitlRequest(
+                    question_id=question_id,
+                    thread_id=self._thread_id,
+                    payload=payload,
+                    created_at=time.time(),
+                    timeout_seconds=effective_timeout,
+                )
+                self._pending = req
+                self._future = asyncio.get_running_loop().create_future()
+
+                exc_caught: BaseException | None = None
+                signal_task: asyncio.Future[Any] | None = None
+                # CRITICAL: _on_pending_set is called INSIDE the try/finally so that
+                # if it raises (e.g. CheckpointedChannel's HitlDurabilityNotGuaranteed
+                # guard), the finally still clears _pending/_future. Otherwise the
+                # channel would be permanently wedged.
+                try:
+                    await self._on_pending_set(req)
+                    if signal is None and effective_timeout is None:
+                        result = await self._future
+                        outcome = _outcome_from_answer(kind, result)
+                        return result
+                    tasks: list[asyncio.Future[Any]] = [self._future]
+                    if signal is not None:
+                        signal_task = asyncio.ensure_future(signal.wait())
+                        tasks.append(signal_task)
+                    done, pending_tasks = await asyncio.wait(
+                        tasks,
+                        timeout=effective_timeout,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    # Clean up pending tasks (the loser of the race + any signal task
+                    # we never want to leave hanging).
+                    for p in pending_tasks:
+                        if p is not self._future:
+                            p.cancel()
+                    if not done:
+                        raise HitlTimedOut(effective_timeout)
+                    # Use task identity, not signal.is_set() — Agent.abort() leaves the
+                    # signal sticky-set, so signal.is_set() would be true even on the
+                    # happy path after a prior abort. The race winner is what matters.
+                    if (
+                        signal_task is not None
+                        and signal_task in done
+                        and self._future not in done
+                    ):
+                        raise HitlAborted("agent signal fired during HITL pending")
+                    result = self._future.result()
+                    outcome = _outcome_from_answer(kind, result)
+                    return result
+                except BaseException as exc:
+                    exc_caught = exc
+                    raise
+                finally:
+                    # Cancel any still-pending signal task to avoid leaks.
+                    if signal_task is not None and not signal_task.done():
+                        signal_task.cancel()
+                    self._pending = None
+                    self._future = None
+                    await self._on_pending_cleared(req, exc=exc_caught)
+            except BaseException as exc:
+                outcome = _outcome_from_exception(exc)
+                raise
+            finally:
+                span.set_attribute("hitl.from_resume", from_resume)
+                span.set_attribute("hitl.outcome", outcome)
+                span.set_attribute("hitl.duration_seconds", time.monotonic() - t0)
 
     async def _on_pending_set(self, req: HitlRequest) -> None:
         # Broadcast to subscribers.
@@ -311,6 +342,33 @@ class _BaseChannel:
             signal=signal,
             question_id=qid,
         )
+
+
+def _outcome_from_answer(kind: str, ans: Any) -> str:
+    if kind == "approve":
+        return {"approve": "approved", "deny": "denied", "edit": "edited"}.get(
+            getattr(ans, "decision", None), "answered"
+        )
+    return "answered"
+
+
+def _outcome_from_exception(exc: BaseException) -> str:
+    from cubepi.hitl.exceptions import (
+        HitlAborted,
+        HitlCancelled,
+        HitlDetached,
+        HitlTimedOut,
+    )
+
+    if isinstance(exc, HitlCancelled):
+        return "cancelled"
+    if isinstance(exc, HitlTimedOut):
+        return "timed_out"
+    if isinstance(exc, HitlAborted):
+        return "aborted"
+    if isinstance(exc, HitlDetached):
+        return "detached"
+    return "error"
 
 
 class InMemoryChannel(_BaseChannel):
