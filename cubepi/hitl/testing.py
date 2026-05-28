@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Union
 
-from cubepi.hitl.channel import _BaseChannel
+from cubepi.hitl.channel import _BaseChannel, _UNSET
 from cubepi.hitl.exceptions import HitlError
 from cubepi.hitl.types import HitlRequest
 
@@ -37,7 +37,7 @@ class ScriptedChannel(_BaseChannel):
             thread_id=None,
             payload=payload,
             created_at=time.time(),
-            timeout_seconds=timeout,
+            timeout_seconds=timeout if timeout is not _UNSET else None,
         )
         self._history.append(req)
         head = self._answers.pop(0)
