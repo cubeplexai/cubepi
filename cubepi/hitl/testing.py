@@ -57,4 +57,6 @@ class NoopChannel(_BaseChannel):
             return True
         if kind == "ask":
             return {q.key: "" for q in payload.questions}
-        raise HitlError(f"NoopChannel does not handle {kind!r}")
+        raise HitlError(
+            f"NoopChannel does not handle {kind!r}"
+        )  # pragma: no cover — defensive

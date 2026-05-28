@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 
 
-class _NullSpan:
+class _NullSpan:  # pragma: no cover - only exercised when opentelemetry is not installed
     def set_attribute(self, *a, **k):
         pass
 
@@ -21,7 +21,7 @@ class _NullSpan:
 def hitl_span(kind: str, **attrs):
     try:
         from opentelemetry import trace
-    except ImportError:
+    except ImportError:  # pragma: no cover - tracing extra not installed
         yield _NullSpan()
         return
     tracer = trace.get_tracer("cubepi.hitl")
