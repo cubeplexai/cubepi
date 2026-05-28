@@ -180,9 +180,14 @@ async def _run_loop(
             emit=emit,
         )
     except (HitlDetached, HitlAborted):
-        # Caller (Agent.detach / Agent.abort_pending) emitted the event
-        # already. Loop exits silently — assistant message and pending
-        # state remain intact for the next respond() call.
+        # Per the spec design, HITL terminal events (AgentSuspendedEvent /
+        # AgentAbortedEvent) are emitted by the Agent layer (Agent.detach()
+        # / Agent.abort_pending()) BEFORE these exceptions are raised — they
+        # are mutually exclusive with AgentEndEvent. The loop intentionally
+        # exits silently here: emitting AgentEndEvent would double-signal
+        # termination to event-stream consumers who already saw the HITL
+        # event. Assistant message and pending state remain intact for the
+        # next respond() call.
         return
 
 

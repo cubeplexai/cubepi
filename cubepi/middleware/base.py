@@ -102,7 +102,7 @@ def compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]:
             cur_ctx = ctx
             for mw in before_chain:
                 if edited_args is not None:
-                    cur_ctx = _rebuild_ctx_with_args(ctx, edited_args)
+                    cur_ctx = _rebuild_ctx_with_args(cur_ctx, edited_args)
                 result = await mw.before_tool_call(cur_ctx, signal=signal)
                 if result is None:
                     continue
