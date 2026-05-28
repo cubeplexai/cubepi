@@ -72,6 +72,24 @@ def test_approve_answer_decisions():
     assert ApproveAnswer(decision="edit", edited_args={"x": 1}).edited_args == {"x": 1}
 
 
+def test_before_tool_call_result_new_fields():
+    from cubepi.agent.types import BeforeToolCallResult
+
+    r = BeforeToolCallResult(
+        edited_args={"x": 1},
+        deny_reason="forbidden",
+        hitl_trace={"decision": "edit"},
+    )
+    assert r.edited_args == {"x": 1}
+    assert r.deny_reason == "forbidden"
+    assert r.hitl_trace == {"decision": "edit"}
+    # backwards-compat: old call still works
+    r2 = BeforeToolCallResult(block=True, reason="bad")
+    assert r2.edited_args is None
+    assert r2.deny_reason is None
+    assert r2.hitl_trace is None
+
+
 def test_approval_decision_dataclasses_frozen():
     from cubepi.hitl.policy import Approve, Deny, AskUser
 

@@ -15,6 +15,7 @@ from cubepi.agent.types import (
     TurnEndEvent,
     TurnStartEvent,
 )
+from cubepi.hitl.exceptions import HitlAborted, HitlDetached
 from cubepi.utils import emit_event
 from cubepi.providers.base import (
     AssistantMessage,
@@ -141,6 +142,51 @@ async def run_agent_loop_continue(
 
 
 async def _run_loop(
+    *,
+    current_context: AgentContext,
+    new_messages: list[Message],
+    provider: Provider,
+    model: Model,
+    convert_to_llm: Callable,
+    transform_context: Callable | None,
+    transform_system_prompt: Callable | None,
+    after_model_response: Callable | None,
+    before_tool_call: Callable | None,
+    after_tool_call: Callable | None,
+    should_stop_after_turn: Callable | None,
+    get_steering_messages: Callable | None,
+    get_follow_up_messages: Callable | None,
+    stream_options: StreamOptions | None,
+    tool_execution: str,
+    emit: Callable,
+) -> None:
+    try:
+        await _run_loop_inner(
+            current_context=current_context,
+            new_messages=new_messages,
+            provider=provider,
+            model=model,
+            convert_to_llm=convert_to_llm,
+            transform_context=transform_context,
+            transform_system_prompt=transform_system_prompt,
+            after_model_response=after_model_response,
+            before_tool_call=before_tool_call,
+            after_tool_call=after_tool_call,
+            should_stop_after_turn=should_stop_after_turn,
+            get_steering_messages=get_steering_messages,
+            get_follow_up_messages=get_follow_up_messages,
+            stream_options=stream_options,
+            tool_execution=tool_execution,
+            emit=emit,
+        )
+    except (HitlDetached, HitlAborted):
+        # Caller (Agent.detach / Agent.abort_pending) emitted the event
+        # already. Loop exits silently — assistant message and pending
+        # state remain intact for the next respond() call.
+        return
+
+
+async def _run_loop_inner(
     *,
     current_context: AgentContext,
     new_messages: list[Message],

@@ -59,6 +59,9 @@ class AgentContext:
 class BeforeToolCallResult(BaseModel):
     block: bool = False
     reason: str | None = None
+    edited_args: dict | None = None
+    deny_reason: str | None = None
+    hitl_trace: dict | None = None
 
 
 class AfterToolCallResult(BaseModel):
