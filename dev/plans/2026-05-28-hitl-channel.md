@@ -3263,7 +3263,12 @@ Edit `cubepi/agent/agent.py`. Add inside the class:
             await self._run_hitl_resume()
 
     async def abort_pending(self, reason: str = "aborted by host") -> None:
-        """Abort a pending HITL request.
+        """Abort a pending HITL request and CLOSE the conversation.
+
+        Per spec §5.2 "abort closes the conversation" — no new model call.
+        Implementation differs by case, but the observable outcome is uniform:
+        AgentAbortedEvent emitted, pending cleared, conversation ends with
+        stop_reason="aborted" assistant message.
 
         Two cases, handled WITHOUT a single lock acquisition (codex pass 3:
         holding _run_lock here would deadlock against prompt() which holds it
@@ -3272,15 +3277,17 @@ Edit `cubepi/agent/agent.py`. Add inside the class:
         Case A (in-flight, same process):
           - prompt() is currently holding _run_lock and is suspended in
             channel.{ask,confirm,approve}.
-          - We MUST NOT acquire _run_lock — call channel.cancel() without it.
-            The cancel surfaces HitlCancelled in the awaiter (which ask_user
-            translates to is_error=True tool_result, or ApprovalPolicyMiddleware
-            translates to a deny block). prompt() proceeds to its natural end
-            via the loop's normal post-tool-call flow, releasing _run_lock.
-          - No synthetic-deny writing needed; the conversation closes the same
-            way any cancelled HITL closes (the model sees a tool error and the
-            loop produces the next assistant turn that handles it, or
-            should_stop_after_turn ends the run).
+          - We MUST NOT acquire _run_lock — that would deadlock.
+          - We set self._active_signal (the cubepi abort signal threaded into
+            tools and channels via StreamOptions). _BaseChannel._await_answer
+            races signal vs future; when signal wins it raises HitlAborted
+            (BaseException subclass). HitlAborted propagates through
+            ApprovalPolicyMiddleware / ask_user_tool / _execute_prepared
+            (HitlControlException is re-raised by the selective handler,
+            not converted to a tool error). _run_loop's outer catch handles
+            HitlAborted silently — no further model turn, no extra event.
+          - We emit AgentAbortedEvent BEFORE setting the signal so listeners
+            see the reason with full timing context.
 
         Case B (cross-process, no in-flight await on this channel instance):
           - We are a fresh agent instance loaded from the checkpointer.
@@ -3298,61 +3305,98 @@ Edit `cubepi/agent/agent.py`. Add inside the class:
         if not (self.thread_id and self.checkpointer):
             raise RuntimeError("abort_pending() requires thread_id + checkpointer")
 
-        # === Case A: same-process in-flight ===
-        # Take the channel's _pending atomically; if it's set, cancel and return.
-        # Do NOT take _run_lock — that would deadlock against prompt().
+        # ============= Phase 1: interrupt any in-flight HITL await =============
+        # If prompt() is currently suspended in channel.{ask,confirm,approve},
+        # set the agent signal. _BaseChannel._await_answer races signal vs
+        # future and raises HitlAborted when signal wins. HitlAborted
+        # propagates through tool/middleware (HitlControlException is re-raised
+        # by the selective handler in _execute_prepared) up to _run_loop's
+        # outer silent catch. The HITL channel's finally calls
+        # _on_pending_cleared(exc=HitlAborted) which clears persisted pending
+        # (HitlAborted != HitlDetached).
+        #
+        # CRITICAL: do NOT acquire _run_lock here — prompt() holds it.
         in_flight = self._channel.pending
         if in_flight is not None:
-            await self._channel.cancel(in_flight.question_id, reason=reason)
-            return
+            if self._active_signal is not None:
+                self._active_signal.set()
+            else:
+                # Edge: channel has pending but agent has no active signal
+                # (e.g. respond() race window). Cancel directly.
+                await self._channel.cancel(in_flight.question_id, reason=reason)
 
-        # === Case B: cross-process post-detach ===
+        # ============= Phase 2: append synthetic deny + close conversation =====
+        # Acquiring _run_lock NATURALLY waits for prompt() to finish if Phase 1
+        # signalled it (prompt's HitlAborted unwinds, lock released). If there
+        # was no in-flight, this lock acquisition is uncontended. Inside the
+        # lock we observe the post-unwind message state and append the
+        # synthetic deny + terminal aborted assistant, satisfying the spec's
+        # "abort closes the conversation, no new model call" contract.
         async with self._run_lock:
             load_pending = getattr(self.checkpointer, "load_pending_request", None)
             save_pending = getattr(self.checkpointer, "save_pending_request", None)
-            if load_pending is None or save_pending is None:
+            if save_pending is None:
                 raise HitlError(
                     "abort_pending() requires a checkpointer that implements "
-                    "load_pending_request and save_pending_request"
+                    "save_pending_request"
                 )
-            pending = await load_pending(self.thread_id)
-            if pending is None:
-                return  # nothing to abort
 
-            # Ensure messages are loaded from checkpoint.
+            # Reload messages from checkpoint to see whatever prompt() persisted.
+            data = await self.checkpointer.load(self.thread_id)
+            self._state._messages = list(data.messages or []) if data else []
             if not self._state._messages:
-                data = await self.checkpointer.load(self.thread_id)
-                self._state._messages = list(data.messages or []) if data else []
-
-            if not self._state._messages or not isinstance(
-                self._state._messages[-1], AssistantMessage
-            ):
-                raise HitlInconsistentState(
-                    "abort_pending: thread has pending_request but last message "
-                    "is not AssistantMessage"
-                )
+                # Nothing to close (no in-flight, no persisted history).
+                await self._process_event(AgentAbortedEvent(reason=reason))
+                return
 
             last = self._state._messages[-1]
-            for content in last.content:
-                if isinstance(content, ToolCall):
-                    synthetic = ToolResultMessage(
-                        tool_call_id=content.id,
-                        tool_name=content.name,
-                        content=[TextContent(text=f"aborted: {reason}")],
-                        details={"hitl": {"decision": "aborted", "reason": reason}},
-                        is_error=True,
-                        timestamp=time.time(),
-                    )
-                    self._state._messages.append(synthetic)
-                    await self.checkpointer.append(self.thread_id, [synthetic])
+            if not isinstance(last, AssistantMessage):
+                # No unresolved tool_calls in tail — conversation already ended
+                # by some other path. Still emit the event for observability.
+                if save_pending is not None:
+                    await save_pending(self.thread_id, None)
+                await self._process_event(AgentAbortedEvent(reason=reason))
+                return
 
-            term = AssistantMessage(
-                content=[TextContent(text=f"Conversation aborted: {reason}")],
-                stop_reason="aborted",
-            )
-            self._state._messages.append(term)
-            await self.checkpointer.append(self.thread_id, [term])
+            # Find unresolved tool_calls in `last` (those without a matching
+            # ToolResultMessage anywhere later in the conversation).
+            tool_call_ids = [
+                c.id for c in last.content if isinstance(c, ToolCall)
+            ]
+            asst_pos = len(self._state._messages) - 1
+            already_resolved = {
+                m.tool_call_id for m in self._state._messages[asst_pos + 1:]
+                if isinstance(m, ToolResultMessage)
+            }
+            unresolved = [tc_id for tc_id in tool_call_ids if tc_id not in already_resolved]
 
+            # Synthesize deny tool_result for each unresolved tool_call.
+            for tc_id in unresolved:
+                tc = next(c for c in last.content
+                          if isinstance(c, ToolCall) and c.id == tc_id)
+                synthetic = ToolResultMessage(
+                    tool_call_id=tc_id,
+                    tool_name=tc.name,
+                    content=[TextContent(text=f"aborted: {reason}")],
+                    details={"hitl": {"decision": "aborted", "reason": reason}},
+                    is_error=True,
+                    timestamp=time.time(),
+                )
+                self._state._messages.append(synthetic)
+                await self.checkpointer.append(self.thread_id, [synthetic])
+
+            # Append terminal aborted assistant only if we actually appended
+            # synthetic denials — otherwise the conversation already closed.
+            if unresolved:
+                term = AssistantMessage(
+                    content=[TextContent(text=f"Conversation aborted: {reason}")],
+                    stop_reason="aborted",
+                )
+                self._state._messages.append(term)
+                await self.checkpointer.append(self.thread_id, [term])
+
+            # Defensive clear (Phase 1's _on_pending_cleared usually did this,
+            # but cross-process abort_pending may bypass Phase 1 entirely).
             await save_pending(self.thread_id, None)
             await self._process_event(AgentAbortedEvent(reason=reason))
 
