@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 from cubepi.hitl.types import (
     Option,
@@ -78,5 +80,5 @@ def test_approval_decision_dataclasses_frozen():
     u = AskUser(timeout_seconds=10.0)
     assert d.reason == "forbidden"
     assert u.timeout_seconds == 10.0
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         a.foo = "bar"  # frozen dataclass
