@@ -73,7 +73,7 @@ agent = Agent(
 If `RateLimiter` returns `block=True`, `SafetyFilter` and
 `AuditLogger`'s `before_tool_call` don't run. If `SafetyFilter` returns
 `edited_args={"cmd": "rm /tmp/foo"}`, the *tool* runs with the edited
-args and `AuditLogger` sees the edit in `hitl_trace["_chain"]`.
+args and `AuditLogger` sees them via the rebuilt `ctx.args`.
 `AuditLogger.after_tool_call` still fires because that's a different
 hook.
 

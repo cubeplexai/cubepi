@@ -81,9 +81,9 @@ There are two ways to opt out of parallel mode:
     )
     ```
 
-The built-in `ask_user` HITL tool (see [HITL guide](../hitl)) uses
-`execution_mode="sequential"` — it pauses the agent for human input and
-cannot share a turn with other tools.
+The built-in `ask_user` HITL tool (see [HITL guide](../hitl)) sets
+`execution_mode="sequential"` — it pauses the agent for human input, so
+the tool batch runs one-by-one.
 
 Use sequential mode when tools mutate shared state (a DB, a counter)
 and you want a deterministic order.

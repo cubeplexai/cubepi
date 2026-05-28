@@ -26,7 +26,7 @@ def classify_command(cmd: str) -> tuple[str, str | None]:
 
 
 def sandbox_policy(ctx):
-    cmd = ctx.args.get("cmd", "")
+    cmd = ctx.args.cmd  # ctx.args is the validated pydantic model
     tier, reason = classify_command(cmd)
 
     if tier == "allow":
@@ -39,9 +39,10 @@ def sandbox_policy(ctx):
     )
 ```
 
-Arguments (`ctx.args`) are a **pydantic model** when the tool declares
-`parameters=SomePydanticModel`. Access fields as attributes
-(`ctx.args.cmd`) or dict-key (`ctx.args.get("cmd")` if using `_args_to_dict`).
+`ctx.args` is the **validated pydantic model**. Access fields as
+attributes (`ctx.args.cmd`). The middleware internally converts it to a
+dict via `_args_to_dict` for the channel's approve payload, but your
+policy receives the typed model.
 
 ## Step 2: Wire into the agent
 
@@ -92,10 +93,13 @@ async def host_loop(channel: CheckpointedChannel):
                 details=details,
                 timeout=timeout,
             )
-            # human_answer is an ApproveAnswer with one of:
-            #   {"decision": "approve"}
-            #   {"decision": "deny", "reason": "looks suspicious"}
-            #   {"decision": "edit", "edited_args": {"cmd": "rm /tmp/foo"}}
+            # Build an ApproveAnswer from the human's decision.
+            from cubepi.hitl import ApproveAnswer
+            human_answer = ApproveAnswer(
+                decision=ui_response["decision"],          # "approve" | "deny" | "edit"
+                reason=ui_response.get("reason"),           # only for deny
+                edited_args=ui_response.get("edited_args"), # only for edit
+            )
             await channel.answer(req.question_id, human_answer)
         elif req.payload.kind == "ask":
             await channel.answer(req.question_id, await my_frontend.show_form(req))
@@ -107,7 +111,7 @@ async def host_loop(channel: CheckpointedChannel):
 
 | Human chose | Tool outcome | `hitl_trace["decision"]` | Model sees |
 |---|---|---|---|
-| Approve | Runs with original args | `"approved"` | Normal `tool_result` |
+| Approve | Runs with original args | unset (passthrough, no HITL details) | Normal `tool_result` |
 | Deny | Blocked | `"human_deny"` | `tool_result.is_error=True` with user's reason |
 | Edit | Runs with edited args | `"edit"` + `original_args` / `edited_args` | Normal `tool_result` (from the edited execution) |
 

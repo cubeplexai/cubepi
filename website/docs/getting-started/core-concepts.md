@@ -99,7 +99,7 @@ Streams and events are two layers:
 - **Provider streams** — `MessageStream` yields *provider* events:
   `start`, `text_start`, `text_delta`, `text_end`, `thinking_*`,
   `toolcall_*`, `done`, `error`. This is the raw token stream.
-- **Agent events** — what `agent.subscribe(...)` receives. 15
+- **Agent events** — what `agent.subscribe(...)` receives. 14
   types covering the entire loop + HITL: `agent_start`, `agent_end`,
   `turn_start`, `turn_end`, `message_start`, `message_update`,
   `message_end`, `tool_execution_start`, `tool_execution_update`,

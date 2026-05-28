@@ -29,8 +29,8 @@ agent = Agent(
 ```
 
 The `ask_user` tool is registered like any other tool. Its
-`execution_mode="sequential"` ensures it runs alone in its turn — it can't
-be parallelised with other tool calls.
+`execution_mode="sequential"` makes the tool batch run one-by-one —
+the HITL pause can't overlap with parallel tool execution.
 
 ## Step 2: Host renders the form
 

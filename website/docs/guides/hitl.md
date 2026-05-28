@@ -229,7 +229,7 @@ The policy function can be sync or async (`await`-able). It returns one of:
 |---|---|
 | `Approve()` | Tool runs; channel never invoked. |
 | `Deny(reason)` | Tool blocked; `hitl_trace["decision"]="policy_deny"`. |
-| `AskUser(timeout=..., details=...)` | Channel invoked; human chooses approve/deny/edit. |
+| `AskUser(timeout_seconds=..., details=...)` | Channel invoked; human chooses approve/deny/edit. |
 
 Policy-deny and human-deny produce different `hitl_trace` keys (`policy_deny`
 vs `human_deny`) so audit and trace can distinguish them.
