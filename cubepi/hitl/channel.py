@@ -218,9 +218,19 @@ class _BaseChannel:
                     # Cancel any still-pending signal task to avoid leaks.
                     if signal_task is not None and not signal_task.done():
                         signal_task.cancel()
-                    self._pending = None
-                    self._future = None
-                    await self._on_pending_cleared(req, exc=exc_caught)
+                    # Keep the local _pending/_future slot occupied WHILE
+                    # _on_pending_cleared runs — CheckpointedChannel's hook
+                    # may do an `await save_pending_request(thread_id, None)`,
+                    # and during that await another caller could otherwise
+                    # see _pending == None, persist a new pending, then have
+                    # it wiped by this prior request's late clear. Holding
+                    # the local slot forces concurrent calls to bounce on
+                    # HitlConcurrencyError instead.
+                    try:
+                        await self._on_pending_cleared(req, exc=exc_caught)
+                    finally:
+                        self._pending = None
+                        self._future = None
             except BaseException as exc:
                 outcome = _outcome_from_exception(exc)
                 raise

@@ -162,44 +162,101 @@ async def run_agent_loop_resume(
     checkpointer: Any = None,
     thread_id: str | None = None,
 ) -> list[Message]:
-    from cubepi.hitl.exceptions import HitlInconsistentState
-
     new_messages: list[Message] = []
+
+    try:
+        return await _run_agent_loop_resume_body(
+            context=context,
+            provider=provider,
+            model=model,
+            convert_to_llm=convert_to_llm,
+            emit=emit,
+            transform_context=transform_context,
+            transform_system_prompt=transform_system_prompt,
+            after_model_response=after_model_response,
+            before_tool_call=before_tool_call,
+            after_tool_call=after_tool_call,
+            should_stop_after_turn=should_stop_after_turn,
+            get_steering_messages=get_steering_messages,
+            get_follow_up_messages=get_follow_up_messages,
+            stream_options=stream_options,
+            tool_execution=tool_execution,
+            system_prompt=system_prompt,
+            checkpointer=checkpointer,
+            thread_id=thread_id,
+            new_messages=new_messages,
+        )
+    except (HitlDetached, HitlAborted):
+        # Same as _run_loop's outer catch: the Agent caller (Agent.detach /
+        # Agent.abort_pending) emitted the corresponding event already.
+        # Loop exits silently — assistant message and pending state remain
+        # intact for the next respond() call. This catch covers the prelude
+        # (execute_tool_calls of the resumed tool batch) AND the fall-through
+        # to _run_loop, so a second HITL pause/abort during respond() also
+        # unwinds cleanly instead of escaping.
+        return new_messages
+
+
+async def _run_agent_loop_resume_body(
+    *,
+    context,
+    provider,
+    model,
+    convert_to_llm,
+    emit,
+    transform_context,
+    transform_system_prompt,
+    after_model_response,
+    before_tool_call,
+    after_tool_call,
+    should_stop_after_turn,
+    get_steering_messages,
+    get_follow_up_messages,
+    stream_options,
+    tool_execution,
+    system_prompt,
+    checkpointer,
+    thread_id,
+    new_messages: list,
+) -> list[Message]:
+    from cubepi.hitl.exceptions import HitlInconsistentState
 
     # Sanity check
     if not context.messages:
         raise HitlInconsistentState("resume called with empty message history")
-    last = context.messages[-1]
-    if not isinstance(last, AssistantMessage):
+
+    # Locate the suspended AssistantMessage by scanning backwards for the most
+    # recent assistant turn that still has unresolved tool_calls. We cannot
+    # require the tail to be that assistant message — a previous crashed
+    # resume may have left some ToolResultMessage(s) at the tail before
+    # crashing, and crash-recovery idempotency depends on us picking the
+    # right assistant turn and skipping already-resolved tool_calls.
+    asst_pos = -1
+    last: AssistantMessage | None = None
+    for i in range(len(context.messages) - 1, -1, -1):
+        msg = context.messages[i]
+        if not isinstance(msg, AssistantMessage):
+            continue
+        tcs = [c for c in msg.content if isinstance(c, ToolCall)]
+        if not tcs:
+            continue
+        already = {
+            m.tool_call_id
+            for m in context.messages[i + 1 :]
+            if isinstance(m, ToolResultMessage)
+        }
+        if any(tc.id not in already for tc in tcs):
+            asst_pos = i
+            last = msg
+            break
+
+    if last is None or asst_pos < 0:
         raise HitlInconsistentState(
-            f"resume requires last message to be AssistantMessage, got "
-            f"{type(last).__name__}"
+            "resume could not locate an AssistantMessage with unresolved tool_calls"
         )
+
     unresolved = [c for c in last.content if isinstance(c, ToolCall)]
-    if not unresolved:
-        raise HitlInconsistentState(
-            "resume requires unresolved tool_calls in last message"
-        )
-
-    # Locate `last` by IDENTITY (not value equality). list.index() uses ==, which
-    # would match an earlier assistant message with identical content (rare but
-    # possible after retries or reused prompts).
-    asst_pos = next(
-        (
-            i
-            for i in range(len(context.messages) - 1, -1, -1)
-            if context.messages[i] is last
-        ),
-        -1,
-    )
-    if asst_pos < 0:
-        raise HitlInconsistentState(
-            "could not locate last assistant message by identity"
-        )
-
-    # Idempotency: a previous crashed-mid-execute resume may have already left
-    # ToolResultMessage(s) for some of the unresolved tool_calls after asst_pos.
-    # Skip those — DO NOT re-run side-effecting tool bodies.
+    # Idempotency: skip tool_calls already resolved by a prior crashed resume.
     already_resolved = {
         m.tool_call_id
         for m in context.messages[asst_pos + 1 :]
