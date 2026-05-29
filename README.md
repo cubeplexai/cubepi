@@ -12,7 +12,7 @@
 [![Docs](https://img.shields.io/badge/docs-cubepi.pages.dev-blue)](https://cubepi.pages.dev)
 [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1f6feb)](https://deepwiki.com/cubeplexai/cubepi)
 
-A Pythonic, async-native agent framework — a leaner, more readable take on agent runtimes like [langgraph](https://github.com/langchain-ai/langgraph).
+CubePi is a Pythonic, async-native agent framework designed for high performance, readability, and production-grade persistence. It provides a leaner alternative to graph-based agent runtimes by modeling agent logic as a linear while loop that developers can easily trace and debug.
 
 ## Why CubePi
 
