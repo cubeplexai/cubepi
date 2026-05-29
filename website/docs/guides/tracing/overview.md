@@ -29,7 +29,7 @@ Each layer carries standard `gen_ai.*` attributes — `gen_ai.operation.name`,
 ## What ships out of the box
 
 - **Tracer** — builds an SDK `TracerProvider`, attaches one
-  `BatchSpanProcessor` per exporter, wires the cubepi event stream into spans.
+  `BatchSpanProcessor` per exporter, wires the CubePi event stream into spans.
 - **Meter** — sibling for OTel histograms:
   `gen_ai.client.operation.duration`, `gen_ai.client.operation.time_to_first_chunk`,
   `gen_ai.client.token.usage`.
@@ -86,7 +86,7 @@ Each layer carries standard `gen_ai.*` attributes — `gen_ai.operation.name`,
 
 - [Getting Started](./getting-started) — install the extra and emit your
   first spans
-- [OTLP & Backends](./otlp) — point cubepi at Jaeger, Tempo, Honeycomb, …
+- [OTLP & Backends](./otlp) — point CubePi at Jaeger, Tempo, Honeycomb, …
 - [Content Recording & Redaction](./content-recording) — record prompts and
   responses safely
 - [Metrics](./metrics) — histograms via `Meter`

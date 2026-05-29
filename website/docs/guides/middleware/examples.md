@@ -239,7 +239,7 @@ model with the feedback message in context.
 
 ## Human-in-the-loop tool confirmation
 
-cubepi ships two built-in HITL middlewares in `cubepi.hitl`:
+CubePi ships two built-in HITL middlewares in `cubepi.hitl`:
 
 **`ConfirmToolCallMiddleware`** — "always ask the human for this tool":
 

@@ -68,7 +68,7 @@ unlike SQLite), CubePi **does not create these for you** — it verifies
 on `__aenter__` that they exist with the expected `schema_version`.
 
 If they're missing, you get `CubepiSchemaUninitialized`. If the version
-doesn't match this cubepi release, you get `CubepiSchemaMismatch`. A
+doesn't match this CubePi release, you get `CubepiSchemaMismatch`. A
 production database belongs to the host application's migration system
 (Alembic, …), not to a third-party library.
 
@@ -121,7 +121,7 @@ def upgrade():
 ```
 
 `write_schema_version_op()` is idempotent: it deletes any rows from a
-prior cubepi version and inserts the current one. When CubePi later
+prior CubePi version and inserts the current one. When CubePi later
 bumps `EXPECTED_SCHEMA_VERSION`, generate a new revision and run it
 again.
 
@@ -189,7 +189,7 @@ from `dict.update`.)
 - **`CubepiSchemaUninitialized`** — Your DB is empty, your migrations
   didn't run, or the `cubepi_schema_version` table is malformed. Apply
   the host alembic upgrade first.
-- **`CubepiSchemaMismatch`** — You upgraded cubepi but didn't generate a
+- **`CubepiSchemaMismatch`** — You upgraded CubePi but didn't generate a
   new migration. Generate one, apply it, and CubePi will start.
 - **JSON default errors on older MySQL** — JSON columns use
   `DEFAULT (JSON_OBJECT())`, which requires MySQL 8.0.13+.

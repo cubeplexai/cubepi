@@ -189,7 +189,7 @@ if first.type == "error":
 A more robust approach is to fork the built-in providers and re-raise
 specific SDK exceptions from `_produce` so they reach `provider.stream()`
 as real Python exceptions — but that's a larger change against
-cubepi itself.
+CubePi itself.
 
 ## Adding circuit breaking
 

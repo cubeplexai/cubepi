@@ -6,7 +6,7 @@ sidebar_position: 4
 
 # Recording Prompts, Responses, and Tool Payloads
 
-By default cubepi's tracing emits structural attributes only — operation
+By default CubePi's tracing emits structural attributes only — operation
 names, models, token counts, finish reasons, durations. **No prompt content,
 no model output, no tool arguments or results leave the process.** This is
 deliberate: many agent setups handle PII, customer data, or trade-secret

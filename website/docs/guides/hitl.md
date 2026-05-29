@@ -6,7 +6,7 @@ sidebar_position: 10
 
 # Human-in-the-Loop (HITL)
 
-cubepi's HITL channel lets an agent **pause and ask a human** before proceeding.
+CubePi's HITL channel lets an agent **pause and ask a human** before proceeding.
 It handles two recurring patterns with a single primitive:
 
 1. **Sandbox tool confirmation** — a dangerous tool (bash, file writes, API
@@ -476,7 +476,7 @@ well-defined safe suspension points:
 
 **Custom tools that mix HITL with other work inside `execute()` are NOT
 durable cross-process by default.** If such a tool's process dies mid-execute,
-anything that ran before the channel call would be lost. cubepi will raise
+anything that ran before the channel call would be lost. CubePi will raise
 `HitlDurabilityNotGuaranteed` unless the `CheckpointedChannel` is constructed
 with `allow_inside_custom_tool=True` — the caller must acknowledge the
 idempotency contract (the tool body must be a pure HITL wait with no

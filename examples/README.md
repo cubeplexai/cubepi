@@ -1,6 +1,6 @@
 # Examples
 
-Runnable scripts demonstrating cubepi features. They use `FauxProvider`, so
+Runnable scripts demonstrating CubePi features. They use `FauxProvider`, so
 they need no API key — only the relevant service where noted.
 
 Run any example with `uv`:
@@ -27,7 +27,7 @@ CUBEPI_MYSQL_DSN=mysql://user:pass@host:3306/dbname \
     uv run python examples/checkpointing_mysql.py
 ```
 
-Each script bootstraps the cubepi schema inline so it runs standalone, but in
+Each script bootstraps the CubePi schema inline so it runs standalone, but in
 production the schema is owned by your host application's Alembic migration.
 The inline DDL mirrors exactly what that migration produces and uses the same
 `alembic_helpers`. See the host-integration runbooks for the migration recipe

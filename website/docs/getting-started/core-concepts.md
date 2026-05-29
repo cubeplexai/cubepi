@@ -149,7 +149,7 @@ backends implement them. See [HITL guide](../guides/hitl).
 
 ## HITL (Human-in-the-Loop)
 
-cubepi ships a built-in `cubepi.hitl` module for scenarios where the
+CubePi ships a built-in `cubepi.hitl` module for scenarios where the
 agent needs to **pause and wait for a human**:
 
 - **Sandbox confirmation** — a dangerous tool (bash, file write) needs

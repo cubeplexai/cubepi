@@ -61,7 +61,7 @@ The checkpointer expects three tables: `cubepi_threads`,
 they exist with the expected `schema_version`.
 
 If they're missing, you get `CubepiSchemaUninitialized`. If the
-version doesn't match this cubepi release, you get
+version doesn't match this CubePi release, you get
 `CubepiSchemaMismatch`.
 
 The reason: a production database belongs to the host application's
@@ -87,7 +87,7 @@ alembic revision --autogenerate -m "add cubepi checkpointer"
 ```
 
 Autogenerate emits the `CREATE TABLE`s from `cubepi_metadata`, but
-SQLAlchemy `MetaData` **cannot model two things cubepi needs**, so add
+SQLAlchemy `MetaData` **cannot model two things CubePi needs**, so add
 them to the generated migration by hand: the 64 hash partitions of
 `cubepi_messages` (via `create_message_partitions_op()`) and the
 `cubepi_schema_version` row (via `write_schema_version_op()`). Use the
@@ -108,7 +108,7 @@ def upgrade():
 
 Both helpers return a SQL string — you pass them to `op.execute(...)`.
 `write_schema_version_op()` is idempotent: it deletes any rows from a
-prior cubepi version and inserts the current one.
+prior CubePi version and inserts the current one.
 
 When CubePi later upgrades and bumps `EXPECTED_SCHEMA_VERSION`, you
 generate a new revision and call `op.execute(write_schema_version_op())`
@@ -186,12 +186,12 @@ to so the schema is forward-compatible.
 
 - **`CubepiSchemaUninitialized`** — Your DB is empty or your
   migrations didn't run. Apply the host alembic upgrade first.
-- **`CubepiSchemaMismatch`** — You upgraded cubepi but didn't generate
+- **`CubepiSchemaMismatch`** — You upgraded CubePi but didn't generate
   a new migration. Generate one, apply it, and CubePi will start.
   
   :::info Schema v2 (HITL)
 
-  cubepi ≥ the HITL feature bumps `EXPECTED_SCHEMA_VERSION` from 1 to 2
+  CubePi ≥ the HITL feature bumps `EXPECTED_SCHEMA_VERSION` from 1 to 2
   and adds a `pending_request JSONB NULL` column to `cubepi_threads`.
   Your host alembic upgrade must call
   `add_pending_request_column_op()` (from
