@@ -1,0 +1,152 @@
+---
+title: 组合规则
+description: "了解 CubePi 如何通过 per-hook 规则组合多个中间件。"
+---
+
+# 组合规则
+
+当你传入多个中间件——`Agent(middleware=[m1, m2, m3])`——CubePi 按照
+**每个 hook 各自的规则**进行组合。正确的理解方式是：每个 hook 采用
+最适合其工作的组合规则，你不需要记忆 "before" 或 "after" 优先级猜测。
+
+## 规则速览
+
+| Hook | 规则 | 顺序重要吗？ |
+|---|---|---|
+| `transform_context` | **链式**——每个看到上一个的输出 | 是 |
+| `convert_to_llm` | **最后一个胜出** | 只有一个运行 |
+| `transform_system_prompt` | **链式** | 是 |
+| `before_tool_call` | **第一个 block 停止** | 列表中第一个胜出阻止 |
+| `after_tool_call` | **后面覆盖前面** | 最后写入胜出 |
+| `should_stop_after_turn` | **任一 True 即停止**（OR） | 否 |
+| `after_model_response` | **带合并语义的链式** | 见下文 |
+
+## `transform_context` 和 `transform_system_prompt`
+
+链式：`m1` 的输出成为 `m2` 的输入，`m2` 的输出成为 `m3` 的输入。适用于分层转换：
+
+```python
+agent = Agent(
+    middleware=[
+        SlidingWindow(max_messages=20),    # m1: 丢弃最旧的
+        InjectSummary(),                    # m2: 前置摘要块
+    ],
+)
+```
+
+`m2` 看到的是截断后的列表。用户可见的 `agent.state.messages` 不受影响——
+中间件只改变模型接收到的内容。
+
+## `convert_to_llm`
+
+有意采用最后胜出：这是发送前的最终转换。多个所有者会打架；只选一个。
+CubePi 强制**列表中的最后一个**实现了 `convert_to_llm` 的中间件运行。
+
+如果你发现自己需要两个 `convert_to_llm` 中间件，将它们合并为一个
+（调用点组合：写一个调用两者的中间件）。
+
+## `before_tool_call`
+
+第一个 `block=True` 短路其余中间件。用于按从最严格到最宽松的顺序
+链式组合策略层：
+
+```python
+agent = Agent(
+    middleware=[
+        RateLimiter(),       # 配额不足时阻止
+        SafetyFilter(),      # 参数危险时阻止
+        AuditLogger(),       # 永不阻止；仅记录
+    ],
+)
+```
+
+如果 `RateLimiter` 返回 `block=True`，`SafetyFilter` 和 `AuditLogger`
+的 `before_tool_call` 不会运行。`AuditLogger.after_tool_call` 仍然
+触发，因为那是另一个 hook。
+
+## `after_tool_call`
+
+每个中间件可以返回一个设置了部分字段的 `AfterToolCallResult`；
+CubePi 合并它们，后面的结果在非 `None` 字段上覆盖前面的。完整结果：
+
+```python
+class AfterToolCallResult(BaseModel):
+    content: list[Content] | None = None
+    details: Any = None
+    is_error: bool | None = None
+    terminate: bool | None = None
+```
+
+模式：早期中间件添加丰富的 `details`，后期中间件为模型净化 `content`。
+两者都运行；合并后的结果组合了一个的 `details` 和另一个的脱敏 `content`。
+
+## `should_stop_after_turn`
+
+任一中间件返回 `True` 即结束运行。链中其余中间件不会被执行。
+
+```python
+agent = Agent(
+    middleware=[
+        MaxTurns(10),
+        BudgetCap(usd=0.5),
+        FinalAnswerSentinel(),   # 当 assistant 说 "FINAL ANSWER" 时停止
+    ],
+)
+```
+
+## `after_model_response`
+
+带结构化合并的链式。每个中间件看到**当前的 response**（可能已被前面的
+中间件替换），并返回一个 `TurnAction`：
+
+- `response: AssistantMessage | None` —— 若非 None，则替换当前的 response
+  供下游中间件和循环最终持久化使用。
+- `inject_messages: list[Message]` —— 跨整个链追加到单个列表中，
+  然后在下一轮之前添加到上下文中。
+- `decision: "natural" | "stop" | "loop_to_model"` —— **最后一个中间件的值胜出**。
+
+```python
+agent = Agent(
+    middleware=[
+        ProfanityRedactor(),    # 重写 response
+        StructuredOutputValidator(),  # 可能返回 decision="loop_to_model"
+        EventLogger(),          # 不改变 decision
+    ],
+)
+```
+
+如果 `StructuredOutputValidator` 返回 `decision="loop_to_model"` 而
+`EventLogger` 返回 `decision="natural"`，循环看到的是 `"natural"`——
+因为最后胜出。如果这不是你想要的，请重新排序。
+
+## 混合中间件与构造函数可调用对象
+
+`Agent(...)` 也接受显式的 hook 可调用对象（`convert_to_llm=…`、
+`before_tool_call=…` 等）。当两者都存在时，**显式可调用对象胜出**：
+
+```python
+agent = Agent(
+    middleware=[LoggingMiddleware()],
+    before_tool_call=my_explicit_hook,   # 覆盖中间件版本
+)
+```
+
+一次性 hook 使用显式形式；当行为是一个连贯的包时使用中间件类。
+
+## 关于 `Middleware` 基类的说明
+
+基类 `Middleware` 中未实现的方法会抛出 `NotImplementedError`。
+`compose_middleware` 通过对比基方法检测到这一点，并**只连接**中间件
+实际覆盖的 hook。
+
+```python
+class JustTransform(Middleware):
+    async def transform_context(self, messages, *, signal=None):
+        return messages[-10:]
+    # 没有其他 hook。CubePi 不会调用它们。
+```
+
+## 另请参阅
+
+- [7 个 Hook](./hooks) —— 每个 hook 的作用及触发时机。
+- [示例](./examples) —— 组合在实践中的应用。
