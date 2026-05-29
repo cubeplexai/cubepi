@@ -84,6 +84,12 @@ from cubepi.checkpointer.mysql import cubepi_metadata, EXPECTED_SCHEMA_VERSION
 target_metadata = [my_app_metadata, cubepi_metadata]
 ```
 
+Then autogenerate a revision:
+
+```bash
+alembic revision --autogenerate -m "add cubepi checkpointer"
+```
+
 The `cubepi_messages` table is `KEY`-partitioned, which SQLAlchemy's
 autogenerate cannot express, so append the partition clause and the
 schema-version write with the provided helpers:
@@ -196,3 +202,5 @@ from `dict.update`.)
 - [Postgres Checkpointing](./postgres) — the Postgres-backed sibling.
 - [SQLite Checkpointing](./sqlite) — single-process alternative.
 - [Custom Backends](./custom) — Protocol details.
+- [Package README](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/README.md)
+  — the full host-integration runbook next to the code.
