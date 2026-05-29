@@ -178,7 +178,10 @@ class Agent(Generic[TMessage]):
         self.checkpointer = checkpointer
         self.thread_id = thread_id
         self._channel = channel
-        if channel is not None:
+        # _bind_emit is a _BaseChannel internal, not part of the HitlChannel
+        # protocol. Third-party channels that only implement the public
+        # protocol won't have it — skip the wiring instead of crashing.
+        if channel is not None and hasattr(channel, "_bind_emit"):
             channel._bind_emit(lambda e: self._process_event(e))
         self._run_lock = asyncio.Lock()
 
