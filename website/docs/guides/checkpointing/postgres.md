@@ -80,8 +80,18 @@ from cubepi.checkpointer.postgres import cubepi_metadata, EXPECTED_SCHEMA_VERSIO
 target_metadata = [my_app_metadata, cubepi_metadata]
 ```
 
-Then generate a revision and apply it. The migration must also
-INSERT the schema version. Use the helper:
+Then autogenerate a revision:
+
+```bash
+alembic revision --autogenerate -m "add cubepi checkpointer"
+```
+
+Autogenerate emits the `CREATE TABLE`s from `cubepi_metadata`, but
+SQLAlchemy `MetaData` **cannot model two things cubepi needs**, so add
+them to the generated migration by hand: the 64 hash partitions of
+`cubepi_messages` (via `create_message_partitions_op()`) and the
+`cubepi_schema_version` row (via `write_schema_version_op()`). Use the
+helpers:
 
 ```python
 # In a migration's upgrade():
@@ -205,3 +215,5 @@ to so the schema is forward-compatible.
 - [Custom Backends](./custom) — Protocol details.
 - [Recipes → Postgres + FastAPI Service](../../recipes/postgres-fastapi)
   — a deployable HTTP-fronted agent.
+- [Package README](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/README.md)
+  — the full host-integration runbook next to the code.
