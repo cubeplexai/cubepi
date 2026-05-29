@@ -79,7 +79,7 @@ agent = Agent(
     )
     ```
 
-内置的 `ask_user` HITL 工具（见 [HITL 指南](../hitl)）设置了
+内置的 `ask_user` HITL 工具（见 [HITL 指南](../hitl/overview)）设置了
 `execution_mode="sequential"` —— 它会暂停 agent 等待人类输入，因此
 工具批次会逐个运行。
 

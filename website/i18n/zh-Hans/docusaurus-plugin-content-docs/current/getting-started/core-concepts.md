@@ -136,7 +136,7 @@ class Checkpointer(Protocol):
 见 [Checkpointing → SQLite](../guides/checkpointing/sqlite)。
 
 HITL 为跨进程挂起/恢复新增了两个可选方法：`save_pending_request` /
-`load_pending_request`。所有第一方后���都已实现。见 [HITL 指南](../guides/hitl)。
+`load_pending_request`。所有第一方后���都已实现。见 [HITL 指南](../guides/hitl/overview)。
 
 ## HITL（人机协同）
 
@@ -173,7 +173,7 @@ Channel 是一个可 `await` 的协程协作者：工具和中间件作者写
   `Agent.respond(question_id=, answer=)` 回答。
 
 完整细节——三种 HITL 动词、两套内置中间件、跨进程挂起/恢复协议、事件、
-追踪 span 和错误参考——见 [HITL 指南](../guides/hitl)。
+追踪 span 和错误参考——见 [HITL 指南](../guides/hitl/overview)。
 
 ## Tracer（可选）
 

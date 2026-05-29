@@ -176,7 +176,7 @@ CubePi v0.3 尚未暴露 fork API——现在写入它们是为了保持 schema
   宿主 alembic upgrade 必须在提升 schema_version 行之前调用
   `add_pending_request_column_op()`（来自
   `cubepi.checkpointer.postgres.alembic_helpers`）。
-  完整的跨进程流程请参阅 [HITL 指南](../hitl)。
+  完整的跨进程流程请参阅 [HITL 指南](../hitl/overview)。
   :::
 - **负载下连接池耗尽** —— 默认 `max_pool_size=10`。
   如果应用的并发 agent 数超过此值，请调大。

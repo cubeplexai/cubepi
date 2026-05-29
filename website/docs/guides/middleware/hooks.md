@@ -91,7 +91,7 @@ Return `BeforeToolCallResult(block=True, reason="…")` to short-circuit
 `is_error=True`. Return `None` (or no return) to proceed.
 
 Use for: permissions, rate limiting, dry-run modes, sandboxing,
-human-in-the-loop confirmation (see [HITL guide](../hitl)).
+human-in-the-loop confirmation (see [HITL guide](../hitl/overview)).
 
 Composition: **first `block=True` short-circuits** the chain.
 

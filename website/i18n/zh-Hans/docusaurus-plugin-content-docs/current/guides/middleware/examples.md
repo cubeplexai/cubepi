@@ -275,7 +275,7 @@ agent = Agent(
 `Approve` 立即返回。
 
 完整细节——超时语义、编辑语义、事件、追踪 span、跨进程挂起/恢复——
-请参见 [HITL 指南](../hitl)。
+请参见 [HITL 指南](../hitl/overview)。
 
 ## 另请参阅
 

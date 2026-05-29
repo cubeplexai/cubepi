@@ -196,7 +196,7 @@ to so the schema is forward-compatible.
   Your host alembic upgrade must call
   `add_pending_request_column_op()` (from
   `cubepi.checkpointer.postgres.alembic_helpers`) before bumping the
-  schema_version row. See the [HITL guide](../hitl) for the full
+  schema_version row. See the [HITL guide](../hitl/overview) for the full
   cross-process flow.
   :::
 - **Connection pool exhaustion under load** — Default `max_pool_size=10`.

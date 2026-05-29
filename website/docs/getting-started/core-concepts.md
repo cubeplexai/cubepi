@@ -145,7 +145,7 @@ on the first `prompt()`. Built-in backends: `MemoryCheckpointer`,
 
 HITL adds two optional methods for cross-process suspend/resume:
 `save_pending_request` / `load_pending_request`. All first-party
-backends implement them. See [HITL guide](../guides/hitl).
+backends implement them. See [HITL guide](../guides/hitl/overview).
 
 ## HITL (Human-in-the-Loop)
 
@@ -185,7 +185,7 @@ Two channel backends ship in-box:
 
 Full details — the three HITL verbs, both built-in middlewares, the
 cross-process suspend/resume protocol, events, trace spans, and error
-reference — are in the [HITL guide](../guides/hitl).
+reference — are in the [HITL guide](../guides/hitl/overview).
 
 ## Tracer (optional)
 

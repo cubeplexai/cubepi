@@ -85,7 +85,7 @@ This schema is append-only. CubePi never updates or deletes rows.
 
 ## HITL pending table
 
-When the [HITL](../hitl) module is in use, an additional table is
+When the [HITL](../hitl/overview) module is in use, an additional table is
 created automatically on `__aenter__`:
 
 ```sql

@@ -80,7 +80,7 @@ CREATE TABLE thread_extra (
 
 ## HITL 挂起表
 
-当使用 [HITL](../hitl) 模块时,每次 `__aenter__` 会自动创建一个额外的表：
+当使用 [HITL](../hitl/overview) 模块时,每次 `__aenter__` 会自动创建一个额外的表：
 
 ```sql
 CREATE TABLE IF NOT EXISTS thread_pending_request (

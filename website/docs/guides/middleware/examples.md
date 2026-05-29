@@ -286,7 +286,7 @@ agent = Agent(
 channel's approve flow. `Approve` returns immediately.
 
 Full details — timeout semantics, edit semantics, events, trace spans,
-cross-process suspend/resume — are in the [HITL guide](../hitl).
+cross-process suspend/resume — are in the [HITL guide](../hitl/overview).
 
 ## See also
 

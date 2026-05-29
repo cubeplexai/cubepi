@@ -85,7 +85,7 @@ CubePi 会将该原因作为工具结果返回，并标记 `is_error=True`。
 返回 `None`（或无返回）则继续执行。
 
 用于：权限控制、速率限制、dry-run 模式、沙箱、
-人机协同确认（参见 [HITL 指南](../hitl)）。
+人机协同确认（参见 [HITL 指南](../hitl/overview)）。
 
 组合方式：**第一个 `block=True` 短路**整个链。
 

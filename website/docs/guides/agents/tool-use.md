@@ -82,7 +82,7 @@ There are two ways to opt out of parallel mode:
     )
     ```
 
-The built-in `ask_user` HITL tool (see [HITL guide](../hitl)) sets
+The built-in `ask_user` HITL tool (see [HITL guide](../hitl/overview)) sets
 `execution_mode="sequential"` — it pauses the agent for human input, so
 the tool batch runs one-by-one.
 
