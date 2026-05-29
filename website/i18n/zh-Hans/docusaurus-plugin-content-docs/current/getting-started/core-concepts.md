@@ -140,7 +140,7 @@ HITL 为跨进程挂起/恢复新增了两个可选方法：`save_pending_reques
 
 ## HITL（人机协同）
 
-cubepi 内置了 `cubepi.hitl` 模块，用于 agent 需要**暂停并等待人类输入**的
+CubePi 内置了 `cubepi.hitl` 模块，用于 agent 需要**暂停并等待人类输入**的
 场景：
 
 - **沙箱确认** —— 危险工具（bash、写入文件）在执行前需要人类

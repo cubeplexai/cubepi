@@ -166,12 +166,12 @@ CubePi v0.3 尚未暴露 fork API——现在写入它们是为了保持 schema
 
 - **`CubepiSchemaUninitialized`** —— 数据库为空或迁移未运行。
   先执行宿主 alembic upgrade。
-- **`CubepiSchemaMismatch`** —— 你升级了 cubepi 但未生成新的迁移。
+- **`CubepiSchemaMismatch`** —— 你升级了 CubePi 但未生成新的迁移。
   生成一个、执行它，CubePi 就会启动。
 
   :::info Schema v2（HITL）
 
-  cubepi ≥ HITL 版本将 `EXPECTED_SCHEMA_VERSION` 从 1 提升到 2，
+  CubePi ≥ HITL 版本将 `EXPECTED_SCHEMA_VERSION` 从 1 提升到 2，
   并在 `cubepi_threads` 表中新增 `pending_request JSONB NULL` 列。
   宿主 alembic upgrade 必须在提升 schema_version 行之前调用
   `add_pending_request_column_op()`（来自

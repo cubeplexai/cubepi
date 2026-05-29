@@ -6,7 +6,7 @@ sidebar_position: 10
 
 # 人机协同 (HITL)
 
-cubepi 的 HITL channel 让 agent 能够**暂停并等待人类输入**后再继续。
+CubePi 的 HITL channel 让 agent 能够**暂停并等待人类输入**后再继续。
 它用一个统一原语覆盖两种典型模式：
 
 1. **沙箱工具确认** —— 危险工具（bash、文件写入、API 变更）在运行前

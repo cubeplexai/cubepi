@@ -25,6 +25,7 @@ export default function Hero() {
       />
       <div className={styles.eyebrow}>cubepi · v{version} · alpha</div>
       <h1 className={styles.h1}>CubePi</h1>
+      <p className={styles.tagline}>A Pythonic, async-native agent framework.</p>
       <p className={styles.lead}>
         CubePi is a Pythonic, async-native agent framework designed for high
         performance, readability, and production-grade persistence. It provides
