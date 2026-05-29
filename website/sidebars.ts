@@ -40,6 +40,7 @@ const sidebars: SidebarsConfig = {
           'guides/middleware/composition',
           'guides/middleware/examples',
         ]},
+        'guides/hitl',
         { type: 'category', label: 'MCP', items: [
           'guides/mcp/loading',
           'guides/mcp/auth',
@@ -77,6 +78,8 @@ const sidebars: SidebarsConfig = {
         'recipes/persistent-chat',
         'recipes/resumable-tasks',
         'recipes/postgres-fastapi',
+        'recipes/ask-user-form',
+        'recipes/sandbox-confirm',
       ],
     },
     {
