@@ -64,7 +64,7 @@ CubePi 不匹配，你会收到 `CubepiSchemaMismatch`。
 原因：生产数据库属于宿主应用的迁移系统（Alembic、Atlas……），
 不属于一个可能与你现有迁移冲突的第三方库。
 
-### 通过 Alembic 引导
+### 通过 Alembic 引导 {#bootstrapping-via-alembic}
 
 CubePi 暴露了 SQLAlchemy `MetaData`，让你的迁移可以采用其 schema：
 
