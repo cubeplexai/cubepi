@@ -40,7 +40,12 @@ const sidebars: SidebarsConfig = {
           'guides/middleware/composition',
           'guides/middleware/examples',
         ]},
-        'guides/hitl',
+        { type: 'category', label: 'Human-in-the-Loop', items: [
+          'guides/hitl/overview',
+          'guides/hitl/middlewares',
+          'guides/hitl/durable',
+          'guides/hitl/reference',
+        ]},
         { type: 'category', label: 'MCP', items: [
           'guides/mcp/loading',
           'guides/mcp/auth',
