@@ -273,6 +273,60 @@ async def test_ask_resume_slot_not_consumed_by_different_prompt():
     assert ch._resume_slot == (qid_b, {"color": "blue"})
 
 
+async def _grab_qid_and_answer(ch: InMemoryChannel, value):
+    """Host helper: wait for the next pending request, answer it, and
+    return the qid that was set."""
+    while ch.pending is None:
+        await asyncio.sleep(0)
+    qid = ch.pending.question_id
+    await ch.answer(qid, value)
+    return qid
+
+
+async def test_repeat_confirm_gets_distinct_qids():
+    """Regression: two consecutive `confirm()` calls with identical prompt
+    and details must produce distinct question_ids — otherwise a stale
+    answer from the first call (delivered late, after timeout/cancel) could
+    erroneously match the second call's pending request.
+
+    Codex PR #127 review feedback (P2 follow-up to qid derivation).
+    """
+    ch = InMemoryChannel()
+
+    h1 = asyncio.create_task(_grab_qid_and_answer(ch, True))
+    r1 = await ch.confirm("are you sure?")
+    qid1 = await h1
+
+    h2 = asyncio.create_task(_grab_qid_and_answer(ch, False))
+    r2 = await ch.confirm("are you sure?")
+    qid2 = await h2
+
+    assert r1 is True
+    assert r2 is False
+    assert qid1 != qid2, (
+        f"both confirm() calls produced qid={qid1!r} — a stale answer for "
+        f"the first would erroneously match the second's pending request"
+    )
+
+
+async def test_repeat_ask_gets_distinct_qids():
+    """Same regression as test_repeat_confirm_gets_distinct_qids for ask()."""
+    ch = InMemoryChannel()
+    questions = [Question(key="color", prompt="Pick:")]
+
+    h1 = asyncio.create_task(_grab_qid_and_answer(ch, {"color": "red"}))
+    r1 = await ch.ask(questions)
+    qid1 = await h1
+
+    h2 = asyncio.create_task(_grab_qid_and_answer(ch, {"color": "blue"}))
+    r2 = await ch.ask(questions)
+    qid2 = await h2
+
+    assert r1 == {"color": "red"}
+    assert r2 == {"color": "blue"}
+    assert qid1 != qid2
+
+
 async def test_confirm_resume_slot_not_consumed_by_different_prompt():
     """Same regression as test_ask_resume_slot_..., for confirm()."""
     ch = InMemoryChannel()
