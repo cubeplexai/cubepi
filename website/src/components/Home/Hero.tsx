@@ -19,14 +19,18 @@ export default function Hero() {
       <img
         className={styles.banner}
         src={social}
-        alt="CubePi · A Pythonic alternative to langgraph and pi-agent-core"
+        alt="CubePi · A Pythonic, async-native agent framework"
         width={1280}
         height={640}
       />
       <div className={styles.eyebrow}>cubepi · v{version} · alpha</div>
-      <h1 className={styles.h1}>A Pythonic alternative to langgraph and pi-agent-core.</h1>
+      <h1 className={styles.h1}>CubePi</h1>
+      <p className={styles.tagline}>A Pythonic, async-native agent framework.</p>
       <p className={styles.lead}>
-        Plain async functions instead of graph nodes. 3 deps. Append-only checkpointing.
+        Designed for high performance, readability, and production-grade
+        persistence. Models agent logic as a linear <code>while</code> loop
+        you can trace and debug — no DAGs, no graph DSL, no surprise
+        control flow.
       </p>
       <div className={styles.actions}>
         <button

@@ -1,7 +1,7 @@
 ---
 id: intro
 title: CubePi
-description: "一个 Pythonic、异步原生的 langgraph 和 pi-agent-core 替代品。"
+description: "一个 Pythonic、原生异步的 Agent 框架。普通的 async 函数、追加式 checkpointing、三个依赖。"
 slug: /
 sidebar_position: 0
 ---
@@ -10,11 +10,10 @@ import PackageVersion from '@site/src/components/PackageVersion';
 
 # CubePi
 
-**CubePi** 是一个 Pythonic、原生异步的 Agent 框架——作为
-[langgraph](https://github.com/langchain-ai/langgraph) 和
-[pi-agent-core](https://github.com/anthropics/pi-agent-core) 的替代品，
-更精简、更易读。它把 Agent 建模为一个普通的 `async` 函数，
-而不是状态图；整个核心循环你五分钟就能读完。
+**CubePi** 是一个 Pythonic、原生异步的 Agent 框架，为高性能、可读性和
+生产级持久化而设计。它把一次 Agent 运行建模为一个线性的 `while`
+循环——可追踪、可调试，没有 DAG、没有图 DSL、没有出人意料的控制流。
+整个核心循环你五分钟就能读完。
 
 ```bash
 pip install cubepi
