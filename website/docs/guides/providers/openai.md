@@ -80,7 +80,7 @@ temperature handling) are configured through a
 passed at construction. For example, `max_tokens_field="max_completion_tokens"`
 renames the key on the way out. See
 [Capability Descriptors](./capability-and-presets) for the full set of
-knobs (cubepi `0.5+`).
+knobs (CubePi `0.5+`).
 
 ### Pointing at vLLM / LiteLLM / DeepSeek
 
@@ -159,7 +159,7 @@ provider.
 
 - **`stream_options.include_usage` rejected** — Some compatibles
   reject the whole `stream_options` field. **`on_payload` cannot fix
-  this**: cubepi 0.3 calls `kwargs.setdefault("stream_options", {})`
+  this**: CubePi 0.3 calls `kwargs.setdefault("stream_options", {})`
   *after* your callback runs, so deleting the key in `on_payload` is
   silently undone. Workarounds:
   - Subclass `OpenAIProvider` and override `stream()` to skip the
@@ -167,7 +167,7 @@ provider.
   - Set `include_usage=False` in `on_payload` (the field still goes
     out, but is usually accepted as a no-op even by strict
     backends).
-  - Use a [`CapabilityDescriptor`](./capability-and-presets) (cubepi
+  - Use a [`CapabilityDescriptor`](./capability-and-presets) (CubePi
     `0.5+`) to describe your backend's reasoning wiring declaratively.
 - **Thinking events but no `thinking_*` events** — Your backend
   surfaces reasoning under a non-standard field. Either add a fourth

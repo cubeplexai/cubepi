@@ -12,11 +12,11 @@ the authenticated user.
 
 **Time to run:** 30 minutes.
 **Deps:** `cubepi[postgres]`, `fastapi`, `uvicorn[standard]`,
-`sse-starlette`, a running Postgres with the cubepi schema applied.
+`sse-starlette`, a running Postgres with the CubePi schema applied.
 
 ## Schema first
 
-Before the service starts, run the cubepi schema migration. The
+Before the service starts, run the CubePi schema migration. The
 quickest way for this recipe:
 
 ```bash

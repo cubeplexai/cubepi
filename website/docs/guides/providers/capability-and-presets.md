@@ -5,7 +5,7 @@ description: "Provider capabilities and model presets in CubePi — compare feat
 
 # Capability Descriptors
 
-_Capability descriptors added in cubepi `0.5`._
+_Capability descriptors added in CubePi `0.5`._
 
 This page is about reaching **any** model — the big SaaS APIs, a regional
 endpoint, a coding-plan tier, or your own vLLM box — without writing
@@ -18,10 +18,10 @@ per-vendor glue. The progression is deliberate:
    subclassing, no forking.
 
 :::note Preset catalogs live in the host application
-cubepi ships the **mechanism** (the `CapabilityDescriptor` and the wire
+CubePi ships the **mechanism** (the `CapabilityDescriptor` and the wire
 runtime that applies it), not a catalog of vendors. A ready-made list of
 providers — base URLs, auth, regional/coding-plan endpoints, model lists —
-is product data and belongs to the application embedding cubepi (for
+is product data and belongs to the application embedding CubePi (for
 example, cubebox maintains its own provider catalog). To reach a specific
 vendor, build the provider with the right `base_url` + `CapabilityDescriptor`
 as shown below.
@@ -45,7 +45,7 @@ await agent.prompt("Hello!")
 ```
 
 That's the whole setup. A provider built without `capability=` produces
-byte-identical output to cubepi `0.4` — the machinery below only kicks in
+byte-identical output to CubePi `0.4` — the machinery below only kicks in
 when you ask for it.
 
 ## 2. Off-default endpoints — the CapabilityDescriptor
@@ -129,7 +129,7 @@ the capability value wins.
 
 ### Reasoning level: `reasoning_level` (three shapes)
 
-Beyond on/off, cubepi maps a `ThinkingLevel`
+Beyond on/off, CubePi maps a `ThinkingLevel`
 (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`) onto a concrete wire value
 written at a dotted `path`. `kind` picks the shape:
 

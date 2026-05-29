@@ -111,10 +111,10 @@ until that ships, agent runs and the surrounding service trace are linked
 only by their resource attributes (`service.name`, `gen_ai.agent.name`,
 `cubepi.run_id`).
 
-If you need the upstream trace to continue into cubepi today, the
+If you need the upstream trace to continue into CubePi today, the
 workaround is to set the OTel current span yourself before calling
 `agent.prompt(...)` and let the agent's spans inherit it via OTel's
-ambient context — cubepi never overrides an active parent.
+ambient context — CubePi never overrides an active parent.
 
 On the way out, MCP `tools/call` does inject W3C `traceparent` as an HTTP
 header automatically, so an instrumented MCP server downstream of the
