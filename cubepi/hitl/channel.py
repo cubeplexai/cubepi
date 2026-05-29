@@ -105,6 +105,15 @@ class _BaseChannel:
         self._resume_slot: tuple[str, Any] | None = None
         self._subscribers: list[asyncio.Queue[HitlRequest]] = []
         self._emit = None  # set by Agent._bind_channel
+        # Per-content-hash sequence counter for question_id derivation.
+        # Two consecutive ask()/confirm() calls with identical payload get
+        # distinct qids ("hash.0", "hash.1", …) — prevents a stale answer
+        # from a prior retry of the same prompt matching a new pending
+        # request. On resume, a fresh channel starts the counter at 0 and
+        # re-emits the same qid sequence the original run produced, so
+        # _resume_slot still matches when the tool body re-asks in the
+        # same order.
+        self._qid_seq: dict[str, int] = {}
 
     @property
     def pending(self) -> HitlRequest | None:
@@ -115,6 +124,24 @@ class _BaseChannel:
 
     def _bind_emit(self, emit) -> None:
         self._emit = emit
+
+    def _next_qid(self, kind: str, payload_repr: Any) -> str:
+        """Derive the next question_id for an ask/confirm payload.
+
+        Combines a content hash (so resume after detach can match on
+        payload content) with a per-content monotonic counter (so two
+        retries of the *same* prompt get distinct ids — a stale answer
+        for retry N cannot match retry N+1's pending request).
+
+        On resume, a fresh channel instance starts with an empty counter
+        and walks `hash.0`, `hash.1`, …, in the same order the original
+        run produced — so `attach_resume_answer(persisted_qid, ans)` still
+        matches when the tool body re-asks in the same order.
+        """
+        content_hash = _derive_question_id(kind, payload_repr)
+        seq = self._qid_seq.get(content_hash, 0)
+        self._qid_seq[content_hash] = seq + 1
+        return f"{content_hash}.{seq}"
 
     def subscribe(self) -> AsyncIterator[HitlRequest]:
         queue: asyncio.Queue[HitlRequest] = asyncio.Queue()
@@ -327,7 +354,7 @@ class _BaseChannel:
         # Q_B's qid+answer; the tool's rerun of confirm(Q_A) derives its own
         # qid and falls through to a fresh await instead of consuming Q_B's
         # slot. See `_derive_question_id` docstring for rationale.
-        qid = tool_call_id or _derive_question_id(
+        qid = tool_call_id or self._next_qid(
             "confirm", {"prompt": prompt, "details": details}
         )
         return await self._await_answer(
@@ -372,7 +399,7 @@ class _BaseChannel:
         # rerun of ask(Q_A) derives its own qid and falls through to a
         # fresh await instead of consuming Q_B's slot. See
         # `_derive_question_id` docstring for rationale and limitations.
-        qid = _derive_question_id(
+        qid = self._next_qid(
             "ask",
             [q.model_dump(mode="json") for q in questions],
         )
@@ -385,23 +412,12 @@ class _BaseChannel:
 
 
 def _derive_question_id(kind: str, payload_repr: Any) -> str:
-    """Deterministic question_id from prompt content.
+    """Content hash for a HITL request payload.
 
-    Used by ask()/confirm() so resume after detach matches by payload
-    content, not by call order. Two consecutive ask() calls in the same
-    tool body that re-runs after a detach will derive different qids,
-    so the rerun's *first* call won't incorrectly consume the persisted
-    answer that was destined for the *second* call.
-
-    `approve()` doesn't need this — it already uses the tool_call_id
-    (deterministic across reruns of the same tool batch).
-
-    Limitation: if a tool body legitimately makes the same call twice
-    in a row (identical prompt AND identical details), both calls
-    derive the same qid; on resume after the second's detach, the
-    first call's rerun *will* consume the persisted answer. Callers
-    needing to distinguish should pass distinct `details` (or distinct
-    `tool_call_id` for confirm()).
+    Used as the prefix of the final qid (see `_BaseChannel._next_qid`):
+    the hash gives resume-after-detach the ability to match by payload
+    content, while a per-content sequence counter appended afterwards
+    keeps retries of the same prompt distinct from each other.
     """
     data = json.dumps(
         {"kind": kind, "payload": payload_repr},
