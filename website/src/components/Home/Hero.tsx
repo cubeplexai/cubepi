@@ -25,12 +25,12 @@ export default function Hero() {
       />
       <div className={styles.eyebrow}>cubepi · v{version} · alpha</div>
       <h1 className={styles.h1}>CubePi</h1>
-      <p className={styles.tagline}>A Pythonic, async-native agent framework.</p>
       <p className={styles.lead}>
-        Designed for high performance, readability, and production-grade
-        persistence. Models agent logic as a linear <code>while</code> loop
-        you can trace and debug — no DAGs, no graph DSL, no surprise
-        control flow.
+        CubePi is a Pythonic, async-native agent framework designed for high
+        performance, readability, and production-grade persistence. It provides
+        a leaner alternative to graph-based agent runtimes by modeling agent
+        logic as a linear <code>while</code> loop that developers can easily
+        trace and debug.
       </p>
       <div className={styles.actions}>
         <button
