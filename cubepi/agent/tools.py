@@ -373,8 +373,13 @@ async def _execute_parallel(
     signal: asyncio.Event | None,
     emit_fn: Callable,
 ) -> ToolCallBatch:
-    entries: list[_FinalizedOutcome | asyncio.Task] = []
-
+    # Two-phase: prepare ALL tool calls (which may raise HitlDetached or other
+    # HitlControlException from before_tool_call) BEFORE scheduling any
+    # asyncio.create_task. Otherwise a later prepare detaching the run would
+    # leak already-started tool tasks: their side effects happen, but their
+    # ToolResultMessage is never emitted/checkpointed, and the resumed run
+    # re-executes them — duplicating the side effects.
+    entries: list[_FinalizedOutcome | _PreparedToolCall] = []
     for tc in tool_calls:
         await emit_event(
             emit_fn,
@@ -410,36 +415,42 @@ async def _execute_parallel(
             )
             entries.append(finalized)
         else:
+            entries.append(preparation)
 
-            async def _run(prep=preparation):
-                result, is_error = await _execute_prepared(prep, signal, emit_fn)
-                fin = await _finalize(
-                    context,
-                    assistant_message,
-                    prep,
-                    result,
-                    is_error,
-                    after_tool_call,
-                    signal,
-                )
-                await emit_event(
-                    emit_fn,
-                    ToolExecutionEndEvent(
-                        tool_call_id=prep.tool_call.id,
-                        tool_name=prep.tool_call.name,
-                        result=fin.result,
-                        is_error=fin.is_error,
-                        terminate=bool(fin.result.terminate),
-                        blocked_by_hook=fin.blocked_by_hook,
-                        block_reason=fin.block_reason,
-                    ),
-                )
-                return fin
+    async def _run(prep: _PreparedToolCall) -> _FinalizedOutcome:
+        result, is_error = await _execute_prepared(prep, signal, emit_fn)
+        fin = await _finalize(
+            context,
+            assistant_message,
+            prep,
+            result,
+            is_error,
+            after_tool_call,
+            signal,
+        )
+        await emit_event(
+            emit_fn,
+            ToolExecutionEndEvent(
+                tool_call_id=prep.tool_call.id,
+                tool_name=prep.tool_call.name,
+                result=fin.result,
+                is_error=fin.is_error,
+                terminate=bool(fin.result.terminate),
+                blocked_by_hook=fin.blocked_by_hook,
+                block_reason=fin.block_reason,
+            ),
+        )
+        return fin
 
-            entries.append(asyncio.create_task(_run()))
-
+    # Now that every prepare has succeeded, fan out the executions.
+    scheduled: list[_FinalizedOutcome | asyncio.Task] = [
+        entry
+        if isinstance(entry, _FinalizedOutcome)
+        else asyncio.create_task(_run(entry))
+        for entry in entries
+    ]
     finalized_list: list[_FinalizedOutcome] = []
-    for entry in entries:
+    for entry in scheduled:
         if isinstance(entry, asyncio.Task):
             finalized_list.append(await entry)
         else:
