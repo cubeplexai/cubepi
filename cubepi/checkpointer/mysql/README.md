@@ -24,10 +24,9 @@ async with MySQLCheckpointer("mysql://user:pass@host:3306/db") as cp:
     agent = Agent(..., checkpointer=cp, thread_id="user-42")
 ```
 
-Constructor: `MySQLCheckpointer(dsn, *, min_size=1, max_size=10,
-schema_version_check=True)`. The DSN accepts `mysql://`,
-`mysql+aiomysql://`, or `mysql+pymysql://` and is normalized to the
-aiomysql form.
+Constructor: `MySQLCheckpointer(dsn, *, min_pool_size=1,
+max_pool_size=10)`. The DSN is a `mysql://user:pass@host:port/db` URL,
+parsed into `aiomysql.create_pool` kwargs.
 
 ## What the public API exposes
 

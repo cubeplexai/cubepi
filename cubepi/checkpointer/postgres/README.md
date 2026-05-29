@@ -23,9 +23,9 @@ async with PostgresCheckpointer("postgresql://user:pass@host/db") as cp:
     agent = Agent(..., checkpointer=cp, thread_id="user-42")
 ```
 
-Constructor: `PostgresCheckpointer(dsn, *, min_size=1, max_size=10,
-schema_version_check=True)`. Pass `schema_version_check=False` only if
-you deliberately run ahead of the row in `cubepi_schema_version`.
+Constructor: `PostgresCheckpointer(dsn, *, min_pool_size=1,
+max_pool_size=10)`. `setup()` verifies the schema and raises on a
+version mismatch; it never creates tables.
 
 ## What the public API exposes
 
