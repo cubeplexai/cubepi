@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import hashlib
+import json
 import time
-import uuid
 from typing import Any, AsyncIterator, Protocol
 
 from cubepi.hitl.exceptions import (
@@ -320,11 +321,14 @@ class _BaseChannel:
         timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
         signal: asyncio.Event | None = None,
     ) -> bool:
-        # During resume the _resume_slot carries the original question_id;
-        # reuse it so _await_answer's short-circuit matches. The single-pending
-        # invariant guarantees this is the right slot (see ask() for details).
-        qid = (
-            self._resume_slot[0] if self._resume_slot is not None else uuid.uuid4().hex
+        # question_id derives from the prompt content (or tool_call_id, when
+        # caller supplies one) — NOT from _resume_slot. If a tool body asked
+        # Q_A then Q_B and detached with Q_B pending, respond() pre-loads
+        # Q_B's qid+answer; the tool's rerun of confirm(Q_A) derives its own
+        # qid and falls through to a fresh await instead of consuming Q_B's
+        # slot. See `_derive_question_id` docstring for rationale.
+        qid = tool_call_id or _derive_question_id(
+            "confirm", {"prompt": prompt, "details": details}
         )
         return await self._await_answer(
             ConfirmRequest(prompt=prompt, details=details),
@@ -362,16 +366,15 @@ class _BaseChannel:
         timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
         signal: asyncio.Event | None = None,
     ) -> dict[str, str | list[str]]:
-        # Resume short-circuit: when the agent detaches while ask() is pending
-        # and a host later calls Agent.respond(), attach_resume_answer() stores
-        # the original question_id in _resume_slot. On resume the tool body
-        # calls ask() again — if we generate a new random UUID here, the
-        # _await_answer resume match (line 148) will fail and the agent hangs.
-        # Instead, reuse the resume slot's question_id when one exists. The
-        # single-pending invariant guarantees that any unpopped resume slot
-        # belongs to this specific resumption.
-        qid = (
-            self._resume_slot[0] if self._resume_slot is not None else uuid.uuid4().hex
+        # question_id derives from the questions content — NOT from
+        # _resume_slot. If a tool body asked Q_A then Q_B and detached with
+        # Q_B pending, respond() pre-loads Q_B's qid+answer; the tool's
+        # rerun of ask(Q_A) derives its own qid and falls through to a
+        # fresh await instead of consuming Q_B's slot. See
+        # `_derive_question_id` docstring for rationale and limitations.
+        qid = _derive_question_id(
+            "ask",
+            [q.model_dump(mode="json") for q in questions],
         )
         return await self._await_answer(
             AskRequest(questions=questions),
@@ -379,6 +382,33 @@ class _BaseChannel:
             signal=signal,
             question_id=qid,
         )
+
+
+def _derive_question_id(kind: str, payload_repr: Any) -> str:
+    """Deterministic question_id from prompt content.
+
+    Used by ask()/confirm() so resume after detach matches by payload
+    content, not by call order. Two consecutive ask() calls in the same
+    tool body that re-runs after a detach will derive different qids,
+    so the rerun's *first* call won't incorrectly consume the persisted
+    answer that was destined for the *second* call.
+
+    `approve()` doesn't need this — it already uses the tool_call_id
+    (deterministic across reruns of the same tool batch).
+
+    Limitation: if a tool body legitimately makes the same call twice
+    in a row (identical prompt AND identical details), both calls
+    derive the same qid; on resume after the second's detach, the
+    first call's rerun *will* consume the persisted answer. Callers
+    needing to distinguish should pass distinct `details` (or distinct
+    `tool_call_id` for confirm()).
+    """
+    data = json.dumps(
+        {"kind": kind, "payload": payload_repr},
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()[:32]
 
 
 def _outcome_from_answer(kind: str, ans: Any) -> str:

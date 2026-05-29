@@ -230,3 +230,69 @@ async def test_attach_resume_answer_qid_mismatch_keeps_slot():
     # Slot for the OLD qid is still pre-loaded (the implementation should
     # NOT pop it just because a different qid came through).
     assert ch._resume_slot == ("tc-OLD", True)
+
+
+async def test_ask_resume_slot_not_consumed_by_different_prompt():
+    """Regression: when a tool body asks Q_A then Q_B and detaches with Q_B
+    pending, respond() pre-loads Q_B's answer. The tool body re-runs from
+    the top — Q_A's ask must NOT consume Q_B's resume slot (otherwise Q_A
+    gets Q_B's answer and Q_B is never re-asked).
+
+    Codex PR #127 review feedback (P2 channel.py).
+    """
+    ch = InMemoryChannel()
+    questions_b = [Question(key="color", prompt="What colour for Q_B?")]
+    questions_a = [Question(key="shape", prompt="What shape for Q_A?")]
+
+    # Compute what Q_B's persisted qid would be via the public ask()
+    # path (run a Q_B request, harvest qid, then drop it from pending).
+    async def first_run_to_get_qid_b():
+        async def host():
+            while ch.pending is None:
+                await asyncio.sleep(0)
+            qid = ch.pending.question_id
+            await ch.answer(qid, {"color": "blue"})
+            return qid
+
+        host_task = asyncio.create_task(host())
+        await ch.ask(questions_b)
+        return await host_task
+
+    qid_b = await first_run_to_get_qid_b()
+
+    # Now simulate Agent.respond(): re-prime the slot with Q_B's answer.
+    ch.attach_resume_answer(qid_b, {"color": "blue"})
+
+    # Tool body reruns from top and asks Q_A first — must NOT short-circuit
+    # to Q_B's answer. With a tight per-call timeout, ask(Q_A) should time
+    # out because no host is answering.
+    with pytest.raises(HitlTimedOut):
+        await ch.ask(questions_a, timeout=0.05)
+
+    # Q_B's slot must still be there for the eventual ask(Q_B) re-call.
+    assert ch._resume_slot == (qid_b, {"color": "blue"})
+
+
+async def test_confirm_resume_slot_not_consumed_by_different_prompt():
+    """Same regression as test_ask_resume_slot_..., for confirm()."""
+    ch = InMemoryChannel()
+
+    async def first_run_to_get_qid_b():
+        async def host():
+            while ch.pending is None:
+                await asyncio.sleep(0)
+            qid = ch.pending.question_id
+            await ch.answer(qid, True)
+            return qid
+
+        host_task = asyncio.create_task(host())
+        await ch.confirm("Delete database B?")
+        return await host_task
+
+    qid_b = await first_run_to_get_qid_b()
+    ch.attach_resume_answer(qid_b, True)
+
+    with pytest.raises(HitlTimedOut):
+        await ch.confirm("Format disk A?", timeout=0.05)
+
+    assert ch._resume_slot == (qid_b, True)
