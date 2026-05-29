@@ -121,6 +121,17 @@ class _BaseChannel:
 
     def attach_resume_answer(self, question_id: str, answer: Any) -> None:
         self._resume_slot = (question_id, answer)
+        # A resume replays the tool body / middleware hook from the top. The
+        # per-content qid counter (_qid_seq) is per-channel-instance, so on a
+        # same-process resume it has already advanced past the persisted
+        # question_id; left as-is, the replay would derive hash.N while the
+        # persisted slot holds hash.M (M < N) and _await_answer's resume
+        # short-circuit would miss — re-asking an already-answered prompt or
+        # hanging. Reset it so the replay reproduces the exact qid sequence
+        # the original run produced (hash.0, hash.1, …). Cross-process resume
+        # already started from an empty counter; this makes same-process
+        # resume behave identically.
+        self._qid_seq = {}
 
     def _bind_emit(self, emit) -> None:
         self._emit = emit
