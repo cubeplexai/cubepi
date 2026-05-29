@@ -123,3 +123,53 @@ async def test_parallel_detach_does_not_start_earlier_tools():
         "never be emitted/checkpointed, so resume will duplicate the side effect"
     )
     assert t2_calls == 0
+
+
+async def test_parallel_detach_does_not_leak_start_events():
+    """Regression: when t2's prepare raises HitlDetached during a parallel
+    batch, no `ToolExecutionStartEvent` for t1 or t2 may have been emitted —
+    otherwise `state.pending_tool_calls` and the corresponding trace span
+    are stuck open with no matching ToolExecutionEndEvent.
+
+    Codex PR #127 review feedback (P2 agent/tools.py).
+    """
+    from cubepi.agent.types import ToolExecutionStartEvent
+
+    async def t1_execute(call_id, args, *, signal=None, on_update=None):
+        return AgentToolResult(content=[TextContent(text="ok")])
+
+    async def t2_execute(call_id, args, *, signal=None, on_update=None):
+        return AgentToolResult(content=[TextContent(text="ok")])
+
+    t1 = _make_tool("t1", t1_execute, execution_mode="parallel")
+    t2 = _make_tool("t2", t2_execute, execution_mode="parallel")
+    ctx = AgentContext(system_prompt="", messages=[], tools=[t1, t2])
+    msg = AssistantMessage(
+        content=[
+            ToolCall(id="tc-1", name="t1", arguments={}),
+            ToolCall(id="tc-2", name="t2", arguments={}),
+        ],
+        stop_reason="tool_use",
+    )
+
+    async def before(before_ctx, *, signal=None):
+        if before_ctx.tool_call.id == "tc-2":
+            raise HitlDetached()
+        return None
+
+    events: list = []
+    with pytest.raises(HitlDetached):
+        await execute_tool_calls(
+            ctx,
+            msg,
+            tool_execution="parallel",
+            before_tool_call=before,
+            emit=lambda e: events.append(e),
+        )
+
+    start_events = [e for e in events if isinstance(e, ToolExecutionStartEvent)]
+    assert start_events == [], (
+        f"leaked {len(start_events)} ToolExecutionStartEvent(s) with no End — "
+        f"state.pending_tool_calls / trace spans would be stuck open: "
+        f"{[(e.tool_call_id, e.tool_name) for e in start_events]}"
+    )

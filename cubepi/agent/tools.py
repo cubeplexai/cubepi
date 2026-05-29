@@ -375,24 +375,30 @@ async def _execute_parallel(
 ) -> ToolCallBatch:
     # Two-phase: prepare ALL tool calls (which may raise HitlDetached or other
     # HitlControlException from before_tool_call) BEFORE scheduling any
-    # asyncio.create_task. Otherwise a later prepare detaching the run would
-    # leak already-started tool tasks: their side effects happen, but their
-    # ToolResultMessage is never emitted/checkpointed, and the resumed run
-    # re-executes them — duplicating the side effects.
+    # asyncio.create_task or emitting any ToolExecutionStartEvent. Otherwise:
+    # (a) a later prepare detach would leak already-started tool tasks
+    #     (side effects happen but ToolResultMessage is never emitted/
+    #     checkpointed, so the resumed run duplicates the side effects);
+    # (b) Start events emitted in the prepare loop would have no matching
+    #     End event when prepare later raised, leaving state.pending_tool_calls
+    #     and trace spans permanently open.
     entries: list[_FinalizedOutcome | _PreparedToolCall] = []
     for tc in tool_calls:
-        await emit_event(
-            emit_fn,
-            ToolExecutionStartEvent(
-                tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
-            ),
-        )
-
         preparation = await _prepare_tool_call(
             context, assistant_message, tc, before_tool_call, signal
         )
 
         if isinstance(preparation, _ImmediateOutcome):
+            # Immediate outcomes get a paired Start+End right here (the
+            # "execution" was the prepare step itself — e.g. blocked by hook
+            # or unknown tool). Pairing keeps the event stream balanced
+            # even though no real tool body runs.
+            await emit_event(
+                emit_fn,
+                ToolExecutionStartEvent(
+                    tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
+                ),
+            )
             finalized = _FinalizedOutcome(
                 tool_call=tc,
                 result=preparation.result,
@@ -418,6 +424,17 @@ async def _execute_parallel(
             entries.append(preparation)
 
     async def _run(prep: _PreparedToolCall) -> _FinalizedOutcome:
+        # Start event lives inside _run so it is emitted only for tools
+        # that actually get scheduled. If a later prepare raises before
+        # we get here, no Start is leaked.
+        await emit_event(
+            emit_fn,
+            ToolExecutionStartEvent(
+                tool_call_id=prep.tool_call.id,
+                tool_name=prep.tool_call.name,
+                args=prep.tool_call.arguments,
+            ),
+        )
         result, is_error = await _execute_prepared(prep, signal, emit_fn)
         fin = await _finalize(
             context,
