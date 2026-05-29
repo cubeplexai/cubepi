@@ -9,8 +9,8 @@
 [![PyPI](https://img.shields.io/pypi/v/cubepi)](https://pypi.org/project/cubepi/)
 [![Python](https://img.shields.io/pypi/pyversions/cubepi)](https://pypi.org/project/cubepi/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-
-**Docs:** https://cubepi.pages.dev — Getting Started · API Reference · Recipes
+[![Docs](https://img.shields.io/badge/docs-cubepi.pages.dev-blue)](https://cubepi.pages.dev)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1f6feb)](https://deepwiki.com/cubeplexai/cubepi)
 
 A Pythonic, async-native agent framework — a leaner, more readable take on agent runtimes like [langgraph](https://github.com/langchain-ai/langgraph).
 
@@ -35,16 +35,18 @@ pip install cubepi
 # Optional extras
 pip install cubepi[sqlite]     # SQLite checkpointer
 pip install cubepi[postgres]   # Postgres checkpointer
+pip install cubepi[mysql]      # MySQL checkpointer
 pip install cubepi[mcp]        # MCP tool loaders
 pip install cubepi[tracing]    # OpenTelemetry tracing + metrics
 pip install cubepi[tracing-otlp]  # Adds the OTLP/HTTP span exporter
+pip install cubepi[trace-cli]  # `cubepi trace` terminal viewer
 ```
 
 Or with [uv](https://github.com/astral-sh/uv):
 
 ```bash
 uv add cubepi
-uv add cubepi[sqlite,postgres,mcp,tracing]
+uv add cubepi[sqlite,postgres,mysql,mcp,tracing]
 ```
 
 ## Quick Start
@@ -89,38 +91,9 @@ agent.subscribe(on_event)
 asyncio.run(agent.prompt("What's the weather in Tokyo?"))
 ```
 
-## Architecture
-
-```
-cubepi/
-├── providers/        # LLM provider abstraction
-│   ├── base.py             # Provider protocol, message types, MessageStream
-│   ├── anthropic.py        # Anthropic provider
-│   ├── openai.py           # OpenAI Chat Completions provider
-│   ├── openai_responses.py # OpenAI Responses provider
-│   └── faux.py             # Test utility — pre-configured responses with realistic streaming
-├── agent/            # Agent runtime
-│   ├── agent.py      # Stateful Agent class
-│   ├── loop.py       # Stateless core loop (the actual algorithm)
-│   ├── tools.py      # Tool execution engine (sequential + parallel)
-│   └── types.py      # Events, AgentTool, AgentContext, hook types
-├── middleware/       # Composable middleware protocol
-│   └── base.py       # 7 hooks with distinct composition rules
-├── checkpointer/     # Persistence
-│   ├── base.py       # Checkpointer protocol
-│   ├── memory.py     # In-memory (dev/test)
-│   ├── sqlite.py     # SQLite (lightweight persistence)
-│   └── postgres/     # Postgres (production persistence)
-├── hitl/             # Human-in-the-Loop channel, middlewares, ask_user tool
-├── mcp/              # MCP tool loaders (HTTP + stdio transports)
-└── tracing/          # OpenTelemetry tracing + metrics (optional extra)
-    ├── tracer.py     # Tracer entry point — TracerProvider + recorder wiring
-    ├── recorder.py   # Maps agent + provider events to OTel spans
-    ├── meter.py      # gen_ai.* histograms (duration, TTFC, token usage)
-    ├── context.py    # tracing_context(tags=…, metadata=…) per-run tagging
-    ├── schema.py     # OTel GenAI semconv attribute names
-    └── exporters/    # JsonlSpanExporter + helpers (OTLP via opentelemetry-sdk)
-```
+For a guided tour of the architecture, browse the
+[DeepWiki for this repo](https://deepwiki.com/cubeplexai/cubepi) or the
+[Core Concepts guide](https://cubepi.pages.dev/docs/getting-started/core-concepts).
 
 ## Core Concepts
 
@@ -203,7 +176,12 @@ hooks = compose_middleware([LoggingMiddleware(), SafetyMiddleware()])
 Persist conversation state with append-only semantics:
 
 ```python
-from cubepi.checkpointer import MemoryCheckpointer, SQLiteCheckpointer, PostgresCheckpointer
+from cubepi.checkpointer import (
+    MemoryCheckpointer,
+    SQLiteCheckpointer,
+    PostgresCheckpointer,
+    MySQLCheckpointer,
+)
 
 # In-memory for dev/test
 cp = MemoryCheckpointer()
@@ -215,7 +193,17 @@ async with SQLiteCheckpointer("agent.db") as cp:
 # Postgres for production
 async with PostgresCheckpointer("postgresql://...") as cp:
     agent = Agent(model=model, checkpointer=cp, thread_id="conv-1")
+
+# MySQL for production
+async with MySQLCheckpointer("mysql://...") as cp:
+    agent = Agent(model=model, checkpointer=cp, thread_id="conv-1")
 ```
+
+Postgres and MySQL never issue DDL at runtime — your app owns the schema via
+Alembic. See the host-integration runbooks
+([Postgres](cubepi/checkpointer/postgres/README.md) ·
+[MySQL](cubepi/checkpointer/mysql/README.md)) and the runnable
+[`examples/`](examples/).
 
 ### FauxProvider for Testing
 
@@ -315,11 +303,11 @@ Coding agents debugging cubepi/consumer apps can install the bundled
 
 - Python >= 3.11
 - Core: `pydantic`, `anthropic`, `openai`
-- Optional: `aiosqlite` (`[sqlite]`), `asyncpg` + `sqlalchemy` + `msgpack` (`[postgres]`), `mcp` (`[mcp]`), `opentelemetry-sdk` (`[tracing]`), `opentelemetry-exporter-otlp-proto-http` (`[tracing-otlp]`)
+- Optional: `aiosqlite` (`[sqlite]`), `asyncpg` + `sqlalchemy` + `msgpack` (`[postgres]`), `aiomysql` + `sqlalchemy` + `msgpack` + `cryptography` (`[mysql]`), `mcp` (`[mcp]`), `opentelemetry-sdk` (`[tracing]`), `opentelemetry-exporter-otlp-proto-http` (`[tracing-otlp]`), `rich` (`[trace-cli]`)
 
 ## Credits
 
-Architecture inspired by [pi-agent-core](https://github.com/anthropics/pi-agent-core) (TypeScript); CubePi is an independent Python reimplementation with Pydantic v2, asyncio-native primitives, and built-in checkpointing.
+Architecture inspired by pi-agent-core (TypeScript); CubePi is an independent Python reimplementation with Pydantic v2, asyncio-native primitives, and built-in checkpointing.
 
 ## License
 
