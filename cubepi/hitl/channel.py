@@ -22,9 +22,12 @@ from cubepi.hitl.types import (
     Question,
 )
 
-# Sentinel: distinguishes "caller provided no per-call timeout" from
-# "caller explicitly passed timeout=None to wait indefinitely."
-_UNSET = object()
+# Sentinel default for the per-call `timeout` kwarg on confirm/approve/ask.
+# Distinguishes "caller omitted timeout — use the channel's default_timeout"
+# from "caller explicitly passed timeout=None — wait indefinitely."
+# Without this sentinel, those two cases would both look like `timeout is None`
+# and there would be no way to override default_timeout for a single call.
+_USE_DEFAULT_TIMEOUT: object = object()
 
 # ContextVar used by CheckpointedChannel to enforce the "do not ask HITL
 # from inside a custom tool body" durability guard. Set by
@@ -138,7 +141,7 @@ class _BaseChannel:
         kind = payload.kind
         attrs: dict[str, Any] = {
             "question_id": question_id,
-            "timeout_seconds": timeout if timeout is not _UNSET else None,
+            "timeout_seconds": timeout if timeout is not _USE_DEFAULT_TIMEOUT else None,
         }
         if kind == "approve":
             attrs["tool_call_id"] = payload.tool_call_id
@@ -166,7 +169,9 @@ class _BaseChannel:
                     )
 
                 effective_timeout = (
-                    timeout if timeout is not _UNSET else self._default_timeout
+                    timeout
+                    if timeout is not _USE_DEFAULT_TIMEOUT
+                    else self._default_timeout
                 )
                 req = HitlRequest(
                     question_id=question_id,
@@ -312,7 +317,7 @@ class _BaseChannel:
         *,
         details: dict | None = None,
         tool_call_id: str | None = None,
-        timeout: float | None | object = _UNSET,
+        timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
         signal: asyncio.Event | None = None,
     ) -> bool:
         # During resume the _resume_slot carries the original question_id;
@@ -335,7 +340,7 @@ class _BaseChannel:
         args: dict,
         *,
         details: dict | None = None,
-        timeout: float | None | object = _UNSET,
+        timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
         signal: asyncio.Event | None = None,
     ) -> ApproveAnswer:
         return await self._await_answer(
@@ -354,7 +359,7 @@ class _BaseChannel:
         self,
         questions: list[Question],
         *,
-        timeout: float | None | object = _UNSET,
+        timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
         signal: asyncio.Event | None = None,
     ) -> dict[str, str | list[str]]:
         # Resume short-circuit: when the agent detaches while ask() is pending
