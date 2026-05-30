@@ -670,6 +670,9 @@ class Recorder:
         run.turn_terminated_by_tool = False
         run.turn_input_messages = []
         run.turn_output_messages = []
+        # Reset per-turn stream-recording state so a partially-streamed tool
+        # call in a prior turn cannot inflate accumulated counts in this turn.
+        run.stream_tool_accumulated.clear()
 
     def _on_turn_end(self, event: TurnEndEvent) -> None:
         run = self._run
