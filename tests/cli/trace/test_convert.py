@@ -204,7 +204,15 @@ class TestConvertAnthropicFormat:
     def test_anthropic_format_valid_json(self, tmp_path, capsys):
         _write_trace(tmp_path)
         rc = main(
-            ["trace", "convert", "run1", "--dir", str(tmp_path), "--format", "anthropic"]
+            [
+                "trace",
+                "convert",
+                "run1",
+                "--dir",
+                str(tmp_path),
+                "--format",
+                "anthropic",
+            ]
         )
         out = capsys.readouterr().out
         assert rc == 0
@@ -215,7 +223,15 @@ class TestConvertAnthropicFormat:
     def test_anthropic_system_at_top_level(self, tmp_path, capsys):
         _write_trace(tmp_path)
         main(
-            ["trace", "convert", "run1", "--dir", str(tmp_path), "--format", "anthropic"]
+            [
+                "trace",
+                "convert",
+                "run1",
+                "--dir",
+                str(tmp_path),
+                "--format",
+                "anthropic",
+            ]
         )
         out = capsys.readouterr().out
         body = json.loads(out)
@@ -225,7 +241,15 @@ class TestConvertAnthropicFormat:
     def test_anthropic_tool_use_blocks(self, tmp_path, capsys):
         _write_trace(tmp_path)
         main(
-            ["trace", "convert", "run1", "--dir", str(tmp_path), "--format", "anthropic"]
+            [
+                "trace",
+                "convert",
+                "run1",
+                "--dir",
+                str(tmp_path),
+                "--format",
+                "anthropic",
+            ]
         )
         out = capsys.readouterr().out
         body = json.loads(out)
@@ -242,7 +266,15 @@ class TestConvertAnthropicFormat:
     def test_anthropic_tool_result_as_user_message(self, tmp_path, capsys):
         _write_trace(tmp_path)
         main(
-            ["trace", "convert", "run1", "--dir", str(tmp_path), "--format", "anthropic"]
+            [
+                "trace",
+                "convert",
+                "run1",
+                "--dir",
+                str(tmp_path),
+                "--format",
+                "anthropic",
+            ]
         )
         out = capsys.readouterr().out
         body = json.loads(out)
@@ -258,7 +290,15 @@ class TestConvertAnthropicFormat:
     def test_anthropic_tools_use_input_schema(self, tmp_path, capsys):
         _write_trace(tmp_path)
         main(
-            ["trace", "convert", "run1", "--dir", str(tmp_path), "--format", "anthropic"]
+            [
+                "trace",
+                "convert",
+                "run1",
+                "--dir",
+                str(tmp_path),
+                "--format",
+                "anthropic",
+            ]
         )
         out = capsys.readouterr().out
         body = json.loads(out)
@@ -318,9 +358,7 @@ class TestConvertSpanSelection:
 
     def test_turn_1_selects_first_chat_span(self, tmp_path, capsys):
         _write_trace(tmp_path, two_turns=True)
-        rc = main(
-            ["trace", "convert", "run1", "--dir", str(tmp_path), "--turn", "1"]
-        )
+        rc = main(["trace", "convert", "run1", "--dir", str(tmp_path), "--turn", "1"])
         out = capsys.readouterr().out
         assert rc == 0
         body = json.loads(out)
@@ -328,9 +366,7 @@ class TestConvertSpanSelection:
 
     def test_turn_2_selects_second_chat_span(self, tmp_path, capsys):
         _write_trace(tmp_path, two_turns=True)
-        rc = main(
-            ["trace", "convert", "run1", "--dir", str(tmp_path), "--turn", "2"]
-        )
+        rc = main(["trace", "convert", "run1", "--dir", str(tmp_path), "--turn", "2"])
         out = capsys.readouterr().out
         assert rc == 0
         body = json.loads(out)
@@ -338,9 +374,7 @@ class TestConvertSpanSelection:
 
     def test_turn_out_of_range_returns_1(self, tmp_path, capsys):
         _write_trace(tmp_path)
-        rc = main(
-            ["trace", "convert", "run1", "--dir", str(tmp_path), "--turn", "99"]
-        )
+        rc = main(["trace", "convert", "run1", "--dir", str(tmp_path), "--turn", "99"])
         capsys.readouterr()
         assert rc == 1
 
@@ -390,9 +424,7 @@ class TestMessagesToOpenAI:
     def test_assistant_text(self):
         from cubepi.cli.trace.convert import messages_to_openai
 
-        msgs = [
-            {"role": "assistant", "parts": [{"type": "text", "content": "hello"}]}
-        ]
+        msgs = [{"role": "assistant", "parts": [{"type": "text", "content": "hello"}]}]
         out = messages_to_openai(msgs)
         assert len(out) == 1
         assert out[0]["role"] == "assistant"
@@ -464,7 +496,11 @@ class TestMessagesToAnthropic:
         # tool result should be flushed into a user message before the text user msg
         user_msgs = [m for m in out if m["role"] == "user"]
         all_content = [b for m in user_msgs for b in (m.get("content") or [])]
-        tool_results = [b for b in all_content if isinstance(b, dict) and b.get("type") == "tool_result"]
+        tool_results = [
+            b
+            for b in all_content
+            if isinstance(b, dict) and b.get("type") == "tool_result"
+        ]
         assert tool_results
 
     def test_assistant_tool_use_block(self):

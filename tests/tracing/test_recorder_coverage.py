@@ -440,7 +440,9 @@ class TestStreamRecording:
         await tracer.shutdown()
 
         stream_file = next(tmp_path.glob("*.stream.jsonl"))
-        events = [json.loads(line) for line in stream_file.read_text().splitlines() if line]
+        events = [
+            json.loads(line) for line in stream_file.read_text().splitlines() if line
+        ]
         types = [e["type"] for e in events]
         assert "text_delta" in types
 
