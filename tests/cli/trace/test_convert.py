@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from cubepi.cli.__main__ import main
 
 
@@ -315,7 +313,7 @@ class TestConvertSpanSelection:
         rc = main(
             ["trace", "convert", "run1", "--dir", str(tmp_path), "--span", "0xzzz"]
         )
-        err = capsys.readouterr()
+        capsys.readouterr()
         assert rc == 1
 
     def test_turn_1_selects_first_chat_span(self, tmp_path, capsys):
