@@ -169,4 +169,8 @@ span **event** named `gen_ai.client.operation.exception`.
 A bundled `cubepi-trace` skill drives this CLI for debugging ("why did the run
 end with no reply?", "the tool result is wrong"). It encodes the fast path
 (`ls` → `view <prefix>`) and the token/cache-rate conventions.
+
+```bash
+npx skills add cubeplexai/cubepi@cubepi-trace -a claude-code
+```
 :::
