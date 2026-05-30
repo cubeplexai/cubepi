@@ -120,6 +120,56 @@ uv run cubepi trace stats --by model --meta user_id=usr_9
 uv run cubepi trace ls --show-meta conversation_id,user_id
 ```
 
+## Replaying a failing LLM call (`trace convert`)
+
+When the span tree + content aren't enough and you need to replay the exact API
+call — same messages, same tools, same parameters — use `trace convert` to
+reconstruct the request body from a recorded `chat` span (requires
+`record_content=True`):
+
+```bash
+# Reconstruct the last LLM call as an OpenAI JSON body
+uv run cubepi trace convert <run_id>
+
+# Pick a specific call by span_id prefix (copy [0x…] from `view`)
+uv run cubepi trace convert <run_id> --span 0xbb7eb1
+
+# Shell-executable curl (uses $BASE_URL / $API_KEY env vars)
+uv run cubepi trace convert <run_id> --span 0xbb7eb1 --format curl
+
+# Anthropic Messages API shape
+uv run cubepi trace convert <run_id> --format anthropic
+```
+
+The `[0x…]` suffix from each `chat` node in `view` output is the span_id — paste
+it directly as `--span 0x<prefix>`. No need to count turns.
+
+## Debugging streaming failures (`record_stream`)
+
+For issues where the span tree doesn't show the problem — missing tool call
+arguments, duplicate tool executions, truncated output — enable stream recording
+in the tracer:
+
+```python
+Tracer(record_content=True, record_stream=True, stream_dir="./cubepi-traces", …)
+```
+
+This writes `<stream_dir>/<run_id>.stream.jsonl` — one JSON line per raw
+`StreamEvent`. Check the file after a failing run:
+
+```bash
+# See all toolcall events for a run
+grep '"type": "toolcall' cubepi-traces/<date>/<run_id>.stream.jsonl | python -m json.tool
+
+# Check for duplicate toolcall_end (double finish_reason bug pattern):
+grep '"toolcall_end"' cubepi-traces/<date>/<run_id>.stream.jsonl | wc -l   # expect 1
+```
+
+Key fields: `t` (elapsed seconds), `type`, `ci` (content index), `accumulated`
+(running arg chars), `args_chars` (final count at end). An `args_chars: 0` at
+`toolcall_end` means no argument chunks ever arrived — the model sent an empty
+tool call.
+
 If the CLI view still isn't enough, the files are plain JSONL — one span per
 line — so you can parse them directly (e.g. with `python -c`/`jq`) to pull a
 specific attribute. Useful attribute keys:

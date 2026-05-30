@@ -112,6 +112,41 @@ the raw provider response on every chat span, multi-turn agentic runs can
 get large fast. Drop or summarise via `redact` for any field over your
 budget.
 
+## Stream-level recording
+
+`record_content` captures the final assembled request and response on each `chat`
+span, but not the individual streaming chunks. For post-mortem debugging of
+streaming failures — empty tool call arguments, duplicate events, truncated
+output — enable `record_stream` to write a chunk-by-chunk event log alongside the
+main trace:
+
+```python
+tracer = Tracer(
+    record_content=True,            # needed for trace convert
+    record_stream=True,             # ← per-chunk event log
+    stream_dir="./cubepi-traces",   # where to write <run_id>.stream.jsonl
+    exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+)
+```
+
+`record_stream` writes `<stream_dir>/<run_id>.stream.jsonl` (one JSON line per
+`StreamEvent`). Every line carries `t` (elapsed seconds from run start) and
+`type`. Tool-call lines also include `ci` (content index), `id`, `name`, delta
+sizes, and argument previews:
+
+```json
+{"t": 5.873, "type": "toolcall_start", "ci": 1, "id": "toolu_...", "name": "show_widget"}
+{"t": 5.875, "type": "toolcall_delta", "ci": 1, "chars": 11, "accumulated": 11, "preview": "{\"title\": \""}
+{"t": 33.177, "type": "toolcall_end",  "ci": 1, "id": "toolu_...", "args_chars": 7465, "args_preview": "{\"title\": \"CubePi..."}
+```
+
+This makes it straightforward to confirm whether argument chunks ever arrived, or
+whether the same event fired twice (e.g. a provider that sends `finish_reason`
+twice produces two `toolcall_end` lines for the same `ci`).
+
+`record_stream` is independent of `record_content` — turn it on only in debugging
+sessions. Files can grow large for long-running, tool-heavy agents.
+
 ## Auditing what's recorded
 
 The recorder always sets `service.name`, `gen_ai.agent.name`, and
