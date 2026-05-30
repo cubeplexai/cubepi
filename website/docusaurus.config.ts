@@ -54,7 +54,7 @@ const config: Config = {
   tagline: 'A Pythonic, async-native agent framework — an alternative to langgraph and pi-agent-core',
   favicon: 'img/brand/cubepi-logo.svg',
 
-  url: 'https://cubepi.pages.dev',
+  url: 'https://cubepi.ai',
   baseUrl: '/',
   organizationName: 'cubeplexai',
   projectName: 'cubepi',
@@ -81,7 +81,7 @@ const config: Config = {
         '@type': 'SoftwareApplication',
         name: 'CubePi',
         description: 'A Pythonic, async-native alternative to langgraph and pi-agent-core. Plain async functions, append-only checkpointing, minimal dependencies.',
-        url: 'https://cubepi.pages.dev',
+        url: 'https://cubepi.ai',
         applicationCategory: 'DeveloperApplication',
         operatingSystem: 'Linux, macOS, Windows',
         programmingLanguage: 'Python',

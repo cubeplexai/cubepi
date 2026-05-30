@@ -147,7 +147,7 @@ const config: Config = {
   tagline: 'A Pythonic, async-native agent framework',
   favicon: 'img/brand/cubepi-logo.svg',
 
-  url: 'https://cubepi.pages.dev',
+  url: 'https://cubepi.ai',
   baseUrl: '/',
   organizationName: 'cubeplexai',
   projectName: 'cubepi',
@@ -2269,7 +2269,7 @@ Record completion of this manual step in the PR description.
 After the badges block in `README.md`, insert:
 
 ```markdown
-**Docs:** https://cubepi.pages.dev — Getting Started · API Reference · Recipes
+**Docs:** https://cubepi.ai — Getting Started · API Reference · Recipes
 ```
 
 - [ ] **Step 2: Verify image paths**
@@ -2284,7 +2284,7 @@ Expected: no output. Already fixed by Task 1, this is a sanity check.
 
 ```bash
 git add README.md
-git commit -m "docs: link README to https://cubepi.pages.dev"
+git commit -m "docs: link README to https://cubepi.ai"
 ```
 
 ---
@@ -2308,7 +2308,7 @@ gh pr create --title "Add CubePi documentation site (Docusaurus 3, EN+zh-Hans, P
 - EN default + zh-Hans (core 6–8 pages stubbed) with locale + version dropdowns
 - API reference auto-generated from docstrings via griffe (prebuild)
 - 👍/👎 footer widget capturing `doc_feedback` / `doc_feedback_comment` to PostHog
-- CI: build + test + deploy to Cloudflare Pages at `cubepi.pages.dev`
+- CI: build + test + deploy to Cloudflare Pages at `cubepi.ai`
 - First snapshot `0.3` is the default; `Next 🚧` at `/next/`
 
 Spec: `docs/specs/2026-05-15-cubepi-docs-site-design.md`

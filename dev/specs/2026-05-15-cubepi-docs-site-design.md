@@ -55,7 +55,7 @@ acceptable for a docs site that builds on CI, not on every keystroke.
 | Analytics & feedback | PostHog (self-hosted-cloud) |
 | Search | Algolia DocSearch (free tier for OSS) |
 | CI | GitHub Actions |
-| Default domain | `cubepi.pages.dev` (custom domain TBD) |
+| Default domain | `cubepi.ai` (custom domain TBD) |
 
 ## 4. Repository Layout
 
@@ -449,13 +449,13 @@ Two jobs:
 
 ### PR preview
 
-Cloudflare Pages provides preview URLs natively (`<sha>.cubepi.pages.dev`).
+Cloudflare Pages provides preview URLs natively (`<sha>.cubepi.ai`).
 `cloudflare/pages-action@v1` posts a sticky comment with the preview
 link on every PR.
 
 ### Domain
 
-Launch domain: `cubepi.pages.dev`. Custom domain (e.g. `cubepi.dev`,
+Launch domain: `cubepi.ai`. Custom domain (e.g. `cubepi.dev`,
 `docs.cubepi.dev`) is deferred — site config supports late binding via
 `url` / `baseUrl` swap.
 
@@ -479,7 +479,7 @@ Launch domain: `cubepi.pages.dev`. Custom domain (e.g. `cubepi.dev`,
    endpoint).
 4. **README.md updates** — image references must point at the new
    `website/static/img/brand/` path; add a single line linking to
-   `cubepi.pages.dev` at the top.
+   `cubepi.ai` at the top.
 
 ## 14. Out of Scope (explicitly deferred)
 
