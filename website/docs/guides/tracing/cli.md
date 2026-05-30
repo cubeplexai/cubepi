@@ -73,14 +73,16 @@ cubepi trace view 1cd97cdb
 trace
 └── invoke_agent  14425.8ms  [0x1cd97cdb]
     ├── cubepi.turn  1283.1ms  [0x5cfda93e]
-    │   ├── chat claude-sonnet-4-5  1208.7ms  tok 6845/68  [0x0d130229]
+    │   ├── chat deepseek-v4-flash  1208.7ms  tok 6845/68  [0x0d130229]
     │   └── execute_tool subagent  9610.2ms  subagent  [0x38bdd10a]
-    │       └── invoke_agent  9601.0ms  [0x8094f99b]      ← subagent run, nested
+    │       └── invoke_agent  9601.0ms  [0x8094f99b]   ← subagent run, nested
     │           └── cubepi.turn  9598.4ms  [0x57c5cfc7]
-    │               ├── chat claude-sonnet-4-5  1190.3ms  [0x8205ca6b]
+    │               ├── chat deepseek-v4-flash  1190.3ms  [0x8205ca6b]
     │               └── execute_tool web_search  6500.2ms  web_search  [0xca4e59fc]
-    └── cubepi.turn  491.9ms  [0xce25f242]
-        └── chat claude-sonnet-4-5  427.2ms  [0x0bff68ec]
+    └── cubepi.turn  491.9ms  ERROR  [0xce25f242]
+        └── chat deepseek-v4-flash  427.2ms  ERROR  [0x0bff68ec]
+            └── error: Error code: 400 - ... `tool_use` ids were found without
+                `tool_result` blocks immediately after: call_01_...
 ```
 
 Read it top-down: `invoke_agent` (a run) → `cubepi.turn` (one agent-loop turn)
