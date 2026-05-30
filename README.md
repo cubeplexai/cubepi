@@ -11,6 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Docs](https://img.shields.io/badge/docs-cubepi.ai-blue)](https://cubepi.ai)
 [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1f6feb)](https://deepwiki.com/cubeplexai/cubepi)
+[![skills.sh](https://skills.sh/b/cubeplexai/cubepi)](https://skills.sh/cubeplexai/cubepi)
 
 CubePi is a Pythonic, async-native agent framework designed for high performance, readability, and production-grade persistence. It provides a leaner alternative to graph-based agent runtimes by modeling agent logic as a linear while loop that developers can easily trace and debug.
 
@@ -303,9 +304,22 @@ is a subset of it. From trace fields, cache hit rate is
 `cache_read / input_tokens` (≤ 100%) — do **not** add `cache_read` to the
 denominator.
 
-Coding agents debugging cubepi/consumer apps can install the bundled
+Coding agents debugging cubepi/consumer apps can install the
 [`cubepi-trace` skill](skills/cubepi-trace/SKILL.md):
-`npx skills add https://github.com/cubeplexai/cubepi/tree/main/skills/cubepi-trace -a claude-code`.
+
+```bash
+npx skills add cubeplexai/cubepi@cubepi-trace -a claude-code
+```
+
+## AI Agents
+
+Two skills are available for coding agents (Claude Code, Cursor, Codex, …) working
+with this repo:
+
+| Skill | Install | Purpose |
+|-------|---------|---------|
+| `cubepi` | `npx skills add cubeplexai/cubepi@cubepi -a claude-code` | Build agents — API reference, tools, middleware, checkpointing, MCP, HITL |
+| `cubepi-trace` | `npx skills add cubeplexai/cubepi@cubepi-trace -a claude-code` | Debug runs — inspect OTel spans, token counts, tool results, streaming failures |
 
 ## Requirements
 

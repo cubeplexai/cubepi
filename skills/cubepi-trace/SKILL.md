@@ -212,3 +212,9 @@ Mind the convention — it differs between the trace and cubebox's UI:
 - **Backend vs frontend**: the trace shows what the backend/agent did. If the
   trace shows correct data but the UI is wrong, the bug is in the frontend
   (SSE handling / rendering) — the trace won't see that; use a browser instead.
+
+## Source and contributing
+
+Skill source and cubepi source: https://github.com/cubeplexai/cubepi  
+If the docs or skill are unclear, read the source — it's the authoritative reference.  
+Bugs or missing coverage: open an issue or PR at https://github.com/cubeplexai/cubepi/issues
