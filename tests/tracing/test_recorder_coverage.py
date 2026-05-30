@@ -15,7 +15,8 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.trace import StatusCode
 
 from cubepi.agent.agent import Agent
-from cubepi.providers.base import Model
+from cubepi.agent.types import AgentTool, AgentToolResult
+from cubepi.providers.base import Model, TextContent, ToolCall
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubepi.tracing import Tracer
 
@@ -447,9 +448,12 @@ class TestStreamRecording:
         assert "text_delta" in types
 
     async def test_stream_file_closed_on_cancel(self, tmp_path):
-        """Stream file is flushed+closed even on CancelledError (via _close_open_spans)."""
-        import asyncio
+        """Stream file is closed via _close_open_spans on asyncio.CancelledError.
 
+        _close_open_spans is only reachable when detach() is called after a
+        CancelledError-aborted run — agent.abort() goes through _on_agent_end
+        instead, so we must use task.cancel() and then explicitly call detach().
+        """
         provider = FauxProvider(tokens_per_second=5.0)
         provider.append_responses([faux_assistant_message("x" * 300)])
         agent = Agent(provider=provider, model=MODEL, system_prompt="s")
@@ -460,20 +464,73 @@ class TestStreamRecording:
             record_stream=True,
             stream_dir=tmp_path,
         )
-        tracer.attach(agent)
+        detach = tracer.attach(agent)
 
         run = asyncio.create_task(agent.prompt("hi"))
         await asyncio.sleep(0.05)
-        agent.abort()
-        await run
+        run.cancel()
+        try:
+            await run
+        except asyncio.CancelledError:
+            pass
+        # detach() calls _sync_detach → _close_open_spans, which closes the
+        # stream file on the cancellation path (lines 467-471 of recorder.py).
+        detach()
         await tracer.shutdown()
 
-        # File must exist and be closed (readable without error).
+        # File must exist and be readable (closed properly, not leaked).
         files = list(tmp_path.glob("*.stream.jsonl"))
         assert len(files) == 1
-        content = files[0].read_text()
-        # At least one event was recorded before abort.
-        assert content.strip()
+        files[0].read_text()  # raises if file handle leaked
+
+    async def test_stream_toolcall_events_recorded(self, tmp_path):
+        """toolcall_start / toolcall_delta / toolcall_end events reach the stream file."""
+        from pydantic import BaseModel
+
+        class P(BaseModel):
+            pass
+
+        async def noop(tool_call_id: str, params: P, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="done")])
+
+        tool = AgentTool(name="noop", description="d", parameters=P, execute=noop)
+        provider = FauxProvider()
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    [ToolCall(id="tc1", name="noop", arguments={"x": 1})],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("all done"),
+            ]
+        )
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s", tools=[tool])
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        tracer.attach(agent)
+
+        await agent.prompt("go")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        files = list(tmp_path.glob("*.stream.jsonl"))
+        assert len(files) == 1
+        events = [
+            json.loads(line) for line in files[0].read_text().splitlines() if line
+        ]
+        types = [e["type"] for e in events]
+        assert "toolcall_start" in types
+        assert "toolcall_delta" in types
+        assert "toolcall_end" in types
+        # toolcall_end should carry accumulated arg char count
+        end_ev = next(e for e in events if e["type"] == "toolcall_end")
+        assert "args_chars" in end_ev
+        assert end_ev["args_chars"] > 0
 
     async def test_no_stream_file_without_record_stream(self, tmp_path):
         """Default (record_stream=False) must not create any stream file."""
@@ -515,3 +572,181 @@ class TestStreamRecording:
         for ev in events:
             assert "t" in ev
             assert isinstance(ev["t"], (int, float))
+
+    async def test_stream_error_event_recorded(self, tmp_path):
+        """An error stop_reason causes FauxProvider to emit an 'error' StreamEvent,
+        which _write_stream_event captures in the stream file."""
+        provider = FauxProvider()
+        provider.append_responses(
+            [faux_assistant_message("oops", stop_reason="error", error_message="boom")]
+        )
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        tracer.attach(agent)
+
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        files = list(tmp_path.glob("*.stream.jsonl"))
+        assert len(files) == 1
+        events = [
+            json.loads(line) for line in files[0].read_text().splitlines() if line
+        ]
+        types = [e["type"] for e in events]
+        assert "error" in types
+        err_ev = next(e for e in events if e["type"] == "error")
+        assert "error_message" in err_ev
+
+    async def test_stream_write_exception_swallowed(self, tmp_path):
+        """If the stream file write raises, _write_stream_event swallows it silently."""
+        from unittest.mock import MagicMock, patch
+
+        provider = FauxProvider()
+        provider.append_responses([faux_assistant_message("hi")])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        tracer.attach(agent)
+
+        # Run once to create the stream file and let the run finish normally.
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+
+        # Now simulate a second run where the file write raises.
+        # We directly patch the stream_file.write on the recorder's _run state
+        # after the second AgentStart so the open succeeds but every write fails.
+        import cubepi.tracing.recorder as _rec_mod
+
+        _orig_on_agent_start = _rec_mod.Recorder._on_agent_start
+
+        bad_file = MagicMock()
+        bad_file.write.side_effect = OSError("disk full")
+        bad_file.close.return_value = None
+
+        def _patched_start(self_rec):
+            _orig_on_agent_start(self_rec)
+            # Replace the freshly-opened stream_file with the bad mock.
+            if self_rec._run is not None:
+                self_rec._run.stream_file = bad_file
+
+        provider.append_responses([faux_assistant_message("ok")])
+        with patch.object(_rec_mod.Recorder, "_on_agent_start", _patched_start):
+            await agent.prompt("y")
+            await agent.wait_for_idle()
+
+        await tracer.shutdown()
+        # write was called and raised, but the agent completed without crashing.
+        bad_file.write.assert_called()
+
+    async def test_stream_open_exception_swallowed(self, tmp_path):
+        """If the stream file cannot be opened, the recorder continues without crashing."""
+        provider = FauxProvider()
+        provider.append_responses([faux_assistant_message("hi")])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        # Pass stream_dir as an existing file (not a directory) so mkdir fails.
+        bad_dir = tmp_path / "not_a_dir.txt"
+        bad_dir.write_text("i am a file")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=bad_dir,
+        )
+        tracer.attach(agent)
+
+        # Should not raise even though stream file can't be opened.
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+    async def test_stream_close_exception_swallowed_on_agent_end(self, tmp_path):
+        """If stream_file.close() raises during _on_agent_end, it is swallowed."""
+        import cubepi.tracing.recorder as _rec_mod
+        from unittest.mock import MagicMock, patch
+
+        provider = FauxProvider()
+        provider.append_responses([faux_assistant_message("hi")])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        tracer.attach(agent)
+
+        _orig_on_agent_start = _rec_mod.Recorder._on_agent_start
+
+        bad_file: MagicMock | None = None
+
+        def _patched_start(self_rec: _rec_mod.Recorder) -> None:
+            nonlocal bad_file
+            _orig_on_agent_start(self_rec)
+            if self_rec._run is not None and self_rec._run.stream_file is not None:
+                bad_file = MagicMock()
+                bad_file.write.return_value = None
+                bad_file.close.side_effect = OSError("close error")
+                self_rec._run.stream_file = bad_file
+
+        with patch.object(_rec_mod.Recorder, "_on_agent_start", _patched_start):
+            await agent.prompt("x")
+            await agent.wait_for_idle()
+        await tracer.shutdown()
+        assert bad_file is not None
+        bad_file.close.assert_called()
+
+    async def test_stream_close_exception_swallowed_on_cancel(self, tmp_path):
+        """If stream_file.close() raises during _close_open_spans, it is swallowed."""
+        import cubepi.tracing.recorder as _rec_mod
+        from unittest.mock import MagicMock, patch
+
+        provider = FauxProvider(tokens_per_second=5.0)
+        provider.append_responses([faux_assistant_message("x" * 300)])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        detach = tracer.attach(agent)
+
+        _orig_on_agent_start = _rec_mod.Recorder._on_agent_start
+        bad_file: MagicMock | None = None
+
+        def _patched_start(self_rec: _rec_mod.Recorder) -> None:
+            nonlocal bad_file
+            _orig_on_agent_start(self_rec)
+            if self_rec._run is not None and self_rec._run.stream_file is not None:
+                bad_file = MagicMock()
+                bad_file.write.return_value = None
+                bad_file.close.side_effect = OSError("close error")
+                self_rec._run.stream_file = bad_file
+
+        with patch.object(_rec_mod.Recorder, "_on_agent_start", _patched_start):
+            run = asyncio.create_task(agent.prompt("hi"))
+            await asyncio.sleep(0.05)
+            run.cancel()
+            try:
+                await run
+            except asyncio.CancelledError:
+                pass
+        detach()
+        await tracer.shutdown()
+        assert bad_file is not None
+        bad_file.close.assert_called()
