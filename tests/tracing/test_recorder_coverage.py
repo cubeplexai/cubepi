@@ -7,6 +7,7 @@ the FauxProvider end-to-end tests.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from opentelemetry.sdk.trace import ReadableSpan
@@ -391,3 +392,124 @@ class TestTracerConfig:
         async with Tracer(service_name="t", exporters=[exporter]) as t:
             assert t.resource is not None
         # No raise — shutdown ran via __aexit__.
+
+
+# ---------------------------------------------------------------------------
+# Stream recording (record_stream=True)
+# ---------------------------------------------------------------------------
+
+
+class TestStreamRecording:
+    async def test_stream_file_created_and_closed(self, tmp_path):
+        """record_stream=True writes a .stream.jsonl file for the run."""
+        provider = FauxProvider()
+        provider.append_responses([faux_assistant_message("hello world")])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        tracer.attach(agent)
+
+        await agent.prompt("hi")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        files = list(tmp_path.glob("*.stream.jsonl"))
+        assert len(files) == 1
+
+    async def test_stream_file_contains_events(self, tmp_path):
+        """Each text chunk produces a text_delta line in the stream file."""
+        provider = FauxProvider(tokens_per_second=1000.0)
+        provider.append_responses([faux_assistant_message("abc")])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        tracer.attach(agent)
+
+        await agent.prompt("hi")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        stream_file = next(tmp_path.glob("*.stream.jsonl"))
+        events = [json.loads(line) for line in stream_file.read_text().splitlines() if line]
+        types = [e["type"] for e in events]
+        assert "text_delta" in types
+
+    async def test_stream_file_closed_on_cancel(self, tmp_path):
+        """Stream file is flushed+closed even on CancelledError (via _close_open_spans)."""
+        import asyncio
+
+        provider = FauxProvider(tokens_per_second=5.0)
+        provider.append_responses([faux_assistant_message("x" * 300)])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        tracer.attach(agent)
+
+        run = asyncio.create_task(agent.prompt("hi"))
+        await asyncio.sleep(0.05)
+        agent.abort()
+        await run
+        await tracer.shutdown()
+
+        # File must exist and be closed (readable without error).
+        files = list(tmp_path.glob("*.stream.jsonl"))
+        assert len(files) == 1
+        content = files[0].read_text()
+        # At least one event was recorded before abort.
+        assert content.strip()
+
+    async def test_no_stream_file_without_record_stream(self, tmp_path):
+        """Default (record_stream=False) must not create any stream file."""
+        provider = FauxProvider()
+        provider.append_responses([faux_assistant_message("hi")])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[])
+        tracer.attach(agent)
+
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        assert not list(tmp_path.glob("*.stream.jsonl"))
+
+    async def test_stream_events_have_elapsed_time_field(self, tmp_path):
+        """Every recorded stream event must carry a numeric 't' (elapsed) field."""
+        provider = FauxProvider()
+        provider.append_responses([faux_assistant_message("hi")])
+        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        tracer.attach(agent)
+
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        stream_file = next(tmp_path.glob("*.stream.jsonl"))
+        events = [
+            json.loads(line) for line in stream_file.read_text().splitlines() if line
+        ]
+        assert events
+        for ev in events:
+            assert "t" in ev
+            assert isinstance(ev["t"], (int, float))
