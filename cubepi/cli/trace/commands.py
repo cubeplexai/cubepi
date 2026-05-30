@@ -48,6 +48,34 @@ def register(subparsers: "argparse._SubParsersAction") -> None:
     )
     p_follow.set_defaults(handler=cmd_follow)
 
+    from cubepi.cli.trace.convert import cmd_convert
+
+    p_convert = trace_sub.add_parser(
+        "convert", help="reconstruct API request body from a recorded chat span"
+    )
+    p_convert.add_argument("run", help="trace id or path to a .jsonl file")
+    _add_dir(p_convert)
+    p_convert.add_argument(
+        "--turn",
+        type=int,
+        default=None,
+        metavar="N",
+        help="select the N-th chat span (1-indexed); default: last",
+    )
+    p_convert.add_argument(
+        "--span",
+        default=None,
+        metavar="SPAN_ID",
+        help="select span by id prefix",
+    )
+    p_convert.add_argument(
+        "--format",
+        choices=("openai", "anthropic", "curl"),
+        default="openai",
+        help="output format (default: openai)",
+    )
+    p_convert.set_defaults(handler=cmd_convert)
+
     p_stats = trace_sub.add_parser("stats", help="aggregate stats across runs")
     p_stats.add_argument("runs", nargs="*", help="trace ids (default: whole dir)")
     _add_dir(p_stats)

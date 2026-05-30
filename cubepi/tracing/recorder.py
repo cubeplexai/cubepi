@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import contextvars
 import hashlib
+import json
 import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from pathlib import Path
+from typing import IO, TYPE_CHECKING, Any, Callable
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
@@ -41,6 +43,7 @@ from cubepi.agent.types import (
 )
 from cubepi.providers.base import (
     StreamEvent,
+    ToolCall,
     ToolResultMessage,
     UserMessage,
 )
@@ -173,6 +176,10 @@ class _RunState:
     turn_output_messages: list[Any] = field(default_factory=list)
     # Chat-span specific tool_definitions captured at request time.
     chat_tool_definitions: list[dict] | None = None
+    # Stream recording (only used when record_stream=True).
+    stream_file: IO[str] | None = None
+    stream_start_time: float | None = None
+    stream_tool_accumulated: dict[int, int] = field(default_factory=dict)
 
 
 class Recorder:
@@ -188,10 +195,14 @@ class Recorder:
         tracer: "Tracer",
         *,
         record_content: bool = False,
+        record_stream: bool = False,
+        stream_dir: "Path | None" = None,
         redact: "Callable[[str, Any], Any] | None" = None,
     ) -> None:
         self._tracer = tracer
         self._record_content = record_content
+        self._record_stream = record_stream
+        self._stream_dir = stream_dir
         self._redact = redact
         # Active run state. cubepi agents serialize runs (one
         # ``agent.run()`` at a time per Agent), so a single slot is
@@ -451,6 +462,13 @@ class Recorder:
             except Exception:
                 pass
             # Don't null agent_span — _RunState gets dropped wholesale.
+        # Close stream file on cancellation — normal end is handled in _on_agent_end.
+        if run.stream_file is not None:
+            try:
+                run.stream_file.close()
+            except Exception:
+                pass
+            run.stream_file = None
         # Release the per-task active-run gate. A cancelled run never
         # reaches _on_agent_end, so the only reset opportunity is here
         # (detach always calls _close_open_spans). Without this a stale
@@ -502,6 +520,15 @@ class Recorder:
         # Resource carries gen_ai.agent.name at process level — agents
         # that vary per-run set their own value via _ensure_agent_name.
         self._run = _RunState(run_id=run_id, agent_span=span)
+        # Open stream file when record_stream is enabled.
+        if self._record_stream and self._stream_dir is not None:
+            try:
+                self._stream_dir.mkdir(parents=True, exist_ok=True)
+                stream_path = self._stream_dir / f"{run_id}.stream.jsonl"
+                self._run.stream_file = stream_path.open("w", encoding="utf-8")
+                self._run.stream_start_time = time.time()
+            except Exception:
+                pass
         # Claim the per-task active-run gate for this run so this
         # recorder's provider listeners act only for LLM calls made on
         # the task that owns this run (not for an inner subagent sharing
@@ -609,6 +636,12 @@ class Recorder:
         # ``_sweep_tool_span_tokens`` docstring.
         self._sweep_tool_span_tokens(run)
         run.agent_span.end()
+        if run.stream_file is not None:
+            try:
+                run.stream_file.close()
+            except Exception:
+                pass
+            run.stream_file = None
         self._reset_active_run()
         self._run = None
 
@@ -939,20 +972,88 @@ class Recorder:
     def _on_provider_chunk(self, event: StreamEvent, model: "Model") -> None:
         del model
         run = self._run
-        if run is None or run.chat_span is None or run.chat_first_chunk_recorded:
+        if run is None:
             return
         if _active_run.get() is not run:
             return
-        # Only count "content" chunks for time-to-first-chunk (not 'start').
-        if event.type in (
-            "text_delta",
-            "thinking_delta",
-            "toolcall_delta",
+        # TTFT: record once per chat span for the first content chunk.
+        if (
+            run.chat_span is not None
+            and not run.chat_first_chunk_recorded
+            and event.type in ("text_delta", "thinking_delta", "toolcall_delta")
         ):
             opened = run.chat_open_ns or time.time_ns()
             ttft_s = (time.time_ns() - opened) / 1e9
             run.chat_span.set_attribute(GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK, ttft_s)
             run.chat_first_chunk_recorded = True
+        # Stream recording: write every semantically interesting event.
+        if self._record_stream and run.stream_file is not None:
+            self._write_stream_event(run, event)
+
+    def _write_stream_event(self, run: "_RunState", event: StreamEvent) -> None:
+        if event.type in (
+            "start",
+            "text_start",
+            "text_end",
+            "thinking_start",
+            "thinking_end",
+            "done",
+        ):
+            return
+        elapsed = round(time.time() - (run.stream_start_time or time.time()), 3)
+        rec: dict[str, Any] = {"t": elapsed, "type": event.type}
+        ci = event.content_index if event.content_index is not None else 0
+
+        if event.type == "toolcall_start":
+            id_, name = "", ""
+            if event.partial is not None and ci < len(event.partial.content):
+                block = event.partial.content[ci]
+                if isinstance(block, ToolCall):
+                    id_, name = block.id, block.name
+            rec.update({"ci": ci, "id": id_, "name": name})
+
+        elif event.type == "toolcall_delta":
+            delta = event.delta or ""
+            run.stream_tool_accumulated[ci] = run.stream_tool_accumulated.get(
+                ci, 0
+            ) + len(delta)
+            rec.update(
+                {
+                    "ci": ci,
+                    "chars": len(delta),
+                    "accumulated": run.stream_tool_accumulated[ci],
+                    "preview": delta[:60],
+                }
+            )
+
+        elif event.type == "toolcall_end":
+            id_, name, args_str = "", "", ""
+            if event.partial is not None and ci < len(event.partial.content):
+                block = event.partial.content[ci]
+                if isinstance(block, ToolCall):
+                    id_, name = block.id, block.name
+                    args_str = json.dumps(block.arguments)
+            total = run.stream_tool_accumulated.pop(ci, len(args_str))
+            rec.update(
+                {
+                    "ci": ci,
+                    "id": id_,
+                    "name": name,
+                    "args_chars": total,
+                    "args_preview": args_str[:80],
+                }
+            )
+
+        elif event.type in ("text_delta", "thinking_delta"):
+            rec["chars"] = len(event.delta or "")
+
+        elif event.type == "error":
+            rec["error_message"] = event.error_message or ""
+
+        try:
+            run.stream_file.write(json.dumps(rec) + "\n")  # type: ignore[union-attr]
+        except Exception:
+            pass
 
     def _on_provider_response(
         self,

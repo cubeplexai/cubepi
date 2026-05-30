@@ -12,6 +12,7 @@ import atexit
 import contextlib
 import logging
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from opentelemetry.sdk.resources import Resource
@@ -72,12 +73,18 @@ class Tracer:
         agent_version: str | None = None,
         exporters: list[SpanExporter] | None = None,
         record_content: bool = False,
+        record_stream: bool = False,
+        stream_dir: "str | Path | None" = None,
         redact: "Callable[[str, Any], Any] | None" = None,
         resource: Resource | None = None,
         atexit_flush: bool = True,
         atexit_flush_timeout_seconds: float = 5.0,
     ) -> None:
         self._record_content = record_content
+        self._record_stream = record_stream
+        self._stream_dir = (
+            Path(stream_dir) if isinstance(stream_dir, str) else stream_dir
+        )
         self._redact = redact
         self._resource = resource or _build_resource(
             service_name=service_name,
@@ -177,6 +184,8 @@ class Tracer:
         recorder = Recorder(
             self,
             record_content=self._record_content,
+            record_stream=self._record_stream,
+            stream_dir=self._stream_dir,
             redact=self._redact,
         )
         recorder_detach = recorder.attach(agent)
