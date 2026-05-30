@@ -9,7 +9,7 @@
 [![PyPI](https://img.shields.io/pypi/v/cubepi)](https://pypi.org/project/cubepi/)
 [![Python](https://img.shields.io/pypi/pyversions/cubepi)](https://pypi.org/project/cubepi/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Docs](https://img.shields.io/badge/docs-cubepi.pages.dev-blue)](https://cubepi.pages.dev)
+[![Docs](https://img.shields.io/badge/docs-cubepi.ai-blue)](https://cubepi.ai)
 [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1f6feb)](https://deepwiki.com/cubeplexai/cubepi)
 
 CubePi is a Pythonic, async-native agent framework designed for high performance, readability, and production-grade persistence. It provides a leaner alternative to graph-based agent runtimes by modeling agent logic as a linear while loop that developers can easily trace and debug.
@@ -93,7 +93,7 @@ asyncio.run(agent.prompt("What's the weather in Tokyo?"))
 
 For a guided tour of the architecture, browse the
 [DeepWiki for this repo](https://deepwiki.com/cubeplexai/cubepi) or the
-[Core Concepts guide](https://cubepi.pages.dev/docs/getting-started/core-concepts).
+[Core Concepts guide](https://cubepi.ai/docs/getting-started/core-concepts).
 
 ## Core Concepts
 
@@ -263,7 +263,7 @@ invoke_agent <agent_name>              [INTERNAL]
 No prompts / model outputs are recorded by default. Opt in with
 `Tracer(record_content=True)` plus a `redact` callback for PII. Pair
 with `Meter(...)` for `gen_ai.client.operation.duration` / TTFC /
-token-usage histograms. Full guide: https://cubepi.pages.dev/docs/guides/tracing/overview
+token-usage histograms. Full guide: https://cubepi.ai/docs/guides/tracing/overview
 
 #### Inspecting traces from the terminal
 
