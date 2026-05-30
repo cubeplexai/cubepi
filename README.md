@@ -253,11 +253,19 @@ async with (
 Span tree per run:
 
 ```
-invoke_agent <agent_name>              [INTERNAL]
-└── cubepi.turn                        [INTERNAL]
-    ├── chat <model>                   [CLIENT]   ← the LLM call itself
-    └── execute_tool <tool_name>       [INTERNAL] ← each tool invocation
-        └── tools/call <tool_name>     [CLIENT]   ← MCP-backed tools only
+trace
+└── invoke_agent  14425.8ms  [0x1cd97cdb]         ← one per agent.prompt()
+    ├── cubepi.turn  1283.1ms  [0x5cfda93e]        ← one per LLM round-trip
+    │   ├── chat deepseek-v4-flash  1208.7ms  tok 6845/68  [0x0d130229]
+    │   └── execute_tool subagent  9610.2ms  subagent  [0x38bdd10a]
+    │       └── invoke_agent  9601.0ms  [0x8094f99b]   ← subagent run, nested
+    │           └── cubepi.turn  9598.4ms  [0x57c5cfc7]
+    │               ├── chat deepseek-v4-flash  1190.3ms  [0x8205ca6b]
+    │               └── execute_tool web_search  6500.2ms  web_search  [0xca4e59fc]
+    └── cubepi.turn  491.9ms  ERROR  [0xce25f242]
+        └── chat deepseek-v4-flash  427.2ms  ERROR  [0x0bff68ec]
+            └── error: Error code: 400 - ... `tool_use` ids were found without
+                `tool_result` blocks immediately after: call_01_...
 ```
 
 No prompts / model outputs are recorded by default. Opt in with
