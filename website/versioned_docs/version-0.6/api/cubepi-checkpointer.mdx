@@ -1,0 +1,365 @@
+---
+id: cubepi-checkpointer
+title: cubepi.checkpointer
+sidebar_position: 3
+hide_table_of_contents: false
+---
+
+# `cubepi.checkpointer`
+
+### Checkpointer {#checkpointer}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/base.py#L13)
+
+
+**Methods**
+
+#### `load` {#checkpointer-load}
+
+```python
+load(thread_id: str) -> CheckpointData | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/base.py#L15)
+
+
+#### `append` {#checkpointer-append}
+
+```python
+append(thread_id: str, messages: list[Any]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/base.py#L16)
+
+
+#### `save_extra` {#checkpointer-save-extra}
+
+```python
+save_extra(thread_id: str, extra: dict[str, Any]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/base.py#L17)
+
+
+#### `save_pending_request` {#checkpointer-save-pending-request}
+
+```python
+save_pending_request(thread_id: str, request: Any) -> None
+```
+
+Persist (or clear, if request is None) the pending HITL request for a thread.
+
+First-party implementations (Memory, SQLite, Postgres, MySQL) all implement this.
+HITL-requiring features (Agent.respond, CheckpointedChannel) use
+`getattr(checkpointer, "save_pending_request", None)` for graceful degradation.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/base.py#L19)
+
+
+#### `load_pending_request` {#checkpointer-load-pending-request}
+
+```python
+load_pending_request(thread_id: str) -> Any
+```
+
+Load the persisted pending HITL request for a thread, or None.
+
+Returns a `HitlRequest` instance or `None`.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/base.py#L28)
+
+
+
+### CheckpointData {#checkpointdata}
+
+_class_
+
+```python
+CheckpointData(self, messages: list[Any] = list(), extra: dict[str, Any] = dict())
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/base.py#L7)
+
+
+**Attributes**
+
+- `messages`: `list[Any]`
+- `extra`: `dict[str, Any]`
+
+
+### MemoryCheckpointer {#memorycheckpointer}
+
+_class_
+
+```python
+MemoryCheckpointer(self)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/memory.py#L9)
+
+
+**Methods**
+
+#### `load` {#memorycheckpointer-load}
+
+```python
+load(thread_id: str) -> CheckpointData | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/memory.py#L14)
+
+
+#### `append` {#memorycheckpointer-append}
+
+```python
+append(thread_id: str, messages: list[Any]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/memory.py#L17)
+
+
+#### `save_extra` {#memorycheckpointer-save-extra}
+
+```python
+save_extra(thread_id: str, extra: dict[str, Any]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/memory.py#L22)
+
+
+#### `save_pending_request` {#memorycheckpointer-save-pending-request}
+
+```python
+save_pending_request(thread_id: str, request: Any) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/memory.py#L27)
+
+
+#### `load_pending_request` {#memorycheckpointer-load-pending-request}
+
+```python
+load_pending_request(thread_id: str) -> Any
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/memory.py#L33)
+
+
+
+### PostgresCheckpointer {#postgrescheckpointer}
+
+_class_
+
+```python
+PostgresCheckpointer(self, dsn: str, *, min_pool_size: int = 1, max_pool_size: int = 10)
+```
+
+Checkpointer backed by PostgreSQL.
+
+
+**Usage**
+
+```python
+cp = PostgresCheckpointer(dsn="postgresql://...")
+async with cp:
+    await cp.append(thread_id, [msg1, msg2])
+    data = await cp.load(thread_id)
+    await cp.save_extra(thread_id, {"k": "v"})
+```
+
+Raises CubepiSchemaUninitialized / CubepiSchemaMismatch at __aenter__
+if the DB schema isn't compatible with this cubepi version.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/postgres/checkpointer.py#L46)
+
+
+**Methods**
+
+#### `load` {#postgrescheckpointer-load}
+
+```python
+load(thread_id: str) -> CheckpointData | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/postgres/checkpointer.py#L110)
+
+
+#### `append` {#postgrescheckpointer-append}
+
+```python
+append(thread_id: str, messages: list[Message]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/postgres/checkpointer.py#L152)
+
+
+#### `save_extra` {#postgrescheckpointer-save-extra}
+
+```python
+save_extra(thread_id: str, extra: dict[str, Any]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/postgres/checkpointer.py#L200)
+
+
+#### `save_pending_request` {#postgrescheckpointer-save-pending-request}
+
+```python
+save_pending_request(thread_id: str, request) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/postgres/checkpointer.py#L213)
+
+
+#### `load_pending_request` {#postgrescheckpointer-load-pending-request}
+
+```python
+load_pending_request(thread_id: str)
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/postgres/checkpointer.py#L238)
+
+
+
+### SQLiteCheckpointer {#sqlitecheckpointer}
+
+_class_
+
+```python
+SQLiteCheckpointer(self, db_path: str)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/sqlite.py#L12)
+
+
+**Methods**
+
+#### `load` {#sqlitecheckpointer-load}
+
+```python
+load(thread_id: str) -> CheckpointData | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/sqlite.py#L49)
+
+
+#### `append` {#sqlitecheckpointer-append}
+
+```python
+append(thread_id: str, messages: list[Any]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/sqlite.py#L75)
+
+
+#### `save_extra` {#sqlitecheckpointer-save-extra}
+
+```python
+save_extra(thread_id: str, extra: dict[str, Any]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/sqlite.py#L86)
+
+
+#### `save_pending_request` {#sqlitecheckpointer-save-pending-request}
+
+```python
+save_pending_request(thread_id: str, request: Any) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/sqlite.py#L108)
+
+
+#### `load_pending_request` {#sqlitecheckpointer-load-pending-request}
+
+```python
+load_pending_request(thread_id: str) -> Any
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/sqlite.py#L125)
+
+
+
+### MySQLCheckpointer {#mysqlcheckpointer}
+
+_class_
+
+```python
+MySQLCheckpointer(self, dsn: str, *, min_pool_size: int = 1, max_pool_size: int = 10)
+```
+
+Checkpointer backed by MySQL (8.0.13+, InnoDB).
+
+
+**Usage**
+
+```python
+cp = MySQLCheckpointer("mysql://user:pw@host:3306/db")
+async with cp:
+    await cp.append(thread_id, [msg1, msg2])
+    data = await cp.load(thread_id)
+    await cp.save_extra(thread_id, {"k": "v"})
+```
+
+Raises CubepiSchemaUninitialized / CubepiSchemaMismatch at __aenter__ if the
+DB schema isn't compatible with this cubepi version.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/mysql/checkpointer.py#L75)
+
+
+**Methods**
+
+#### `load` {#mysqlcheckpointer-load}
+
+```python
+load(thread_id: str) -> CheckpointData | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/mysql/checkpointer.py#L159)
+
+
+#### `append` {#mysqlcheckpointer-append}
+
+```python
+append(thread_id: str, messages: list[Message]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/mysql/checkpointer.py#L190)
+
+
+#### `save_extra` {#mysqlcheckpointer-save-extra}
+
+```python
+save_extra(thread_id: str, extra: dict[str, Any]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/mysql/checkpointer.py#L244)
+
+
+#### `save_pending_request` {#mysqlcheckpointer-save-pending-request}
+
+```python
+save_pending_request(thread_id, request)
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/mysql/checkpointer.py#L278)
+
+
+#### `load_pending_request` {#mysqlcheckpointer-load-pending-request}
+
+```python
+load_pending_request(thread_id)
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/checkpointer/mysql/checkpointer.py#L309)
+
+
+
+
+<!-- GENERATED by build_api_reference.py — DO NOT EDIT -->
