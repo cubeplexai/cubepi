@@ -1,7 +1,7 @@
 {
   "version.label": {
-    "message": "0.5",
-    "description": "The label for version 0.5"
+    "message": "0.6（最新）",
+    "description": "The label for version 0.6"
   },
   "sidebar.docs.category.Getting Started": {
     "message": "快速入门",
@@ -26,6 +26,10 @@
   "sidebar.docs.category.Middleware": {
     "message": "中间件",
     "description": "The label for category 'Middleware' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Human-in-the-Loop": {
+    "message": "人工介入",
+    "description": "The label for category 'Human-in-the-Loop' in sidebar 'docs'"
   },
   "sidebar.docs.category.MCP": {
     "message": "MCP",

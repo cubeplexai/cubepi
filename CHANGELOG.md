@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-31
+
+### Added
+
+- **Human-in-the-Loop (HITL)** — first-class suspend/resume for agent runs that
+  need a human decision mid-flight:
+  - `HitlChannel` protocol with `InMemoryChannel` and `CheckpointedChannel`
+    implementations. `CheckpointedChannel` persists pending requests so an
+    agent can be resumed after a process restart.
+  - `Agent(channel=...)` wiring; `agent.respond()`, `agent.detach()`, and
+    `agent.abort_pending()` for external controllers.
+  - `ApprovalPolicyMiddleware` and `ConfirmToolCallMiddleware` for declarative
+    tool-call gating; `ask_user` built-in tool for open-ended prompts.
+  - `ScriptedChannel` and `NoopChannel` for deterministic testing.
+  - `HitlRequestEvent`, `HitlAnswerEvent`, `AgentSuspendedEvent`,
+    `AgentAbortedEvent` stream events.
+  - Lazy OTel `hitl.ask` / `hitl.confirm` spans with outcome attributes.
+  - Pending-request persistence on Memory, SQLite, Postgres, and MySQL
+    checkpointers (schema v2 — additive migration, backwards compatible).
+- **`MySQLCheckpointer`** — full-featured MySQL/MariaDB checkpointer with
+  Alembic schema management, matching the Postgres implementation.
+- **Stream recording + `trace convert`** — `record_stream()` captures a raw
+  provider `MessageStream` to JSONL; `cubepi trace convert` replays the
+  recording as a structured trace. Useful for offline debugging and testing
+  without live API calls.
+- **Trace CLI — run-metadata filtering** (`--meta` / `--show-meta`): filter
+  and display `tracing_context` key/value tags attached to a run.
+- **Trace CLI — span IDs in `trace view`** node labels for easier
+  cross-referencing with external OTLP backends.
+- **Agent steering by ID** — `agent.steer(...)` returns a `steer_id`; pass it
+  to `agent.cancel_steer(steer_id)` to cancel a not-yet-drained steering
+  message.
+
+### Fixed
+
+- **OpenAI provider**: deduplicate `finish_reason` processing that caused
+  spurious extra events on streamed responses.
+- **Agent**: `ToolExecutionStartEvent` is now deferred until the tool coroutine
+  is actually scheduled, preventing early events for tools that are never run.
+- **Tracing**: clear `stream_tool_accumulated` at turn start to avoid stale
+  tool-call data leaking across turns.
+
 ## [0.5.0] - 2026-05-25
 
 ### Added
@@ -51,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/cubeplexai/cubepi/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cubeplexai/cubepi/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cubeplexai/cubepi/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cubeplexai/cubepi/compare/v0.2.0...v0.3.0

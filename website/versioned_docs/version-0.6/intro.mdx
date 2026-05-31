@@ -47,9 +47,6 @@ working tool-using agent in under five minutes.
   Conventions — works with Jaeger, Tempo, Honeycomb, Datadog, or any
   OTLP-compatible backend. No payloads recorded by default; opt in
   with `record_content=True` and a `redact` callback.
-- **Human-in-the-Loop.** Suspend an agent mid-run, route a decision to
-  a human (approve/reject/answer), then resume — with full checkpoint
-  persistence so the agent survives a process restart while waiting.
 
 ## Where to go next
 
@@ -71,9 +68,7 @@ the `main` branch. APIs documented here can still change before they
 ship in a tagged release.
 
 The latest released version is `v<PackageVersion/>` ([switch to it
-from the version picker, top-right](pathname:///)). Human-in-the-Loop
-([guide →](./guides/hitl/overview)) — `HitlChannel`, `CheckpointedChannel`,
-`ask_user`, `ConfirmToolCallMiddleware` — landed in 0.6. The native
+from the version picker, top-right](pathname:///)). The native
 OpenTelemetry tracing module ([guide →](./guides/tracing/overview))
 — `Tracer`, `Meter`, content recording, MCP CLIENT spans, per-run
 `tracing_context` tags — landed in 0.4.
