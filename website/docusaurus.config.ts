@@ -95,6 +95,14 @@ const config: Config = {
 
   clientModules: [require.resolve('./src/clientModules/posthog.ts')],
 
+  markdown: {
+    // Strip empty ## [Unreleased] sections before MDX compilation so the
+    // /changelog page doesn't open with a heading that has no content and
+    // makes the first release look unreleased.
+    preprocessor: ({fileContent}) =>
+      fileContent.replace(/^## \[Unreleased\]\n+(?=##)/m, ''),
+  },
+
   presets: [['classic', classicOptions]],
 
   plugins: [
