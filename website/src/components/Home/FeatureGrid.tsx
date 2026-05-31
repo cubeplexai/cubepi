@@ -59,7 +59,7 @@ const CARDS = [
   { Icon: IconTool,   title: 'Tools',         body: 'Plain functions, parallel execution.',    href: '/docs/guides/agents/tool-use' },
   { Icon: IconPlug,   title: 'Providers',     body: 'Anthropic, OpenAI, or write your own.',   href: '/docs/guides/providers/anthropic' },
   { Icon: IconDisk,   title: 'Checkpointing', body: 'Append-only, O(1) per turn.',             href: '/docs/guides/checkpointing/sqlite' },
-  { Icon: IconHitl,   title: 'Human-in-the-loop', body: 'Pause for confirm, approve, or ask.', href: '/docs/next/guides/hitl/overview' },
+  { Icon: IconHitl,   title: 'Human-in-the-loop', body: 'Pause for confirm, approve, or ask.', href: '/docs/guides/hitl/overview' },
   { Icon: IconMcp,    title: 'MCP',           body: 'Load remote tools at startup.',           href: '/docs/guides/mcp/loading' },
   { Icon: IconTrace,  title: 'Tracing',       body: 'OpenTelemetry, OTLP / JSONL, GenAI semconv.', href: '/docs/guides/tracing/overview' },
 ];
