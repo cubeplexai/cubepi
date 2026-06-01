@@ -47,6 +47,10 @@ const classicOptions: ClassicOptions = {
       '/docs/0.3/**',
       '/docs/0.4/**',
       '/docs/0.5/**',
+      '/zh-Hans/docs/next/**',
+      '/zh-Hans/docs/0.3/**',
+      '/zh-Hans/docs/0.4/**',
+      '/zh-Hans/docs/0.5/**',
     ],
   },
 };
