@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-EXPECTED_SCHEMA_VERSION = 2
+EXPECTED_SCHEMA_VERSION = 3
 PARTITION_COUNT = 64
 
 cubepi_metadata = sa.MetaData()
@@ -42,6 +42,15 @@ class CubepiThread(CubepiBase):
     )
     pending_request: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB,
+        nullable=True,
+        server_default=sa.text("NULL"),
+    )
+    # v3: host-side run identifier (e.g. cubebox run_id) persisted alongside
+    # pending_request so a worker that recovers after crash can map the paused
+    # HITL back to the run that produced it. Written atomically with
+    # pending_request via save_pending_request(..., run_id=...).
+    run_id: Mapped[str | None] = mapped_column(
+        sa.Text,
         nullable=True,
         server_default=sa.text("NULL"),
     )

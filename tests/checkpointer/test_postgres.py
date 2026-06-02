@@ -17,7 +17,7 @@ def test_models_import() -> None:
         cubepi_metadata,
     )
 
-    assert EXPECTED_SCHEMA_VERSION == 2
+    assert EXPECTED_SCHEMA_VERSION == 3
     assert PARTITION_COUNT == 64
     # All three model classes are reachable via the public model module
     assert CubepiThread.__tablename__ == "cubepi_threads"
@@ -200,10 +200,15 @@ async def _setup_schema(dsn: str) -> None:
             ) PARTITION BY HASH (thread_id);
         """)
         from cubepi.checkpointer.postgres.alembic_helpers import (
+            add_pending_request_column_op,
+            add_run_id_column_op,
             create_message_partitions_op,
             write_schema_version_op,
         )
 
+        # Bring cubepi_threads up to the v3 shape (pending_request + run_id).
+        await conn.execute(add_pending_request_column_op())
+        await conn.execute(add_run_id_column_op())
         await conn.execute(create_message_partitions_op())
         await conn.execute("""
             CREATE INDEX ix_cubepi_messages_metadata_gin
@@ -322,7 +327,7 @@ async def test_version_mismatch_raises(clean_db) -> None:
     with pytest.raises(CubepiSchemaMismatch) as exc_info:
         async with PostgresCheckpointer(clean_db):
             pass
-    assert exc_info.value.expected == 2
+    assert exc_info.value.expected == 3
     assert exc_info.value.actual == 999
 
 

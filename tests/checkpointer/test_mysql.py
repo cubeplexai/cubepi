@@ -36,7 +36,7 @@ def test_models_import() -> None:
         cubepi_metadata,
     )
 
-    assert EXPECTED_SCHEMA_VERSION == 2
+    assert EXPECTED_SCHEMA_VERSION == 3
     assert PARTITION_COUNT == 64
     assert CubepiThread.__tablename__ == "cubepi_threads"
     assert CubepiMessage.__tablename__ == "cubepi_messages"
@@ -221,6 +221,14 @@ async def _setup_schema(dsn: str) -> None:
                         REFERENCES cubepi_threads (thread_id)
                 ) ENGINE=InnoDB
             """)
+            # Bring cubepi_threads up to the v3 shape via the public helpers.
+            from cubepi.checkpointer.mysql.alembic_helpers import (
+                add_pending_request_column_op,
+                add_run_id_column_op,
+            )
+
+            await cur.execute(add_pending_request_column_op())
+            await cur.execute(add_run_id_column_op())
             await cur.execute(
                 """
                 CREATE TABLE cubepi_messages (
@@ -370,7 +378,7 @@ async def test_version_mismatch_raises(clean_mysql_db) -> None:
     with pytest.raises(CubepiSchemaMismatch) as exc_info:
         async with MySQLCheckpointer(clean_mysql_db):
             pass
-    assert exc_info.value.expected == 2
+    assert exc_info.value.expected == 3
     assert exc_info.value.actual == 999
 
 

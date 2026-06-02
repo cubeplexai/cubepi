@@ -26,9 +26,19 @@ def add_pending_request_column_op() -> str:
     Call inside the host's alembic v1→v2 upgrade() via op.execute(). MySQL does
     not support IF NOT EXISTS for ADD COLUMN; guard with a schema check in the
     alembic migration if idempotence is required. Hosts must also bump
-    `cubepi_schema_version` via write_schema_version_op() (EXPECTED_SCHEMA_VERSION
-    is now 2)."""
+    `cubepi_schema_version` via write_schema_version_op()."""
     return "ALTER TABLE cubepi_threads ADD COLUMN pending_request JSON NULL"
+
+
+def add_run_id_column_op() -> str:
+    """Return SQL adding the v3 `run_id` column to cubepi_threads.
+
+    Call inside the host's alembic v2→v3 upgrade() via op.execute(). MySQL does
+    not support IF NOT EXISTS for ADD COLUMN; guard with a schema check in the
+    alembic migration if idempotence is required. Hosts must also bump
+    `cubepi_schema_version` via write_schema_version_op() (EXPECTED_SCHEMA_VERSION
+    is now 3)."""
+    return "ALTER TABLE cubepi_threads ADD COLUMN run_id VARCHAR(64) NULL"
 
 
 def write_schema_version_op() -> str:

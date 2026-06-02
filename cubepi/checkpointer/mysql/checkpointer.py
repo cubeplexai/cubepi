@@ -152,8 +152,13 @@ class MySQLCheckpointer:
             raise CubepiSchemaMismatch(
                 expected=EXPECTED_SCHEMA_VERSION,
                 actual=actual,
-                hint="cubepi was upgraded but host alembic is behind. "
-                "Generate a new revision and apply.",
+                hint=(
+                    "cubepi was upgraded but host alembic is behind. "
+                    "Generate a new alembic revision that calls "
+                    "add_run_id_column_op() + write_schema_version_op() "
+                    "(see cubepi.checkpointer.mysql.alembic_helpers) "
+                    "and run `alembic upgrade head` against this database."
+                ),
             )
 
     async def load(self, thread_id: str) -> CheckpointData | None:
@@ -275,7 +280,13 @@ class MySQLCheckpointer:
                 await conn.rollback()
                 raise
 
-    async def save_pending_request(self, thread_id, request):
+    async def save_pending_request(
+        self,
+        thread_id: str,
+        request: Any,
+        *,
+        run_id: str | None = None,
+    ) -> None:
         # Matches the explicit-begin/commit/rollback pattern used by
         # save_extra and append (see cubepi/checkpointer/mysql/checkpointer.py).
         assert self._pool is not None
@@ -289,24 +300,28 @@ class MySQLCheckpointer:
                         (thread_id,),
                     )
                     if request is None:
+                        # Clearing pending implicitly clears run_id — one statement.
                         await cur.execute(
-                            "UPDATE cubepi_threads SET pending_request = NULL, "
+                            "UPDATE cubepi_threads "
+                            "SET pending_request = NULL, run_id = NULL, "
                             "updated_at = CURRENT_TIMESTAMP WHERE thread_id = %s",
                             (thread_id,),
                         )
                     else:
                         payload = request.model_dump_json()
+                        # pending + run_id written atomically.
                         await cur.execute(
-                            "UPDATE cubepi_threads SET pending_request = %s, "
+                            "UPDATE cubepi_threads "
+                            "SET pending_request = %s, run_id = %s, "
                             "updated_at = CURRENT_TIMESTAMP WHERE thread_id = %s",
-                            (payload, thread_id),
+                            (payload, run_id, thread_id),
                         )
                 await conn.commit()
             except BaseException:  # pragma: no cover - defensive txn rollback
                 await conn.rollback()
                 raise
 
-    async def load_pending_request(self, thread_id):
+    async def load_pending_request(self, thread_id: str) -> Any:
         from cubepi.hitl.types import HitlRequest
 
         assert self._pool is not None
@@ -325,3 +340,19 @@ class MySQLCheckpointer:
         if isinstance(raw, str):  # pragma: no cover — codec-dependent
             return HitlRequest.model_validate_json(raw)
         return HitlRequest.model_validate(raw)
+
+    async def load_pending_run_id(self, thread_id: str) -> str | None:
+        """Return just the run_id stored alongside the pending request.
+
+        Returns None when the thread is unknown, has no pending request, or
+        was written by a pre-v3 host (legacy rows have run_id NULL).
+        """
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT run_id FROM cubepi_threads WHERE thread_id = %s",
+                    (thread_id,),
+                )
+                row = await cur.fetchone()
+        return row[0] if row is not None else None

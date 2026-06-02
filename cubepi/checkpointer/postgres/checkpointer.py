@@ -103,8 +103,13 @@ class PostgresCheckpointer:
                 raise CubepiSchemaMismatch(
                     expected=EXPECTED_SCHEMA_VERSION,
                     actual=row["version"],
-                    hint="cubepi was upgraded but host alembic is behind. "
-                    "Generate a new revision and apply.",
+                    hint=(
+                        "cubepi was upgraded but host alembic is behind. "
+                        "Generate a new alembic revision that calls "
+                        "add_run_id_column_op() + write_schema_version_op() "
+                        "(see cubepi.checkpointer.postgres.alembic_helpers) "
+                        "and run `alembic upgrade head` against this database."
+                    ),
                 )
 
     async def load(self, thread_id: str) -> CheckpointData | None:
@@ -210,7 +215,13 @@ class PostgresCheckpointer:
                 json.dumps(extra),
             )
 
-    async def save_pending_request(self, thread_id: str, request) -> None:
+    async def save_pending_request(
+        self,
+        thread_id: str,
+        request,
+        *,
+        run_id: str | None = None,
+    ) -> None:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.transaction():
@@ -221,18 +232,24 @@ class PostgresCheckpointer:
                     thread_id,
                 )
                 if request is None:
+                    # Clearing pending implicitly clears run_id — one statement.
                     await conn.execute(
-                        "UPDATE cubepi_threads SET pending_request = NULL, "
+                        "UPDATE cubepi_threads "
+                        "SET pending_request = NULL, run_id = NULL, "
                         "updated_at = now() WHERE thread_id = $1",
                         thread_id,
                     )
                 else:
                     payload = request.model_dump_json()
+                    # Write pending + run_id in the SAME atomic UPDATE so a
+                    # crash between them is impossible.
                     await conn.execute(
-                        "UPDATE cubepi_threads SET pending_request = $2::jsonb, "
+                        "UPDATE cubepi_threads "
+                        "SET pending_request = $2::jsonb, run_id = $3, "
                         "updated_at = now() WHERE thread_id = $1",
                         thread_id,
                         payload,
+                        run_id,
                     )
 
     async def load_pending_request(self, thread_id: str):
@@ -251,3 +268,17 @@ class PostgresCheckpointer:
         if isinstance(raw, str):  # pragma: no cover — codec-dependent
             return HitlRequest.model_validate_json(raw)
         return HitlRequest.model_validate(raw)
+
+    async def load_pending_run_id(self, thread_id: str) -> str | None:
+        """Return just the run_id stored alongside the pending request.
+
+        Returns None when the thread is unknown, has no pending request, or
+        was written by a pre-v3 host (legacy rows have run_id NULL).
+        """
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT run_id FROM cubepi_threads WHERE thread_id = $1",
+                thread_id,
+            )
+        return row["run_id"] if row is not None else None
