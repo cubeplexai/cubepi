@@ -287,8 +287,15 @@ class MySQLCheckpointer:
         *,
         run_id: str | None = None,
     ) -> None:
-        # Matches the explicit-begin/commit/rollback pattern used by
-        # save_extra and append (see cubepi/checkpointer/mysql/checkpointer.py).
+        """Persist a pending HITL request and its owning run_id.
+
+        When ``request is None``, both ``pending_request`` and ``run_id``
+        are cleared; the ``run_id`` kwarg is ignored in that case (the
+        pending row's run_id is always cleared alongside the pending).
+
+        pending and run_id are set in ONE UPDATE; the surrounding
+        explicit transaction also covers the lazy thread INSERT.
+        """
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             await conn.begin()
@@ -300,7 +307,6 @@ class MySQLCheckpointer:
                         (thread_id,),
                     )
                     if request is None:
-                        # Clearing pending implicitly clears run_id — one statement.
                         await cur.execute(
                             "UPDATE cubepi_threads "
                             "SET pending_request = NULL, run_id = NULL, "
@@ -309,7 +315,6 @@ class MySQLCheckpointer:
                         )
                     else:
                         payload = request.model_dump_json()
-                        # pending + run_id written atomically.
                         await cur.execute(
                             "UPDATE cubepi_threads "
                             "SET pending_request = %s, run_id = %s, "
@@ -342,16 +347,19 @@ class MySQLCheckpointer:
         return HitlRequest.model_validate(raw)
 
     async def load_pending_run_id(self, thread_id: str) -> str | None:
-        """Return just the run_id stored alongside the pending request.
+        """Return the run_id of the currently pending HITL request.
 
-        Returns None when the thread is unknown, has no pending request, or
-        was written by a pre-v3 host (legacy rows have run_id NULL).
+        Filters on ``pending_request IS NOT NULL`` so the result reflects
+        a real pending, not a leftover run_id from a cleared row. Returns
+        None when: the thread is unknown, has no pending request, or was
+        written by a pre-v3 host (legacy rows have run_id NULL).
         """
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT run_id FROM cubepi_threads WHERE thread_id = %s",
+                    "SELECT run_id FROM cubepi_threads "
+                    "WHERE thread_id = %s AND pending_request IS NOT NULL",
                     (thread_id,),
                 )
                 row = await cur.fetchone()
