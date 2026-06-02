@@ -54,6 +54,14 @@ class Middleware:
     ) -> TurnAction | None:
         raise NotImplementedError
 
+    async def on_run_end(
+        self,
+        ctx: Any,  # AgentContext — avoid circular import
+        *,
+        signal: Any = None,
+    ) -> list[Message] | None:
+        raise NotImplementedError
+
 
 def _has_method(middleware: Middleware, name: str) -> bool:
     method = getattr(type(middleware), name, None)
@@ -196,5 +204,18 @@ def compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]:
             )
 
         hooks["after_model_response"] = composed_amr
+
+    ore_chain = [m for m in middlewares if _has_method(m, "on_run_end")]
+    if ore_chain:
+
+        async def composed_ore(ctx, *, signal=None):
+            all_inject: list[Message] = []
+            for mw in ore_chain:
+                result = await mw.on_run_end(ctx, signal=signal)
+                if result:
+                    all_inject.extend(result)
+            return all_inject or None
+
+        hooks["on_run_end"] = composed_ore
 
     return hooks

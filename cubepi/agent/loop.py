@@ -44,6 +44,7 @@ async def run_agent_loop(
     should_stop_after_turn: Callable | None = None,
     get_steering_messages: Callable | None = None,
     get_follow_up_messages: Callable | None = None,
+    on_run_end: Callable | None = None,
     stream_options: StreamOptions | None = None,
     tool_execution: str = "parallel",
     system_prompt: str | None = None,
@@ -78,6 +79,7 @@ async def run_agent_loop(
         should_stop_after_turn=should_stop_after_turn,
         get_steering_messages=get_steering_messages,
         get_follow_up_messages=get_follow_up_messages,
+        on_run_end=on_run_end,
         stream_options=stream_options,
         tool_execution=tool_execution,
         emit=emit,
@@ -100,6 +102,7 @@ async def run_agent_loop_continue(
     should_stop_after_turn: Callable | None = None,
     get_steering_messages: Callable | None = None,
     get_follow_up_messages: Callable | None = None,
+    on_run_end: Callable | None = None,
     stream_options: StreamOptions | None = None,
     tool_execution: str = "parallel",
     system_prompt: str | None = None,
@@ -134,6 +137,7 @@ async def run_agent_loop_continue(
         should_stop_after_turn=should_stop_after_turn,
         get_steering_messages=get_steering_messages,
         get_follow_up_messages=get_follow_up_messages,
+        on_run_end=on_run_end,
         stream_options=stream_options,
         tool_execution=tool_execution,
         emit=emit,
@@ -156,6 +160,7 @@ async def run_agent_loop_resume(
     should_stop_after_turn: Callable | None = None,
     get_steering_messages: Callable | None = None,
     get_follow_up_messages: Callable | None = None,
+    on_run_end: Callable | None = None,
     stream_options: StreamOptions | None = None,
     tool_execution: str = "parallel",
     system_prompt: str | None = None,
@@ -179,6 +184,7 @@ async def run_agent_loop_resume(
             should_stop_after_turn=should_stop_after_turn,
             get_steering_messages=get_steering_messages,
             get_follow_up_messages=get_follow_up_messages,
+            on_run_end=on_run_end,
             stream_options=stream_options,
             tool_execution=tool_execution,
             system_prompt=system_prompt,
@@ -212,6 +218,7 @@ async def _run_agent_loop_resume_body(  # pragma: no cover — E2E tested
     should_stop_after_turn,
     get_steering_messages,
     get_follow_up_messages,
+    on_run_end: Callable | None,
     stream_options,
     tool_execution,
     system_prompt,
@@ -359,6 +366,7 @@ async def _run_agent_loop_resume_body(  # pragma: no cover — E2E tested
         should_stop_after_turn=should_stop_after_turn,
         get_steering_messages=get_steering_messages,
         get_follow_up_messages=get_follow_up_messages,
+        on_run_end=on_run_end,
         stream_options=stream_options,
         tool_execution=tool_execution,
         emit=emit,
@@ -381,6 +389,7 @@ async def _run_loop(
     should_stop_after_turn: Callable | None,
     get_steering_messages: Callable | None,
     get_follow_up_messages: Callable | None,
+    on_run_end: Callable | None,
     stream_options: StreamOptions | None,
     tool_execution: str,
     emit: Callable,
@@ -400,6 +409,7 @@ async def _run_loop(
             should_stop_after_turn=should_stop_after_turn,
             get_steering_messages=get_steering_messages,
             get_follow_up_messages=get_follow_up_messages,
+            on_run_end=on_run_end,
             stream_options=stream_options,
             tool_execution=tool_execution,
             emit=emit,
@@ -431,12 +441,14 @@ async def _run_loop_inner(
     should_stop_after_turn: Callable | None,
     get_steering_messages: Callable | None,
     get_follow_up_messages: Callable | None,
+    on_run_end: Callable | None,
     stream_options: StreamOptions | None,
     tool_execution: str,
     emit: Callable,
 ) -> None:
     opts = stream_options or StreamOptions()
     first_turn = True
+    _reflection_fired = False
 
     # Poll for steering messages at start (user may have typed while waiting)
     if get_steering_messages:
@@ -528,8 +540,9 @@ async def _run_loop_inner(
                         await emit_event(
                             emit, TurnEndEvent(message=message, tool_results=[])
                         )
-                        await emit_event(emit, AgentEndEvent(messages=new_messages))
-                        return
+                        # Break inner while so outer while runs on_run_end before AgentEndEvent.
+                        has_more_tool_calls = False
+                        break
                     if turn_action.decision == "loop_to_model":
                         # Skip tool execution; re-invoke the model on next iteration.
                         # inject_messages are already appended to context above.
@@ -590,8 +603,9 @@ async def _run_loop_inner(
                     new_messages=new_messages,
                 )
                 if await should_stop_after_turn(stop_ctx):
-                    await emit_event(emit, AgentEndEvent(messages=new_messages))
-                    return
+                    # Break inner while so outer while runs on_run_end before AgentEndEvent.
+                    has_more_tool_calls = False
+                    break
 
             # Check for steering messages after tool execution
             if get_steering_messages and has_more_tool_calls:
@@ -623,6 +637,22 @@ async def _run_loop_inner(
             follow_ups = await get_follow_up_messages() or []
             if follow_ups:
                 for msg in follow_ups:
+                    await emit_event(emit, MessageStartEvent(message=msg))
+                    await emit_event(emit, MessageEndEvent(message=msg))
+                    current_context.messages.append(msg)
+                    new_messages.append(msg)
+                first_turn = False
+                continue
+
+        # on_run_end fires exactly once per prompt() call, after all normal
+        # turns and follow-ups are drained. _reflection_fired prevents the
+        # reflection pass itself from triggering another reflection.
+        # Skipped for error/aborted runs (those return early before reaching here).
+        if on_run_end and not _reflection_fired:
+            _reflection_fired = True
+            inject = await on_run_end(current_context, signal=opts.signal)
+            if inject:
+                for msg in inject:
                     await emit_event(emit, MessageStartEvent(message=msg))
                     await emit_event(emit, MessageEndEvent(message=msg))
                     current_context.messages.append(msg)

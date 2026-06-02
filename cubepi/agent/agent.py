@@ -137,6 +137,7 @@ class Agent(Generic[TMessage]):
         before_tool_call: Callable | None = None,
         after_tool_call: Callable | None = None,
         should_stop_after_turn: Callable | None = None,
+        on_run_end: Callable | None = None,
         on_payload: OnPayloadCallback | None = None,
         on_response: OnResponseCallback | None = None,
         steering_mode: str = "one-at-a-time",
@@ -172,6 +173,7 @@ class Agent(Generic[TMessage]):
         self.should_stop_after_turn = should_stop_after_turn or _mw_hooks.get(
             "should_stop_after_turn"
         )
+        self.on_run_end = on_run_end or _mw_hooks.get("on_run_end")
         self.on_payload = on_payload
         self.on_response = on_response
         self.tool_execution = tool_execution
@@ -338,6 +340,7 @@ class Agent(Generic[TMessage]):
                 before_tool_call=self.before_tool_call,
                 after_tool_call=self.after_tool_call,
                 should_stop_after_turn=self.should_stop_after_turn,
+                on_run_end=self.on_run_end,
                 get_steering_messages=self._make_async_drain(self._steering_queue),
                 get_follow_up_messages=self._make_async_drain(self._follow_up_queue),
                 stream_options=self._build_stream_options(signal),
@@ -359,6 +362,7 @@ class Agent(Generic[TMessage]):
                 before_tool_call=self.before_tool_call,
                 after_tool_call=self.after_tool_call,
                 should_stop_after_turn=self.should_stop_after_turn,
+                on_run_end=self.on_run_end,
                 get_steering_messages=self._make_async_drain(self._steering_queue),
                 get_follow_up_messages=self._make_async_drain(self._follow_up_queue),
                 stream_options=self._build_stream_options(signal),
@@ -592,6 +596,7 @@ class Agent(Generic[TMessage]):
                 before_tool_call=self.before_tool_call,
                 after_tool_call=self.after_tool_call,
                 should_stop_after_turn=self.should_stop_after_turn,
+                on_run_end=self.on_run_end,
                 get_steering_messages=self._make_async_drain(self._steering_queue),
                 get_follow_up_messages=self._make_async_drain(self._follow_up_queue),
                 stream_options=self._build_stream_options(signal),
