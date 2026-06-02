@@ -185,6 +185,12 @@ class _BaseChannel:
         if kind == "approve":
             attrs["tool_call_id"] = payload.tool_call_id
             attrs["tool_name"] = payload.tool_name
+        # Only CheckpointedChannel carries _run_id; _BaseChannel/InMemoryChannel
+        # don't. hitl_span skips None-valued attrs, so leaving this out for the
+        # base channel is correct.
+        run_id = getattr(self, "_run_id", None)
+        if run_id is not None:
+            attrs["run_id"] = run_id
 
         outcome = "unknown"
         from_resume = False
@@ -286,8 +292,12 @@ class _BaseChannel:
                 outcome = _outcome_from_exception(exc)
                 raise
             finally:
+                # `detached` is a parallel boolean alongside `outcome` —
+                # convenient for filtering spans by "this was a cross-process
+                # suspend" without re-parsing the outcome string.
                 span.set_attribute("hitl.from_resume", from_resume)
                 span.set_attribute("hitl.outcome", outcome)
+                span.set_attribute("hitl.detached", outcome == "detached")
                 span.set_attribute("hitl.duration_seconds", time.monotonic() - t0)
 
     async def _on_pending_set(self, req: HitlRequest) -> None:
@@ -484,6 +494,7 @@ class CheckpointedChannel(_BaseChannel):
         *,
         checkpointer: Any,
         thread_id: str,
+        run_id: str | None = None,
         default_timeout: float | None = None,
         allow_inside_custom_tool: bool = False,
     ) -> None:
@@ -503,6 +514,12 @@ class CheckpointedChannel(_BaseChannel):
             )
         super().__init__(default_timeout=default_timeout, thread_id=thread_id)
         self._checkpointer = checkpointer
+        # Optional host-side run identifier (e.g. cubebox run_id) persisted
+        # alongside the pending request via save_pending_request. Lets a host
+        # recover "which run owns this paused HITL" after worker crash in a
+        # single atomic write — no two-step race between pending JSON and
+        # run_id columns.
+        self._run_id = run_id
         self._allow_inside_custom_tool = allow_inside_custom_tool
 
     async def _on_pending_set(self, req: HitlRequest) -> None:
@@ -514,7 +531,9 @@ class CheckpointedChannel(_BaseChannel):
                 "Use ApprovalPolicyMiddleware or ask_user_tool, or pass "
                 "allow_inside_custom_tool=True to opt in."
             )
-        await self._checkpointer.save_pending_request(self._thread_id, req)
+        await self._checkpointer.save_pending_request(
+            self._thread_id, req, run_id=self._run_id
+        )
         await super()._on_pending_set(req)
 
     async def _on_pending_cleared(
@@ -527,4 +546,5 @@ class CheckpointedChannel(_BaseChannel):
 
         if isinstance(exc, HitlDetached):
             return
+        # request=None clears pending AND run_id atomically.
         await self._checkpointer.save_pending_request(self._thread_id, None)
