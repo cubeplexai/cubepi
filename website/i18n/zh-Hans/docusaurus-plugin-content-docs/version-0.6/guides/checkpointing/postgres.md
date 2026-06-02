@@ -1,5 +1,5 @@
 ---
-title: Postgres Checkpointing
+title: Postgres 检查点
 description: "使用 PostgresCheckpointer 实现生产级的 agent 状态持久化。"
 ---
 

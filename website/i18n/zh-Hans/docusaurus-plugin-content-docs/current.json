@@ -32,7 +32,7 @@
     "description": "The label for category 'MCP' in sidebar 'docs'"
   },
   "sidebar.docs.category.Tracing": {
-    "message": "追踪",
+    "message": "Tracing",
     "description": "The label for category 'Tracing' in sidebar 'docs'"
   },
   "sidebar.docs.category.Recipes": {

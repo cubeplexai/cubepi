@@ -28,7 +28,7 @@
     "description": "The label for category 'Middleware' in sidebar 'docs'"
   },
   "sidebar.docs.category.Human-in-the-Loop": {
-    "message": "人工介入",
+    "message": "人机协同",
     "description": "The label for category 'Human-in-the-Loop' in sidebar 'docs'"
   },
   "sidebar.docs.category.MCP": {
@@ -36,7 +36,7 @@
     "description": "The label for category 'MCP' in sidebar 'docs'"
   },
   "sidebar.docs.category.Tracing": {
-    "message": "追踪",
+    "message": "Tracing",
     "description": "The label for category 'Tracing' in sidebar 'docs'"
   },
   "sidebar.docs.category.Recipes": {

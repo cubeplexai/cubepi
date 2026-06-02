@@ -1,5 +1,5 @@
 ---
-title: MySQL Checkpointing
+title: MySQL 检查点
 description: "在 CubePi 中使用 MySQLCheckpointer 通过 MySQL 后端实现 agent 状态持久化。"
 ---
 
