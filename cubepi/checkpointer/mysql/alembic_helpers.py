@@ -38,10 +38,11 @@ def add_run_id_column_op() -> str:
     alembic migration if idempotence is required. Hosts must also bump
     `cubepi_schema_version` via write_schema_version_op() (EXPECTED_SCHEMA_VERSION
     is now 3)."""
-    # TEXT (unbounded) matches the Postgres/SQLite TEXT column type and
-    # avoids silent truncation / strict-mode failure when a host supplies
-    # a run_id longer than 64 chars (e.g. opaque UUIDs with prefixes).
-    return "ALTER TABLE cubepi_threads ADD COLUMN run_id TEXT NULL"
+    # VARCHAR(64) accommodates UUIDs (36) and prefixed-UUID conventions.
+    # Hosts needing longer run_ids should subclass MySQLCheckpointer and
+    # override the column rather than have cubepi pay the TEXT cost
+    # globally.
+    return "ALTER TABLE cubepi_threads ADD COLUMN run_id VARCHAR(64) NULL"
 
 
 def write_schema_version_op() -> str:

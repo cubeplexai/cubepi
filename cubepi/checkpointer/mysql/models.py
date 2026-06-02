@@ -13,7 +13,7 @@ import datetime as _dt
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.mysql import JSON, LONGBLOB, TEXT, VARCHAR
+from sqlalchemy.dialects.mysql import JSON, LONGBLOB, VARCHAR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 EXPECTED_SCHEMA_VERSION = 3
@@ -50,12 +50,13 @@ class CubepiThread(CubepiBase):
     )
     # v3: host-side run identifier persisted alongside pending_request. See
     # the parallel docstring on cubepi/checkpointer/postgres/models.py.
-    # TEXT (unbounded) keeps parity with Postgres/SQLite — hosts may use
-    # opaque ids longer than 64 chars; a length cap here would silently
-    # break recovery under strict mode or truncate it in non-strict mode.
-    # run_id is not indexed so MySQL's TEXT-indexing restrictions don't bite.
+    # VARCHAR(64) accommodates UUIDs (36), prefixed UUIDs (e.g. "run_<uuid>"),
+    # and typical opaque ids. Hosts that need longer identifiers should
+    # subclass MySQLCheckpointer and override the column type — cubepi
+    # doesn't pay the TEXT-column cost for everyone to accommodate a
+    # minority case.
     run_id: Mapped[str | None] = mapped_column(
-        TEXT(),
+        VARCHAR(64),
         nullable=True,
     )
     created_at: Mapped[_dt.datetime] = mapped_column(
