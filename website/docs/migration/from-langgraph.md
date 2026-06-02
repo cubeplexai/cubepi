@@ -1,6 +1,6 @@
 ---
 title: From langgraph
-description: "Migrate your agents from LangGraph to CubePi."
+description: "Learn how to migrate your agents from LangGraph to CubePi — concept mapping, side-by-side code comparisons, and a step-by-step porting guide for the Pythonic async-native alternative."
 ---
 
 # Migrating from langgraph

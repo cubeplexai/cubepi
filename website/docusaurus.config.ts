@@ -117,7 +117,7 @@ const config: Config = {
 
   themeConfig: {
     metadata: [
-      { name: 'keywords', content: 'CubePi, langgraph alternative, pi-agent-core alternative, Python agent framework, async agent, LLM agent, AI agent framework, tool-use agent' },
+      { name: 'keywords', content: 'CubePi, langgraph alternative, pi-agent-core alternative, Python agent framework, async agent, LLM agent, AI agent framework, tool-use agent, Python Agent 框架, 异步 Agent, langgraph 替代品, AI Agent 开发' },
       { name: 'twitter:site', content: '@cubeplexai' },
       { name: 'twitter:creator', content: '@cubeplexai' },
     ],

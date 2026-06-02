@@ -2,3 +2,4 @@ User-agent: *
 Allow: /
 
 Sitemap: https://cubepi.ai/sitemap.xml
+Sitemap: https://cubepi.ai/zh-Hans/sitemap.xml
