@@ -39,7 +39,7 @@ from cubepi.checkpointer.postgres import cubepi_metadata, EXPECTED_SCHEMA_VERSIO
 | Symbol | Use |
 |---|---|
 | `cubepi_metadata` | SQLAlchemy `MetaData` — set as Alembic `target_metadata` |
-| `EXPECTED_SCHEMA_VERSION` | The version cubepi verifies on connect (currently `2`) |
+| `EXPECTED_SCHEMA_VERSION` | The version cubepi verifies on connect (currently `3`) |
 
 The SQL helpers live in the `alembic_helpers` submodule:
 
