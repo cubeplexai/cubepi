@@ -25,7 +25,7 @@ export default function Hero() {
         width={1280}
         height={640}
       />
-      <div className={styles.eyebrow}>cubepi · v{version} · alpha</div>
+      <div className={styles.eyebrow}>cubepi · v{version}</div>
       <h1 className={styles.h1}>CubePi</h1>
       <p className={styles.tagline}>
         {zh ? '一个 Pythonic 原生异步 Agent 框架。' : 'A Pythonic, async-native agent framework.'}
