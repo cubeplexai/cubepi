@@ -168,7 +168,10 @@ hooks = compose_middleware([LoggingMiddleware(), SafetyMiddleware()])
 | `convert_to_llm` | Last implementation wins |
 | `before_tool_call` | Any block stops execution |
 | `after_tool_call` | Later overrides earlier |
+| `transform_system_prompt` | Chained — each receives previous result |
+| `after_model_response` | Returns `TurnAction`; last decision wins, messages concatenate |
 | `should_stop_after_turn` | Any true stops |
+| `on_run_end` | Messages concatenate; non-empty result triggers one extra model turn |
 
 ### Checkpointer
 

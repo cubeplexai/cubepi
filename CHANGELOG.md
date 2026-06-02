@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`on_run_end` middleware hook** — fires exactly once after all turns and tool
+  calls complete, before `AgentEndEvent`. Return a `list[Message]` to inject
+  additional messages and run one extra model turn (e.g. a memory-reflection
+  pass); return `None` to do nothing.
+  - `_reflection_fired` guard in the loop prevents the injected turn from
+    re-triggering `on_run_end`.
+  - `should_stop_after_turn` and `turn_action.decision == "stop"` paths now
+    route through `on_run_end` before emitting `AgentEndEvent`. Error/aborted
+    runs (`stop_reason in ("error", "aborted")`) skip the hook.
+  - HITL-interrupted runs (HitlDetached / HitlAborted) also skip the hook —
+    the conversation is paused, not finished.
+
 ## [0.6.0] - 2026-05-31
 
 ### Added
