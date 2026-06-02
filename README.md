@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/cubeplexai/cubepi/main/website/static/img/brand/cubepi-logo.svg" alt="CubePi logo" width="160">
+  <img src="https://raw.githubusercontent.com/cubeplexai/cubepi/main/website/static/img/brand/cubepi-social-preview.png" alt="CubePi" width="800">
 </p>
-
-<h1 align="center">CubePi</h1>
 
 [![CI](https://github.com/cubeplexai/cubepi/actions/workflows/ci.yml/badge.svg)](https://github.com/cubeplexai/cubepi/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/cubeplexai/cubepi/graph/badge.svg)](https://codecov.io/gh/cubeplexai/cubepi)
