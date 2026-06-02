@@ -13,10 +13,16 @@ from cubepi.hitl.channel import InMemoryChannel
 
 @pytest.fixture
 def exporter():
-    provider = TracerProvider()
+    # OTel forbids replacing the global TracerProvider once set, so attach a
+    # fresh InMemorySpanExporter to whatever provider is already installed
+    # (or install one if none is). Clearing the exporter buffer per test
+    # keeps tests independent.
+    current = trace.get_tracer_provider()
+    if not isinstance(current, TracerProvider):
+        current = TracerProvider()
+        trace.set_tracer_provider(current)
     exp = InMemorySpanExporter()
-    provider.add_span_processor(SimpleSpanProcessor(exp))
-    trace.set_tracer_provider(provider)
+    current.add_span_processor(SimpleSpanProcessor(exp))
     yield exp
 
 
