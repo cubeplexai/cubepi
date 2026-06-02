@@ -84,6 +84,44 @@ async def test_no_run_id_kwarg_leaves_run_id_none():
     await ch.approve(tool_name="bash", tool_call_id="tc-2", args={})
 
 
+async def test_legacy_checkpointer_works_without_run_id_kwarg():
+    """A third-party checkpointer that still implements the v2 contract
+    ``save_pending_request(thread_id, request)`` (no run_id kwarg) must
+    keep working when the host constructs CheckpointedChannel WITHOUT
+    a run_id — the channel must not unconditionally pass the new kwarg.
+    """
+    from cubepi.hitl.types import HitlRequest
+
+    class LegacyCheckpointer:
+        """Mimics a v2-era third-party checkpointer. save_pending_request
+        intentionally lacks the run_id kwarg; calling it with run_id=...
+        would raise TypeError."""
+
+        def __init__(self) -> None:
+            self._pending: dict[str, HitlRequest | None] = {}
+
+        async def save_pending_request(
+            self, thread_id: str, request
+        ):  # NO run_id kwarg
+            self._pending[thread_id] = request
+
+        async def load_pending_request(self, thread_id: str):
+            return self._pending.get(thread_id)
+
+    cp = LegacyCheckpointer()
+    # No run_id at construction → channel must call legacy two-arg signature.
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t-legacy")
+
+    async def host():
+        while await cp.load_pending_request("t-legacy") is None:
+            await asyncio.sleep(0)
+        await ch.answer(ch.pending.question_id, ApproveAnswer(decision="approve"))
+
+    asyncio.create_task(host())
+    answer = await ch.approve(tool_name="bash", tool_call_id="tc-legacy", args={})
+    assert answer.decision == "approve"
+
+
 async def test_run_id_cleared_on_detach_stays_persisted():
     """On detach (HitlDetached) the pending row must remain — and so must run_id."""
     cp = MemoryCheckpointer()
