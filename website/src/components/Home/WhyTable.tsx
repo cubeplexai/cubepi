@@ -16,7 +16,7 @@ const ROWS_EN: { label: string; langgraph: string; cubepi: string }[] = [
 const ROWS_ZH: { label: string; langgraph: string; cubepi: string }[] = [
   { label: '抽象模型',     langgraph: '图节点 + 边 + 通道',                              cubepi: '普通 async 函数 — run_agent_loop 就是一个 while 循环' },
   { label: '流式输出',     langgraph: '基于回调，多种 handler 类型',                      cubepi: 'async for event in stream — 统一模式' },
-  { label: 'Checkpointing', langgraph: '每步全量快照，序列化整个消息列表',                cubepi: '追加式 — 无论对话多长，每轮 O(1) DB I/O' },
+  { label: '检查点',        langgraph: '每步全量快照，序列化整个消息列表',                cubepi: '追加式 — 无论对话多长，每轮 O(1) DB I/O' },
   { label: '依赖项',       langgraph: 'langchain-core、langgraph-sdk 及传递依赖',        cubepi: '3 个核心依赖：pydantic、anthropic、openai' },
   { label: '工具执行',     langgraph: '工具是需要手动连线的图节点',                        cubepi: '声明为函数；框架自动路由并并行执行' },
   { label: '多 Provider',  langgraph: '通过 langchain chat model 适配器',                cubepi: '原生 Provider 协议 — 内置 Anthropic、OpenAI' },

@@ -70,7 +70,7 @@ const CARDS_ZH = [
   { Icon: IconStream, title: '流式输出',        body: 'async for event in stream。',                 href: '/docs/guides/agents/streaming' },
   { Icon: IconTool,   title: '工具调用',        body: '普通函数，并行执行。',                         href: '/docs/guides/agents/tool-use' },
   { Icon: IconPlug,   title: 'Provider',       body: 'Anthropic、OpenAI，或自定义。',               href: '/docs/guides/providers/anthropic' },
-  { Icon: IconDisk,   title: 'Checkpointing',  body: '追加式，每轮 O(1)。',                         href: '/docs/guides/checkpointing/sqlite' },
+  { Icon: IconDisk,   title: '检查点',          body: '追加式，每轮 O(1)。',                         href: '/docs/guides/checkpointing/sqlite' },
   { Icon: IconHitl,   title: '人机协同',        body: '暂停等待确认、审批或问答。',                   href: '/docs/guides/hitl/overview' },
   { Icon: IconMcp,    title: 'MCP',            body: '启动时加载远程工具。',                         href: '/docs/guides/mcp/loading' },
   { Icon: IconTrace,  title: 'Tracing',        body: 'OpenTelemetry、OTLP / JSONL、GenAI semconv。', href: '/docs/guides/tracing/overview' },
