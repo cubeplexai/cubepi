@@ -4,6 +4,7 @@ import pytest
 from cubepi.checkpointer.mysql import MySQLCheckpointer
 from cubepi.checkpointer.mysql.alembic_helpers import (
     add_pending_request_column_op,
+    add_run_id_column_op,
     messages_partition_clause,
     write_schema_version_op,
 )
@@ -29,8 +30,9 @@ async def _setup_schema_v2(dsn: str) -> None:
                         REFERENCES cubepi_threads (thread_id)
                 ) ENGINE=InnoDB
             """)
-            # v2 column add
+            # v2 + v3 column adds
             await cur.execute(add_pending_request_column_op())
+            await cur.execute(add_run_id_column_op())
             await cur.execute(
                 """
                 CREATE TABLE cubepi_messages (

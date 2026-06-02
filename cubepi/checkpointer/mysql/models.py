@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.mysql import JSON, LONGBLOB, VARCHAR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-EXPECTED_SCHEMA_VERSION = 2
+EXPECTED_SCHEMA_VERSION = 3
 PARTITION_COUNT = 64
 
 cubepi_metadata = sa.MetaData()
@@ -46,6 +46,12 @@ class CubepiThread(CubepiBase):
     )
     pending_request: Mapped[dict[str, Any] | None] = mapped_column(
         sa.JSON,
+        nullable=True,
+    )
+    # v3: host-side run identifier persisted alongside pending_request. See
+    # the parallel docstring on cubepi/checkpointer/postgres/models.py.
+    run_id: Mapped[str | None] = mapped_column(
+        VARCHAR(64),
         nullable=True,
     )
     created_at: Mapped[_dt.datetime] = mapped_column(

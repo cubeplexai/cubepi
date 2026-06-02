@@ -4,6 +4,7 @@ import pytest
 from cubepi.checkpointer.postgres import PostgresCheckpointer
 from cubepi.checkpointer.postgres.alembic_helpers import (
     add_pending_request_column_op,
+    add_run_id_column_op,
     create_message_partitions_op,
     write_schema_version_op,
 )
@@ -11,7 +12,10 @@ from cubepi.hitl.types import ApproveRequest, HitlRequest
 
 
 async def _setup_schema_v2(dsn: str) -> None:
-    """Bootstrap a v2 schema in a fresh DB (mirrors test_postgres.py::_setup_schema)."""
+    """Bootstrap the current cubepi schema in a fresh DB (now v3; legacy name kept).
+
+    Adds both the v2 pending_request column and the v3 run_id column so the
+    HITL pending tests can exercise save_pending_request(... run_id=...)."""
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute("""
@@ -24,8 +28,9 @@ async def _setup_schema_v2(dsn: str) -> None:
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
         """)
-        # v2 column add
+        # v2 + v3 column adds
         await conn.execute(add_pending_request_column_op())
+        await conn.execute(add_run_id_column_op())
         await conn.execute("""
             CREATE TABLE cubepi_messages (
                 thread_id TEXT NOT NULL REFERENCES cubepi_threads(thread_id) ON DELETE CASCADE,

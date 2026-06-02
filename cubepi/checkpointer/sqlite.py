@@ -35,9 +35,19 @@ class SQLiteCheckpointer:
             "CREATE TABLE IF NOT EXISTS thread_pending_request ("
             "  thread_id TEXT PRIMARY KEY,"
             "  request_json TEXT NOT NULL,"
+            "  run_id TEXT,"
             "  created_at REAL NOT NULL DEFAULT (julianday('now'))"
             ")"
         )
+        # One-shot migration: older DBs (created before run_id existed) have
+        # the table without the run_id column. SQLite has no schema_version
+        # gate, so we ALTER inline when it's missing.
+        cur = await self._db.execute("PRAGMA table_info(thread_pending_request)")
+        cols = {row[1] for row in await cur.fetchall()}
+        if "run_id" not in cols:
+            await self._db.execute(
+                "ALTER TABLE thread_pending_request ADD COLUMN run_id TEXT"
+            )
         await self._db.commit()
         return self
 
@@ -105,20 +115,28 @@ class SQLiteCheckpointer:
                 )
             await self._db.commit()
 
-    async def save_pending_request(self, thread_id: str, request: Any) -> None:
+    async def save_pending_request(
+        self,
+        thread_id: str,
+        request: Any,
+        *,
+        run_id: str | None = None,
+    ) -> None:
         assert self._db is not None
         async with self._lock:
             if request is None:
+                # Clearing pending implicitly clears the associated run_id.
                 await self._db.execute(
                     "DELETE FROM thread_pending_request WHERE thread_id = ?",
                     (thread_id,),
                 )
             else:
                 payload = request.model_dump_json()
+                # Single statement writes pending + run_id atomically.
                 await self._db.execute(
                     "INSERT OR REPLACE INTO thread_pending_request "
-                    "(thread_id, request_json) VALUES (?, ?)",
-                    (thread_id, payload),
+                    "(thread_id, request_json, run_id) VALUES (?, ?, ?)",
+                    (thread_id, payload, run_id),
                 )
             await self._db.commit()
 
@@ -133,6 +151,16 @@ class SQLiteCheckpointer:
             )
             row = await cursor.fetchone()
             return HitlRequest.model_validate_json(row[0]) if row else None
+
+    async def load_pending_run_id(self, thread_id: str) -> str | None:
+        assert self._db is not None
+        async with self._lock:
+            cursor = await self._db.execute(
+                "SELECT run_id FROM thread_pending_request WHERE thread_id = ?",
+                (thread_id,),
+            )
+            row = await cursor.fetchone()
+        return row[0] if row else None
 
 
 def _serialize_message(msg: Any) -> str:

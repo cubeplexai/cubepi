@@ -25,9 +25,20 @@ def add_pending_request_column_op() -> str:
 
     Call inside the host's alembic v1→v2 upgrade() via op.execute(). The new
     column is JSONB NULL. Idempotent under repeated execution via IF NOT EXISTS.
-    Hosts must also bump `cubepi_schema_version` via write_schema_version_op()
-    (already documented; EXPECTED_SCHEMA_VERSION is now 2)."""
+    Hosts must also bump `cubepi_schema_version` via write_schema_version_op()."""
     return "ALTER TABLE cubepi_threads ADD COLUMN IF NOT EXISTS pending_request JSONB"
+
+
+def add_run_id_column_op() -> str:
+    """Return SQL adding the v3 `run_id` column to cubepi_threads.
+
+    Call inside the host's alembic v2→v3 upgrade() via op.execute(). The new
+    column is TEXT NULL — it carries an opaque host-side identifier (e.g. the
+    cubebox run_id) persisted atomically with `pending_request`. Idempotent
+    under repeated execution via IF NOT EXISTS. Hosts must also bump
+    `cubepi_schema_version` via write_schema_version_op() (EXPECTED_SCHEMA_VERSION
+    is now 3)."""
+    return "ALTER TABLE cubepi_threads ADD COLUMN IF NOT EXISTS run_id TEXT"
 
 
 def write_schema_version_op() -> str:
