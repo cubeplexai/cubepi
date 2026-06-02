@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from '@docusaurus/Link';
+import { useIsZhHans } from '@site/src/hooks/useIsZhHans';
 import styles from './FeatureGrid.module.css';
 
 type Icon = React.FC<React.SVGProps<SVGSVGElement>>;
@@ -53,18 +54,31 @@ const IconHitl: Icon = (p) => (
   </svg>
 );
 
-const CARDS = [
-  { Icon: IconBox,    title: 'Agents',        body: 'One async loop, fully typed events.',     href: '/docs/guides/agents/first-agent' },
-  { Icon: IconStream, title: 'Streaming',     body: 'async for event in stream.',              href: '/docs/guides/agents/streaming' },
-  { Icon: IconTool,   title: 'Tools',         body: 'Plain functions, parallel execution.',    href: '/docs/guides/agents/tool-use' },
-  { Icon: IconPlug,   title: 'Providers',     body: 'Anthropic, OpenAI, or write your own.',   href: '/docs/guides/providers/anthropic' },
-  { Icon: IconDisk,   title: 'Checkpointing', body: 'Append-only, O(1) per turn.',             href: '/docs/guides/checkpointing/sqlite' },
-  { Icon: IconHitl,   title: 'Human-in-the-loop', body: 'Pause for confirm, approve, or ask.', href: '/docs/guides/hitl/overview' },
-  { Icon: IconMcp,    title: 'MCP',           body: 'Load remote tools at startup.',           href: '/docs/guides/mcp/loading' },
-  { Icon: IconTrace,  title: 'Tracing',       body: 'OpenTelemetry, OTLP / JSONL, GenAI semconv.', href: '/docs/guides/tracing/overview' },
+const CARDS_EN = [
+  { Icon: IconBox,    title: 'Agents',             body: 'One async loop, fully typed events.',          href: '/docs/guides/agents/first-agent' },
+  { Icon: IconStream, title: 'Streaming',           body: 'async for event in stream.',                  href: '/docs/guides/agents/streaming' },
+  { Icon: IconTool,   title: 'Tools',               body: 'Plain functions, parallel execution.',        href: '/docs/guides/agents/tool-use' },
+  { Icon: IconPlug,   title: 'Providers',           body: 'Anthropic, OpenAI, or write your own.',       href: '/docs/guides/providers/anthropic' },
+  { Icon: IconDisk,   title: 'Checkpointing',       body: 'Append-only, O(1) per turn.',                href: '/docs/guides/checkpointing/sqlite' },
+  { Icon: IconHitl,   title: 'Human-in-the-loop',  body: 'Pause for confirm, approve, or ask.',         href: '/docs/guides/hitl/overview' },
+  { Icon: IconMcp,    title: 'MCP',                 body: 'Load remote tools at startup.',               href: '/docs/guides/mcp/loading' },
+  { Icon: IconTrace,  title: 'Tracing',             body: 'OpenTelemetry, OTLP / JSONL, GenAI semconv.', href: '/docs/guides/tracing/overview' },
+];
+
+const CARDS_ZH = [
+  { Icon: IconBox,    title: 'Agent',          body: '一个 async 循环，完整类型化事件。',             href: '/docs/guides/agents/first-agent' },
+  { Icon: IconStream, title: '流式输出',        body: 'async for event in stream。',                 href: '/docs/guides/agents/streaming' },
+  { Icon: IconTool,   title: '工具调用',        body: '普通函数，并行执行。',                         href: '/docs/guides/agents/tool-use' },
+  { Icon: IconPlug,   title: 'Provider',       body: 'Anthropic、OpenAI，或自定义。',               href: '/docs/guides/providers/anthropic' },
+  { Icon: IconDisk,   title: 'Checkpointing',  body: '追加式，每轮 O(1)。',                         href: '/docs/guides/checkpointing/sqlite' },
+  { Icon: IconHitl,   title: '人机协同',        body: '暂停等待确认、审批或问答。',                   href: '/docs/guides/hitl/overview' },
+  { Icon: IconMcp,    title: 'MCP',            body: '启动时加载远程工具。',                         href: '/docs/guides/mcp/loading' },
+  { Icon: IconTrace,  title: 'Tracing',        body: 'OpenTelemetry、OTLP / JSONL、GenAI semconv。', href: '/docs/guides/tracing/overview' },
 ];
 
 export default function FeatureGrid() {
+  const zh = useIsZhHans();
+  const CARDS = zh ? CARDS_ZH : CARDS_EN;
   return (
     <section className={styles.section}>
       <div className={styles.grid}>
@@ -73,7 +87,7 @@ export default function FeatureGrid() {
             <c.Icon className={styles.icon} width={16} height={16} />
             <h3 className={styles.title}>{c.title}</h3>
             <p className={styles.body}>{c.body}</p>
-            <span className={styles.more}>→ Guides / {c.title}</span>
+            <span className={styles.more}>→ {zh ? '指南 / ' : 'Guides / '}{c.title}</span>
           </Link>
         ))}
       </div>

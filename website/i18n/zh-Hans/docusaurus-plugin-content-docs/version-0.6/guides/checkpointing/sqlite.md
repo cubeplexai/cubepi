@@ -1,5 +1,5 @@
 ---
-title: SQLite
+title: SQLite Checkpointing
 description: "使用 SQLiteCheckpointer 实现轻量级单进程 agent 状态持久化。"
 ---
 

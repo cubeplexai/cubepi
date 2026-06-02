@@ -1,4 +1,5 @@
 import React from 'react';
+import { useIsZhHans } from '@site/src/hooks/useIsZhHans';
 import styles from './InstallMatrix.module.css';
 
 const ROWS: { tool: string; cmd: string }[] = [
@@ -9,9 +10,10 @@ const ROWS: { tool: string; cmd: string }[] = [
 ];
 
 export default function InstallMatrix() {
+  const zh = useIsZhHans();
   return (
     <section className={styles.section}>
-      <h2 className={styles.h2}>Install</h2>
+      <h2 className={styles.h2}>{zh ? '安装' : 'Install'}</h2>
       <div className={styles.table}>
         {ROWS.map((r) => (
           <div key={r.tool} className={styles.row}>
@@ -22,7 +24,7 @@ export default function InstallMatrix() {
               className={styles.copy}
               onClick={() => navigator.clipboard?.writeText(r.cmd)}
               aria-label={`Copy ${r.tool} command`}
-            >Copy</button>
+            >{zh ? '复制' : 'Copy'}</button>
           </div>
         ))}
       </div>
