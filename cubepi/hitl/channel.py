@@ -531,9 +531,18 @@ class CheckpointedChannel(_BaseChannel):
                 "Use ApprovalPolicyMiddleware or ask_user_tool, or pass "
                 "allow_inside_custom_tool=True to opt in."
             )
-        await self._checkpointer.save_pending_request(
-            self._thread_id, req, run_id=self._run_id
-        )
+        # Only pass run_id when the caller actually set one. Third-party
+        # checkpointers that still implement the v2 contract
+        # `save_pending_request(thread_id, request)` would raise TypeError
+        # if we always passed the new kwarg. With this guard, legacy
+        # backends keep working as long as no host opts into run_id
+        # persistence on them.
+        if self._run_id is not None:
+            await self._checkpointer.save_pending_request(
+                self._thread_id, req, run_id=self._run_id
+            )
+        else:
+            await self._checkpointer.save_pending_request(self._thread_id, req)
         await super()._on_pending_set(req)
 
     async def _on_pending_cleared(
