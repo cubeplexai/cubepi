@@ -30,9 +30,22 @@ class AskUserParams(BaseModel):
 
 
 _DESCRIPTION = (
-    "Ask the user one or more structured questions. Use ONLY when you need "
-    "a specific selection or piece of info to proceed; for free-form clarification, "
-    "just end your turn with the question as text — the user's next message will be the answer."
+    "Ask the user one or more structured questions and pause until they answer.\n"
+    "\n"
+    "PREFER this tool whenever you need:\n"
+    "- A choice from a small fixed set (use `options`, single or multi-select).\n"
+    "- A specific piece of structured info (name, date, file path, value).\n"
+    "- Confirmation before taking an action.\n"
+    "\n"
+    "When the answer is naturally one of a few options, ALWAYS use `options`.\n"
+    "If the user might want to pick something outside the list, add one option\n"
+    'with `allow_input: true` (an "Other / specify" escape) rather than\n'
+    "falling back to a free-text question.\n"
+    "\n"
+    "Skip this tool ONLY for genuinely open-ended input — paragraph-length\n"
+    "explanations, creative writing, ambiguous multi-part requests. For those,\n"
+    "end your turn with the question as text and the user's next message will\n"
+    "be the answer."
 )
 
 
