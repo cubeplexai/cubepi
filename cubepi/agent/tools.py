@@ -67,6 +67,50 @@ def _error_result(message: str) -> AgentToolResult:
     return AgentToolResult(content=[TextContent(text=message)])
 
 
+def _format_validation_error(exc: ValidationError, tool_name: str) -> str:
+    """Render a pydantic ValidationError as text the LLM can act on.
+
+    The default ``str(exc)`` leaks pydantic-internal model names and a
+    documentation URL — the model can read it but cannot reliably extract
+    the fix from it. This produces one short line per error, naming the
+    field path, the constraint, and (for discriminated unions) the allowed
+    discriminator values, so the model can correct the call without
+    another round-trip.
+    """
+    lines = [f"Invalid arguments for tool '{tool_name}':"]
+    for err in exc.errors():
+        loc_parts = [str(p) for p in err.get("loc", ())]
+        loc = ".".join(loc_parts) if loc_parts else "<root>"
+        etype = err.get("type", "")
+        msg = err.get("msg", "")
+        ctx = err.get("ctx") or {}
+
+        if etype == "union_tag_not_found":
+            # pydantic stores discriminator wrapped in single quotes, e.g.
+            # "'operation'" — strip for readability. expected_tags is not
+            # populated for this error type; the model has the JSON Schema
+            # to enumerate allowed values.
+            disc = str(ctx.get("discriminator", "?")).strip("'\"")
+            lines.append(f"- {loc}: missing required discriminator key '{disc}'")
+        elif etype == "union_tag_invalid":
+            disc = str(ctx.get("discriminator", "?")).strip("'\"")
+            tag = ctx.get("tag", "")
+            allowed = ctx.get("expected_tags") or ""
+            lines.append(
+                f"- {loc}: discriminator '{disc}'={tag!r} is not one of: {allowed}"
+            )
+        elif etype == "missing":
+            lines.append(f"- {loc}: field required")
+        elif etype == "literal_error":
+            expected = ctx.get("expected", "")
+            lines.append(f"- {loc}: must be one of {expected}")
+        elif etype == "extra_forbidden":
+            lines.append(f"- {loc}: unexpected field")
+        else:
+            lines.append(f"- {loc}: {msg}")
+    return "\n".join(lines)
+
+
 def _merge_hitl_details(base: Any, hitl: dict | None) -> Any:
     if hitl is None:
         return base
@@ -114,7 +158,10 @@ async def _prepare_tool_call(
     try:
         validated_args = tool.parameters.model_validate(tool_call.arguments)
     except ValidationError as exc:
-        return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
+        return _ImmediateOutcome(
+            result=_error_result(_format_validation_error(exc, tool.name)),
+            is_error=True,
+        )
     except Exception as exc:  # pragma: no cover — defensive
         return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
 
@@ -149,7 +196,10 @@ async def _prepare_tool_call(
                     before_result.edited_args
                 )
             except ValidationError as exc:  # pragma: no cover — defensive
-                return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
+                return _ImmediateOutcome(
+                    result=_error_result(_format_validation_error(exc, tool.name)),
+                    is_error=True,
+                )
 
         hitl_trace_carry = before_result.hitl_trace if before_result else None
     else:

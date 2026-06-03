@@ -372,6 +372,124 @@ class TestToolExecutionError:
         assert batch.messages[0].is_error
 
 
+class TestValidationErrorFormatting:
+    """Pin the contract that ValidationError text is model-friendly.
+
+    A raw str(ValidationError) names pydantic's internal model class and
+    points at the pydantic docs site, which the LLM cannot act on. The
+    formatter must produce field-path-anchored lines the model can use to
+    self-correct without a second round-trip.
+    """
+
+    async def test_missing_required_field_names_the_field(self):
+        tool = make_echo_tool()
+        ctx = make_context([tool])
+        msg = make_assistant_msg([ToolCall(id="t1", name="echo", arguments={})])
+
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="sequential", emit=lambda e: None
+        )
+
+        text = batch.messages[0].content[0].text
+        assert "Invalid arguments for tool 'echo'" in text
+        assert "value" in text
+        assert "field required" in text
+        # Raw pydantic decoration must NOT leak to the model.
+        assert "errors.pydantic.dev" not in text
+        assert "validation error" not in text.lower()[: len("validation error")] or (
+            "validation error" not in text.lower().split("\n")[0]
+        )
+
+    async def test_discriminator_failure_lists_allowed_tags(self):
+        from typing import Annotated, Literal, Union
+
+        from pydantic import Field, RootModel
+
+        class ListOp(BaseModel):
+            operation: Literal["list"]
+
+        class CreateOp(BaseModel):
+            operation: Literal["create"]
+            name: str
+
+        union_type = Annotated[
+            Union[ListOp, CreateOp],
+            Field(discriminator="operation"),
+        ]
+        union_root = RootModel[union_type]
+
+        async def execute_fn(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="ok")])
+
+        tool = AgentTool(
+            name="opt",
+            description="discriminated tool",
+            parameters=union_root,
+            execute=execute_fn,
+        )
+        ctx = make_context([tool])
+
+        msg = make_assistant_msg(
+            [ToolCall(id="t1", name="opt", arguments={"operation": "delete"})]
+        )
+
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="sequential", emit=lambda e: None
+        )
+
+        text = batch.messages[0].content[0].text
+        assert "discriminator" in text
+        # Allowed tags must be enumerated so the model can self-correct.
+        assert "list" in text
+        assert "create" in text
+
+    async def test_missing_discriminator_key_is_named(self):
+        from typing import Annotated, Literal, Union
+
+        from pydantic import Field, RootModel
+
+        class ListOp(BaseModel):
+            operation: Literal["list"]
+
+        class CreateOp(BaseModel):
+            operation: Literal["create"]
+            name: str
+
+        union_type = Annotated[
+            Union[ListOp, CreateOp],
+            Field(discriminator="operation"),
+        ]
+        union_root = RootModel[union_type]
+
+        async def execute_fn(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="ok")])
+
+        tool = AgentTool(
+            name="opt",
+            description="discriminated tool",
+            parameters=union_root,
+            execute=execute_fn,
+        )
+        ctx = make_context([tool])
+
+        # Wrong top-level key — pydantic raises union_tag_not_found.
+        # That error type does not carry expected_tags in its ctx, but the
+        # error must still name the discriminator key so the model can find
+        # it in the tool's JSON Schema and self-correct.
+        msg = make_assistant_msg(
+            [ToolCall(id="t1", name="opt", arguments={"action": "list"})]
+        )
+
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="sequential", emit=lambda e: None
+        )
+
+        text = batch.messages[0].content[0].text
+        assert "missing required discriminator key 'operation'" in text
+        # Surrounding quotes from pydantic's ctx must be stripped.
+        assert "''operation''" not in text
+
+
 class TestTermination:
     async def test_all_terminate_stops_loop(self):
         async def term_execute(tool_call_id, params, *, signal=None, on_update=None):
