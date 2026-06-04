@@ -235,6 +235,48 @@ async def test_oneshot_generate_error_event_raises_and_marks_root() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oneshot_propagates_silent_producer_failure() -> None:
+    """If the producer task fails AFTER emitting done (without an explicit
+    error event), generate() must still raise — not return empty text and
+    leave the root span marked successful."""
+    from opentelemetry.trace import StatusCode
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    provider = FauxProvider()
+    tracer, exporter = _make_tracer()
+
+    # Build a stream that emits done normally but whose result() raises
+    fake_stream = MagicMock()
+
+    async def _events():
+        yield MagicMock(type="done", delta=None, error_message=None)
+
+    fake_stream.__aiter__ = lambda self: _events()
+
+    async def failing_result():
+        raise RuntimeError("producer crashed after done")
+
+    fake_stream.result = failing_result
+
+    with patch.object(provider, "stream", new=AsyncMock(return_value=fake_stream)):
+        with pytest.raises(RuntimeError, match="producer crashed"):
+            async with tracer.oneshot(provider=provider, model=MODEL) as session:
+                await session.generate(
+                    system="sys",
+                    messages=[UserMessage(content=[TextContent(text="q")])],
+                    max_output_tokens=10,
+                )
+
+    await tracer.force_flush()
+    await tracer.shutdown()
+
+    roots = [s for s in exporter.spans if s.name == "invoke_agent"]
+    assert len(roots) == 1
+    # Root must be marked ERROR (not silently successful)
+    assert roots[0].status.status_code == StatusCode.ERROR
+
+
+@pytest.mark.asyncio
 async def test_oneshot_subscribe_failure_raises_and_ends_root_span() -> None:
     """If provider subscription raises, oneshot re-raises and ends the root span."""
     from unittest.mock import patch

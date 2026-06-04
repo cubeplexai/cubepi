@@ -123,12 +123,17 @@ class _OneShotSession:
         # ``await stream.result()`` pattern in cubepi.agent.loop.
         try:
             await stream.result()
-        except Exception:
-            # The producer's exception was already surfaced via the
-            # error event above (or the listener has recorded the error
-            # on the chat span). Swallow here so we report it uniformly
-            # via ``error_msg``.
-            pass
+        except Exception as result_exc:
+            # If we already captured an error event, the producer's
+            # exception is just the same failure expressed differently —
+            # swallow it and report uniformly via ``error_msg``. But if
+            # we got here on the success path (``done`` event consumed),
+            # the producer raised AFTER signalling done without emitting
+            # an error event, e.g. a custom provider bug. Surface that
+            # exception so the run is reported as failed instead of
+            # returning empty text.
+            if error_msg is None:
+                error_msg = str(result_exc) or "oneshot producer failed"
         if error_msg is not None:
             raise RuntimeError(error_msg)
         text = "".join(parts)
