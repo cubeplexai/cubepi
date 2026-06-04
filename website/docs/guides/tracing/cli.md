@@ -47,6 +47,15 @@ cubepi trace ls --meta conversation_id=conv_123
 cubepi trace ls --meta user_id=usr_9 --meta org_id=org_1   # repeatable = AND, exact match
 ```
 
+Traces produced by [`Tracer.oneshot()`](../../api/cubepi-tracing#tracer-oneshot)
+(background LLM calls without a full agent loop) are also indexed here. Filter
+them by the `operation` name passed to `oneshot()`:
+
+```bash
+cubepi trace ls --meta oneshot_operation=consolidate_memory
+cubepi trace stats --by model --meta oneshot_operation=consolidate_memory
+```
+
 Each `--meta KEY=VALUE` is matched exactly against the trace's root metadata;
 repeating the flag ANDs the conditions.
 

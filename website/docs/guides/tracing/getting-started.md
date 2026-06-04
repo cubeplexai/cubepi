@@ -225,6 +225,46 @@ contextvars are per-asyncio-task, so concurrent agents see
 independent values, and nested `tracing_context` blocks merge
 (tags concatenate, metadata keys union with inner winning).
 
+## Tracing background LLM calls (`oneshot`)
+
+`attach()` instruments a cubepi `Agent`. For background tasks that call an LLM
+directly — without a full agent loop (no tool use, no multi-turn) — use
+`Tracer.oneshot()` instead. It produces the same `invoke_agent` root span and
+`chat` child span so the `cubepi trace` CLI indexes it alongside normal agent
+runs.
+
+```python
+async with tracer.oneshot(
+    provider=provider,
+    model=model,
+    operation="consolidate_memory",          # labelled in the trace
+    metadata={"conversation_id": conv_id},   # queryable via --meta
+) as session:
+    text = await session.generate(
+        system=SYSTEM_PROMPT,
+        messages=[UserMessage(content=[TextContent(text=prompt)])],
+        max_output_tokens=1500,
+    )
+```
+
+The span tree is flat (no `cubepi.turn` wrapper — there is no loop):
+
+```
+invoke_agent  820ms
+  └── chat deepseek-v3  815ms  tok 3200/180
+```
+
+Filter these traces by operation name in the CLI:
+
+```bash
+cubepi trace ls --meta oneshot_operation=consolidate_memory
+cubepi trace ls --meta conversation_id=conv-123   # alongside the conversation's agent runs
+```
+
+The `operation` string is recorded as both `cubepi.oneshot.operation` (for
+dashboards) and `cubepi.metadata.oneshot_operation` (so `--meta` can reach it,
+since the CLI filter only reads `cubepi.metadata.*` attributes).
+
 ## Next
 
 - [OTLP & Backends](./otlp) — Jaeger, Tempo, Honeycomb, Datadog, …
