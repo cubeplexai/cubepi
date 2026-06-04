@@ -264,6 +264,92 @@ async def test_oneshot_detacher_exception_is_swallowed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oneshot_partial_subscribe_failure_unwinds_listeners() -> None:
+    """If subscribe_chunk raises after subscribe_request succeeded, the first
+    listener must be unsubscribed before re-raising (no dangling listeners)."""
+    from unittest.mock import patch
+
+    provider = FauxProvider()
+    tracer, exporter = _make_tracer()
+
+    # Track how many listeners were subscribed / detached
+    subscribed: list[str] = []
+    detached: list[str] = []
+    original_sub_req = provider.subscribe_request
+
+    def patched_sub_req(cb):
+        subscribed.append("request")
+        real_unsub = original_sub_req(cb)
+
+        def counting_unsub():
+            detached.append("request")
+            real_unsub()
+
+        return counting_unsub
+
+    with (
+        patch.object(provider, "subscribe_request", side_effect=patched_sub_req),
+        patch.object(
+            provider, "subscribe_chunk", side_effect=RuntimeError("chunk sub failed")
+        ),
+        pytest.raises(RuntimeError, match="chunk sub failed"),
+    ):
+        async with tracer.oneshot(provider=provider, model=MODEL):
+            pass  # pragma: no cover
+
+    await tracer.force_flush()
+    await tracer.shutdown()
+
+    # subscribe_request succeeded; its detacher must have been called on cleanup
+    assert "request" in subscribed
+    assert "request" in detached
+
+    # Root span must still be exported despite the error
+    roots = [s for s in exporter.spans if s.name == "invoke_agent"]
+    assert len(roots) == 1
+
+
+@pytest.mark.asyncio
+async def test_oneshot_cancelled_generate_closes_chat_span() -> None:
+    """If generate() is cancelled mid-stream, the chat span must be closed."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    provider = FauxProvider()
+    tracer, exporter = _make_tracer()
+
+    # A stream that never yields (blocks forever) so we can cancel it
+    async def hanging_stream():
+        await asyncio.sleep(60)
+        yield  # pragma: no cover
+
+    hanging = MagicMock()
+    hanging.__aiter__ = lambda self: hanging_stream()
+
+    async def do_work():
+        async with tracer.oneshot(provider=provider, model=MODEL) as session:
+            with patch.object(provider, "stream", new=AsyncMock(return_value=hanging)):
+                await session.generate(
+                    system="sys",
+                    messages=[UserMessage(content=[TextContent(text="q")])],
+                    max_output_tokens=10,
+                )
+
+    task = asyncio.create_task(do_work())
+    await asyncio.sleep(0.05)  # let the task reach generate()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    await tracer.force_flush()
+    await tracer.shutdown()
+
+    # Root span must be exported; chat span if opened must also be ended
+    roots = [s for s in exporter.spans if s.name == "invoke_agent"]
+    assert len(roots) == 1
+
+
+@pytest.mark.asyncio
 async def test_oneshot_does_not_interfere_with_concurrent_agent() -> None:
     """Oneshot's active-run gate must not bleed into a concurrent Agent run."""
     import asyncio

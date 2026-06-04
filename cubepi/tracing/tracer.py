@@ -492,6 +492,13 @@ class Tracer:
                     provider.subscribe_response(recorder._on_provider_response)
                 )
             except BaseException:
+                # Unwind any partial subscriptions before re-raising so no
+                # dangling listeners are left on the provider.
+                for d in detachers:
+                    try:
+                        d()
+                    except Exception:
+                        pass
                 root_span.end()
                 raise
 
@@ -507,6 +514,9 @@ class Tracer:
                     d()
                 except Exception:
                     pass
+            # Close any chat span left open by a cancelled/timed-out stream
+            # (mirrors Recorder._close_open_spans for the agent detach path).
+            recorder._close_open_spans(run)
             recorder._run = None
             root_span.end()
             # Best-effort flush — tracing must never break the caller's work.
