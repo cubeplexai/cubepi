@@ -244,66 +244,71 @@ class AnthropicProvider(BaseProvider):
                 kwargs = await invoke_on_payload(opts.on_payload, kwargs, model)
                 await _fire_request_listeners(self._request_listeners, kwargs, model)
 
-                async with self._client.messages.stream(**kwargs) as stream:
-                    # Invoke on_response with HTTP metadata if available
-                    http_response = getattr(stream, "response", None)
-                    if http_response is not None:
-                        await invoke_on_response(
-                            opts.on_response,
-                            ProviderResponse(
-                                status=http_response.status_code,
-                                headers=dict(http_response.headers),
+                try:
+                    async with self._client.messages.stream(**kwargs) as stream:
+                        # Invoke on_response with HTTP metadata if available
+                        http_response = getattr(stream, "response", None)
+                        if http_response is not None:
+                            await invoke_on_response(
+                                opts.on_response,
+                                ProviderResponse(
+                                    status=http_response.status_code,
+                                    headers=dict(http_response.headers),
+                                ),
+                                model,
+                            )
+
+                        partial = AssistantMessage(
+                            content=[],
+                            usage=Usage(),
+                            timestamp=time.time(),
+                            provider_id=model.provider,
+                            model_id=model.id,
+                        )
+                        await self._emit(
+                            ms,
+                            StreamEvent(
+                                type="start", partial=partial.model_copy(deep=True)
                             ),
                             model,
                         )
 
-                    partial = AssistantMessage(
-                        content=[],
-                        usage=Usage(),
-                        timestamp=time.time(),
-                        provider_id=model.provider,
-                        model_id=model.id,
-                    )
-                    await self._emit(
-                        ms,
-                        StreamEvent(
-                            type="start", partial=partial.model_copy(deep=True)
-                        ),
-                        model,
-                    )
+                        # Accumulate streamed tool-call args JSON per content index
+                        # so toolcall_end can carry parsed arguments (the Anthropic
+                        # stream only delivers them as incremental partial_json).
+                        tool_args_buffers: dict[int, str] = {}
+                        async for event in stream:
+                            if opts.signal and opts.signal.is_set():
+                                aborted = partial.model_copy(
+                                    update={
+                                        "stop_reason": "aborted",
+                                        "error_message": "Request was aborted",
+                                    }
+                                )
+                                await self._emit(
+                                    ms,
+                                    StreamEvent(
+                                        type="error",
+                                        error_message="Request was aborted",
+                                    ),
+                                    model,
+                                )
+                                ms.set_result(aborted)
+                                return
 
-                    # Accumulate streamed tool-call args JSON per content index
-                    # so toolcall_end can carry parsed arguments (the Anthropic
-                    # stream only delivers them as incremental partial_json).
-                    tool_args_buffers: dict[int, str] = {}
-                    async for event in stream:
-                        if opts.signal and opts.signal.is_set():
-                            aborted = partial.model_copy(
-                                update={
-                                    "stop_reason": "aborted",
-                                    "error_message": "Request was aborted",
-                                }
+                            await self._handle_event(
+                                event, partial, ms, model, tool_args_buffers
                             )
-                            await self._emit(
-                                ms,
-                                StreamEvent(
-                                    type="error",
-                                    error_message="Request was aborted",
-                                ),
-                                model,
-                            )
-                            ms.set_result(aborted)
-                            return
 
-                        await self._handle_event(
-                            event, partial, ms, model, tool_args_buffers
-                        )
+                        final_msg = await stream.get_final_message()
+                        result = self._convert_response(final_msg, model)
+                        body = self._assemble_response(final_msg)
+                        await self._emit(ms, StreamEvent(type="done"), model)
+                        ms.set_result(result)
+                except Exception as _sdk_exc:
+                    from cubepi.errors import classify_and_raise
 
-                    final_msg = await stream.get_final_message()
-                    result = self._convert_response(final_msg, model)
-                    body = self._assemble_response(final_msg)
-                    await self._emit(ms, StreamEvent(type="done"), model)
-                    ms.set_result(result)
+                    classify_and_raise(_sdk_exc, model=model, messages=messages)
 
             except BaseException as e:
                 exc = e

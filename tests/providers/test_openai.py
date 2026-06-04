@@ -935,3 +935,91 @@ class TestOpenAIStreamMultipleToolCalls:
             assert tool_calls[0].arguments == {"q": "a"}
             assert tool_calls[1].name == "fetch"
             assert tool_calls[1].arguments == {"url": "b"}
+
+
+# ---------------------------------------------------------------------------
+# Typed error wrapping — provider integration
+# ---------------------------------------------------------------------------
+
+
+class _FakeSdkExc(Exception):
+    """Minimal fake SDK exception with configurable status_code."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        if status_code is not None:
+            self.status_code = status_code
+
+
+class TestOpenAITypedErrorWrapping:
+    """Verify that raw SDK exceptions are re-raised as typed ProviderError subclasses.
+
+    The provider catches raw SDK exceptions, classifies them via classify_and_raise,
+    and then the outer BaseException handler converts them to error AssistantMessages.
+    The typed exception is available via the response listener's ``exc`` argument.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_429_delivers_rate_limited_to_listener(self) -> None:
+        from cubepi.errors import RateLimited
+
+        exc = _FakeSdkExc("Rate limit exceeded", status_code=429)
+        mock_client = MagicMock()
+        mock_client.chat = MagicMock()
+        mock_client.chat.completions = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(side_effect=exc)
+
+        provider = OpenAIProvider(api_key="test-key")
+        provider._client = mock_client
+
+        captured_exc: list[BaseException | None] = []
+
+        def on_response(body, model, e):  # type: ignore[misc]
+            captured_exc.append(e)
+
+        provider.subscribe_response(on_response)
+
+        ms = await provider.stream(
+            _model(), [UserMessage(content=[TextContent(text="hi")])]
+        )
+        async for _ in ms:
+            pass
+        result = await ms.result()
+
+        assert result.stop_reason == "error"
+        assert len(captured_exc) == 1
+        assert isinstance(captured_exc[0], RateLimited)
+
+    @pytest.mark.asyncio
+    async def test_context_length_message_delivers_context_length_exceeded(
+        self,
+    ) -> None:
+        from cubepi.errors import ContextLengthExceeded
+
+        exc = _FakeSdkExc(
+            "This model's maximum context length is 128000 tokens.", status_code=400
+        )
+        mock_client = MagicMock()
+        mock_client.chat = MagicMock()
+        mock_client.chat.completions = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(side_effect=exc)
+
+        provider = OpenAIProvider(api_key="test-key")
+        provider._client = mock_client
+
+        captured_exc: list[BaseException | None] = []
+
+        def on_response(body, model, e):  # type: ignore[misc]
+            captured_exc.append(e)
+
+        provider.subscribe_response(on_response)
+
+        ms = await provider.stream(
+            _model(), [UserMessage(content=[TextContent(text="hi")])]
+        )
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        assert len(captured_exc) == 1
+        assert isinstance(captured_exc[0], ContextLengthExceeded)
