@@ -13,6 +13,9 @@ from cubepi.errors import (
     ProviderError,
     ProviderUnavailable,
     RateLimited,
+    _estimate_input_tokens,
+    _retry_after_from,
+    _status_of,
     classify_and_raise,
 )
 from cubepi.providers.base import Model, TextContent, UserMessage
@@ -36,7 +39,12 @@ def _messages(text: str = "hello") -> list:
 
 
 class _FakeExc(Exception):
-    """Fake SDK exception with configurable status_code, message, and headers."""
+    """Fake SDK exception with configurable status_code, message, and headers.
+
+    ``status_code`` sets both the direct attr AND ``.response.status_code`` so
+    existing classifier tests work. Pass ``response_status_code`` instead to
+    put the code only on ``.response`` (for testing the fallback path).
+    """
 
     def __init__(
         self,
@@ -44,14 +52,18 @@ class _FakeExc(Exception):
         *,
         status_code: int | None = None,
         headers: dict | None = None,
+        response_status_code: int | None = None,
     ) -> None:
         super().__init__(message)
         if status_code is not None:
             self.status_code = status_code
-        if headers is not None:
+        response_code = (
+            response_status_code if response_status_code is not None else status_code
+        )
+        if response_code is not None or headers is not None:
             self.response = SimpleNamespace(
-                status_code=status_code,
-                headers=headers,
+                status_code=response_code,
+                headers=headers or {},
             )
 
 
@@ -253,3 +265,83 @@ class TestProviderErrorInheritance:
             "slow down", provider="openai", model="gpt-4o", retry_after=30.0
         )
         assert err.retry_after == 30.0
+
+
+# ---------------------------------------------------------------------------
+# Coverage fillers — internal helpers exercised directly.
+# ---------------------------------------------------------------------------
+
+
+class TestStatusOf:
+    def test_direct_status_code(self) -> None:
+        exc = _FakeExc("msg", status_code=400)
+        assert _status_of(exc) == 400
+
+    def test_response_fallback(self) -> None:
+        """exc has no .status_code but .response.status_code — fallback path."""
+        exc = _FakeExc("msg", response_status_code=503)
+        assert getattr(exc, "status_code", None) is None
+        assert _status_of(exc) == 503
+
+    def test_no_status(self) -> None:
+        exc = RuntimeError("no status anywhere")
+        assert _status_of(exc) is None
+
+
+class TestEstimateInputTokens:
+    def test_none_returns_none(self) -> None:
+        assert _estimate_input_tokens(None) is None
+
+    def test_empty_returns_none(self) -> None:
+        assert _estimate_input_tokens([]) is None
+
+    def test_user_message_with_text_content(self) -> None:
+        msgs = _messages("hello world")
+        est = _estimate_input_tokens(msgs)
+        assert est >= 2
+
+    def test_block_with_content_not_text_attr(self) -> None:
+        """Block that has .content instead of .text — non-TextContent blocks."""
+        block = SimpleNamespace(text=None, content="tool result text")
+        msg = type("_Msg", (), {"content": [block]})()
+        est = _estimate_input_tokens([msg])
+        assert est is not None and est >= 3
+
+    def test_string_content(self) -> None:
+        """Message with list[str] content blocks is NOT expected but is handled."""
+
+        # Actually test the elif isinstance(content, str) branch via a mock.
+        class _StrMsg:
+            content = "plain string content for token estimation"
+
+        est = _estimate_input_tokens([_StrMsg])  # type: ignore[list-item]
+        assert est is not None and est >= 7
+
+    def test_zero_total_returns_none(self) -> None:
+        """Empty strings produce zero total."""
+        msgs = [UserMessage(content=[TextContent(text="")])]
+        assert _estimate_input_tokens(msgs) is None
+
+
+class TestRetryAfterFrom:
+    def test_lowercase_retry_after_header(self) -> None:
+        exc = _FakeExc("rate limited", status_code=429, headers={"retry-after": "60"})
+        assert _retry_after_from(exc) == 60.0
+
+    def test_title_case_retry_after_header(self) -> None:
+        exc = _FakeExc("rate limited", status_code=429, headers={"Retry-After": "30"})
+        assert _retry_after_from(exc) == 30.0
+
+    def test_no_headers_returns_none(self) -> None:
+        exc = _FakeExc("rate limited", status_code=429)
+        assert _retry_after_from(exc) is None
+
+    def test_no_retry_after_key_returns_none(self) -> None:
+        exc = _FakeExc("rate limited", status_code=429, headers={"x-other": "1"})
+        assert _retry_after_from(exc) is None
+
+    def test_non_numeric_value_returns_none(self) -> None:
+        exc = _FakeExc(
+            "rate limited", status_code=429, headers={"retry-after": "not-a-number"}
+        )
+        assert _retry_after_from(exc) is None
