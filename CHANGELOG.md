@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider.generate(...)` one-shot helper** — providers now expose a
+  non-streaming call that consumes `stream()` and returns the final
+  `AssistantMessage`. It supports per-call overrides for
+  `max_output_tokens`, `temperature`, `thinking`, and `thinking_budgets`.
+- **Compaction middleware** — `cubepi.middleware.CompactionMiddleware`
+  summarizes older conversation turns into JSON-safe `AgentContext.extra`
+  state and sends the model a compressed view while preserving full agent
+  history.
+- **Subagent middleware** — `cubepi.middleware.SubagentMiddleware` adds a
+  `subagent` tool that runs an ephemeral child `Agent`, supports shared tools
+  and middleware inheritance, captures child events, and exposes host callbacks
+  for application-specific event streaming.
 - **`on_run_end` middleware hook** — fires exactly once after all turns and tool
   calls complete, before `AgentEndEvent`. Return a `list[Message]` to inject
   additional messages and run one extra model turn (e.g. a memory-reflection
@@ -20,6 +32,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     runs (`stop_reason in ("error", "aborted")`) skip the hook.
   - HITL-interrupted runs (HitlDetached / HitlAborted) also skip the hook —
     the conversation is paused, not finished.
+
+### Changed
+
+- **Breaking:** pre-model middleware hooks now receive `AgentContext` directly.
+  Update custom middleware and explicit hook callables from the old signatures:
+  - `transform_context(messages, *, signal=None)`
+  - `transform_system_prompt(system_prompt, *, signal=None)`
+  - `convert_to_llm(messages)`
+
+  to the new signatures:
+  - `transform_context(messages, *, ctx, signal=None)`
+  - `transform_system_prompt(system_prompt, *, ctx, signal=None)`
+  - `convert_to_llm(messages, *, ctx)`
+
+  Use `ctx.extra` for middleware state that should survive checkpointing. This
+  release does not include old-signature compatibility shims.
 
 ## [0.6.0] - 2026-05-31
 
