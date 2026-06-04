@@ -253,6 +253,15 @@ def classify_and_raise(
             msg, provider=provider, model=model_id, status_code=status
         ) from exc
 
+    # SDK-specific connection/timeout errors (openai.APIConnectionError,
+    # anthropic.APITimeoutError) don't inherit from Python's built-in
+    # ConnectionError/TimeoutError, so the isinstance above misses them.
+    cls_name = type(exc).__name__
+    if "ConnectionError" in cls_name or "Timeout" in cls_name:
+        raise ProviderUnavailable(
+            msg, provider=provider, model=model_id, status_code=status
+        ) from exc
+
     if status is not None and 500 <= status < 600:
         raise ProviderUnavailable(
             msg, provider=provider, model=model_id, status_code=status
