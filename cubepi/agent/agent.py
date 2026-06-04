@@ -159,8 +159,14 @@ class Agent(Generic[TMessage]):
         )
         if tools:
             self._state.tools = tools
+        middleware = middleware or []
+        middleware_tools: list[AgentTool] = []
+        for mw in middleware:
+            middleware_tools.extend(getattr(mw, "tools", []) or [])
+        if middleware_tools:
+            self._state.tools = [*self._state.tools, *middleware_tools]
         # Compose middleware hooks, then let explicit callables override.
-        _mw_hooks = compose_middleware(middleware or [])
+        _mw_hooks = compose_middleware(middleware)
         self.convert_to_llm = (
             convert_to_llm or _mw_hooks.get("convert_to_llm") or _default_convert_to_llm
         )

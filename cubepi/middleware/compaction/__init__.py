@@ -68,6 +68,11 @@ class CompactionMiddleware(Middleware):
         del signal
         state = _load_state(ctx.extra.get("compaction"))
         boundary = int(ctx.extra.get("compaction_until_msg_index") or 0)
+        if boundary >= len(messages):
+            boundary = 0
+            state = None
+            ctx.extra.pop("compaction", None)
+            ctx.extra.pop("compaction_until_msg_index", None)
         compressed = _compressed_view(messages, state, boundary)
 
         if approx_tokens(compressed) < self._max_tokens_before:

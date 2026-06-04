@@ -4,6 +4,7 @@ import pytest
 
 from cubepi.agent.agent import Agent, _MessageQueue
 from cubepi.agent.types import AgentTool
+from cubepi.middleware.base import Middleware
 from cubepi.providers.base import (
     AssistantMessage,
     Model,
@@ -11,6 +12,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from pydantic import BaseModel
 
 
 def make_model() -> Model:
@@ -42,6 +44,31 @@ class TestAgentInit:
 
         assert agent.state.system_prompt == "You are a helpful assistant."
         assert agent.state.thinking == "low"
+
+    def test_middleware_tools_are_registered_on_agent(self):
+        class Params(BaseModel):
+            pass
+
+        async def execute(tool_call_id, params, *, signal=None, on_update=None):
+            return None
+
+        tool = AgentTool(
+            name="from_middleware",
+            description="middleware tool",
+            parameters=Params,
+            execute=execute,
+        )
+
+        class ToolMiddleware(Middleware):
+            tools = [tool]
+
+        agent = Agent(
+            provider=FauxProvider(),
+            model=make_model(),
+            middleware=[ToolMiddleware()],
+        )
+
+        assert agent.state.tools == [tool]
 
 
 class TestAgentSubscribe:
