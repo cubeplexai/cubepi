@@ -131,15 +131,21 @@ async def test_summarize_raises_on_provider_error_message() -> None:
 
 
 def test_format_message_for_summary_includes_tool_calls_and_text_like_blocks() -> None:
-    message = AssistantMessage(
-        content=[
+    class _TextLike:
+        text = "extra text"
+
+    class _Transcript:
+        content = [
             TextContent(text="checking"),
             ToolCall(id="t1", name="lookup", arguments={"q": "x"}),
+            _TextLike(),
         ]
-    )
 
-    formatted = _format_message_for_summary(message)
+    message = _Transcript()
 
-    assert "[assistant]" in formatted
+    formatted = _format_message_for_summary(message)  # type: ignore[arg-type]
+
+    assert "[_transcript]" in formatted
     assert "checking" in formatted
     assert "[tool_call:lookup]" in formatted
+    assert "extra text" in formatted

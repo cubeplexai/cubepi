@@ -5,6 +5,7 @@ from typing import Any
 
 from cubepi.agent.types import AgentContext
 from cubepi.middleware.compaction import CompactionMiddleware, CompactionState
+from cubepi.middleware.compaction import _load_state
 from cubepi.providers.base import (
     AssistantMessage,
     Message,
@@ -105,6 +106,13 @@ async def test_under_threshold_returns_existing_compressed_view() -> None:
     assert provider.calls == []
 
 
+def test_load_state_accepts_state_and_ignores_unknown_values() -> None:
+    state = CompactionState(summary="cached")
+
+    assert _load_state(state) is state
+    assert _load_state("not-state") is None
+
+
 async def test_over_threshold_writes_json_safe_state_to_ctx_extra() -> None:
     provider = _FakeSummaryProvider(reply="New summary")
     middleware = _make_middleware(provider, max_tokens_before=1)
@@ -127,6 +135,21 @@ async def test_over_threshold_writes_json_safe_state_to_ctx_extra() -> None:
     assert ctx.extra["compaction_until_msg_index"] > 0
     assert isinstance(result[0], UserMessage)
     assert provider.calls[0]["options"].signal is signal
+
+
+async def test_over_threshold_without_safe_boundary_returns_compressed_view() -> None:
+    provider = _FakeSummaryProvider()
+    middleware = _make_middleware(provider, max_tokens_before=1)
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    assert result == messages
+    assert provider.calls == []
 
 
 async def test_summarizer_failure_returns_current_view_without_writing_state() -> None:

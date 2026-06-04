@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from cubepi import AgentTool, AgentToolResult, TextContent
+from cubepi import Agent, AgentTool, AgentToolResult, TextContent, UserMessage
 from cubepi.middleware.subagents import SubagentMiddleware, SubagentSpec
 from cubepi.providers.base import AssistantMessage, MessageStream, Model, StreamEvent
 from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
@@ -131,6 +131,29 @@ async def test_unknown_subagent_type_falls_back_to_general_purpose() -> None:
     assert result.content[0].text == "fallback reply"
 
 
+async def test_subagent_tool_returns_error_when_dispatch_raises() -> None:
+    middleware = _make_middleware()
+    [tool] = middleware.tools
+
+    async def fail_run(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        raise RuntimeError("dispatch boom")
+
+    middleware._run_subagent = fail_run  # type: ignore[method-assign]
+    args = tool.parameters(
+        name="worker",
+        role="researcher",
+        task="answer",
+        prompt="please reply",
+        subagent_type="general-purpose",
+    )
+
+    result = await tool.execute("tc-dispatch-error", args, signal=None, on_update=None)
+
+    assert result.is_error is True
+    assert "dispatch boom" in result.content[0].text
+
+
 async def test_subagent_tool_returns_only_child_final_answer() -> None:
     class _EchoParams(BaseModel):
         value: str
@@ -245,6 +268,36 @@ async def test_string_event_mapper_payload_is_treated_as_one_payload() -> None:
     assert result.details["subagent_events"] == ["started"]
 
 
+def test_child_error_handles_empty_non_assistant_and_error_assistant_states() -> None:
+    child = Agent(
+        provider=FauxProvider(),
+        model=Model(id="faux-1", provider="faux"),
+    )
+
+    assert SubagentMiddleware._child_error(child) is None
+
+    child.state.messages = [UserMessage(content=[TextContent(text="user only")])]
+    assert SubagentMiddleware._child_error(child) is None
+
+    child.state.messages = [
+        AssistantMessage(content=[], error_message="assistant failed")
+    ]
+    assert SubagentMiddleware._child_error(child) == "assistant failed"
+
+    child.state.messages = [AssistantMessage(content=[], stop_reason="error")]
+    assert SubagentMiddleware._child_error(child) == "subagent failed"
+
+
+def test_final_assistant_text_returns_empty_without_assistant_message() -> None:
+    child = Agent(
+        provider=FauxProvider(),
+        model=Model(id="faux-1", provider="faux"),
+    )
+    child.state.messages = [UserMessage(content=[TextContent(text="user only")])]
+
+    assert SubagentMiddleware._final_assistant_text(child) == ""
+
+
 async def test_inner_agent_failure_returns_tool_error() -> None:
     class _FailingProvider(FauxProvider):
         async def stream(self, *args: Any, **kwargs: Any) -> Any:
@@ -356,6 +409,69 @@ async def test_parent_signal_aborts_running_child_agent() -> None:
 
     assert result.is_error is True
     assert "aborted" in result.content[0].text
+
+
+async def test_abort_forwarder_waits_for_child_streaming_before_abort() -> None:
+    class _State:
+        is_streaming = False
+
+    class _Child:
+        state = _State()
+        aborted = False
+
+        def abort(self) -> None:
+            self.aborted = True
+
+    child = _Child()
+    signal = asyncio.Event()
+    middleware = _make_middleware()
+    task = middleware._start_abort_forwarder(child, signal)  # type: ignore[arg-type]
+    assert task is not None
+
+    signal.set()
+    await asyncio.sleep(0)
+    assert child.aborted is False
+
+    child.state.is_streaming = True
+    await asyncio.wait_for(task, timeout=1)
+    assert child.aborted is True
+
+
+async def test_stop_abort_forwarder_cancels_active_task() -> None:
+    middleware = _make_middleware()
+
+    async def never() -> None:
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(never())
+
+    await middleware._stop_abort_forwarder(task)
+
+    assert task.cancelled()
+
+
+def test_tracer_attach_failure_is_ignored() -> None:
+    class _BadTracer:
+        def attach(self, agent: Any) -> Any:
+            del agent
+            raise RuntimeError("attach failed")
+
+    middleware = _make_middleware(tracer=_BadTracer())
+    child = Agent(
+        provider=FauxProvider(),
+        model=Model(id="faux-1", provider="faux"),
+    )
+
+    assert middleware._attach_tracer(child) is None
+
+
+async def test_tracer_detach_failure_is_ignored() -> None:
+    middleware = _make_middleware()
+
+    def detach() -> None:
+        raise RuntimeError("detach failed")
+
+    await middleware._detach_tracer(detach)
 
 
 class _FakeTracer:

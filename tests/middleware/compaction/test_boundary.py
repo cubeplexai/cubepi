@@ -47,6 +47,12 @@ def test_returns_boundary_at_user_message_start() -> None:
     assert safe_boundary(messages, keep_recent=2, min_compact=1) == 4
 
 
+def test_short_history_has_no_safe_boundary() -> None:
+    messages: list[Message] = [_user("q1"), _assistant("a1")]
+
+    assert safe_boundary(messages, keep_recent=2) is None
+
+
 def test_rejects_suffix_with_orphan_tool_result() -> None:
     call = ToolCall(id="c1", name="search", arguments={})
     messages: list[Message] = [
@@ -59,6 +65,20 @@ def test_rejects_suffix_with_orphan_tool_result() -> None:
     ]
 
     assert safe_boundary(messages, keep_recent=2, min_compact=1) is None
+
+
+def test_accepts_suffix_with_matching_tool_call_and_result() -> None:
+    call = ToolCall(id="c1", name="search", arguments={})
+    messages: list[Message] = [
+        _user("q1"),
+        _assistant("a1"),
+        _user("q2"),
+        _assistant(tool_calls=[call]),
+        _tool_result("c1"),
+        _assistant("done"),
+    ]
+
+    assert safe_boundary(messages, keep_recent=3, min_compact=1) == 2
 
 
 def test_enforces_min_compact() -> None:

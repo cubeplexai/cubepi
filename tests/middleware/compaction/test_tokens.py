@@ -4,6 +4,7 @@ from cubepi.middleware.compaction.tokens import approx_tokens
 from cubepi.providers.base import (
     AssistantMessage,
     TextContent,
+    ToolCall,
     ToolResultMessage,
     Usage,
     UserMessage,
@@ -42,3 +43,19 @@ def test_tool_result_text_is_counted() -> None:
     ]
 
     assert approx_tokens(messages) == 100
+
+
+def test_tool_call_arguments_are_counted() -> None:
+    messages = [
+        AssistantMessage(
+            content=[
+                ToolCall(
+                    id="c1",
+                    name="search",
+                    arguments={"query": "x" * 20},
+                )
+            ],
+        )
+    ]
+
+    assert approx_tokens(messages) > 0
