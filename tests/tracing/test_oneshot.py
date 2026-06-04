@@ -279,6 +279,42 @@ async def test_oneshot_detacher_exception_is_swallowed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oneshot_record_stream_writes_jsonl(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """When record_stream is on, oneshot must open a per-run stream.jsonl
+    so _on_provider_chunk can write the same per-chunk log as the agent path."""
+    exporter = InMemoryExporter()
+    tracer = Tracer(
+        exporters=[exporter],
+        record_stream=True,
+        stream_dir=str(tmp_path),
+        atexit_flush=False,
+    )
+
+    provider = FauxProvider()
+    provider.append_responses([faux_assistant_message("streamed text")])
+
+    async with tracer.oneshot(provider=provider, model=MODEL) as session:
+        text = await session.generate(
+            system="sys",
+            messages=[UserMessage(content=[TextContent(text="hi")])],
+            max_output_tokens=20,
+        )
+
+    await tracer.shutdown()
+
+    assert text == "streamed text"
+    stream_files = list(tmp_path.glob("*.stream.jsonl"))
+    assert len(stream_files) == 1, f"expected one stream file, got {stream_files}"
+    content = stream_files[0].read_text(encoding="utf-8").strip()
+    assert content, "stream file should have at least one event"
+    # The file should be one JSON object per line — sanity-check parse
+    import json
+
+    for line in content.splitlines():
+        json.loads(line)
+
+
+@pytest.mark.asyncio
 async def test_oneshot_partial_subscribe_failure_unwinds_listeners() -> None:
     """If subscribe_chunk raises after subscribe_request succeeded, the first
     listener must be unsubscribed before re-raising (no dangling listeners)."""

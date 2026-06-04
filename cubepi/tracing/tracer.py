@@ -520,6 +520,21 @@ class Tracer:
         )
         recorder._run = run
 
+        # Open the per-run stream file when record_stream is enabled, so
+        # ``_on_provider_chunk`` writes ``<run_id>.stream.jsonl`` for the
+        # oneshot the same way the agent path does. Closed in the finally
+        # block below.
+        if self._record_stream and self._stream_dir is not None:
+            try:
+                import time as _time
+
+                self._stream_dir.mkdir(parents=True, exist_ok=True)
+                stream_path = self._stream_dir / f"{run_id}.stream.jsonl"
+                run.stream_file = stream_path.open("w", encoding="utf-8")
+                run.stream_start_time = _time.time()
+            except Exception:
+                pass
+
         detachers: list[Callable[[], None]] = []
         if isinstance(provider, _BaseProvider):
             try:
@@ -606,6 +621,14 @@ class Tracer:
                         )
                 except Exception:
                     pass
+            # Close the stream file opened above (mirrors the agent
+            # _on_agent_end / _close_open_spans path).
+            if run.stream_file is not None:
+                try:
+                    run.stream_file.close()
+                except Exception:
+                    pass
+                run.stream_file = None
             recorder._run = None
             root_span.end()
             # Flush synchronously so the trace is visible after the block.
