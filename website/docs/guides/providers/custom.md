@@ -44,6 +44,7 @@ import asyncio
 import time
 from cubepi.providers.base import (
     AssistantMessage,
+    BaseProvider,
     Message,
     MessageStream,
     Model,
@@ -55,8 +56,9 @@ from cubepi.providers.base import (
 )
 
 
-class MyProvider:
+class MyProvider(BaseProvider):
     def __init__(self, *, api_key: str) -> None:
+        super().__init__()
         self._api_key = api_key
 
     async def stream(

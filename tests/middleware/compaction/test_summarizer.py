@@ -73,6 +73,7 @@ async def test_summarize_uses_provider_generate_with_common_overrides() -> None:
 
     assert isinstance(result, CompactionState)
     assert result.summary == "Compressed summary."
+    assert len(result.summarized_message_refs) == 2
     assert provider.calls[0]["max_output_tokens"] == 512
     assert provider.calls[0]["temperature"] == 0.0
     assert provider.calls[0]["thinking"] == "off"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from cubepi.middleware.compaction.state import CompactionState
+from cubepi.middleware.compaction.state import CompactionState, message_refs
 from cubepi.providers.base import (
     Message,
     Model,
@@ -89,6 +89,7 @@ async def summarize(
     ]
     new_ids = [message_id for message_id in new_ids if message_id]
     prior_ids = list(existing.summarized_message_ids) if existing else []
+    prior_refs = list(existing.summarized_message_refs) if existing else []
     last_id = (
         new_ids[-1]
         if new_ids
@@ -98,5 +99,6 @@ async def summarize(
     return CompactionState(
         summary=text.strip(),
         summarized_message_ids=prior_ids + new_ids,
+        summarized_message_refs=prior_refs + message_refs(messages_to_summarize),
         last_summarized_message_id=last_id,
     )

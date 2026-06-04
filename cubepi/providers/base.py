@@ -597,9 +597,9 @@ class BaseProvider:
 
     Built-in providers (Anthropic, OpenAI, OpenAI Responses, Faux) inherit
     from this class to gain the persistent listener registry used by
-    ``cubepi.tracing`` and other observers. User-defined providers may also
-    inherit from ``BaseProvider`` to opt in, or remain duck-typed against
-    the ``Provider`` Protocol (which only requires ``stream()``).
+    ``cubepi.tracing`` and other observers. User-defined providers should
+    inherit from ``BaseProvider`` unless they implement the full ``Provider``
+    protocol themselves.
 
     Concrete subclasses must implement ``stream()`` and call
     ``_fire_listeners`` at three points: after the request payload is

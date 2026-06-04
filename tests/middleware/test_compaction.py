@@ -6,6 +6,7 @@ from typing import Any
 from cubepi.agent.types import AgentContext
 from cubepi.middleware.compaction import CompactionMiddleware, CompactionState
 from cubepi.middleware.compaction import _load_state
+from cubepi.middleware.compaction.state import message_refs
 from cubepi.providers.base import (
     AssistantMessage,
     Message,
@@ -92,7 +93,10 @@ async def test_under_threshold_returns_existing_compressed_view() -> None:
         system_prompt="",
         messages=messages,
         extra={
-            "compaction": CompactionState(summary="old summary").model_dump(),
+            "compaction": CompactionState(
+                summary="old summary",
+                summarized_message_refs=message_refs(messages[:2]),
+            ).model_dump(),
             "compaction_until_msg_index": 2,
         },
     )
@@ -187,5 +191,39 @@ async def test_stale_boundary_larger_than_history_is_ignored() -> None:
     result = await middleware.transform_context(messages, ctx=ctx)
 
     assert result == messages
+    assert "compaction" not in ctx.extra
+    assert "compaction_until_msg_index" not in ctx.extra
+
+
+async def test_stale_boundary_from_replaced_history_is_ignored() -> None:
+    provider = _FakeSummaryProvider()
+    middleware = _make_middleware(provider, max_tokens_before=100_000)
+    old_messages: list[Message] = [
+        _user("old turn 1"),
+        _assistant("old reply 1"),
+        _user("old turn 2"),
+        _assistant("old reply 2"),
+    ]
+    new_messages: list[Message] = [
+        _user("new turn 1"),
+        _assistant("new reply 1"),
+        _user("new turn 2"),
+        _assistant("new reply 2"),
+    ]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=new_messages,
+        extra={
+            "compaction": CompactionState(
+                summary="old summary",
+                summarized_message_refs=message_refs(old_messages[:2]),
+            ).model_dump(),
+            "compaction_until_msg_index": 2,
+        },
+    )
+
+    result = await middleware.transform_context(new_messages, ctx=ctx)
+
+    assert result == new_messages
     assert "compaction" not in ctx.extra
     assert "compaction_until_msg_index" not in ctx.extra

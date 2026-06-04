@@ -6,7 +6,7 @@ from typing import Any
 from cubepi.agent.types import AgentContext
 from cubepi.middleware.base import Middleware
 from cubepi.middleware.compaction.boundary import safe_boundary
-from cubepi.middleware.compaction.state import CompactionState
+from cubepi.middleware.compaction.state import CompactionState, message_refs
 from cubepi.middleware.compaction.summarizer import summarize
 from cubepi.middleware.compaction.tokens import approx_tokens
 from cubepi.providers.base import Message, Model, Provider, TextContent, UserMessage
@@ -38,6 +38,24 @@ def _load_state(value: Any) -> CompactionState | None:
     return None
 
 
+def _clear_state(ctx: AgentContext) -> None:
+    ctx.extra.pop("compaction", None)
+    ctx.extra.pop("compaction_until_msg_index", None)
+
+
+def _state_matches_history(
+    messages: list[Message],
+    state: CompactionState | None,
+    boundary: int,
+) -> bool:
+    if state is None or boundary <= 0:
+        return True
+    refs = state.summarized_message_refs
+    if len(refs) != boundary:
+        return False
+    return refs == message_refs(messages[:boundary])
+
+
 class CompactionMiddleware(Middleware):
     """Keep long histories within context by summarizing older turns."""
 
@@ -67,11 +85,12 @@ class CompactionMiddleware(Middleware):
     ) -> list[Message]:
         state = _load_state(ctx.extra.get("compaction"))
         boundary = int(ctx.extra.get("compaction_until_msg_index") or 0)
-        if boundary >= len(messages):
+        if boundary >= len(messages) or not _state_matches_history(
+            messages, state, boundary
+        ):
             boundary = 0
             state = None
-            ctx.extra.pop("compaction", None)
-            ctx.extra.pop("compaction_until_msg_index", None)
+            _clear_state(ctx)
         compressed = _compressed_view(messages, state, boundary)
 
         if approx_tokens(compressed) < self._max_tokens_before:

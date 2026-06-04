@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Use `ctx.extra` for middleware state that should survive checkpointing. This
   release does not include old-signature compatibility shims.
+- **Breaking:** custom providers must implement `Provider.generate(...)` or
+  inherit from `BaseProvider`, which supplies `generate()` by consuming
+  `stream()`.
 
 ## [0.6.0] - 2026-05-31
 
