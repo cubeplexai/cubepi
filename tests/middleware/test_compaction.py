@@ -6,7 +6,7 @@ from typing import Any
 from cubepi.agent.types import AgentContext
 from cubepi.middleware.compaction import CompactionMiddleware, CompactionState
 from cubepi.middleware.compaction import _load_state
-from cubepi.middleware.compaction.state import message_refs
+from cubepi.middleware.compaction.state import message_ref, message_refs
 from cubepi.providers.base import (
     AssistantMessage,
     Message,
@@ -117,6 +117,17 @@ def test_load_state_accepts_state_and_ignores_unknown_values() -> None:
     assert _load_state("not-state") is None
 
 
+def test_message_ref_prefers_explicit_message_id() -> None:
+    class _MessageWithId:
+        id = "msg-123"
+
+        def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+            del kwargs
+            return {"content": "unused"}
+
+    assert message_ref(_MessageWithId()) == "id:msg-123"  # type: ignore[arg-type]
+
+
 async def test_over_threshold_writes_json_safe_state_to_ctx_extra() -> None:
     provider = _FakeSummaryProvider(reply="New summary")
     middleware = _make_middleware(provider, max_tokens_before=1)
@@ -225,6 +236,34 @@ async def test_stale_boundary_from_replaced_history_is_ignored() -> None:
     result = await middleware.transform_context(new_messages, ctx=ctx)
 
     assert result == new_messages
+    assert "compaction" not in ctx.extra
+    assert "compaction_until_msg_index" not in ctx.extra
+
+
+async def test_stale_boundary_with_mismatched_ref_count_is_ignored() -> None:
+    provider = _FakeSummaryProvider()
+    middleware = _make_middleware(provider, max_tokens_before=100_000)
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        _assistant("reply 2"),
+    ]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=messages,
+        extra={
+            "compaction": CompactionState(
+                summary="old summary",
+                summarized_message_refs=message_refs(messages[:1]),
+            ).model_dump(),
+            "compaction_until_msg_index": 2,
+        },
+    )
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    assert result == messages
     assert "compaction" not in ctx.extra
     assert "compaction_until_msg_index" not in ctx.extra
 
