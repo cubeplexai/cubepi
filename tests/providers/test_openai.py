@@ -945,6 +945,8 @@ class TestOpenAIStreamMultipleToolCalls:
 class _FakeSdkExc(Exception):
     """Minimal fake SDK exception with configurable status_code."""
 
+    __module__ = "openai"  # so the __module__ guard in classify_and_raise allows it
+
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         if status_code is not None:
