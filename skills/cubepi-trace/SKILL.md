@@ -143,14 +143,15 @@ The root span carries:
 Find oneshot traces by operation or conversation:
 
 ```bash
-# All consolidation runs
-uv run cubepi trace ls --meta cubepi.oneshot.operation=consolidate_memory
+# All consolidation runs  (operation is exposed as cubepi.metadata.oneshot_operation
+# so the --meta filter can reach it; cubepi.oneshot.operation is also set for dashboards)
+uv run cubepi trace ls --meta oneshot_operation=consolidate_memory
 
 # Oneshot traces for a specific conversation (alongside its agent runs)
 uv run cubepi trace ls --meta conversation_id=conv-1fwZQ8u3ZDukx3
 
 # Stats on consolidation token usage
-uv run cubepi trace stats --by model --meta cubepi.oneshot.operation=consolidate_memory
+uv run cubepi trace stats --by model --meta oneshot_operation=consolidate_memory
 ```
 
 Cubebox wires this in `run_manager.py`; the consolidation pass calls:

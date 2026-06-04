@@ -442,6 +442,10 @@ class Tracer:
             CUBEPI_RUN_ID: run_id,
             GEN_AI_PROVIDER_NAME: "cubepi",
             "cubepi.oneshot.operation": operation,
+            # Also expose operation under cubepi.metadata.* so the
+            # `cubepi trace ls --meta oneshot_operation=...` filter works
+            # (the CLI's --meta filter only reads cubepi.metadata.* attrs).
+            "cubepi.metadata.oneshot_operation": operation,
         }
         for k, v in (metadata or {}).items():
             root_attrs[f"cubepi.metadata.{k}"] = v

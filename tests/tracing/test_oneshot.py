@@ -89,6 +89,8 @@ async def test_oneshot_produces_root_and_chat_spans() -> None:
     attrs = dict(root.attributes or {})
     assert attrs.get("gen_ai.operation.name") == "invoke_agent"
     assert attrs.get("cubepi.oneshot.operation") == "test_op"
+    # operation also exposed under cubepi.metadata.* for --meta CLI filter
+    assert attrs.get("cubepi.metadata.oneshot_operation") == "test_op"
     assert attrs.get("cubepi.metadata.conversation_id") == "conv-123"
     assert attrs.get("cubepi.metadata.user_id") == "usr-456"
     assert "cubepi.run_id" in attrs
