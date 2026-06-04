@@ -345,3 +345,19 @@ class TestRetryAfterFrom:
             "rate limited", status_code=429, headers={"retry-after": "not-a-number"}
         )
         assert _retry_after_from(exc) is None
+
+
+class TestSDKConnectionErrors:
+    """SDK-specific connection/timeout exceptions masquerading as ProviderUnavailable."""
+
+    def test_sdk_connection_error_name_match(self) -> None:
+        """openai.APIConnectionError has 'ConnectionError' in class name."""
+        exc = type("APIConnectionError", (Exception,), {})("cannot connect")
+        with pytest.raises(ProviderUnavailable):
+            classify_and_raise(exc, model=_model())
+
+    def test_sdk_timeout_name_match(self) -> None:
+        """anthropic.APITimeoutError has 'Timeout' in class name."""
+        exc = type("APITimeoutError", (Exception,), {})("timed out")
+        with pytest.raises(ProviderUnavailable):
+            classify_and_raise(exc, model=_model())
