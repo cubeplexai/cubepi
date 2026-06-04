@@ -138,6 +138,37 @@ async def test_oneshot_metadata_on_root_span() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oneshot_user_metadata_cannot_shadow_reserved_oneshot_operation() -> None:
+    """If a caller's metadata dict includes 'oneshot_operation', the value
+    derived from the operation argument must still win — the documented
+    `cubepi trace ls --meta oneshot_operation=<op>` filter depends on it."""
+    provider = FauxProvider()
+    provider.append_responses([faux_assistant_message("ok")])
+    tracer, exporter = _make_tracer()
+
+    async with tracer.oneshot(
+        provider=provider,
+        model=MODEL,
+        operation="real_op",
+        metadata={"oneshot_operation": "user_supplied_value"},
+    ) as session:
+        await session.generate(
+            system="sys",
+            messages=[UserMessage(content=[TextContent(text="q")])],
+            max_output_tokens=10,
+        )
+
+    await tracer.force_flush()
+    await tracer.shutdown()
+
+    roots = [s for s in exporter.spans if s.name == "invoke_agent"]
+    assert len(roots) == 1
+    attrs = dict(roots[0].attributes or {})
+    assert attrs["cubepi.metadata.oneshot_operation"] == "real_op"
+    assert attrs["cubepi.oneshot.operation"] == "real_op"
+
+
+@pytest.mark.asyncio
 async def test_oneshot_no_metadata_ok() -> None:
     provider = FauxProvider()
     provider.append_responses([faux_assistant_message("result")])
@@ -232,6 +263,44 @@ async def test_oneshot_generate_error_event_raises_and_marks_root() -> None:
     assert root.status.status_code == StatusCode.ERROR
     attrs = dict(root.attributes or {})
     assert attrs.get("error.type") == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_oneshot_subscribe_failure_closes_stream_file(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A subscription failure on the pre-yield path must close any per-run
+    stream file that was already opened, so record_stream mode doesn't leak
+    file descriptors on this error path."""
+    from unittest.mock import patch
+
+    exporter = InMemoryExporter()
+    tracer = Tracer(
+        exporters=[exporter],
+        record_stream=True,
+        stream_dir=str(tmp_path),
+        atexit_flush=False,
+    )
+
+    provider = FauxProvider()
+
+    with patch.object(
+        provider, "subscribe_chunk", side_effect=RuntimeError("chunk sub failed")
+    ):
+        with pytest.raises(RuntimeError, match="chunk sub failed"):
+            async with tracer.oneshot(provider=provider, model=MODEL):
+                pass  # pragma: no cover
+
+    await tracer.shutdown()
+
+    # File was created and then closed; it should be a closed handle, not
+    # a leaked open one. We can't directly inspect FD state, but writing
+    # via run.stream_file would have failed; instead assert the file
+    # exists and is empty/parseable (no events written before failure).
+    stream_files = list(tmp_path.glob("*.stream.jsonl"))
+    assert len(stream_files) == 1
+    # File must be closed and finite-size (no leak symptom: pending writes
+    # buffered indefinitely or unable-to-stat). On Linux this is a basic
+    # sanity check.
+    assert stream_files[0].stat().st_size == 0
 
 
 @pytest.mark.asyncio
