@@ -63,8 +63,13 @@ class _OneShotSession:
         The provider listeners wired by :meth:`Tracer.oneshot` will record
         a ``chat`` child span covering this call automatically.
         """
+        import asyncio as _asyncio
+
         from cubepi.providers.base import (
             AssistantMessage as _AssistantMessage,
+        )
+        from cubepi.providers.base import (
+            StreamOptions as _StreamOptions,
         )
         from cubepi.providers.base import (
             TextContent as _TextContent,
@@ -78,22 +83,36 @@ class _OneShotSession:
         self._run.input_messages = list(messages)
         self._run.system_prompt = system
 
+        # Cancellation signal forwarded to the provider so a cancelled
+        # consumer (e.g. asyncio.wait_for timeout) tears down the
+        # producer task instead of leaking it past the oneshot context.
+        # Mirrors the agent loop's ``StreamOptions(signal=...)`` use.
+        abort_signal = _asyncio.Event()
+
         model = self._model.model_copy(update={"max_tokens": max_output_tokens})
         stream = await self._provider.stream(
             model=model,
             messages=messages,
             system_prompt=system,
+            options=_StreamOptions(signal=abort_signal),
         )
         parts: list[str] = []
         error_msg: str | None = None
-        async for evt in stream:
-            if evt.type == "text_delta" and evt.delta:
-                parts.append(evt.delta)
-            elif evt.type == "error":
-                error_msg = evt.error_message or "oneshot generation failed"
-                break
-            elif evt.type == "done":
-                break
+        try:
+            async for evt in stream:
+                if evt.type == "text_delta" and evt.delta:
+                    parts.append(evt.delta)
+                elif evt.type == "error":
+                    error_msg = evt.error_message or "oneshot generation failed"
+                    break
+                elif evt.type == "done":
+                    break
+        except BaseException:
+            # On cancellation/timeout, tell the producer to stop so it
+            # doesn't keep running after we exit. ``stream.result()``
+            # below then surfaces the (now-completed) producer's state.
+            abort_signal.set()
+            raise
         # Wait for the producer task to finish — its ``finally`` block
         # invokes the response listeners (including the recorder's
         # ``_on_provider_response`` that closes the chat span and records

@@ -279,6 +279,59 @@ async def test_oneshot_detacher_exception_is_swallowed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oneshot_passes_signal_to_provider_and_sets_on_cancel() -> None:
+    """generate() must forward a StreamOptions.signal so a cancellation in
+    the consumer tears the producer task down too."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from cubepi.providers.base import StreamOptions
+
+    provider = FauxProvider()
+    tracer, _ = _make_tracer()
+
+    captured_options: dict[str, StreamOptions | None] = {"opts": None}
+
+    async def hanging_stream():
+        # Never yields, simulating a long provider call
+        await asyncio.sleep(60)
+        yield  # pragma: no cover
+
+    hanging = MagicMock()
+    hanging.__aiter__ = lambda self: hanging_stream()
+
+    real_stream = AsyncMock(return_value=hanging)
+
+    async def patched_stream(**kwargs):
+        captured_options["opts"] = kwargs.get("options")
+        return await real_stream(**kwargs)
+
+    async def do_work():
+        async with tracer.oneshot(provider=provider, model=MODEL) as session:
+            with patch.object(provider, "stream", new=patched_stream):
+                await session.generate(
+                    system="sys",
+                    messages=[UserMessage(content=[TextContent(text="q")])],
+                    max_output_tokens=10,
+                )
+
+    task = asyncio.create_task(do_work())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    await tracer.shutdown()
+
+    # The provider received options with a signal Event…
+    opts = captured_options["opts"]
+    assert opts is not None
+    assert opts.signal is not None
+    # …and the signal was set when the consumer was cancelled.
+    assert opts.signal.is_set()
+
+
+@pytest.mark.asyncio
 async def test_oneshot_record_stream_writes_jsonl(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """When record_stream is on, oneshot must open a per-run stream.jsonl
     so _on_provider_chunk can write the same per-chunk log as the agent path."""
