@@ -489,6 +489,76 @@ class TestValidationErrorFormatting:
         # Surrounding quotes from pydantic's ctx must be stripped.
         assert "''operation''" not in text
 
+    async def test_literal_error_lists_allowed_values(self):
+        from typing import Literal
+
+        from pydantic import BaseModel
+
+        class LiteralParams(BaseModel):
+            mode: Literal["fast", "slow"]
+
+        async def execute_fn(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="ok")])
+
+        tool = AgentTool(
+            name="lit",
+            description="literal tool",
+            parameters=LiteralParams,
+            execute=execute_fn,
+        )
+        ctx = make_context([tool])
+
+        msg = make_assistant_msg(
+            [ToolCall(id="t1", name="lit", arguments={"mode": "medium"})]
+        )
+
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="sequential", emit=lambda e: None
+        )
+
+        text = batch.messages[0].content[0].text
+        assert "mode" in text
+        assert "must be one of" in text
+        # The allowed values must be enumerated so the model can self-correct.
+        assert "fast" in text
+        assert "slow" in text
+
+    async def test_extra_forbidden_names_the_unexpected_field(self):
+        from pydantic import BaseModel, ConfigDict
+
+        class StrictParams(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+            value: str
+
+        async def execute_fn(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="ok")])
+
+        tool = AgentTool(
+            name="strict",
+            description="strict tool",
+            parameters=StrictParams,
+            execute=execute_fn,
+        )
+        ctx = make_context([tool])
+
+        msg = make_assistant_msg(
+            [
+                ToolCall(
+                    id="t1",
+                    name="strict",
+                    arguments={"value": "hi", "stray_key": 1},
+                )
+            ]
+        )
+
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="sequential", emit=lambda e: None
+        )
+
+        text = batch.messages[0].content[0].text
+        assert "stray_key" in text
+        assert "unexpected field" in text
+
 
 class TestTermination:
     async def test_all_terminate_stops_loop(self):
