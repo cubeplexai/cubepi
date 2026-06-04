@@ -403,8 +403,14 @@ class Tracer:
         the root span and are queryable with
         ``cubepi trace ls --meta <key>=<value>``.
 
-        ``operation`` is recorded as ``cubepi.oneshot.operation`` to let
-        callers filter one-shot traces from agent runs in dashboards.
+        ``operation`` is recorded in two places:
+
+        - ``cubepi.oneshot.operation`` — for span introspection and dashboards.
+        - ``cubepi.metadata.oneshot_operation`` — so the CLI ``--meta`` filter
+          (which only reads ``cubepi.metadata.*`` attributes) can reach it::
+
+              uv run cubepi trace ls --meta oneshot_operation=consolidate_memory
+              uv run cubepi trace ls --meta conversation_id=conv-123
 
         Example::
 
