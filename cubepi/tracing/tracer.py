@@ -85,13 +85,33 @@ class _OneShotSession:
             system_prompt=system,
         )
         parts: list[str] = []
+        error_msg: str | None = None
         async for evt in stream:
             if evt.type == "text_delta" and evt.delta:
                 parts.append(evt.delta)
             elif evt.type == "error":
-                raise RuntimeError(evt.error_message or "oneshot generation failed")
+                error_msg = evt.error_message or "oneshot generation failed"
+                break
             elif evt.type == "done":
                 break
+        # Wait for the producer task to finish — its ``finally`` block
+        # invokes the response listeners (including the recorder's
+        # ``_on_provider_response`` that closes the chat span and records
+        # usage). Without this, breaking on ``done`` lets us race ahead
+        # and exit the oneshot context before the chat span is closed,
+        # so the cleanup sweep would mark it ``cubepi.aborted`` and the
+        # trace would be missing usage / response data. Mirrors the
+        # ``await stream.result()`` pattern in cubepi.agent.loop.
+        try:
+            await stream.result()
+        except Exception:
+            # The producer's exception was already surfaced via the
+            # error event above (or the listener has recorded the error
+            # on the chat span). Swallow here so we report it uniformly
+            # via ``error_msg``.
+            pass
+        if error_msg is not None:
+            raise RuntimeError(error_msg)
         text = "".join(parts)
         # Stash output as a single assistant message so the oneshot finally
         # block can stamp gen_ai.output.messages on the root span.
