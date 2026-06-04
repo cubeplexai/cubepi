@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Generic, Literal, TypeVar
+from typing import Awaitable, Callable, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
+from cubepi.hitl.types import HitlRequest
 from cubepi.providers.base import (
     AssistantMessage,
     Content,
@@ -15,14 +16,15 @@ from cubepi.providers.base import (
     ToolDefinition,
     ToolResultMessage,
 )
+from cubepi.types import JsonObject, StructuredObject, StructuredValue
 
-TParams = TypeVar("TParams", bound=BaseModel)
+TParams = TypeVar("TParams", bound=BaseModel, covariant=True)
 TMessage = TypeVar("TMessage")
 
 
 class AgentToolResult(BaseModel):
     content: list[Content]
-    details: Any = None
+    details: StructuredValue = None
     is_error: bool | None = None
     terminate: bool | None = None
 
@@ -35,6 +37,7 @@ class AgentTool(Generic[TParams]):
     execute: Callable[..., Awaitable[AgentToolResult]]
     label: str = ""
     execution_mode: Literal["sequential", "parallel"] | None = None
+    hitl_builtin: bool = False
 
     def to_definition(self) -> ToolDefinition:
         schema = self.parameters.model_json_schema()
@@ -50,7 +53,7 @@ class AgentContext:
     system_prompt: str
     messages: list[Message]
     tools: list[AgentTool] | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
+    extra: JsonObject = field(default_factory=dict)
 
 
 # --- Hook context types ---
@@ -59,14 +62,14 @@ class AgentContext:
 class BeforeToolCallResult(BaseModel):
     block: bool = False
     reason: str | None = None
-    edited_args: dict | None = None
+    edited_args: JsonObject | None = None
     deny_reason: str | None = None
-    hitl_trace: dict | None = None
+    hitl_trace: StructuredObject | None = None
 
 
 class AfterToolCallResult(BaseModel):
     content: list[Content] | None = None
-    details: Any = None
+    details: StructuredValue = None
     is_error: bool | None = None
     terminate: bool | None = None
 
@@ -75,7 +78,7 @@ class AfterToolCallResult(BaseModel):
 class BeforeToolCallContext:
     assistant_message: AssistantMessage
     tool_call: ToolCall
-    args: Any
+    args: BaseModel | JsonObject
     context: AgentContext
 
 
@@ -83,7 +86,7 @@ class BeforeToolCallContext:
 class AfterToolCallContext:
     assistant_message: AssistantMessage
     tool_call: ToolCall
-    args: Any
+    args: BaseModel | JsonObject
     result: AgentToolResult
     is_error: bool
     context: AgentContext
@@ -139,22 +142,22 @@ class ToolExecutionStartEvent(BaseModel):
     type: Literal["tool_execution_start"] = "tool_execution_start"
     tool_call_id: str
     tool_name: str
-    args: Any
+    args: JsonObject
 
 
 class ToolExecutionUpdateEvent(BaseModel):
     type: Literal["tool_execution_update"] = "tool_execution_update"
     tool_call_id: str
     tool_name: str
-    args: Any = None
-    partial_result: Any = None
+    args: JsonObject | None = None
+    partial_result: StructuredValue = None
 
 
 class ToolExecutionEndEvent(BaseModel):
     type: Literal["tool_execution_end"] = "tool_execution_end"
     tool_call_id: str
     tool_name: str
-    result: Any = None
+    result: StructuredValue = None
     is_error: bool = False
     terminate: bool = False
     """True iff the tool's AgentToolResult.terminate was True (or the
@@ -172,20 +175,20 @@ class ToolExecutionEndEvent(BaseModel):
 
 class HitlRequestEvent(BaseModel):
     type: Literal["hitl_request"] = "hitl_request"
-    request: Any  # forward-declared; cubepi.hitl.types.HitlRequest
+    request: HitlRequest
 
 
 class HitlAnswerEvent(BaseModel):
     type: Literal["hitl_answer"] = "hitl_answer"
     question_id: str
-    answer: Any
+    answer: StructuredValue = None
     cancelled: bool = False
     timed_out: bool = False
 
 
 class AgentSuspendedEvent(BaseModel):
     type: Literal["agent_suspended"] = "agent_suspended"
-    pending_request: Any  # forward-declared; cubepi.hitl.types.HitlRequest
+    pending_request: HitlRequest
 
 
 class AgentAbortedEvent(BaseModel):

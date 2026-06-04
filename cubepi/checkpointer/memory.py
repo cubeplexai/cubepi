@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
-
 from cubepi.checkpointer.base import CheckpointData
 from cubepi.hitl.types import HitlRequest
+from cubepi.providers.base import Message
+from cubepi.types import JsonObject
 
 
 class MemoryCheckpointer:
@@ -17,12 +17,12 @@ class MemoryCheckpointer:
     async def load(self, thread_id: str) -> CheckpointData | None:
         return self._store.get(thread_id)
 
-    async def append(self, thread_id: str, messages: list[Any]) -> None:
+    async def append(self, thread_id: str, messages: list[Message]) -> None:
         if thread_id not in self._store:
             self._store[thread_id] = CheckpointData()
         self._store[thread_id].messages.extend(messages)
 
-    async def save_extra(self, thread_id: str, extra: dict[str, Any]) -> None:
+    async def save_extra(self, thread_id: str, extra: JsonObject) -> None:
         if thread_id not in self._store:
             self._store[thread_id] = CheckpointData()
         self._store[thread_id].extra.update(extra)
@@ -30,7 +30,7 @@ class MemoryCheckpointer:
     async def save_pending_request(
         self,
         thread_id: str,
-        request: Any,
+        request: HitlRequest | None,
         *,
         run_id: str | None = None,
     ) -> None:
@@ -41,7 +41,7 @@ class MemoryCheckpointer:
             self._pending[thread_id] = request
             self._pending_run_id[thread_id] = run_id
 
-    async def load_pending_request(self, thread_id: str) -> Any:
+    async def load_pending_request(self, thread_id: str) -> HitlRequest | None:
         return self._pending.get(thread_id)
 
     async def load_pending_run_id(self, thread_id: str) -> str | None:

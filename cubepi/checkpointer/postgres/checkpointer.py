@@ -18,12 +18,14 @@ from cubepi.checkpointer.postgres.exceptions import (
     CubepiSchemaUninitialized,
 )
 from cubepi.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
+from cubepi.hitl.types import HitlRequest
 from cubepi.providers.base import (
     AssistantMessage,
     Message,
     ToolResultMessage,
     UserMessage,
 )
+from cubepi.types import JsonObject
 
 
 def _role_of(msg: Message) -> str:
@@ -202,7 +204,7 @@ class PostgresCheckpointer:
                     rows,
                 )
 
-    async def save_extra(self, thread_id: str, extra: dict[str, Any]) -> None:
+    async def save_extra(self, thread_id: str, extra: JsonObject) -> None:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -218,7 +220,7 @@ class PostgresCheckpointer:
     async def save_pending_request(
         self,
         thread_id: str,
-        request,
+        request: HitlRequest | None,
         *,
         run_id: str | None = None,
     ) -> None:
@@ -258,9 +260,7 @@ class PostgresCheckpointer:
                         run_id,
                     )
 
-    async def load_pending_request(self, thread_id: str):
-        from cubepi.hitl.types import HitlRequest
-
+    async def load_pending_request(self, thread_id: str) -> HitlRequest | None:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(

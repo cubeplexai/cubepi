@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Callable
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -8,6 +11,7 @@ from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.hitl.channel import HitlChannel
 from cubepi.hitl.types import Option, Question
 from cubepi.providers.base import TextContent
+from cubepi.types import StructuredObject, StructuredValue
 
 
 class _OptionDef(BaseModel):
@@ -49,14 +53,19 @@ _DESCRIPTION = (
 )
 
 
-def _format_answers(answers: dict) -> str:
+def _format_answers(answers: dict[str, str | list[str]]) -> str:
     return "User answers:\n" + json.dumps(answers, indent=2, ensure_ascii=False)
 
 
-def ask_user_tool(channel: HitlChannel) -> AgentTool:
+def ask_user_tool(channel: HitlChannel) -> AgentTool[AskUserParams]:
     async def execute(
-        call_id: str, args: AskUserParams, *, signal=None, on_update=None
+        call_id: str,
+        args: AskUserParams,
+        *,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
+        del call_id, on_update
         from cubepi.hitl.exceptions import HitlCancelled, HitlTimedOut
 
         questions = [
@@ -91,7 +100,10 @@ def ask_user_tool(channel: HitlChannel) -> AgentTool:
             )
         return AgentToolResult(
             content=[TextContent(text=_format_answers(answers))],
-            details={"hitl": {"kind": "ask", "answers": answers}},
+            details=cast(
+                StructuredObject,
+                {"hitl": {"kind": "ask", "answers": answers}},
+            ),
         )
 
     tool = AgentTool(
@@ -104,5 +116,5 @@ def ask_user_tool(channel: HitlChannel) -> AgentTool:
     # Signal to _execute_prepared that this is a built-in HITL tool so the
     # ContextVar durability guard is NOT set on entry — only custom tool
     # bodies trigger CheckpointedChannel's HitlDurabilityNotGuaranteed.
-    tool._hitl_builtin = True
+    tool.hitl_builtin = True
     return tool

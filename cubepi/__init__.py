@@ -48,6 +48,7 @@ from cubepi.providers.capability import (
     ReasoningLevelSpec,
     TemperatureSpec,
 )
+from cubepi.types import JsonObject, JsonValue, StructuredObject, StructuredValue
 
 __all__ = [
     "__version__",
@@ -59,6 +60,8 @@ __all__ = [
     "BaseProvider",
     "CapabilityDescriptor",
     "ContextLengthExceeded",
+    "JsonObject",
+    "JsonValue",
     "Message",
     "MessageStream",
     "Middleware",
@@ -72,6 +75,8 @@ __all__ = [
     "ReasoningLevelSpec",
     "StreamEvent",
     "StreamOptions",
+    "StructuredObject",
+    "StructuredValue",
     "TemperatureSpec",
     "TextContent",
     "ThinkingBudgets",

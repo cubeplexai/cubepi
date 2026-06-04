@@ -16,6 +16,8 @@ from typing import (
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from cubepi.types import JsonObject, StructuredValue
+
 ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 
 
@@ -111,14 +113,14 @@ class ToolCall(BaseModel):
     type: Literal["tool_call"] = "tool_call"
     id: str
     name: str
-    arguments: dict[str, Any]
+    arguments: JsonObject
 
 
 class UserMessage(BaseModel):
     role: Literal["user"] = "user"
     content: list[Content]
     timestamp: float | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
 
 class AssistantMessage(BaseModel):
@@ -131,7 +133,7 @@ class AssistantMessage(BaseModel):
     provider_id: str = ""
     model_id: str = ""
     response_id: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
 
 class ToolResultMessage(BaseModel):
@@ -139,10 +141,10 @@ class ToolResultMessage(BaseModel):
     tool_call_id: str
     tool_name: str
     content: list[Content]
-    details: Any = None
+    details: StructuredValue = None
     is_error: bool = False
     timestamp: float | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
 
 Message = UserMessage | AssistantMessage | ToolResultMessage
@@ -151,7 +153,7 @@ Message = UserMessage | AssistantMessage | ToolResultMessage
 class ToolDefinition(BaseModel):
     name: str
     description: str
-    parameters: dict[str, Any]
+    parameters: JsonObject
 
 
 class StreamEvent(BaseModel):

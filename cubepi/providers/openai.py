@@ -319,6 +319,7 @@ class OpenAIProvider(BaseProvider):
                                 model,
                             )
                             thinking_started = True
+                        assert thinking_content_index is not None
                         existing = partial.content[thinking_content_index].thinking  # type: ignore[union-attr]
                         partial.content[thinking_content_index] = ThinkingContent(
                             thinking=existing + reasoning_delta

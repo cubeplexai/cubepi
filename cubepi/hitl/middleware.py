@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Awaitable, Callable, Iterable, Union
+from typing import Awaitable, Callable, Iterable, Protocol, Union, cast
+
+from pydantic import BaseModel
 
 from cubepi.agent.types import BeforeToolCallContext, BeforeToolCallResult
 from cubepi.hitl.channel import HitlChannel
 from cubepi.hitl.exceptions import HitlCancelled, HitlTimedOut
 from cubepi.hitl.policy import Approve, ApprovalDecision, AskUser, Deny
 from cubepi.middleware.base import Middleware
+from cubepi.types import JsonObject, StructuredObject
 
 
-def _args_to_dict(args: Any) -> dict:
-    if hasattr(args, "model_dump"):
+class _VarsObject(Protocol):
+    __dict__: JsonObject
+
+
+def _args_to_dict(args: BaseModel | JsonObject | _VarsObject) -> JsonObject:
+    if isinstance(args, BaseModel):
         return args.model_dump()
     if isinstance(args, dict):
         return dict(args)
@@ -30,7 +37,9 @@ class ApprovalPolicyMiddleware(Middleware):
         self._channel = channel
         self._policy = policy
 
-    async def before_tool_call(self, ctx, *, signal=None):
+    async def before_tool_call(
+        self, ctx: BeforeToolCallContext, *, signal=None
+    ) -> BeforeToolCallResult | None:
         decision = self._policy(ctx)
         if inspect.isawaitable(decision):
             decision = await decision
@@ -51,7 +60,9 @@ class ApprovalPolicyMiddleware(Middleware):
 
         raise TypeError(f"policy returned unexpected {type(decision).__name__}")
 
-    async def _ask_and_translate(self, ctx, ask: AskUser, *, signal):
+    async def _ask_and_translate(
+        self, ctx: BeforeToolCallContext, ask: AskUser, *, signal
+    ) -> BeforeToolCallResult | None:
         original_args = _args_to_dict(ctx.args)
         try:
             answer = await self._channel.approve(
@@ -89,11 +100,14 @@ class ApprovalPolicyMiddleware(Middleware):
         if answer.decision == "edit":
             return BeforeToolCallResult(
                 edited_args=answer.edited_args,
-                hitl_trace={
-                    "decision": "edit",
-                    "original_args": original_args,
-                    "edited_args": answer.edited_args,
-                },
+                hitl_trace=cast(
+                    StructuredObject,
+                    {
+                        "decision": "edit",
+                        "original_args": original_args,
+                        "edited_args": answer.edited_args,
+                    },
+                ),
             )
 
 
@@ -107,12 +121,13 @@ class ConfirmToolCallMiddleware(ApprovalPolicyMiddleware):
         require_confirm: Union[
             Callable[[BeforeToolCallContext], bool], Iterable[str], None
         ] = None,
-        details_fn: Callable[[BeforeToolCallContext], dict] | None = None,
+        details_fn: Callable[[BeforeToolCallContext], JsonObject] | None = None,
         timeout_seconds: float | None = None,
     ):
+        matcher: Callable[[BeforeToolCallContext], bool]
         if require_confirm is None:
 
-            def matcher(ctx):
+            def matcher(ctx: BeforeToolCallContext) -> bool:
                 return True
 
         elif callable(require_confirm):
@@ -120,10 +135,10 @@ class ConfirmToolCallMiddleware(ApprovalPolicyMiddleware):
         else:
             names = set(require_confirm)
 
-            def matcher(ctx):
+            def matcher(ctx: BeforeToolCallContext) -> bool:
                 return ctx.tool_call.name in names
 
-        def policy(ctx) -> ApprovalDecision:
+        def policy(ctx: BeforeToolCallContext) -> ApprovalDecision:
             if matcher(ctx):
                 return AskUser(
                     timeout_seconds=timeout_seconds,

@@ -25,15 +25,15 @@ def approx_tokens(messages: list[Message]) -> int:
 
     for message in messages:
         if isinstance(message, UserMessage):
-            for block in message.content:
-                if isinstance(block, TextContent):
-                    total_chars += len(block.text)
+            for user_block in message.content:
+                if isinstance(user_block, TextContent):
+                    total_chars += len(user_block.text)
         elif isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextContent):
-                    total_chars += len(block.text)
-                elif isinstance(block, ToolCall):
-                    total_chars += len(json.dumps(block.arguments or {}))
+            for assistant_block in message.content:
+                if isinstance(assistant_block, TextContent):
+                    total_chars += len(assistant_block.text)
+                elif isinstance(assistant_block, ToolCall):
+                    total_chars += len(json.dumps(assistant_block.arguments or {}))
             usage = message.usage
             if (
                 usage
@@ -45,9 +45,9 @@ def approx_tokens(messages: list[Message]) -> int:
                     raw_factor = total_chars / chars_estimate
                     scale_factor = max(1.0, min(raw_factor, 1.25))
         elif isinstance(message, ToolResultMessage):
-            for block in message.content:
-                if isinstance(block, TextContent):
-                    total_chars += len(block.text)
+            for result_block in message.content:
+                if isinstance(result_block, TextContent):
+                    total_chars += len(result_block.text)
 
     estimate = total_chars / _CHARS_PER_TOKEN
     if scale_factor is not None:

@@ -273,8 +273,8 @@ class Meter:
                 state.tool_attrs[event.tool_call_id] = attrs
             elif type_name == "tool_execution_end":
                 start = state.tool_open_ns.pop(event.tool_call_id, None)
-                attrs = state.tool_attrs.pop(event.tool_call_id, None)
-                if start is not None and attrs is not None:
+                attrs = state.tool_attrs.pop(event.tool_call_id, {})
+                if start is not None and attrs:
                     duration = (time.time_ns() - start) / 1e9
                     self._duration_hist.record(duration, attrs)
         except Exception:

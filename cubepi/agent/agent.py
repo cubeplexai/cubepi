@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 from cubepi.agent.loop import (
     run_agent_loop,
     run_agent_loop_continue,
     run_agent_loop_resume,
 )
+from cubepi.checkpointer.base import Checkpointer
 from cubepi.hitl import HitlError, HitlRequest
 from cubepi.hitl.channel import HitlChannel
 from cubepi.hitl.exceptions import HitlDetached
@@ -38,6 +39,7 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
 )
+from cubepi.types import JsonObject, StructuredValue
 
 TMessage = TypeVar("TMessage")
 
@@ -146,7 +148,7 @@ class Agent(Generic[TMessage]):
         steering_mode: str = "one-at-a-time",
         follow_up_mode: str = "one-at-a-time",
         tool_execution: str = "parallel",
-        checkpointer: Any = None,
+        checkpointer: Checkpointer | None = None,
         thread_id: str | None = None,
         middleware: list[Middleware] | None = None,
         channel: HitlChannel | None = None,
@@ -196,7 +198,7 @@ class Agent(Generic[TMessage]):
             channel._bind_emit(lambda e: self._process_event(e))
         self._run_lock = asyncio.Lock()
 
-        self._extra: dict[str, Any] = {}
+        self._extra: JsonObject = {}
 
         self._steering_queue = _MessageQueue(steering_mode)
         self._follow_up_queue = _MessageQueue(follow_up_mode)
@@ -275,7 +277,7 @@ class Agent(Generic[TMessage]):
                 )
 
             if isinstance(message, str):
-                messages = [
+                messages: list[Message] = [
                     UserMessage(
                         content=[TextContent(text=message)], timestamp=time.time()
                     )
@@ -422,7 +424,7 @@ class Agent(Generic[TMessage]):
         return await load_pending(self.thread_id)
 
     async def respond(
-        self, *, question_id: str | None = None, answer: Any
+        self, *, question_id: str | None = None, answer: StructuredValue
     ) -> None:  # pragma: no cover — E2E tested
         from cubepi.hitl.exceptions import (
             HitlNoPendingRequest,

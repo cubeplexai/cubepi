@@ -5,8 +5,10 @@ import contextvars
 import hashlib
 import json
 import time
-from typing import Any, AsyncIterator, Protocol
+from typing import Any, AsyncIterator, Protocol, TypeAlias
+from typing import cast
 
+from cubepi.checkpointer.base import Checkpointer
 from cubepi.hitl.exceptions import (
     HitlAborted,
     HitlCancelled,
@@ -19,16 +21,24 @@ from cubepi.hitl.types import (
     ApproveRequest,
     AskRequest,
     ConfirmRequest,
+    HitlPayload,
     HitlRequest,
     Question,
 )
+from cubepi.types import JsonObject, StructuredValue
+
 
 # Sentinel default for the per-call `timeout` kwarg on confirm/approve/ask.
 # Distinguishes "caller omitted timeout — use the channel's default_timeout"
 # from "caller explicitly passed timeout=None — wait indefinitely."
 # Without this sentinel, those two cases would both look like `timeout is None`
 # and there would be no way to override default_timeout for a single call.
-_USE_DEFAULT_TIMEOUT: object = object()
+class _UseDefaultTimeout:
+    pass
+
+
+_USE_DEFAULT_TIMEOUT = _UseDefaultTimeout()
+TimeoutArg: TypeAlias = float | None | _UseDefaultTimeout
 
 # ContextVar used by CheckpointedChannel to enforce the "do not ask HITL
 # from inside a custom tool body" durability guard. Set by
@@ -47,7 +57,7 @@ class HitlChannel(Protocol):
         self,
         prompt: str,
         *,
-        details: dict | None = None,
+        details: JsonObject | None = None,
         tool_call_id: str | None = None,
         timeout: float | None = None,
         signal: asyncio.Event | None = None,
@@ -57,9 +67,9 @@ class HitlChannel(Protocol):
         self,
         tool_name: str,
         tool_call_id: str,
-        args: dict,
+        args: JsonObject,
         *,
-        details: dict | None = None,
+        details: JsonObject | None = None,
         timeout: float | None = None,
         signal: asyncio.Event | None = None,
     ) -> ApproveAnswer: ...
@@ -75,13 +85,18 @@ class HitlChannel(Protocol):
     @property
     def pending(self) -> HitlRequest | None: ...
 
+    @property
+    def _future(self) -> asyncio.Future[StructuredValue] | None: ...
+
     def subscribe(self) -> AsyncIterator[HitlRequest]: ...
 
-    async def answer(self, question_id: str, answer: Any) -> None: ...
+    async def answer(self, question_id: str, answer: StructuredValue) -> None: ...
 
     async def cancel(self, question_id: str, reason: str = "cancelled") -> None: ...
 
-    def attach_resume_answer(self, question_id: str, answer: Any) -> None: ...
+    def attach_resume_answer(
+        self, question_id: str, answer: StructuredValue
+    ) -> None: ...
 
 
 class _BaseChannel:
@@ -101,8 +116,8 @@ class _BaseChannel:
         self._default_timeout = default_timeout
         self._thread_id = thread_id
         self._pending: HitlRequest | None = None
-        self._future: asyncio.Future[Any] | None = None
-        self._resume_slot: tuple[str, Any] | None = None
+        self._future: asyncio.Future[StructuredValue] | None = None
+        self._resume_slot: tuple[str, StructuredValue] | None = None
         self._subscribers: list[asyncio.Queue[HitlRequest]] = []
         self._emit = None  # set by Agent._bind_channel
         # Per-content-hash sequence counter for question_id derivation.
@@ -119,7 +134,7 @@ class _BaseChannel:
     def pending(self) -> HitlRequest | None:
         return self._pending
 
-    def attach_resume_answer(self, question_id: str, answer: Any) -> None:
+    def attach_resume_answer(self, question_id: str, answer: StructuredValue) -> None:
         self._resume_slot = (question_id, answer)
         # A resume replays the tool body / middleware hook from the top. The
         # per-content qid counter (_qid_seq) is per-channel-instance, so on a
@@ -136,7 +151,7 @@ class _BaseChannel:
     def _bind_emit(self, emit) -> None:
         self._emit = emit
 
-    def _next_qid(self, kind: str, payload_repr: Any) -> str:
+    def _next_qid(self, kind: str, payload_repr: StructuredValue) -> str:
         """Derive the next question_id for an ask/confirm payload.
 
         Combines a content hash (so resume after detach can match on
@@ -170,19 +185,25 @@ class _BaseChannel:
 
     async def _await_answer(
         self,
-        payload: Any,
-        timeout: float | None | object,
+        payload: HitlPayload,
+        timeout: TimeoutArg,
         signal: asyncio.Event | None,
         question_id: str,
-    ) -> Any:
+    ) -> StructuredValue:
         from cubepi.hitl._trace import hitl_span
 
         kind = payload.kind
+        effective_timeout: float | None = (
+            self._default_timeout
+            if isinstance(timeout, _UseDefaultTimeout)
+            else timeout
+        )
+
         attrs: dict[str, Any] = {
             "question_id": question_id,
-            "timeout_seconds": timeout if timeout is not _USE_DEFAULT_TIMEOUT else None,
+            "timeout_seconds": effective_timeout,
         }
-        if kind == "approve":
+        if isinstance(payload, ApproveRequest):
             attrs["tool_call_id"] = payload.tool_call_id
             attrs["tool_name"] = payload.tool_name
         # Only CheckpointedChannel carries _run_id; _BaseChannel/InMemoryChannel
@@ -213,11 +234,6 @@ class _BaseChannel:
                         f"channel busy: already pending {self._pending.question_id}"
                     )
 
-                effective_timeout = (
-                    timeout
-                    if timeout is not _USE_DEFAULT_TIMEOUT
-                    else self._default_timeout
-                )
                 req = HitlRequest(
                     question_id=question_id,
                     thread_id=self._thread_id,
@@ -229,7 +245,7 @@ class _BaseChannel:
                 self._future = asyncio.get_running_loop().create_future()
 
                 exc_caught: BaseException | None = None
-                signal_task: asyncio.Future[Any] | None = None
+                signal_task: asyncio.Task[bool] | None = None
                 # CRITICAL: _on_pending_set is called INSIDE the try/finally so that
                 # if it raises (e.g. CheckpointedChannel's HitlDurabilityNotGuaranteed
                 # guard), the finally still clears _pending/_future. Otherwise the
@@ -240,9 +256,14 @@ class _BaseChannel:
                         result = await self._future
                         outcome = _outcome_from_answer(kind, result)
                         return result
-                    tasks: list[asyncio.Future[Any]] = [self._future]
+                    tasks: list[
+                        asyncio.Future[StructuredValue] | asyncio.Future[bool]
+                    ] = [self._future]
                     if signal is not None:
-                        signal_task = asyncio.ensure_future(signal.wait())
+                        signal_task = cast(
+                            asyncio.Task[bool],
+                            asyncio.ensure_future(signal.wait()),
+                        )
                         tasks.append(signal_task)
                     done, pending_tasks = await asyncio.wait(
                         tasks,
@@ -255,6 +276,7 @@ class _BaseChannel:
                         if p is not self._future:
                             p.cancel()
                     if not done:
+                        assert effective_timeout is not None
                         raise HitlTimedOut(effective_timeout)
                     # Use task identity, not signal.is_set() — Agent.abort() leaves the
                     # signal sticky-set, so signal.is_set() would be true even on the
@@ -321,14 +343,14 @@ class _BaseChannel:
         # cross-process suspend that must keep persisted pending).
         pass
 
-    async def _emit_event(self, event: Any) -> None:
+    async def _emit_event(self, event: StructuredValue) -> None:
         if self._emit is None:  # pragma: no cover — caller already guards this
             return
         res = self._emit(event)
         if asyncio.iscoroutine(res):
             await res
 
-    async def answer(self, question_id: str, answer: Any) -> None:
+    async def answer(self, question_id: str, answer: StructuredValue) -> None:
         if self._pending is None or self._pending.question_id != question_id:
             raise HitlStaleAnswer(
                 f"answer for {question_id}; pending is "
@@ -364,9 +386,9 @@ class _BaseChannel:
         self,
         prompt: str,
         *,
-        details: dict | None = None,
+        details: JsonObject | None = None,
         tool_call_id: str | None = None,
-        timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
+        timeout: TimeoutArg = _USE_DEFAULT_TIMEOUT,
         signal: asyncio.Event | None = None,
     ) -> bool:
         # question_id derives from the prompt content (or tool_call_id, when
@@ -376,42 +398,48 @@ class _BaseChannel:
         # qid and falls through to a fresh await instead of consuming Q_B's
         # slot. See `_derive_question_id` docstring for rationale.
         qid = tool_call_id or self._next_qid(
-            "confirm", {"prompt": prompt, "details": details}
+            "confirm", cast(StructuredValue, {"prompt": prompt, "details": details})
         )
-        return await self._await_answer(
-            ConfirmRequest(prompt=prompt, details=details),
-            timeout=timeout,
-            signal=signal,
-            question_id=qid,
+        return cast(
+            bool,
+            await self._await_answer(
+                ConfirmRequest(prompt=prompt, details=details),
+                timeout=timeout,
+                signal=signal,
+                question_id=qid,
+            ),
         )
 
     async def approve(
         self,
         tool_name: str,
         tool_call_id: str,
-        args: dict,
+        args: JsonObject,
         *,
-        details: dict | None = None,
-        timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
+        details: JsonObject | None = None,
+        timeout: TimeoutArg = _USE_DEFAULT_TIMEOUT,
         signal: asyncio.Event | None = None,
     ) -> ApproveAnswer:
-        return await self._await_answer(
-            ApproveRequest(
-                tool_name=tool_name,
-                tool_call_id=tool_call_id,
-                args=args,
-                details=details,
+        return cast(
+            ApproveAnswer,
+            await self._await_answer(
+                ApproveRequest(
+                    tool_name=tool_name,
+                    tool_call_id=tool_call_id,
+                    args=args,
+                    details=details,
+                ),
+                timeout=timeout,
+                signal=signal,
+                question_id=tool_call_id,
             ),
-            timeout=timeout,
-            signal=signal,
-            question_id=tool_call_id,
         )
 
     async def ask(
         self,
         questions: list[Question],
         *,
-        timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
+        timeout: TimeoutArg = _USE_DEFAULT_TIMEOUT,
         signal: asyncio.Event | None = None,
     ) -> dict[str, str | list[str]]:
         # question_id derives from the questions content — NOT from
@@ -422,17 +450,20 @@ class _BaseChannel:
         # `_derive_question_id` docstring for rationale and limitations.
         qid = self._next_qid(
             "ask",
-            [q.model_dump(mode="json") for q in questions],
+            cast(StructuredValue, [q.model_dump(mode="json") for q in questions]),
         )
-        return await self._await_answer(
-            AskRequest(questions=questions),
-            timeout=timeout,
-            signal=signal,
-            question_id=qid,
+        return cast(
+            dict[str, str | list[str]],
+            await self._await_answer(
+                AskRequest(questions=questions),
+                timeout=timeout,
+                signal=signal,
+                question_id=qid,
+            ),
         )
 
 
-def _derive_question_id(kind: str, payload_repr: Any) -> str:
+def _derive_question_id(kind: str, payload_repr: StructuredValue) -> str:
     """Content hash for a HITL request payload.
 
     Used as the prefix of the final qid (see `_BaseChannel._next_qid`):
@@ -448,10 +479,10 @@ def _derive_question_id(kind: str, payload_repr: Any) -> str:
     return hashlib.sha256(data.encode("utf-8")).hexdigest()[:32]
 
 
-def _outcome_from_answer(kind: str, ans: Any) -> str:
-    if kind == "approve":
+def _outcome_from_answer(kind: str, ans: StructuredValue) -> str:
+    if kind == "approve" and isinstance(ans, ApproveAnswer):
         return {"approve": "approved", "deny": "denied", "edit": "edited"}.get(
-            getattr(ans, "decision", None), "answered"
+            ans.decision, "answered"
         )
     return "answered"
 
@@ -492,7 +523,7 @@ class CheckpointedChannel(_BaseChannel):
     def __init__(
         self,
         *,
-        checkpointer: Any,
+        checkpointer: Checkpointer,
         thread_id: str,
         run_id: str | None = None,
         default_timeout: float | None = None,
@@ -538,10 +569,12 @@ class CheckpointedChannel(_BaseChannel):
         # backends keep working as long as no host opts into run_id
         # persistence on them.
         if self._run_id is not None:
+            assert self._thread_id is not None
             await self._checkpointer.save_pending_request(
                 self._thread_id, req, run_id=self._run_id
             )
         else:
+            assert self._thread_id is not None
             await self._checkpointer.save_pending_request(self._thread_id, req)
         await super()._on_pending_set(req)
 
@@ -556,4 +589,5 @@ class CheckpointedChannel(_BaseChannel):
         if isinstance(exc, HitlDetached):
             return
         # request=None clears pending AND run_id atomically.
+        assert self._thread_id is not None
         await self._checkpointer.save_pending_request(self._thread_id, None)

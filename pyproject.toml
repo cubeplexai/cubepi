@@ -71,11 +71,19 @@ dev = [
     "rich>=13.0",
     "ruff>=0.15.12",
     "sqlalchemy>=2.0",
+    "mypy>=2.1.0",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests", "website/scripts/tests"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["cubepi"]
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
 
 [build-system]
 requires = ["hatchling"]

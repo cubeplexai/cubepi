@@ -282,12 +282,14 @@ class Tracer:
         # other than the optional module being absent, undo the recorder attach
         # before re-raising so we don't leak its subscriptions.
         mcp_token: object | None = None
+        mcp_tracing: Any | None = None
         try:
             from cubepi.mcp import _tracing as mcp_tracing
 
+            assert mcp_tracing is not None
             mcp_token = mcp_tracing.register_provider(self._provider)
         except ImportError:  # pragma: no cover — mcp module always present
-            mcp_tracing = None
+            pass
         except BaseException:
             try:
                 recorder_detach()

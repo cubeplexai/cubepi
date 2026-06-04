@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Callable, Literal
 
-from cubepi.agent.types import BeforeToolCallResult
+import asyncio
+
+from cubepi.agent.types import (
+    AfterToolCallContext,
+    AfterToolCallResult,
+    AgentContext,
+    BeforeToolCallContext,
+    BeforeToolCallResult,
+)
 from cubepi.providers.base import AssistantMessage, Message
+from cubepi.types import JsonObject, StructuredObject
 
 
 @dataclass
@@ -22,44 +31,62 @@ class TurnAction:
 
 
 class Middleware:
-    async def transform_context(self, messages: list, *, ctx: Any, signal=None) -> list:
+    async def transform_context(
+        self,
+        messages: list[Message],
+        *,
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
+    ) -> list[Message]:
         raise NotImplementedError
 
-    async def convert_to_llm(self, messages: list, *, ctx: Any) -> list:
+    async def convert_to_llm(
+        self, messages: list[Message], *, ctx: AgentContext
+    ) -> list[Message]:
         raise NotImplementedError
 
-    async def before_tool_call(self, ctx: Any, *, signal=None) -> Any:
+    async def before_tool_call(
+        self,
+        ctx: BeforeToolCallContext,
+        *,
+        signal: asyncio.Event | None = None,
+    ) -> BeforeToolCallResult | None:
         raise NotImplementedError
 
-    async def after_tool_call(self, ctx: Any, *, signal=None) -> Any:
+    async def after_tool_call(
+        self,
+        ctx: AfterToolCallContext,
+        *,
+        signal: asyncio.Event | None = None,
+    ) -> AfterToolCallResult | None:
         raise NotImplementedError
 
     async def transform_system_prompt(
         self,
         system_prompt: str,
         *,
-        ctx: Any,
-        signal=None,
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
     ) -> str:
         raise NotImplementedError
 
-    async def should_stop_after_turn(self, ctx: Any) -> bool:
+    async def should_stop_after_turn(self, ctx: AgentContext) -> bool:
         raise NotImplementedError
 
     async def after_model_response(
         self,
         response: AssistantMessage,
-        ctx: Any,  # AgentContext — avoid circular import
+        ctx: AgentContext,
         *,
-        signal: Any = None,
+        signal: asyncio.Event | None = None,
     ) -> TurnAction | None:
         raise NotImplementedError
 
     async def on_run_end(
         self,
-        ctx: Any,  # AgentContext — avoid circular import
+        ctx: AgentContext,
         *,
-        signal: Any = None,
+        signal: asyncio.Event | None = None,
     ) -> list[Message] | None:
         raise NotImplementedError
 
@@ -96,14 +123,16 @@ def compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]:
     before_chain = [m for m in middlewares if _has_method(m, "before_tool_call")]
     if before_chain:
 
-        def _rebuild_ctx_with_args(ctx, new_args):
+        def _rebuild_ctx_with_args(
+            ctx: BeforeToolCallContext, new_args: JsonObject
+        ) -> BeforeToolCallContext:
             from dataclasses import replace
 
             return replace(ctx, args=new_args)
 
         async def composed_before(ctx, *, signal=None):
-            accumulated_hitl: dict = {}
-            edited_args = None
+            accumulated_hitl: StructuredObject = {}
+            edited_args: JsonObject | None = None
             deny_reason: str | None = None
             block_reason: str | None = None
             blocked = False

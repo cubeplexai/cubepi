@@ -89,3 +89,6 @@ jobs:
 
       - name: Ruff format check
         run: uv run ruff format --check cubepi/ tests/
+
+      - name: Mypy
+        run: uv run mypy cubepi

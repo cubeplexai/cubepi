@@ -75,6 +75,9 @@ def aggregate(spans: list[Span], by: str) -> list[StatRow]:
         if sp.is_aborted:
             row.aborted += 1
         if want_tokens:
+            assert row.input_tokens is not None
+            assert row.output_tokens is not None
+            assert row.cache_tokens is not None
             a = sp.attributes
             # `or 0` guards against the attr being present but JSON null.
             row.input_tokens += int(a.get(schema.GEN_AI_USAGE_INPUT_TOKENS) or 0)

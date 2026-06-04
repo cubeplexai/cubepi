@@ -45,9 +45,9 @@ try:
 except ImportError:  # pragma: no cover — exercised only without the extra.
     _OTEL_AVAILABLE = False
     _otel_trace = None  # type: ignore[assignment]
-    SpanKind = None  # type: ignore[assignment]
-    Status = None  # type: ignore[assignment]
-    StatusCode = None  # type: ignore[assignment]
+    SpanKind = None  # type: ignore[assignment,misc]
+    Status = None  # type: ignore[assignment,misc]
+    StatusCode = None  # type: ignore[assignment,misc]
 
 
 # When :class:`cubepi.tracing.Tracer` is attached to an agent it

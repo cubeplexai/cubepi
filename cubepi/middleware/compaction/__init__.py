@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from typing import Any
 
 from pydantic import ValidationError
@@ -86,10 +87,13 @@ class CompactionMiddleware(Middleware):
         messages: list[Message],
         *,
         ctx: AgentContext,
-        signal: object = None,
+        signal: asyncio.Event | None = None,
     ) -> list[Message]:
         state = _load_state(ctx.extra.get("compaction"))
-        boundary = int(ctx.extra.get("compaction_until_msg_index") or 0)
+        raw_boundary = ctx.extra.get("compaction_until_msg_index")
+        boundary = (
+            int(raw_boundary) if isinstance(raw_boundary, (int, float, str)) else 0
+        )
         if state is None and ("compaction" in ctx.extra or boundary > 0):
             boundary = 0
             _clear_state(ctx)

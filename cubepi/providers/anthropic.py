@@ -446,40 +446,44 @@ class AnthropicProvider(BaseProvider):
     @staticmethod
     def _convert_message(msg: Message) -> dict[str, Any]:
         if isinstance(msg, UserMessage):
-            content = []
-            for c in msg.content:
-                if isinstance(c, TextContent):
-                    content.append({"type": "text", "text": c.text})
-                elif isinstance(c, ImageContent):
-                    content.append(
+            user_content: list[dict[str, Any]] = []
+            for user_block in msg.content:
+                if isinstance(user_block, TextContent):
+                    user_content.append({"type": "text", "text": user_block.text})
+                elif isinstance(user_block, ImageContent):
+                    user_content.append(
                         {
                             "type": "image",
                             "source": {
                                 "type": "base64",
-                                "media_type": c.media_type,
-                                "data": c.source,
+                                "media_type": user_block.media_type,
+                                "data": user_block.source,
                             },
                         }
                     )
-            return {"role": "user", "content": content}
+            return {"role": "user", "content": user_content}
 
         elif isinstance(msg, AssistantMessage):
-            content = []
-            for c in msg.content:
-                if isinstance(c, TextContent):
-                    content.append({"type": "text", "text": c.text})
-                elif isinstance(c, ThinkingContent):
-                    content.append({"type": "thinking", "thinking": c.thinking})
-                elif isinstance(c, ToolCall):
-                    content.append(
+            assistant_content: list[dict[str, Any]] = []
+            for assistant_block in msg.content:
+                if isinstance(assistant_block, TextContent):
+                    assistant_content.append(
+                        {"type": "text", "text": assistant_block.text}
+                    )
+                elif isinstance(assistant_block, ThinkingContent):
+                    assistant_content.append(
+                        {"type": "thinking", "thinking": assistant_block.thinking}
+                    )
+                elif isinstance(assistant_block, ToolCall):
+                    assistant_content.append(
                         {
                             "type": "tool_use",
-                            "id": c.id,
-                            "name": c.name,
-                            "input": c.arguments,
+                            "id": assistant_block.id,
+                            "name": assistant_block.name,
+                            "input": assistant_block.arguments,
                         }
                     )
-            return {"role": "assistant", "content": content}
+            return {"role": "assistant", "content": assistant_content}
 
         elif isinstance(msg, ToolResultMessage):
             tool_content = []

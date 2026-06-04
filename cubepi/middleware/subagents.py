@@ -6,7 +6,7 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Protocol, cast
 
 from pydantic import BaseModel
 
@@ -14,11 +14,18 @@ from cubepi.agent.agent import Agent
 from cubepi.agent.types import AgentEvent, AgentTool, AgentToolResult
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import AssistantMessage, Model, Provider, TextContent
+from cubepi.types import StructuredValue
 
 logger = logging.getLogger(__name__)
 
-EventMapper = Callable[[AgentEvent], Sequence[Any] | Any | None]
-EventHandler = Callable[[str, Any], Awaitable[None] | None]
+EventMapper = Callable[[AgentEvent], Sequence[StructuredValue] | StructuredValue | None]
+EventHandler = Callable[[str, StructuredValue], Awaitable[None] | None]
+
+
+class SubagentTracer(Protocol):
+    def attach(
+        self, agent: Agent[BaseModel]
+    ) -> Callable[[], Awaitable[None] | None] | None: ...
 
 
 @dataclass(frozen=True)
@@ -28,7 +35,7 @@ class SubagentSpec:
     system_prompt: str
     provider: Provider | None = None
     model: Model | None = None
-    tools: Sequence[AgentTool[Any]] = field(default_factory=tuple)
+    tools: Sequence[AgentTool[BaseModel]] = field(default_factory=tuple)
     middleware: Sequence[Middleware] = field(default_factory=tuple)
 
 
@@ -44,7 +51,7 @@ class SubagentRequest(BaseModel):
 class SubagentResult:
     agent_id: str
     text: str
-    events: list[Any]
+    events: list[StructuredValue]
     error: str | None = None
 
 
@@ -57,12 +64,12 @@ class SubagentMiddleware(Middleware):
         subagents: dict[str, SubagentSpec],
         default_provider: Provider,
         default_model: Model,
-        shared_tools: Sequence[AgentTool[Any]] = (),
+        shared_tools: Sequence[AgentTool[BaseModel]] = (),
         inherited_middleware: Sequence[Middleware] = (),
         excluded_tool_names: set[str] | None = None,
         event_mapper: EventMapper | None = None,
         event_handler: EventHandler | None = None,
-        tracer: Any = None,
+        tracer: SubagentTracer | None = None,
     ) -> None:
         if "general-purpose" not in subagents:
             subagents = {
@@ -85,14 +92,14 @@ class SubagentMiddleware(Middleware):
         self._event_mapper = event_mapper
         self._event_handler = event_handler
         self._tracer = tracer
-        self.tools: list[AgentTool[Any]] = [self._make_tool()]
+        self.tools: list[AgentTool[BaseModel]] = [self._make_tool()]
 
     @property
     def subagents(self) -> dict[str, SubagentSpec]:
         return dict(self._subagents)
 
     @property
-    def shared_tools(self) -> tuple[AgentTool[Any], ...]:
+    def shared_tools(self) -> tuple[AgentTool[BaseModel], ...]:
         return self._shared_tools
 
     def _make_tool(self) -> AgentTool[SubagentRequest]:
@@ -102,8 +109,8 @@ class SubagentMiddleware(Middleware):
             tool_call_id: str,
             args: SubagentRequest,
             *,
-            signal: Any = None,
-            on_update: Any = None,
+            signal: asyncio.Event | None = None,
+            on_update: Callable[[StructuredValue], None] | None = None,
         ) -> AgentToolResult:
             del on_update
             try:
@@ -140,7 +147,7 @@ class SubagentMiddleware(Middleware):
         tool_call_id: str,
         request: SubagentRequest,
         *,
-        signal: Any = None,
+        signal: asyncio.Event | None = None,
     ) -> SubagentResult:
         spec = self._subagents.get(
             request.subagent_type,
@@ -150,7 +157,7 @@ class SubagentMiddleware(Middleware):
         model = spec.model or self._default_model
         tools = [*self._shared_tools, *spec.tools]
         middleware = [*self._inherited_middleware, *spec.middleware]
-        child = Agent(
+        child: Agent[BaseModel] = Agent(
             provider=provider,
             model=model,
             system_prompt=spec.system_prompt,
@@ -159,9 +166,11 @@ class SubagentMiddleware(Middleware):
         )
 
         agent_id = f"subagent:{tool_call_id}"
-        events: list[Any] = []
+        events: list[StructuredValue] = []
 
-        async def listener(event: AgentEvent, signal: Any = None) -> None:
+        async def listener(
+            event: AgentEvent, signal: asyncio.Event | None = None
+        ) -> None:
             del signal
             await self._handle_event(agent_id, event, events)
 
@@ -180,7 +189,7 @@ class SubagentMiddleware(Middleware):
         return SubagentResult(agent_id=agent_id, text=text, events=events, error=error)
 
     @staticmethod
-    def _child_error(child: Agent[Any]) -> str | None:
+    def _child_error(child: Agent[BaseModel]) -> str | None:
         if child.state.error_message:
             return child.state.error_message
         if not child.state.messages:
@@ -195,7 +204,7 @@ class SubagentMiddleware(Middleware):
         return None
 
     @staticmethod
-    def _final_assistant_text(child: Agent[Any]) -> str:
+    def _final_assistant_text(child: Agent[BaseModel]) -> str:
         for message in reversed(child.state.messages):
             if not isinstance(message, AssistantMessage):
                 continue
@@ -210,7 +219,7 @@ class SubagentMiddleware(Middleware):
         self,
         agent_id: str,
         event: AgentEvent,
-        events: list[Any],
+        events: list[StructuredValue],
     ) -> None:
         if self._event_mapper is None:
             return
@@ -220,7 +229,7 @@ class SubagentMiddleware(Middleware):
         if isinstance(mapped, Sequence) and not isinstance(mapped, (str, bytes)):
             payloads = list(mapped)
         else:
-            payloads = [mapped]
+            payloads = [cast(StructuredValue, mapped)]
         for payload in payloads:
             events.append(payload)
             if self._event_handler is not None:
@@ -228,7 +237,9 @@ class SubagentMiddleware(Middleware):
                 if inspect.isawaitable(result):
                     await result
 
-    def _attach_tracer(self, child: Agent[Any]) -> Any:
+    def _attach_tracer(
+        self, child: Agent[BaseModel]
+    ) -> Callable[[], Awaitable[None] | None] | None:
         if self._tracer is None:
             return None
         try:
@@ -238,7 +249,7 @@ class SubagentMiddleware(Middleware):
             return None
 
     def _start_abort_forwarder(
-        self, child: Agent[Any], signal: Any
+        self, child: Agent[BaseModel], signal: asyncio.Event | None
     ) -> asyncio.Task | None:
         if signal is None:
             return None
@@ -258,7 +269,9 @@ class SubagentMiddleware(Middleware):
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
-    async def _detach_tracer(self, detach: Any) -> None:
+    async def _detach_tracer(
+        self, detach: Callable[[], Awaitable[None] | None] | None
+    ) -> None:
         if detach is None:
             return
         try:

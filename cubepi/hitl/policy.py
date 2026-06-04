@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import Union
+
+from cubepi.types import JsonObject
 
 
 @dataclass(frozen=True)
@@ -18,7 +20,7 @@ class Deny:
 class AskUser:
     prompt: str | None = None
     timeout_seconds: float | None = None
-    details: dict[str, Any] | None = None
+    details: JsonObject | None = None
 
 
 ApprovalDecision = Union[Approve, Deny, AskUser]

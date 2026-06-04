@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Callable
 
+from pydantic import BaseModel
 from pydantic import ValidationError
 
 from cubepi.hitl.exceptions import HitlControlException
@@ -28,6 +29,7 @@ from cubepi.providers.base import (
     ToolCall,
     ToolResultMessage,
 )
+from cubepi.types import JsonObject, StructuredObject, StructuredValue
 
 
 @dataclass
@@ -40,8 +42,8 @@ class ToolCallBatch:
 class _PreparedToolCall:
     tool_call: ToolCall
     tool: AgentTool
-    args: Any
-    hitl_trace: dict | None = None
+    args: BaseModel | JsonObject
+    hitl_trace: StructuredObject | None = None
 
 
 @dataclass
@@ -50,7 +52,7 @@ class _ImmediateOutcome:
     is_error: bool
     blocked_by_hook: bool = False
     block_reason: str | None = None
-    hitl_trace: dict | None = None
+    hitl_trace: StructuredObject | None = None
 
 
 @dataclass
@@ -60,7 +62,7 @@ class _FinalizedOutcome:
     is_error: bool
     blocked_by_hook: bool = False
     block_reason: str | None = None
-    hitl_trace: dict | None = None
+    hitl_trace: StructuredObject | None = None
 
 
 def _error_result(message: str) -> AgentToolResult:
@@ -111,7 +113,9 @@ def _format_validation_error(exc: ValidationError, tool_name: str) -> str:
     return "\n".join(lines)
 
 
-def _merge_hitl_details(base: Any, hitl: dict | None) -> Any:
+def _merge_hitl_details(
+    base: StructuredValue, hitl: StructuredObject | None
+) -> StructuredValue:
     if hitl is None:
         return base
     if base is None:
@@ -220,7 +224,7 @@ async def _execute_prepared(
 ) -> tuple[AgentToolResult, bool]:
     from cubepi.hitl.channel import _in_custom_tool_var
 
-    is_builtin = getattr(prepared.tool, "_hitl_builtin", False)
+    is_builtin = prepared.tool.hitl_builtin
     token = None if is_builtin else _in_custom_tool_var.set(True)
     try:
         try:

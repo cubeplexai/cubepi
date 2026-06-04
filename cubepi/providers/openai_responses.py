@@ -654,14 +654,18 @@ class OpenAIResponsesProvider(BaseProvider):
 
             elif isinstance(msg, AssistantMessage):
                 text_blocks: list[dict[str, Any]] = []
-                for c in msg.content:
-                    if isinstance(c, ThinkingContent):
+                for assistant_block in msg.content:
+                    if isinstance(assistant_block, ThinkingContent):
                         pass
-                    elif isinstance(c, TextContent):
+                    elif isinstance(assistant_block, TextContent):
                         text_blocks.append(
-                            {"type": "output_text", "text": c.text, "annotations": []}
+                            {
+                                "type": "output_text",
+                                "text": assistant_block.text,
+                                "annotations": [],
+                            }
                         )
-                    elif isinstance(c, ToolCall):
+                    elif isinstance(assistant_block, ToolCall):
                         if text_blocks:
                             api_input.append(
                                 {
@@ -672,14 +676,14 @@ class OpenAIResponsesProvider(BaseProvider):
                                 }
                             )
                             text_blocks = []
-                        parts = c.id.split("|", 1)
+                        parts = assistant_block.id.split("|", 1)
                         call_id = parts[0]
                         item_id = parts[1] if len(parts) > 1 else None
                         fc: dict[str, Any] = {
                             "type": "function_call",
                             "call_id": call_id,
-                            "name": c.name,
-                            "arguments": json.dumps(c.arguments),
+                            "name": assistant_block.name,
+                            "arguments": json.dumps(assistant_block.arguments),
                         }
                         if item_id:
                             fc["id"] = item_id

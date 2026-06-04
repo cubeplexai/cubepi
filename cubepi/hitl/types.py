@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Union
+from typing import Literal, Union
 
 from pydantic import BaseModel, Field
+
+from cubepi.types import JsonObject
 
 
 class Option(BaseModel):
@@ -23,15 +25,15 @@ class Question(BaseModel):
 class ConfirmRequest(BaseModel):
     kind: Literal["confirm"] = "confirm"
     prompt: str
-    details: dict[str, Any] | None = None
+    details: JsonObject | None = None
 
 
 class ApproveRequest(BaseModel):
     kind: Literal["approve"] = "approve"
     tool_name: str
     tool_call_id: str
-    args: dict[str, Any]
-    details: dict[str, Any] | None = None
+    args: JsonObject
+    details: JsonObject | None = None
 
 
 class AskRequest(BaseModel):
@@ -52,5 +54,5 @@ class HitlRequest(BaseModel):
 
 class ApproveAnswer(BaseModel):
     decision: Literal["approve", "deny", "edit"]
-    edited_args: dict[str, Any] | None = None
+    edited_args: JsonObject | None = None
     reason: str | None = None

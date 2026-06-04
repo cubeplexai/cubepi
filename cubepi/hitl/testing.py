@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Union
+from typing import Callable, Union
 
 from cubepi.hitl.channel import _BaseChannel, _USE_DEFAULT_TIMEOUT
 from cubepi.hitl.exceptions import HitlError
 from cubepi.hitl.types import HitlRequest
+from cubepi.types import StructuredValue
 
 
 class ScriptedChannel(_BaseChannel):
@@ -16,7 +17,10 @@ class ScriptedChannel(_BaseChannel):
     the answer.
     """
 
-    def __init__(self, answers: list[Union[Any, Callable[[HitlRequest], Any]]]):
+    def __init__(
+        self,
+        answers: list[Union[StructuredValue, Callable[[HitlRequest], StructuredValue]]],
+    ):
         super().__init__()
         self._answers = list(answers)
         self._history: list[HitlRequest] = []

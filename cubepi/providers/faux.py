@@ -5,11 +5,12 @@ import inspect
 import json
 import math
 import time
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 
 from cubepi.providers.base import (
     AssistantMessage,
     BaseProvider,
+    Content,
     Message,
     MessageStream,
     Model,
@@ -73,7 +74,7 @@ def faux_assistant_message(
     else:
         blocks = [content]
     return AssistantMessage(
-        content=blocks,
+        content=cast(list[Content | ThinkingContent | ToolCall], blocks),
         stop_reason=stop_reason,
         error_message=error_message,
         usage=Usage(),
@@ -318,6 +319,10 @@ class FauxProvider(BaseProvider):
                     return
 
                 if callable(step):
+                    args: (
+                        tuple[list[Message], Model, str, list[ToolDefinition] | None]
+                        | tuple[list[Message], Model]
+                    )
                     if _can_accept_extended_args(step):
                         args = (messages, model, system_prompt, tools)
                     else:

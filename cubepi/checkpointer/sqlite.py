@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, cast
 
 import aiosqlite
 
 from cubepi.checkpointer.base import CheckpointData
+from cubepi.hitl.types import HitlRequest
+from cubepi.providers.base import (
+    AssistantMessage,
+    Message,
+    ToolResultMessage,
+    UserMessage,
+)
+from cubepi.types import JsonObject
 
 
 class SQLiteCheckpointer:
@@ -82,7 +90,7 @@ class SQLiteCheckpointer:
             extra = json.loads(extra_row[0]) if extra_row else {}
             return CheckpointData(messages=messages, extra=extra)
 
-    async def append(self, thread_id: str, messages: list[Any]) -> None:
+    async def append(self, thread_id: str, messages: list[Message]) -> None:
         assert self._db is not None
         async with self._lock:
             for msg in messages:
@@ -93,7 +101,7 @@ class SQLiteCheckpointer:
                 )
             await self._db.commit()
 
-    async def save_extra(self, thread_id: str, extra: dict[str, Any]) -> None:
+    async def save_extra(self, thread_id: str, extra: JsonObject) -> None:
         assert self._db is not None
         async with self._lock:
             existing_cursor = await self._db.execute(
@@ -118,7 +126,7 @@ class SQLiteCheckpointer:
     async def save_pending_request(
         self,
         thread_id: str,
-        request: Any,
+        request: HitlRequest | None,
         *,
         run_id: str | None = None,
     ) -> None:
@@ -140,9 +148,7 @@ class SQLiteCheckpointer:
                 )
             await self._db.commit()
 
-    async def load_pending_request(self, thread_id: str) -> Any:
-        from cubepi.hitl.types import HitlRequest
-
+    async def load_pending_request(self, thread_id: str) -> HitlRequest | None:
         assert self._db is not None
         async with self._lock:
             cursor = await self._db.execute(
@@ -169,9 +175,7 @@ def _serialize_message(msg: Any) -> str:
     return json.dumps(msg)
 
 
-def _deserialize_message(data: dict) -> Any:
-    from cubepi.providers.base import AssistantMessage, ToolResultMessage, UserMessage
-
+def _deserialize_message(data: dict[str, Any]) -> Message:
     role = data.get("role")
     if role == "user":
         return UserMessage.model_validate(data)
@@ -179,4 +183,4 @@ def _deserialize_message(data: dict) -> Any:
         return AssistantMessage.model_validate(data)
     elif role == "tool_result":
         return ToolResultMessage.model_validate(data)
-    return data
+    return cast(Message, data)

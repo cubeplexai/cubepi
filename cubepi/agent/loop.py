@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable
+from typing import Callable
 
 from cubepi.agent.tools import execute_tool_calls
 from cubepi.agent.types import (
@@ -15,6 +15,7 @@ from cubepi.agent.types import (
     TurnEndEvent,
     TurnStartEvent,
 )
+from cubepi.checkpointer.base import Checkpointer
 from cubepi.hitl.exceptions import HitlAborted, HitlDetached
 from cubepi.utils import emit_event
 from cubepi.providers.base import (
@@ -164,7 +165,7 @@ async def run_agent_loop_resume(
     stream_options: StreamOptions | None = None,
     tool_execution: str = "parallel",
     system_prompt: str | None = None,
-    checkpointer: Any = None,
+    checkpointer: Checkpointer | None = None,
     thread_id: str | None = None,
 ) -> list[Message]:
     new_messages: list[Message] = []
