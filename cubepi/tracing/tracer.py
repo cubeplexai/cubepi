@@ -580,6 +580,30 @@ class Tracer:
         token = _active_run.set(run)
         try:
             yield _OneShotSession(provider=provider, model=model, run=run)
+        except BaseException as _exc:
+            # Mark the root span as failed so `cubepi trace ls` (which
+            # reads status off the root) lists this run as an error
+            # instead of a successful invoke_agent. Mirrors what the
+            # agent path does on turn-level errors. Cancellation is
+            # tracked as cubepi.aborted (UNSET status, semconv-aligned)
+            # rather than ERROR.
+            try:
+                from opentelemetry.trace import Status, StatusCode
+
+                from cubepi.tracing.schema import CUBEPI_ABORTED, ERROR_TYPE
+
+                import asyncio as _asyncio_for_cancel
+
+                if isinstance(_exc, _asyncio_for_cancel.CancelledError):
+                    root_span.set_attribute(CUBEPI_ABORTED, True)
+                    root_span.set_attribute(ERROR_TYPE, "cubepi.aborted")
+                else:
+                    root_span.set_status(Status(StatusCode.ERROR, str(_exc)[:256]))
+                    root_span.set_attribute(ERROR_TYPE, type(_exc).__name__)
+                root_span.record_exception(_exc)
+            except Exception:
+                pass
+            raise
         finally:
             _active_run.reset(token)
             for d in detachers:
