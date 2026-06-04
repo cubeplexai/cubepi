@@ -183,7 +183,12 @@ class OpenAIResponsesProvider(BaseProvider):
 
                 await _fire_request_listeners(self._request_listeners, kwargs, model)
 
-                response = await self._client.responses.create(**kwargs)
+                try:
+                    response = await self._client.responses.create(**kwargs)
+                except Exception as _sdk_exc:
+                    from cubepi.errors import classify_and_raise
+
+                    classify_and_raise(_sdk_exc, model=model, messages=messages)
 
                 # Invoke on_response with HTTP metadata if available
                 http_response = getattr(response, "response", None)

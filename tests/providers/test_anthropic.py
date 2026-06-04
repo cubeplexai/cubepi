@@ -1364,3 +1364,88 @@ class TestAnthropicBaseUrl:
             mock_anthropic.return_value = MagicMock()
             AnthropicProvider(api_key="x")
             assert "base_url" not in mock_anthropic.call_args.kwargs
+
+
+# ---------------------------------------------------------------------------
+# Typed error wrapping — provider integration
+# ---------------------------------------------------------------------------
+
+
+class _FakeAnthropicExc(Exception):
+    """Minimal fake Anthropic SDK exception with configurable status_code."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        if status_code is not None:
+            self.status_code = status_code
+
+
+class TestAnthropicTypedErrorWrapping:
+    """Verify that raw SDK exceptions are re-raised as typed ProviderError subclasses.
+
+    The provider wraps the entire async with stream block. When the SDK raises,
+    classify_and_raise converts it to a typed ProviderError. The outer
+    BaseException handler converts it to an error AssistantMessage and passes
+    the typed exception to response listeners.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_429_delivers_rate_limited_to_listener(self) -> None:
+        from cubepi.errors import RateLimited
+
+        exc = _FakeAnthropicExc("Rate limit exceeded", status_code=429)
+        provider = _make_provider("none")
+        mock_client = MagicMock()
+        mock_client.messages = MagicMock()
+        mock_client.messages.stream = MagicMock(side_effect=exc)
+        provider._client = mock_client
+
+        captured_exc: list[BaseException | None] = []
+
+        def on_response(body, model, e):  # type: ignore[misc]
+            captured_exc.append(e)
+
+        provider.subscribe_response(on_response)
+
+        ms = await provider.stream(
+            _anthropic_model(), [UserMessage(content=[TextContent(text="hi")])]
+        )
+        async for _ in ms:
+            pass
+        result = await ms.result()
+
+        assert result.stop_reason == "error"
+        assert len(captured_exc) == 1
+        assert isinstance(captured_exc[0], RateLimited)
+
+    @pytest.mark.asyncio
+    async def test_context_length_message_delivers_context_length_exceeded(
+        self,
+    ) -> None:
+        from cubepi.errors import ContextLengthExceeded
+
+        exc = _FakeAnthropicExc(
+            "This model's maximum context length is 200000 tokens.", status_code=400
+        )
+        provider = _make_provider("none")
+        mock_client = MagicMock()
+        mock_client.messages = MagicMock()
+        mock_client.messages.stream = MagicMock(side_effect=exc)
+        provider._client = mock_client
+
+        captured_exc: list[BaseException | None] = []
+
+        def on_response(body, model, e):  # type: ignore[misc]
+            captured_exc.append(e)
+
+        provider.subscribe_response(on_response)
+
+        ms = await provider.stream(
+            _anthropic_model(), [UserMessage(content=[TextContent(text="hi")])]
+        )
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        assert len(captured_exc) == 1
+        assert isinstance(captured_exc[0], ContextLengthExceeded)
