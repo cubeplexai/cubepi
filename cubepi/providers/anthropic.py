@@ -313,8 +313,7 @@ class AnthropicProvider(BaseProvider):
                     # _convert_response, _assemble_response).
                     if type(_sdk_exc).__module__.startswith("anthropic"):
                         classify_and_raise(_sdk_exc, model=model, messages=messages)
-                    else:
-                        raise
+                    raise
 
             except BaseException as e:
                 exc = e
