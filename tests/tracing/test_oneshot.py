@@ -94,6 +94,9 @@ async def test_oneshot_produces_root_and_chat_spans() -> None:
     assert attrs.get("cubepi.metadata.conversation_id") == "conv-123"
     assert attrs.get("cubepi.metadata.user_id") == "usr-456"
     assert "cubepi.run_id" in attrs
+    # Successful one-shot must NOT be marked aborted by the cleanup sweeper.
+    assert attrs.get("cubepi.aborted") is None
+    assert attrs.get("error.type") is None
 
     chat = by_name[f"chat {MODEL.id}"]
     # chat span must be a child of root

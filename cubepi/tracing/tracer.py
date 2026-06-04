@@ -514,9 +514,22 @@ class Tracer:
                     d()
                 except Exception:
                     pass
-            # Close any chat span left open by a cancelled/timed-out stream
-            # (mirrors Recorder._close_open_spans for the agent detach path).
-            recorder._close_open_spans(run)
+            # Close any chat span left open by a cancelled/timed-out stream.
+            # We don't reuse Recorder._close_open_spans because that helper
+            # also walks turn_span / agent_span — both of which point at
+            # root_span here, so it would mark a successful one-shot's root
+            # as aborted before we end it normally below. Tool spans don't
+            # exist for one-shot (no tool execution path).
+            if run.chat_span is not None:
+                try:
+                    from cubepi.tracing.schema import CUBEPI_ABORTED, ERROR_TYPE
+
+                    run.chat_span.set_attribute(CUBEPI_ABORTED, True)
+                    run.chat_span.set_attribute(ERROR_TYPE, "cubepi.aborted")
+                    run.chat_span.end()
+                except Exception:
+                    pass
+                run.chat_span = None
             recorder._run = None
             root_span.end()
             # Best-effort flush — tracing must never break the caller's work.
