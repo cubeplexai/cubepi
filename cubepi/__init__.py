@@ -35,6 +35,14 @@ from cubepi.providers import (
     UserMessage,
     adjust_max_tokens_for_thinking,
 )
+from cubepi.errors import (
+    ContextLengthExceeded,
+    ProviderAuthFailed,
+    ProviderBadRequest,
+    ProviderError,
+    ProviderUnavailable,
+    RateLimited,
+)
 from cubepi.providers.capability import (
     CapabilityDescriptor,
     ReasoningLevelSpec,
@@ -50,11 +58,17 @@ __all__ = [
     "AssistantMessage",
     "BaseProvider",
     "CapabilityDescriptor",
+    "ContextLengthExceeded",
     "Message",
     "MessageStream",
     "Middleware",
     "Model",
     "Provider",
+    "ProviderAuthFailed",
+    "ProviderBadRequest",
+    "ProviderError",
+    "ProviderUnavailable",
+    "RateLimited",
     "ReasoningLevelSpec",
     "StreamEvent",
     "StreamOptions",
