@@ -432,7 +432,9 @@ class Tracer:
             SPAN_NAME_INVOKE_AGENT,
         )
 
-        do_record = record_content if record_content is not None else self._record_content
+        do_record = (
+            record_content if record_content is not None else self._record_content
+        )
         run_id = str(uuid.uuid4())
 
         root_attrs: dict[str, Any] = {
@@ -478,9 +480,7 @@ class Tracer:
                 detachers.append(
                     provider.subscribe_request(recorder._on_provider_request)
                 )
-                detachers.append(
-                    provider.subscribe_chunk(recorder._on_provider_chunk)
-                )
+                detachers.append(provider.subscribe_chunk(recorder._on_provider_chunk))
                 detachers.append(
                     provider.subscribe_response(recorder._on_provider_response)
                 )
