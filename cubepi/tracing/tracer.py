@@ -561,7 +561,9 @@ class Tracer:
                 stream_path = self._stream_dir / f"{run_id}.stream.jsonl"
                 run.stream_file = stream_path.open("w", encoding="utf-8")
                 run.stream_start_time = _time.time()
-            except Exception:
+            except (
+                Exception
+            ):  # pragma: no cover — defensive: tracing must never break the caller
                 pass
 
         detachers: list[Callable[[], None]] = []
@@ -583,12 +585,12 @@ class Tracer:
                 for d in detachers:
                     try:
                         d()
-                    except Exception:
+                    except Exception:  # pragma: no cover — defensive
                         pass
                 if run.stream_file is not None:
                     try:
                         run.stream_file.close()
-                    except Exception:
+                    except Exception:  # pragma: no cover — defensive
                         pass
                     run.stream_file = None
                 root_span.end()
@@ -620,7 +622,7 @@ class Tracer:
                     root_span.set_status(Status(StatusCode.ERROR, str(_exc)[:256]))
                     root_span.set_attribute(ERROR_TYPE, type(_exc).__name__)
                 root_span.record_exception(_exc)
-            except Exception:
+            except Exception:  # pragma: no cover — defensive
                 pass
             raise
         finally:
@@ -628,7 +630,7 @@ class Tracer:
             for d in detachers:
                 try:
                     d()
-                except Exception:
+                except Exception:  # pragma: no cover — defensive
                     pass
             # Close any chat span left open by a cancelled/timed-out stream.
             # We don't reuse Recorder._close_open_spans because that helper
@@ -643,7 +645,7 @@ class Tracer:
                     run.chat_span.set_attribute(CUBEPI_ABORTED, True)
                     run.chat_span.set_attribute(ERROR_TYPE, "cubepi.aborted")
                     run.chat_span.end()
-                except Exception:
+                except Exception:  # pragma: no cover — defensive
                     pass
                 run.chat_span = None
             # Stamp content on the root invoke_agent span. The agent path
@@ -681,14 +683,14 @@ class Tracer:
                             GEN_AI_OUTPUT_MESSAGES,
                             messages_to_semconv(run.output_messages),
                         )
-                except Exception:
+                except Exception:  # pragma: no cover — defensive
                     pass
             # Close the stream file opened above (mirrors the agent
             # _on_agent_end / _close_open_spans path).
             if run.stream_file is not None:
                 try:
                     run.stream_file.close()
-                except Exception:
+                except Exception:  # pragma: no cover — defensive
                     pass
                 run.stream_file = None
             recorder._run = None
@@ -699,7 +701,7 @@ class Tracer:
             # asyncio.run() can exit before the BatchSpanProcessor drains.
             try:
                 await self.force_flush(timeout_seconds=5.0)
-            except Exception:
+            except Exception:  # pragma: no cover — defensive
                 pass
 
     async def __aenter__(self) -> "Tracer":

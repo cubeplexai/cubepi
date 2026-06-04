@@ -581,6 +581,44 @@ async def test_oneshot_cancelled_generate_closes_chat_span() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oneshot_cancel_mid_stream_marks_open_chat_span_aborted() -> None:
+    """When cancellation happens after the chat span has been opened by the
+    provider request listener but before the response listener has closed
+    it, the oneshot cleanup must close it and stamp cubepi.aborted."""
+    import asyncio
+
+    # Slow provider: streams the response one token at a time so we can
+    # cancel mid-stream (after _on_provider_request has fired).
+    provider = FauxProvider(tokens_per_second=5.0)
+    provider.append_responses([faux_assistant_message("a b c d e f g h")])
+    tracer, exporter = _make_tracer()
+
+    async def do_work():
+        async with tracer.oneshot(provider=provider, model=MODEL) as session:
+            await session.generate(
+                system="sys",
+                messages=[UserMessage(content=[TextContent(text="q")])],
+                max_output_tokens=50,
+            )
+
+    task = asyncio.create_task(do_work())
+    await asyncio.sleep(0.15)  # let chunks start, chat span opens
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    await tracer.force_flush()
+    await tracer.shutdown()
+
+    # Chat span must have been ended with cubepi.aborted=true
+    chat_spans = [s for s in exporter.spans if s.name.startswith("chat ")]
+    assert chat_spans, "expected at least one chat span (opened by request listener)"
+    chat_attrs = dict(chat_spans[0].attributes or {})
+    assert chat_attrs.get("cubepi.aborted") is True
+    assert chat_attrs.get("error.type") == "cubepi.aborted"
+
+
+@pytest.mark.asyncio
 async def test_oneshot_does_not_interfere_with_concurrent_agent() -> None:
     """Oneshot's active-run gate must not bleed into a concurrent Agent run."""
     import asyncio
