@@ -156,11 +156,9 @@ class SubagentMiddleware(Middleware):
 
         agent_id = f"subagent:{tool_call_id}"
         events: list[Any] = []
-        text_parts: list[str] = []
 
         async def listener(event: AgentEvent, signal: Any = None) -> None:
             del signal
-            self._collect_text(event, text_parts)
             await self._handle_event(agent_id, event, events)
 
         child.subscribe(listener)
@@ -171,7 +169,7 @@ class SubagentMiddleware(Middleware):
         finally:
             await self._detach_tracer(detach)
 
-        text = "".join(text_parts) or "[subagent produced no output]"
+        text = self._final_assistant_text(child) or "[subagent produced no output]"
         error = self._child_error(child)
         return SubagentResult(agent_id=agent_id, text=text, events=events, error=error)
 
@@ -191,15 +189,16 @@ class SubagentMiddleware(Middleware):
         return None
 
     @staticmethod
-    def _collect_text(event: AgentEvent, text_parts: list[str]) -> None:
-        if event.type != "message_end":
-            return
-        message = event.message
-        if getattr(message, "role", None) != "assistant":
-            return
-        for block in getattr(message, "content", []):
-            if isinstance(block, TextContent):
-                text_parts.append(block.text)
+    def _final_assistant_text(child: Agent[Any]) -> str:
+        for message in reversed(child.state.messages):
+            if not isinstance(message, AssistantMessage):
+                continue
+            return "".join(
+                block.text
+                for block in message.content
+                if isinstance(block, TextContent)
+            )
+        return ""
 
     async def _handle_event(
         self,

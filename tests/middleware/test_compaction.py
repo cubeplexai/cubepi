@@ -143,3 +143,21 @@ async def test_summarizer_failure_returns_current_view_without_writing_state() -
 
     assert result == messages
     assert "compaction" not in ctx.extra
+
+
+async def test_stale_boundary_larger_than_history_is_ignored() -> None:
+    provider = _FakeSummaryProvider()
+    middleware = _make_middleware(provider, max_tokens_before=100_000)
+    messages: list[Message] = [_user("new question")]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=messages,
+        extra={
+            "compaction": CompactionState(summary="old summary").model_dump(),
+            "compaction_until_msg_index": 10,
+        },
+    )
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    assert result == messages

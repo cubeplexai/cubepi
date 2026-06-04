@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from cubepi import AgentTool, AgentToolResult, TextContent
 from cubepi.middleware.subagents import SubagentMiddleware, SubagentSpec
 from cubepi.providers.base import Model
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 
 def _make_middleware(
@@ -129,6 +129,55 @@ async def test_unknown_subagent_type_falls_back_to_general_purpose() -> None:
 
     assert result.is_error is not True
     assert result.content[0].text == "fallback reply"
+
+
+async def test_subagent_tool_returns_only_child_final_answer() -> None:
+    class _EchoParams(BaseModel):
+        value: str
+
+    async def _echo(
+        tool_call_id: str,
+        args: _EchoParams,
+        *,
+        signal: Any = None,
+        on_update: Any = None,
+    ) -> AgentToolResult:
+        del tool_call_id, signal, on_update
+        return AgentToolResult(content=[TextContent(text=f"echoed {args.value}")])
+
+    echo_tool = AgentTool(
+        name="echo",
+        description="echo",
+        parameters=_EchoParams,
+        execute=_echo,
+    )
+    provider = FauxProvider()
+    provider.set_responses(
+        [
+            faux_assistant_message(
+                [
+                    TextContent(text="I'll check."),
+                    faux_tool_call("echo", {"value": "x"}, id="echo-1"),
+                ],
+                stop_reason="tool_use",
+            ),
+            faux_assistant_message("final answer"),
+        ]
+    )
+    middleware = _make_middleware(provider=provider, shared_tools=[echo_tool])
+    [tool] = middleware.tools
+
+    args = tool.parameters(
+        name="worker",
+        role="researcher",
+        task="answer",
+        prompt="please use a tool",
+        subagent_type="general-purpose",
+    )
+    result = await tool.execute("tc-final", args, signal=None, on_update=None)
+
+    assert result.is_error is not True
+    assert result.content[0].text == "final answer"
 
 
 async def test_event_mapper_and_handler_receive_child_events() -> None:
