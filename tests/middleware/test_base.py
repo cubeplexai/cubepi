@@ -23,45 +23,76 @@ class TestComposeMiddlewareEmpty:
 
 
 class TestTransformContext:
-    async def test_chained_transform_context(self):
+    async def test_chained_transform_context_receives_agent_context(self):
         class AddPrefix(Middleware):
-            async def transform_context(self, messages, *, signal=None):
+            async def transform_context(self, messages, *, ctx, signal=None):
+                ctx.extra["prefix_called"] = True
                 return [UserMessage(content=[TextContent(text="PREFIX")])] + list(
                     messages
                 )
 
         class AddSuffix(Middleware):
-            async def transform_context(self, messages, *, signal=None):
+            async def transform_context(self, messages, *, ctx, signal=None):
+                ctx.extra["suffix_called"] = True
                 return list(messages) + [
                     UserMessage(content=[TextContent(text="SUFFIX")])
                 ]
 
         hooks = compose_middleware([AddPrefix(), AddSuffix()])
+        ctx = AgentContext(system_prompt="", messages=[])
         result = await hooks["transform_context"](
-            [UserMessage(content=[TextContent(text="middle")])], signal=None
+            [UserMessage(content=[TextContent(text="middle")])], ctx=ctx, signal=None
         )
 
         assert len(result) == 3
         assert result[0].content[0].text == "PREFIX"
         assert result[1].content[0].text == "middle"
         assert result[2].content[0].text == "SUFFIX"
+        assert ctx.extra == {"prefix_called": True, "suffix_called": True}
 
 
 class TestConvertToLlm:
-    async def test_last_implementation_wins(self):
+    async def test_last_implementation_wins_and_receives_agent_context(self):
         class First(Middleware):
-            async def convert_to_llm(self, messages):
+            async def convert_to_llm(self, messages, *, ctx):
+                ctx.extra["first_called"] = True
                 return [UserMessage(content=[TextContent(text="first")])]
 
         class Second(Middleware):
-            async def convert_to_llm(self, messages):
+            async def convert_to_llm(self, messages, *, ctx):
+                ctx.extra["second_called"] = True
                 return [UserMessage(content=[TextContent(text="second")])]
 
         hooks = compose_middleware([First(), Second()])
-        result = await hooks["convert_to_llm"]([])
+        ctx = AgentContext(system_prompt="", messages=[])
+        result = await hooks["convert_to_llm"]([], ctx=ctx)
 
         assert len(result) == 1
         assert result[0].content[0].text == "second"
+        assert ctx.extra == {"second_called": True}
+
+
+class TestTransformSystemPrompt:
+    async def test_chained_transform_system_prompt_receives_agent_context(self):
+        class AddPrefix(Middleware):
+            async def transform_system_prompt(self, system_prompt, *, ctx, signal=None):
+                ctx.extra["prompt_prefix_called"] = True
+                return f"prefix {system_prompt}"
+
+        class AddSuffix(Middleware):
+            async def transform_system_prompt(self, system_prompt, *, ctx, signal=None):
+                ctx.extra["prompt_suffix_called"] = True
+                return f"{system_prompt} suffix"
+
+        hooks = compose_middleware([AddPrefix(), AddSuffix()])
+        ctx = AgentContext(system_prompt="base", messages=[])
+        result = await hooks["transform_system_prompt"]("base", ctx=ctx, signal=None)
+
+        assert result == "prefix base suffix"
+        assert ctx.extra == {
+            "prompt_prefix_called": True,
+            "prompt_suffix_called": True,
+        }
 
 
 class TestBeforeToolCall:
@@ -177,9 +208,10 @@ class TestAgentMiddlewareWiring:
         captured: dict = {}
 
         class MarkConvert(Middleware):
-            async def convert_to_llm(self, messages):
+            async def convert_to_llm(self, messages, *, ctx):
                 captured["called"] = True
                 captured["count"] = len(messages)
+                captured["ctx"] = ctx
                 return list(messages)
 
         provider = FauxProvider()
@@ -191,12 +223,13 @@ class TestAgentMiddlewareWiring:
         )
         await agent.prompt("hi")
         assert captured.get("called") is True
+        assert isinstance(captured.get("ctx"), AgentContext)
 
 
 class TestPartialMiddleware:
     async def test_middleware_with_only_some_hooks(self):
         class OnlyTransform(Middleware):
-            async def transform_context(self, messages, *, signal=None):
+            async def transform_context(self, messages, *, ctx, signal=None):
                 return messages
 
         hooks = compose_middleware([OnlyTransform()])
@@ -217,13 +250,17 @@ class TestBaseMiddlewareDefaults:
         import pytest
 
         with pytest.raises(NotImplementedError):
-            await Middleware().transform_context([], signal=None)
+            await Middleware().transform_context(
+                [], ctx=AgentContext(system_prompt="", messages=[]), signal=None
+            )
 
     async def test_convert_to_llm_raises(self):
         import pytest
 
         with pytest.raises(NotImplementedError):
-            await Middleware().convert_to_llm([])
+            await Middleware().convert_to_llm(
+                [], ctx=AgentContext(system_prompt="", messages=[])
+            )
 
     async def test_before_tool_call_raises(self):
         import pytest
@@ -241,7 +278,9 @@ class TestBaseMiddlewareDefaults:
         import pytest
 
         with pytest.raises(NotImplementedError):
-            await Middleware().transform_system_prompt("hello", signal=None)
+            await Middleware().transform_system_prompt(
+                "hello", ctx=AgentContext(system_prompt="", messages=[]), signal=None
+            )
 
     async def test_should_stop_after_turn_raises(self):
         import pytest

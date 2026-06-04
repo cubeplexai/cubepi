@@ -22,10 +22,10 @@ class TurnAction:
 
 
 class Middleware:
-    async def transform_context(self, messages: list, *, signal=None) -> list:
+    async def transform_context(self, messages: list, *, ctx: Any, signal=None) -> list:
         raise NotImplementedError
 
-    async def convert_to_llm(self, messages: list) -> list:
+    async def convert_to_llm(self, messages: list, *, ctx: Any) -> list:
         raise NotImplementedError
 
     async def before_tool_call(self, ctx: Any, *, signal=None) -> Any:
@@ -38,6 +38,7 @@ class Middleware:
         self,
         system_prompt: str,
         *,
+        ctx: Any,
         signal=None,
     ) -> str:
         raise NotImplementedError
@@ -75,10 +76,10 @@ def compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]:
     transform_chain = [m for m in middlewares if _has_method(m, "transform_context")]
     if transform_chain:
 
-        async def composed_transform(messages, *, signal=None):
+        async def composed_transform(messages, *, ctx, signal=None):
             result = messages
             for mw in transform_chain:
-                result = await mw.transform_context(result, signal=signal)
+                result = await mw.transform_context(result, ctx=ctx, signal=signal)
             return result
 
         hooks["transform_context"] = composed_transform
@@ -87,8 +88,8 @@ def compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]:
     if convert_impls:
         last = convert_impls[-1]
 
-        async def composed_convert(messages):
-            return await last.convert_to_llm(messages)
+        async def composed_convert(messages, *, ctx):
+            return await last.convert_to_llm(messages, ctx=ctx)
 
         hooks["convert_to_llm"] = composed_convert
 
@@ -160,10 +161,12 @@ def compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]:
     sp_chain = [m for m in middlewares if _has_method(m, "transform_system_prompt")]
     if sp_chain:
 
-        async def composed_sp(system_prompt, *, signal=None):
+        async def composed_sp(system_prompt, *, ctx, signal=None):
             result = system_prompt
             for mw in sp_chain:
-                result = await mw.transform_system_prompt(result, signal=signal)
+                result = await mw.transform_system_prompt(
+                    result, ctx=ctx, signal=signal
+                )
             return result
 
         hooks["transform_system_prompt"] = composed_sp

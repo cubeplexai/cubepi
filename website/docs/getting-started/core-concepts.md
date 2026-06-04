@@ -78,11 +78,27 @@ class Provider(Protocol):
         tools: list[ToolDefinition] | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream: ...
+
+    async def generate(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        thinking: ThinkingLevel | None = None,
+        thinking_budgets: ThinkingBudgets | None = None,
+    ) -> AssistantMessage: ...
 ```
 
-It returns a `MessageStream` — a single async iterator that yields
-`StreamEvent`s and exposes the final `AssistantMessage` via `await
-stream.result()`. Built-in providers:
+`stream()` returns a `MessageStream` — a single async iterator that
+yields `StreamEvent`s and exposes the final `AssistantMessage` via
+`await stream.result()`. `generate()` consumes one stream and returns
+the final message directly; `BaseProvider` implements it for any
+provider that implements `stream()`. Built-in providers:
 
 - `AnthropicProvider` — Claude (Messages API, with thinking, caching,
   tool use).
@@ -91,7 +107,8 @@ stream.result()`. Built-in providers:
   state).
 - `FauxProvider` — deterministic test double (no network).
 
-Write your own by implementing one method. See [Providers / Custom](../guides/providers/custom).
+Write your own by subclassing `BaseProvider` and implementing
+`stream()`. See [Providers / Custom](../guides/providers/custom).
 
 ## Stream and events
 

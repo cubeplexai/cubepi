@@ -677,9 +677,9 @@ async def _stream_assistant_response(
 ) -> AssistantMessage:
     messages = context.messages
     if transform_context:
-        messages = await transform_context(messages, signal=options.signal)
+        messages = await transform_context(messages, ctx=context, signal=options.signal)
 
-    llm_messages = convert_to_llm(messages)
+    llm_messages = convert_to_llm(messages, ctx=context)
     if asyncio.iscoroutine(llm_messages):
         llm_messages = await llm_messages
 
@@ -689,7 +689,7 @@ async def _stream_assistant_response(
 
     sp = context.system_prompt
     if transform_system_prompt:
-        sp = await transform_system_prompt(sp, signal=options.signal)
+        sp = await transform_system_prompt(sp, ctx=context, signal=options.signal)
 
     stream = await provider.stream(
         model,

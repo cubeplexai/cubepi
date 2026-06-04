@@ -166,7 +166,8 @@ overrides. You don't need to `pass`-implement every method.
 
 ```python
 class JustTransform(Middleware):
-    async def transform_context(self, messages, *, signal=None):
+    async def transform_context(self, messages, *, ctx, signal=None):
+        del ctx, signal
         return messages[-10:]
     # No other hooks. CubePi won't call them.
 ```

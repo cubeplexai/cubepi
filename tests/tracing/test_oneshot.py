@@ -8,7 +8,17 @@ import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from cubepi.providers.base import Model, TextContent, UserMessage
+from cubepi.providers.base import (
+    AssistantMessage,
+    Message,
+    MessageStream,
+    Model,
+    StreamEvent,
+    StreamOptions,
+    TextContent,
+    ToolDefinition,
+    UserMessage,
+)
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubepi.tracing import Tracer
 from cubepi.tracing.tracer import _OneShotSession
@@ -56,6 +66,26 @@ async def test_oneshot_session_type() -> None:
     async with tracer.oneshot(provider=provider, model=MODEL) as session:
         assert isinstance(session, _OneShotSession)
     await tracer.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_oneshot_session_uses_provider_generate() -> None:
+    provider = _GenerateOnlyProvider()
+    tracer, _ = _make_tracer()
+
+    async with tracer.oneshot(provider=provider, model=MODEL) as session:
+        text = await session.generate(
+            system="sys",
+            messages=[UserMessage(content=[TextContent(text="q")])],
+            max_output_tokens=123,
+        )
+
+    await tracer.shutdown()
+
+    assert text == "via generate"
+    assert provider.seen_max_output_tokens == 123
+    assert provider.seen_options is not None
+    assert provider.seen_options.signal is not None
 
 
 @pytest.mark.asyncio
@@ -233,18 +263,16 @@ async def test_oneshot_generate_error_event_raises_and_marks_root() -> None:
     the root invoke_agent span with ERROR status so `cubepi trace ls` shows
     the run as failed instead of as a successful invoke_agent."""
     from opentelemetry.trace import StatusCode
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import AsyncMock, patch
 
     provider = FauxProvider()
     tracer, exporter = _make_tracer()
 
-    # Patch provider.stream to yield an error event
-    error_stream = MagicMock()
-
-    async def _gen():
-        yield MagicMock(type="error", error_message="boom", delta=None)
-
-    error_stream.__aiter__ = lambda self: _gen()
+    error_stream = MessageStream()
+    error_stream.push(StreamEvent(type="error", error_message="boom"))
+    error_stream.set_result(
+        AssistantMessage(content=[], stop_reason="error", error_message="boom")
+    )
     with patch.object(provider, "stream", new=AsyncMock(return_value=error_stream)):
         with pytest.raises(RuntimeError, match="boom"):
             async with tracer.oneshot(provider=provider, model=MODEL) as session:
@@ -406,8 +434,6 @@ async def test_oneshot_passes_signal_to_provider_and_sets_on_cancel() -> None:
     the consumer tears the producer task down too."""
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
-
-    from cubepi.providers.base import StreamOptions
 
     provider = FauxProvider()
     tracer, _ = _make_tracer()
@@ -661,3 +687,41 @@ async def test_oneshot_does_not_interfere_with_concurrent_agent() -> None:
     # Both runs should produce an invoke_agent span
     roots = [s for s in exporter.spans if s.name == "invoke_agent"]
     assert len(roots) == 2
+
+
+class _GenerateOnlyProvider(FauxProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.seen_max_output_tokens: int | None = None
+        self.seen_options: StreamOptions | None = None
+
+    async def generate(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        thinking=None,
+        thinking_budgets=None,
+    ) -> AssistantMessage:
+        del model, messages, system_prompt, tools, temperature, thinking
+        del thinking_budgets
+        self.seen_max_output_tokens = max_output_tokens
+        self.seen_options = options
+        return AssistantMessage(content=[TextContent(text="via generate")])
+
+    async def stream(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        del model, messages, system_prompt, tools, options
+        raise AssertionError("Tracer.oneshot must call provider.generate()")

@@ -3,17 +3,20 @@
 import pytest
 
 from cubepi import Agent, Model
+from cubepi.agent.types import AgentContext
 from cubepi.middleware.base import Middleware, compose_middleware
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
 
 class _AppendA(Middleware):
-    async def transform_system_prompt(self, sp, *, signal=None):
+    async def transform_system_prompt(self, sp, *, ctx, signal=None):
+        del ctx, signal
         return sp + "\n[A]"
 
 
 class _AppendB(Middleware):
-    async def transform_system_prompt(self, sp, *, signal=None):
+    async def transform_system_prompt(self, sp, *, ctx, signal=None):
+        del ctx, signal
         return sp + "\n[B]"
 
 
@@ -21,7 +24,7 @@ class _AppendB(Middleware):
 async def test_single_middleware_appends() -> None:
     hooks = compose_middleware([_AppendA()])
     fn = hooks["transform_system_prompt"]
-    out = await fn("base")
+    out = await fn("base", ctx=AgentContext(system_prompt="", messages=[]))
     assert out == "base\n[A]"
 
 
@@ -30,7 +33,7 @@ async def test_chain_order_preserved() -> None:
     """A then B → A first, then B sees A's output."""
     hooks = compose_middleware([_AppendA(), _AppendB()])
     fn = hooks["transform_system_prompt"]
-    out = await fn("base")
+    out = await fn("base", ctx=AgentContext(system_prompt="", messages=[]))
     assert out == "base\n[A]\n[B]"
 
 
@@ -49,7 +52,9 @@ async def test_default_implementation_raises() -> None:
     """Default Middleware.transform_system_prompt raises NotImplementedError."""
     mw = Middleware()
     with pytest.raises(NotImplementedError):
-        await mw.transform_system_prompt("any")
+        await mw.transform_system_prompt(
+            "any", ctx=AgentContext(system_prompt="", messages=[])
+        )
 
 
 @pytest.mark.asyncio
@@ -58,7 +63,8 @@ async def test_agent_applies_transform_system_prompt() -> None:
     captured: list[str] = []
 
     class _Capturing(Middleware):
-        async def transform_system_prompt(self, sp: str, *, signal=None) -> str:
+        async def transform_system_prompt(self, sp: str, *, ctx, signal=None) -> str:
+            del ctx, signal
             # last middleware in chain captures what it saw
             captured.append(sp)
             return sp + "\n[C]"

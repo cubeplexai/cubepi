@@ -1,0 +1,259 @@
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from pydantic import BaseModel
+
+from cubepi import AgentTool, AgentToolResult, TextContent
+from cubepi.middleware.subagents import SubagentMiddleware, SubagentSpec
+from cubepi.providers.base import Model
+from cubepi.providers.faux import FauxProvider, faux_assistant_message
+
+
+def _make_middleware(
+    *,
+    provider: FauxProvider | None = None,
+    subagents: dict[str, SubagentSpec] | None = None,
+    **kwargs: Any,
+) -> SubagentMiddleware:
+    provider = provider or FauxProvider()
+    subagents = subagents or {
+        "general-purpose": SubagentSpec(
+            name="general-purpose",
+            description="general",
+            system_prompt="You are a subagent.",
+        )
+    }
+    return SubagentMiddleware(
+        subagents=subagents,
+        default_provider=provider,
+        default_model=Model(id="faux-1", provider="faux"),
+        **kwargs,
+    )
+
+
+def test_middleware_exposes_subagent_tool() -> None:
+    middleware = _make_middleware()
+
+    assert len(middleware.tools) == 1
+    assert middleware.tools[0].name == "subagent"
+    schema = middleware.tools[0].parameters.model_json_schema()
+    assert "prompt" in schema["properties"]
+    assert "subagent_type" in schema["properties"]
+
+
+def test_general_purpose_fallback_is_registered() -> None:
+    middleware = _make_middleware(
+        subagents={
+            "specialist": SubagentSpec(
+                name="specialist",
+                description="niche",
+                system_prompt="You are special.",
+            )
+        }
+    )
+
+    assert "general-purpose" in middleware.subagents
+    assert "specialist" in middleware.subagents
+
+
+def test_shared_tools_filter_is_configurable() -> None:
+    class _NoArgs(BaseModel):
+        pass
+
+    async def _noop(
+        tool_call_id: str,
+        args: _NoArgs,
+        *,
+        signal: Any = None,
+        on_update: Any = None,
+    ) -> AgentToolResult:
+        del tool_call_id, args, signal, on_update
+        return AgentToolResult(content=[TextContent(text="ok")])
+
+    safe = AgentTool(name="safe", description="safe", parameters=_NoArgs, execute=_noop)
+    subagent = AgentTool(
+        name="subagent", description="recursive", parameters=_NoArgs, execute=_noop
+    )
+    load_skill = AgentTool(
+        name="load_skill",
+        description="host-specific",
+        parameters=_NoArgs,
+        execute=_noop,
+    )
+
+    middleware = _make_middleware(
+        shared_tools=[safe, subagent, load_skill],
+        excluded_tool_names={"subagent", "load_skill"},
+    )
+
+    assert middleware.shared_tools == (safe,)
+
+
+async def test_subagent_tool_dispatches_to_child_agent() -> None:
+    provider = FauxProvider()
+    provider.set_responses([faux_assistant_message("subagent reply")])
+    middleware = _make_middleware(provider=provider)
+    [tool] = middleware.tools
+
+    args = tool.parameters(
+        name="worker",
+        role="researcher",
+        task="answer",
+        prompt="please reply",
+        subagent_type="general-purpose",
+    )
+    result = await tool.execute("tc-1", args, signal=None, on_update=None)
+
+    assert result.is_error is not True
+    assert result.content[0].text == "subagent reply"
+    assert isinstance(result.details, dict)
+    assert "subagent_events" in result.details
+
+
+async def test_unknown_subagent_type_falls_back_to_general_purpose() -> None:
+    provider = FauxProvider()
+    provider.set_responses([faux_assistant_message("fallback reply")])
+    middleware = _make_middleware(provider=provider)
+    [tool] = middleware.tools
+
+    args = tool.parameters(
+        name="worker",
+        role="researcher",
+        task="answer",
+        prompt="please reply",
+        subagent_type="missing",
+    )
+    result = await tool.execute("tc-2", args, signal=None, on_update=None)
+
+    assert result.is_error is not True
+    assert result.content[0].text == "fallback reply"
+
+
+async def test_event_mapper_and_handler_receive_child_events() -> None:
+    provider = FauxProvider()
+    provider.set_responses([faux_assistant_message("mapped reply")])
+    handled: list[tuple[str, dict[str, Any]]] = []
+
+    def mapper(event: Any) -> list[dict[str, Any]]:
+        return [{"type": event.type}]
+
+    async def handler(agent_id: str, payload: dict[str, Any]) -> None:
+        handled.append((agent_id, payload))
+
+    middleware = _make_middleware(
+        provider=provider,
+        event_mapper=mapper,
+        event_handler=handler,
+    )
+    [tool] = middleware.tools
+
+    args = tool.parameters(
+        name="worker",
+        role="researcher",
+        task="answer",
+        prompt="please reply",
+        subagent_type="general-purpose",
+    )
+    result = await tool.execute("tc-3", args, signal=None, on_update=None)
+
+    assert handled
+    assert all(agent_id == "subagent:tc-3" for agent_id, _ in handled)
+    assert result.details["subagent_events"] == [payload for _, payload in handled]
+
+
+async def test_inner_agent_failure_returns_tool_error() -> None:
+    class _FailingProvider(FauxProvider):
+        async def stream(self, *args: Any, **kwargs: Any) -> Any:
+            del args, kwargs
+            raise RuntimeError("inner boom")
+
+    middleware = _make_middleware(provider=_FailingProvider())
+    [tool] = middleware.tools
+
+    args = tool.parameters(
+        name="worker",
+        role="researcher",
+        task="answer",
+        prompt="please reply",
+        subagent_type="general-purpose",
+    )
+    result = await tool.execute("tc-4", args, signal=None, on_update=None)
+
+    assert result.is_error is True
+    assert "inner boom" in result.content[0].text
+
+
+async def test_tracer_detaches_after_success_and_cancel() -> None:
+    tracer = _FakeTracer(awaitable_detach=True)
+    provider = FauxProvider()
+    provider.set_responses([faux_assistant_message("ok")])
+    middleware = _make_middleware(provider=provider, tracer=tracer)
+    [tool] = middleware.tools
+
+    args = tool.parameters(
+        name="worker",
+        role="researcher",
+        task="answer",
+        prompt="please reply",
+        subagent_type="general-purpose",
+    )
+    result = await tool.execute("tc-5", args, signal=None, on_update=None)
+
+    assert result.is_error is not True
+    assert len(tracer.attached) == 1
+    assert tracer.detached == 1
+    assert tracer.awaited is True
+
+
+async def test_cancelled_subagent_run_propagates_and_detaches_tracer() -> None:
+    class _CancelledProvider(FauxProvider):
+        async def stream(self, *args: Any, **kwargs: Any) -> Any:
+            del args, kwargs
+            raise asyncio.CancelledError()
+
+    tracer = _FakeTracer()
+    middleware = _make_middleware(provider=_CancelledProvider(), tracer=tracer)
+    [tool] = middleware.tools
+
+    args = tool.parameters(
+        name="worker",
+        role="researcher",
+        task="answer",
+        prompt="please reply",
+        subagent_type="general-purpose",
+    )
+    try:
+        await tool.execute("tc-6", args, signal=None, on_update=None)
+    except asyncio.CancelledError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("CancelledError was swallowed")
+
+    assert len(tracer.attached) == 1
+    assert tracer.detached == 1
+
+
+class _FakeTracer:
+    def __init__(self, *, awaitable_detach: bool = False) -> None:
+        self.awaitable_detach = awaitable_detach
+        self.attached: list[Any] = []
+        self.detached = 0
+        self.awaited = False
+
+    def attach(self, agent: Any) -> Any:
+        self.attached.append(agent)
+
+        def detach() -> Any:
+            self.detached += 1
+            if not self.awaitable_detach:
+                return None
+
+            async def flush() -> None:
+                await asyncio.sleep(0)
+                self.awaited = True
+
+            return flush()
+
+        return detach

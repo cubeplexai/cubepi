@@ -34,7 +34,8 @@ def make_user_message(text: str) -> UserMessage:
     return UserMessage(content=[TextContent(text=text)])
 
 
-def identity_converter(messages: list[Any]) -> list[Message]:
+def identity_converter(messages: list[Any], *, ctx: AgentContext) -> list[Message]:
+    del ctx
     return [
         m
         for m in messages
@@ -102,7 +103,8 @@ class TestAgentLoop:
 
         converted: list[Message] = []
 
-        def converter(messages):
+        def converter(messages, *, ctx):
+            del ctx
             result = [
                 m
                 for m in messages
@@ -141,14 +143,16 @@ class TestAgentLoop:
         transformed_len = []
         converted_len = []
 
-        async def transform(messages, *, signal=None):
+        async def transform(messages, *, ctx, signal=None):
+            del ctx, signal
             result = messages[-2:]
             transformed_len.append(len(result))
             return result
 
-        def converter(messages):
+        def converter(messages, *, ctx):
+            del ctx
             converted_len.append(len(messages))
-            return identity_converter(messages)
+            return identity_converter(messages, ctx=context)
 
         await run_agent_loop(
             prompts=[make_user_message("new")],
@@ -573,8 +577,13 @@ class TestAsyncConvertToLlm:
         context = AgentContext(system_prompt="", messages=[], tools=[])
         converter_called = False
 
-        async def async_converter(messages: list[Any]) -> list[Message]:
+        async def async_converter(
+            messages: list[Any],
+            *,
+            ctx: AgentContext,
+        ) -> list[Message]:
             nonlocal converter_called
+            del ctx
             converter_called = True
             return [
                 m

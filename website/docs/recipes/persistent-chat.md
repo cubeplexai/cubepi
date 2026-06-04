@@ -128,7 +128,8 @@ class SlidingWindow(Middleware):
     def __init__(self, n: int) -> None:
         self.n = n
 
-    async def transform_context(self, messages, *, signal=None):
+    async def transform_context(self, messages, *, ctx, signal=None):
+        del ctx, signal
         return messages[-self.n:] if len(messages) > self.n else messages
 
 

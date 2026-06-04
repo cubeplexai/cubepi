@@ -152,7 +152,8 @@ class SlidingWindow(Middleware):
     def __init__(self, max_messages: int = 20) -> None:
         self.max_messages = max_messages
 
-    async def transform_context(self, messages, *, signal=None):
+    async def transform_context(self, messages, *, ctx, signal=None):
+        del ctx, signal
         if len(messages) <= self.max_messages:
             return messages
         return messages[-self.max_messages:]
@@ -166,10 +167,76 @@ what was dropped:
 
 ```python
 class SummaryInjector(Middleware):
-    async def transform_system_prompt(self, system_prompt, *, signal=None):
+    async def transform_system_prompt(self, system_prompt, *, ctx, signal=None):
+        del ctx, signal
         summary = "Earlier in this conversation we discussed: …"
         return f"{system_prompt}\n\nContext: {summary}".strip()
 ```
+
+## Built-in compaction
+
+`CompactionMiddleware` summarizes older turns into `ctx.extra` and
+passes the model a compressed view: one summary message plus recent
+messages. The full conversation history remains in `agent.state`.
+
+```python
+from cubepi.middleware import CompactionMiddleware
+from cubepi.providers import Model
+
+agent = Agent(
+    provider=main_provider,
+    model=main_model,
+    middleware=[
+        CompactionMiddleware(
+            summary_provider=cheap_provider,
+            summary_model=Model(id="claude-haiku-4-5", provider="anthropic"),
+            max_tokens_before_compact=80_000,
+            keep_recent_messages=8,
+        ),
+    ],
+)
+```
+
+The summary call uses `Provider.generate(...)` with
+`temperature=0.0`, `thinking="off"`, and `max_output_tokens` set from
+`max_summary_tokens`.
+
+## Built-in subagents
+
+`SubagentMiddleware` adds one `subagent` tool that runs a temporary
+child `Agent` with a self-contained prompt. CubePi captures child
+events and returns the child agent's final assistant text as the tool
+result.
+
+```python
+from cubepi.middleware import SubagentMiddleware, SubagentSpec
+
+subagents = {
+    "researcher": SubagentSpec(
+        name="researcher",
+        description="Researches a narrow question",
+        system_prompt="You are a concise research assistant.",
+    )
+}
+
+agent = Agent(
+    provider=provider,
+    model=model,
+    middleware=[
+        SubagentMiddleware(
+            subagents=subagents,
+            default_provider=provider,
+            default_model=model,
+            shared_tools=[web_search],
+        ),
+    ],
+)
+```
+
+Host applications can pass `event_mapper` and `event_handler` to map
+child `AgentEvent`s into their own UI stream or audit log. Billing,
+SSE payload shape, and product-specific tool filtering stay in the
+host application.
 
 ## Max turns / budget cap
 

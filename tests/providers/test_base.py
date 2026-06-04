@@ -4,16 +4,20 @@ import pytest
 
 from cubepi.providers.base import (
     AssistantMessage,
+    BaseProvider,
     ImageContent,
+    Message,
     MessageStream,
     Model,
     ModelCost,
     StreamEvent,
     TextContent,
+    ThinkingBudgets,
     ThinkingContent,
     ToolCall,
     ToolDefinition,
     ToolResultMessage,
+    StreamOptions,
     Usage,
     UserMessage,
     format_provider_error,
@@ -233,6 +237,47 @@ class TestMessageStreamTaskTracking:
             await ms.result()
 
 
+class TestBaseProviderGenerate:
+    async def test_generate_consumes_stream_and_returns_assistant_message(self):
+        provider = _RecordingProvider(
+            AssistantMessage(content=[TextContent(text="ok")])
+        )
+
+        result = await provider.generate(
+            Model(id="gpt-4o", provider="openai"),
+            [UserMessage(content=[TextContent(text="hi")])],
+            system_prompt="system",
+        )
+
+        assert result.content[0].text == "ok"
+        assert provider.call_count == 1
+
+    async def test_generate_applies_common_per_call_overrides(self):
+        provider = _RecordingProvider(AssistantMessage(content=[]))
+        base_model = Model(id="gpt-4o", provider="openai", max_tokens=128)
+        base_options = StreamOptions(thinking="low")
+        budgets = ThinkingBudgets(low=4096)
+
+        await provider.generate(
+            base_model,
+            [],
+            options=base_options,
+            max_output_tokens=512,
+            temperature=0.0,
+            thinking="high",
+            thinking_budgets=budgets,
+        )
+
+        assert provider.seen_model is not None
+        assert provider.seen_model.max_tokens == 512
+        assert provider.seen_model.temperature == 0.0
+        assert base_model.max_tokens == 128
+        assert provider.seen_options is not None
+        assert provider.seen_options.thinking == "high"
+        assert provider.seen_options.thinking_budgets is budgets
+        assert base_options.thinking == "low"
+
+
 class TestAssistantMessageMetadata:
     def test_default_metadata_fields(self):
         msg = AssistantMessage(content=[])
@@ -250,3 +295,30 @@ class TestAssistantMessageMetadata:
         assert msg.provider_id == "anthropic"
         assert msg.model_id == "claude-sonnet-4-20250514"
         assert msg.response_id == "msg_abc123"
+
+
+class _RecordingProvider(BaseProvider):
+    def __init__(self, result: AssistantMessage) -> None:
+        super().__init__()
+        self._result = result
+        self.call_count = 0
+        self.seen_model: Model | None = None
+        self.seen_options: StreamOptions | None = None
+
+    async def stream(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        del messages, system_prompt, tools
+        self.call_count += 1
+        self.seen_model = model
+        self.seen_options = options
+        stream = MessageStream()
+        stream.push(StreamEvent(type="done"))
+        stream.set_result(self._result)
+        return stream

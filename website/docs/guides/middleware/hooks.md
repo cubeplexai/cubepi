@@ -13,7 +13,7 @@ ones you need — CubePi only wires in the ones you override.
 from cubepi import Middleware
 
 class MyMiddleware(Middleware):
-    async def transform_context(self, messages, *, signal=None):
+    async def transform_context(self, messages, *, ctx, signal=None):
         ...
 ```
 
@@ -22,11 +22,19 @@ Pass instances to `Agent(middleware=[MyMiddleware(), …])`.
 ## `transform_context`
 
 ```python
-async def transform_context(self, messages: list[Message], *, signal=None) -> list[Message]:
+async def transform_context(
+    self,
+    messages: list[Message],
+    *,
+    ctx: AgentContext,
+    signal=None,
+) -> list[Message]:
     ...
 ```
 
-Fires **before each model call**, on the full message list. Use to:
+Fires **before each model call**, on the full message list. `ctx` is
+the current `AgentContext`; use `ctx.extra` for per-run or
+checkpointer-persisted middleware state. Use to:
 
 - Truncate or summarise to fit context windows.
 - Inject system reminders (better: use `transform_system_prompt`).
@@ -41,7 +49,12 @@ output.
 ## `convert_to_llm`
 
 ```python
-async def convert_to_llm(self, messages: list[Message]) -> list[Message]:
+async def convert_to_llm(
+    self,
+    messages: list[Message],
+    *,
+    ctx: AgentContext,
+) -> list[Message]:
     ...
 ```
 
@@ -59,7 +72,13 @@ multiple middlewares would conflict and you want a single owner.
 ## `transform_system_prompt`
 
 ```python
-async def transform_system_prompt(self, system_prompt: str, *, signal=None) -> str:
+async def transform_system_prompt(
+    self,
+    system_prompt: str,
+    *,
+    ctx: AgentContext,
+    signal=None,
+) -> str:
     ...
 ```
 

@@ -5,7 +5,9 @@ description: "Write a custom provider for CubePi by implementing the Provider pr
 
 # Writing a Custom Provider
 
-A provider is any class with one method:
+A provider is any class matching the `Provider` protocol. In practice,
+subclass `BaseProvider` and implement `stream()`; `BaseProvider`
+supplies `generate()` for one-shot calls.
 
 ```python
 class Provider(Protocol):
@@ -20,8 +22,10 @@ class Provider(Protocol):
     ) -> MessageStream: ...
 ```
 
-That's the whole interface. Implement it and `Agent(provider=…)`
-accepts your class.
+That is the only method custom providers usually implement. The
+inherited `generate()` consumes `stream()` and returns the final
+`AssistantMessage`, with per-call overrides for `max_output_tokens`,
+`temperature`, `thinking`, and `thinking_budgets`.
 
 This page covers two scenarios:
 

@@ -577,6 +577,20 @@ class Provider(Protocol):
         options: StreamOptions | None = None,
     ) -> MessageStream: ...
 
+    async def generate(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        thinking: ThinkingLevel | None = None,
+        thinking_budgets: ThinkingBudgets | None = None,
+    ) -> AssistantMessage: ...
+
 
 class BaseProvider:
     """Concrete base class for built-in cubepi providers.
@@ -613,6 +627,49 @@ class BaseProvider:
         options: StreamOptions | None = None,
     ) -> MessageStream:
         raise NotImplementedError
+
+    async def generate(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        thinking: ThinkingLevel | None = None,
+        thinking_budgets: ThinkingBudgets | None = None,
+    ) -> AssistantMessage:
+        """Run a single provider call and return the final assistant message."""
+        model_updates: dict[str, int | float] = {}
+        if max_output_tokens is not None:
+            model_updates["max_tokens"] = max_output_tokens
+        if temperature is not None:
+            model_updates["temperature"] = temperature
+        if model_updates:
+            model = model.model_copy(update=model_updates)
+
+        option_updates: dict[str, ThinkingLevel | ThinkingBudgets] = {}
+        if thinking is not None:
+            option_updates["thinking"] = thinking
+        if thinking_budgets is not None:
+            option_updates["thinking_budgets"] = thinking_budgets
+        if option_updates:
+            base_options = options or StreamOptions()
+            options = base_options.model_copy(update=option_updates)
+
+        stream = await self.stream(
+            model=model,
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            options=options,
+        )
+        async for event in stream:
+            if event.type in ("done", "error"):
+                break
+        return await stream.result()
 
     def _error_message(self, exc: BaseException, model: Model) -> str:
         """Format a failed-call error with provider/model/base_url + cause."""

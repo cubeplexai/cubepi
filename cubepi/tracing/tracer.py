@@ -66,9 +66,6 @@ class _OneShotSession:
         import asyncio as _asyncio
 
         from cubepi.providers.base import (
-            AssistantMessage as _AssistantMessage,
-        )
-        from cubepi.providers.base import (
             StreamOptions as _StreamOptions,
         )
         from cubepi.providers.base import (
@@ -89,60 +86,31 @@ class _OneShotSession:
         # Mirrors the agent loop's ``StreamOptions(signal=...)`` use.
         abort_signal = _asyncio.Event()
 
-        model = self._model.model_copy(update={"max_tokens": max_output_tokens})
-        stream = await self._provider.stream(
-            model=model,
-            messages=messages,
-            system_prompt=system,
-            options=_StreamOptions(signal=abort_signal),
-        )
-        parts: list[str] = []
-        error_msg: str | None = None
         try:
-            async for evt in stream:
-                if evt.type == "text_delta" and evt.delta:
-                    parts.append(evt.delta)
-                elif evt.type == "error":
-                    error_msg = evt.error_message or "oneshot generation failed"
-                    break
-                elif evt.type == "done":
-                    break
+            response = await self._provider.generate(
+                model=self._model,
+                messages=messages,
+                system_prompt=system,
+                options=_StreamOptions(signal=abort_signal),
+                max_output_tokens=max_output_tokens,
+            )
         except BaseException:
             # On cancellation/timeout, tell the producer to stop so it
-            # doesn't keep running after we exit. ``stream.result()``
-            # below then surfaces the (now-completed) producer's state.
+            # doesn't keep running after we exit.
             abort_signal.set()
             raise
-        # Wait for the producer task to finish — its ``finally`` block
-        # invokes the response listeners (including the recorder's
-        # ``_on_provider_response`` that closes the chat span and records
-        # usage). Without this, breaking on ``done`` lets us race ahead
-        # and exit the oneshot context before the chat span is closed,
-        # so the cleanup sweep would mark it ``cubepi.aborted`` and the
-        # trace would be missing usage / response data. Mirrors the
-        # ``await stream.result()`` pattern in cubepi.agent.loop.
-        try:
-            await stream.result()
-        except Exception as result_exc:
-            # If we already captured an error event, the producer's
-            # exception is just the same failure expressed differently —
-            # swallow it and report uniformly via ``error_msg``. But if
-            # we got here on the success path (``done`` event consumed),
-            # the producer raised AFTER signalling done without emitting
-            # an error event, e.g. a custom provider bug. Surface that
-            # exception so the run is reported as failed instead of
-            # returning empty text.
-            if error_msg is None:
-                error_msg = str(result_exc) or "oneshot producer failed"
-        if error_msg is not None:
-            raise RuntimeError(error_msg)
+
+        if response.error_message is not None:
+            raise RuntimeError(response.error_message)
+
+        parts = [
+            block.text for block in response.content if isinstance(block, _TextContent)
+        ]
         text = "".join(parts)
         # Stash output as a single assistant message so the oneshot finally
         # block can stamp gen_ai.output.messages on the root span.
         if text:
-            self._run.output_messages = [
-                _AssistantMessage(content=[_TextContent(text=text)])
-            ]
+            self._run.output_messages = [response]
         return text
 
 

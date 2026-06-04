@@ -42,7 +42,10 @@ from cubepi.providers.base import (
 TMessage = TypeVar("TMessage")
 
 
-def _default_convert_to_llm(messages: list[Message]) -> list[Message]:
+def _default_convert_to_llm(
+    messages: list[Message], *, ctx: AgentContext
+) -> list[Message]:
+    del ctx
     return list(messages)
 
 
@@ -130,7 +133,7 @@ class Agent(Generic[TMessage]):
         system_prompt: str = "",
         tools: list[AgentTool] | None = None,
         thinking: ThinkingLevel = "off",
-        convert_to_llm: Callable[[list[Message]], list[Message]] | None = None,
+        convert_to_llm: Callable[..., list[Message]] | None = None,
         transform_context: Callable | None = None,
         transform_system_prompt: Callable | None = None,
         after_model_response: Callable | None = None,
