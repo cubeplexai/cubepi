@@ -227,3 +227,23 @@ async def test_stale_boundary_from_replaced_history_is_ignored() -> None:
     assert result == new_messages
     assert "compaction" not in ctx.extra
     assert "compaction_until_msg_index" not in ctx.extra
+
+
+async def test_malformed_persisted_state_is_cleared() -> None:
+    provider = _FakeSummaryProvider()
+    middleware = _make_middleware(provider, max_tokens_before=100_000)
+    messages: list[Message] = [_user("new question")]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=messages,
+        extra={
+            "compaction": {},
+            "compaction_until_msg_index": 1,
+        },
+    )
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    assert result == messages
+    assert "compaction" not in ctx.extra
+    assert "compaction_until_msg_index" not in ctx.extra

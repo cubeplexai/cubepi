@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from pydantic import ValidationError
+
 from cubepi.agent.types import AgentContext
 from cubepi.middleware.base import Middleware
 from cubepi.middleware.compaction.boundary import safe_boundary
@@ -34,7 +36,10 @@ def _load_state(value: Any) -> CompactionState | None:
     if isinstance(value, CompactionState):
         return value
     if isinstance(value, dict):
-        return CompactionState.model_validate(value)
+        try:
+            return CompactionState.model_validate(value)
+        except ValidationError:
+            return None
     return None
 
 
@@ -85,6 +90,9 @@ class CompactionMiddleware(Middleware):
     ) -> list[Message]:
         state = _load_state(ctx.extra.get("compaction"))
         boundary = int(ctx.extra.get("compaction_until_msg_index") or 0)
+        if state is None and ("compaction" in ctx.extra or boundary > 0):
+            boundary = 0
+            _clear_state(ctx)
         if boundary >= len(messages) or not _state_matches_history(
             messages, state, boundary
         ):
