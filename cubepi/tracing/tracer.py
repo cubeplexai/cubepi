@@ -63,8 +63,20 @@ class _OneShotSession:
         The provider listeners wired by :meth:`Tracer.oneshot` will record
         a ``chat`` child span covering this call automatically.
         """
-        # Seed transcript so record_content captures input messages.
+        from cubepi.providers.base import (
+            AssistantMessage as _AssistantMessage,
+        )
+        from cubepi.providers.base import (
+            TextContent as _TextContent,
+        )
+
+        # Seed transcript so record_content captures input messages on the
+        # chat span, and stash system/input on the run so the oneshot
+        # finally block can also stamp them on the root invoke_agent span
+        # (no AgentEnd event fires here to do it automatically).
         self._run.transcript = list(messages)
+        self._run.input_messages = list(messages)
+        self._run.system_prompt = system
 
         model = self._model.model_copy(update={"max_tokens": max_output_tokens})
         stream = await self._provider.stream(
@@ -80,7 +92,14 @@ class _OneShotSession:
                 raise RuntimeError(evt.error_message or "oneshot generation failed")
             elif evt.type == "done":
                 break
-        return "".join(parts)
+        text = "".join(parts)
+        # Stash output as a single assistant message so the oneshot finally
+        # block can stamp gen_ai.output.messages on the root span.
+        if text:
+            self._run.output_messages = [
+                _AssistantMessage(content=[_TextContent(text=text)])
+            ]
+        return text
 
 
 class Tracer:
@@ -530,16 +549,52 @@ class Tracer:
                 except Exception:
                     pass
                 run.chat_span = None
+            # Stamp content on the root invoke_agent span. The agent path
+            # does this in Recorder._on_agent_end, which never fires for
+            # oneshot. Without it, ``cubepi trace ls`` shows a blank input
+            # column for one-shot traces because it reads
+            # ``gen_ai.input.messages`` off the root.
+            if do_record:
+                try:
+                    from cubepi.tracing.content import (
+                        messages_to_semconv,
+                        system_instructions_to_semconv,
+                    )
+                    from cubepi.tracing.schema import (
+                        GEN_AI_INPUT_MESSAGES,
+                        GEN_AI_OUTPUT_MESSAGES,
+                        GEN_AI_SYSTEM_INSTRUCTIONS,
+                    )
+
+                    if run.system_prompt:
+                        recorder._set_content_attr(
+                            root_span,
+                            GEN_AI_SYSTEM_INSTRUCTIONS,
+                            system_instructions_to_semconv(run.system_prompt),
+                        )
+                    if run.input_messages:
+                        recorder._set_content_attr(
+                            root_span,
+                            GEN_AI_INPUT_MESSAGES,
+                            messages_to_semconv(run.input_messages),
+                        )
+                    if run.output_messages:
+                        recorder._set_content_attr(
+                            root_span,
+                            GEN_AI_OUTPUT_MESSAGES,
+                            messages_to_semconv(run.output_messages),
+                        )
+                except Exception:
+                    pass
             recorder._run = None
             root_span.end()
-            # Best-effort flush — tracing must never break the caller's work.
+            # Flush synchronously so the trace is visible after the block.
+            # Unlike attach()'s detach, we have no detach Task to hand back
+            # to the caller — if we don't await here, a short-lived
+            # asyncio.run() can exit before the BatchSpanProcessor drains.
             try:
-                import asyncio
-
-                asyncio.get_running_loop().create_task(
-                    self.force_flush(timeout_seconds=5.0)
-                )
-            except RuntimeError:  # pragma: no cover — only fires outside an event loop
+                await self.force_flush(timeout_seconds=5.0)
+            except Exception:
                 pass
 
     async def __aenter__(self) -> "Tracer":

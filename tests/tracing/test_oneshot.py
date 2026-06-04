@@ -183,6 +183,18 @@ async def test_oneshot_record_content_captures_messages() -> None:
     # With record_content=True the system instructions are recorded on the chat span
     assert "gen_ai.system_instructions" in attrs
 
+    # The root invoke_agent span must also carry input/output/system so that
+    # `cubepi trace ls` (which reads gen_ai.input.messages off the root) can
+    # show the prompt in its input column.
+    root_spans = [s for s in exporter.spans if s.name == "invoke_agent"]
+    assert root_spans, "expected a root invoke_agent span"
+    root_attrs = dict(root_spans[0].attributes or {})
+    assert "gen_ai.system_instructions" in root_attrs
+    assert "gen_ai.input.messages" in root_attrs
+    assert "gen_ai.output.messages" in root_attrs
+    assert "question" in root_attrs["gen_ai.input.messages"]
+    assert "answer" in root_attrs["gen_ai.output.messages"]
+
 
 @pytest.mark.asyncio
 async def test_oneshot_generate_error_event_raises() -> None:
