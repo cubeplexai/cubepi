@@ -308,12 +308,7 @@ class AnthropicProvider(BaseProvider):
                 except Exception as _sdk_exc:
                     from cubepi.errors import classify_and_raise
 
-                    # Guard: only classify Anthropic SDK errors, not local
-                    # callback/processing exceptions (on_response, _handle_event,
-                    # _convert_response, _assemble_response).
-                    if type(_sdk_exc).__module__.startswith("anthropic"):
-                        classify_and_raise(_sdk_exc, model=model, messages=messages)
-                    raise
+                    classify_and_raise(_sdk_exc, model=model, messages=messages)
 
             except BaseException as e:
                 exc = e
