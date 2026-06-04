@@ -1374,6 +1374,8 @@ class TestAnthropicBaseUrl:
 class _FakeAnthropicExc(Exception):
     """Minimal fake Anthropic SDK exception with configurable status_code."""
 
+    __module__ = "anthropic"  # so the __module__ guard in classify_and_raise allows it
+
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         if status_code is not None:
