@@ -197,12 +197,15 @@ async def test_oneshot_record_content_captures_messages() -> None:
 
 
 @pytest.mark.asyncio
-async def test_oneshot_generate_error_event_raises() -> None:
-    """generate() propagates RuntimeError when the stream emits an error event."""
+async def test_oneshot_generate_error_event_raises_and_marks_root() -> None:
+    """generate() propagates RuntimeError on a stream error event AND marks
+    the root invoke_agent span with ERROR status so `cubepi trace ls` shows
+    the run as failed instead of as a successful invoke_agent."""
+    from opentelemetry.trace import StatusCode
     from unittest.mock import AsyncMock, MagicMock, patch
 
     provider = FauxProvider()
-    tracer, _ = _make_tracer()
+    tracer, exporter = _make_tracer()
 
     # Patch provider.stream to yield an error event
     error_stream = MagicMock()
@@ -220,7 +223,15 @@ async def test_oneshot_generate_error_event_raises() -> None:
                     max_output_tokens=10,
                 )
 
+    await tracer.force_flush()
     await tracer.shutdown()
+
+    roots = [s for s in exporter.spans if s.name == "invoke_agent"]
+    assert len(roots) == 1
+    root = roots[0]
+    assert root.status.status_code == StatusCode.ERROR
+    attrs = dict(root.attributes or {})
+    assert attrs.get("error.type") == "RuntimeError"
 
 
 @pytest.mark.asyncio
@@ -448,9 +459,14 @@ async def test_oneshot_cancelled_generate_closes_chat_span() -> None:
     await tracer.force_flush()
     await tracer.shutdown()
 
-    # Root span must be exported; chat span if opened must also be ended
+    # Root span must be exported; chat span if opened must also be ended.
+    # Cancellation is tracked as cubepi.aborted (not StatusCode.ERROR),
+    # matching the agent path's contract.
     roots = [s for s in exporter.spans if s.name == "invoke_agent"]
     assert len(roots) == 1
+    attrs = dict(roots[0].attributes or {})
+    assert attrs.get("cubepi.aborted") is True
+    assert attrs.get("error.type") == "cubepi.aborted"
 
 
 @pytest.mark.asyncio
