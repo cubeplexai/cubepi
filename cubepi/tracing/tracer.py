@@ -444,10 +444,7 @@ class Tracer:
             "cubepi.oneshot.operation": operation,
         }
         for k, v in (metadata or {}).items():
-            try:
-                root_attrs[f"cubepi.metadata.{k}"] = v
-            except (TypeError, ValueError):
-                pass
+            root_attrs[f"cubepi.metadata.{k}"] = v
 
         root_span = self._otel_tracer.start_span(
             name=SPAN_NAME_INVOKE_AGENT,
@@ -509,7 +506,7 @@ class Tracer:
                 asyncio.get_running_loop().create_task(
                     self.force_flush(timeout_seconds=5.0)
                 )
-            except RuntimeError:
+            except RuntimeError:  # pragma: no cover — only fires outside an event loop
                 pass
 
     async def __aenter__(self) -> "Tracer":

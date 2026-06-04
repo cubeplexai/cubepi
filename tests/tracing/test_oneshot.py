@@ -180,6 +180,88 @@ async def test_oneshot_record_content_captures_messages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oneshot_generate_error_event_raises() -> None:
+    """generate() propagates RuntimeError when the stream emits an error event."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    provider = FauxProvider()
+    tracer, _ = _make_tracer()
+
+    # Patch provider.stream to yield an error event
+    error_stream = MagicMock()
+
+    async def _gen():
+        yield MagicMock(type="error", error_message="boom", delta=None)
+
+    error_stream.__aiter__ = lambda self: _gen()
+    with patch.object(provider, "stream", new=AsyncMock(return_value=error_stream)):
+        with pytest.raises(RuntimeError, match="boom"):
+            async with tracer.oneshot(provider=provider, model=MODEL) as session:
+                await session.generate(
+                    system="sys",
+                    messages=[UserMessage(content=[TextContent(text="q")])],
+                    max_output_tokens=10,
+                )
+
+    await tracer.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_oneshot_subscribe_failure_raises_and_ends_root_span() -> None:
+    """If provider subscription raises, oneshot re-raises and ends the root span."""
+    from unittest.mock import patch
+
+    provider = FauxProvider()
+    tracer, exporter = _make_tracer()
+
+    with patch.object(
+        provider, "subscribe_request", side_effect=RuntimeError("subscribe failed")
+    ):
+        with pytest.raises(RuntimeError, match="subscribe failed"):
+            async with tracer.oneshot(provider=provider, model=MODEL):
+                pass  # pragma: no cover — never reached
+
+    await tracer.force_flush()
+    await tracer.shutdown()
+
+    # Root span must have been ended even though subscribe raised
+    roots = [s for s in exporter.spans if s.name == "invoke_agent"]
+    assert len(roots) == 1
+
+
+@pytest.mark.asyncio
+async def test_oneshot_detacher_exception_is_swallowed() -> None:
+    """Detach errors during cleanup must not propagate to the caller."""
+    from unittest.mock import patch
+
+    provider = FauxProvider()
+    provider.append_responses([faux_assistant_message("ok")])
+    tracer, _ = _make_tracer()
+
+    # Make subscribe_request return a detacher that raises on call
+    original_subscribe = provider.subscribe_request
+
+    def patched_subscribe(cb):
+        unsub = original_subscribe(cb)
+
+        def raising_detach():
+            raise RuntimeError("detach failed")
+
+        return raising_detach
+
+    with patch.object(provider, "subscribe_request", side_effect=patched_subscribe):
+        async with tracer.oneshot(provider=provider, model=MODEL) as session:
+            text = await session.generate(
+                system="sys",
+                messages=[UserMessage(content=[TextContent(text="q")])],
+                max_output_tokens=10,
+            )
+
+    await tracer.shutdown()
+    assert text == "ok"
+
+
+@pytest.mark.asyncio
 async def test_oneshot_does_not_interfere_with_concurrent_agent() -> None:
     """Oneshot's active-run gate must not bleed into a concurrent Agent run."""
     import asyncio
