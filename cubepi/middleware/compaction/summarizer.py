@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+
 from cubepi.middleware.compaction.state import CompactionState
 from cubepi.providers.base import (
     Message,
     Model,
     Provider,
+    StreamOptions,
     TextContent,
     ToolCall,
     UserMessage,
@@ -55,6 +58,7 @@ async def summarize(
     messages_to_summarize: list[Message],
     existing: CompactionState | None,
     max_summary_tokens: int = 1024,
+    abort_signal: asyncio.Event | None = None,
 ) -> CompactionState:
     system_prompt = SUMMARIZER_SYSTEM_PROMPT
     if existing and existing.summary:
@@ -68,6 +72,7 @@ async def summarize(
             )
         ],
         system_prompt=system_prompt,
+        options=StreamOptions(signal=abort_signal),
         max_output_tokens=max_summary_tokens,
         temperature=0.0,
         thinking="off",

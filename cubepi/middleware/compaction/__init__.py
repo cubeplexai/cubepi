@@ -65,7 +65,6 @@ class CompactionMiddleware(Middleware):
         ctx: AgentContext,
         signal: object = None,
     ) -> list[Message]:
-        del signal
         state = _load_state(ctx.extra.get("compaction"))
         boundary = int(ctx.extra.get("compaction_until_msg_index") or 0)
         if boundary >= len(messages):
@@ -93,6 +92,7 @@ class CompactionMiddleware(Middleware):
                 messages_to_summarize=messages[boundary:new_boundary],
                 existing=state,
                 max_summary_tokens=self._max_summary_tokens,
+                abort_signal=signal,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("CompactionMiddleware summarizer failed, skipping: %s", exc)

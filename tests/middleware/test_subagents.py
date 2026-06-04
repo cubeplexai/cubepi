@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from cubepi import AgentTool, AgentToolResult, TextContent
 from cubepi.middleware.subagents import SubagentMiddleware, SubagentSpec
-from cubepi.providers.base import Model
+from cubepi.providers.base import AssistantMessage, MessageStream, Model, StreamEvent
 from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 
@@ -212,6 +212,39 @@ async def test_event_mapper_and_handler_receive_child_events() -> None:
     assert result.details["subagent_events"] == [payload for _, payload in handled]
 
 
+async def test_string_event_mapper_payload_is_treated_as_one_payload() -> None:
+    provider = FauxProvider()
+    provider.set_responses([faux_assistant_message("mapped reply")])
+    handled: list[tuple[str, str]] = []
+
+    def mapper(event: Any) -> str | None:
+        if event.type == "agent_start":
+            return "started"
+        return None
+
+    def handler(agent_id: str, payload: str) -> None:
+        handled.append((agent_id, payload))
+
+    middleware = _make_middleware(
+        provider=provider,
+        event_mapper=mapper,
+        event_handler=handler,
+    )
+    [tool] = middleware.tools
+
+    args = tool.parameters(
+        name="worker",
+        role="researcher",
+        task="answer",
+        prompt="please reply",
+        subagent_type="general-purpose",
+    )
+    result = await tool.execute("tc-string", args, signal=None, on_update=None)
+
+    assert handled == [("subagent:tc-string", "started")]
+    assert result.details["subagent_events"] == ["started"]
+
+
 async def test_inner_agent_failure_returns_tool_error() -> None:
     class _FailingProvider(FauxProvider):
         async def stream(self, *args: Any, **kwargs: Any) -> Any:
@@ -282,6 +315,47 @@ async def test_cancelled_subagent_run_propagates_and_detaches_tracer() -> None:
 
     assert len(tracer.attached) == 1
     assert tracer.detached == 1
+
+
+async def test_parent_signal_aborts_running_child_agent() -> None:
+    class _SlowProvider(FauxProvider):
+        async def stream(self, *args: Any, **kwargs: Any) -> MessageStream:
+            del args
+            options = kwargs["options"]
+            stream = MessageStream()
+
+            async def produce() -> None:
+                await options.signal.wait()
+                stream.push(StreamEvent(type="error", error_message="aborted"))
+                stream.set_result(
+                    AssistantMessage(
+                        content=[],
+                        stop_reason="aborted",
+                        error_message="aborted",
+                    )
+                )
+
+            stream.attach_task(asyncio.create_task(produce()))
+            return stream
+
+    signal = asyncio.Event()
+    middleware = _make_middleware(provider=_SlowProvider())
+    [tool] = middleware.tools
+    args = tool.parameters(
+        name="worker",
+        role="researcher",
+        task="answer",
+        prompt="please reply",
+        subagent_type="general-purpose",
+    )
+
+    task = asyncio.create_task(tool.execute("tc-abort", args, signal=signal))
+    await asyncio.sleep(0.05)
+    signal.set()
+    result = await asyncio.wait_for(task, timeout=2)
+
+    assert result.is_error is True
+    assert "aborted" in result.content[0].text
 
 
 class _FakeTracer:

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from cubepi.middleware.compaction import CompactionState
-from cubepi.middleware.compaction.summarizer import summarize
+from cubepi.middleware.compaction.summarizer import (
+    _format_message_for_summary,
+    summarize,
+)
 from cubepi.providers.base import (
     AssistantMessage,
     Message,
     Model,
     StreamOptions,
     TextContent,
+    ToolCall,
     ToolDefinition,
     UserMessage,
 )
@@ -52,6 +57,7 @@ class _FakeProvider:
 async def test_summarize_uses_provider_generate_with_common_overrides() -> None:
     provider = _FakeProvider(" Compressed summary. ")
     model = Model(id="summary-model", provider="faux")
+    signal = asyncio.Event()
 
     result = await summarize(
         provider=provider,
@@ -62,6 +68,7 @@ async def test_summarize_uses_provider_generate_with_common_overrides() -> None:
         ],
         existing=None,
         max_summary_tokens=512,
+        abort_signal=signal,
     )
 
     assert isinstance(result, CompactionState)
@@ -69,6 +76,7 @@ async def test_summarize_uses_provider_generate_with_common_overrides() -> None:
     assert provider.calls[0]["max_output_tokens"] == 512
     assert provider.calls[0]["temperature"] == 0.0
     assert provider.calls[0]["thinking"] == "off"
+    assert provider.calls[0]["options"].signal is signal
 
 
 async def test_summarize_merges_existing_state() -> None:
@@ -84,3 +92,54 @@ async def test_summarize_merges_existing_state() -> None:
 
     assert "Older context." in provider.calls[0]["system_prompt"]
     assert result.summary == "Merged summary."
+
+
+async def test_summarize_raises_on_provider_error_message() -> None:
+    class _ErrorProvider(_FakeProvider):
+        async def generate(
+            self,
+            model: Model,
+            messages: list[Message],
+            *,
+            system_prompt: str = "",
+            tools: list[ToolDefinition] | None = None,
+            options: StreamOptions | None = None,
+            max_output_tokens: int | None = None,
+            temperature: float | None = None,
+            thinking=None,
+            thinking_budgets=None,
+        ) -> AssistantMessage:
+            del model, messages, system_prompt, tools, options
+            del max_output_tokens, temperature, thinking, thinking_budgets
+            return AssistantMessage(
+                content=[],
+                stop_reason="error",
+                error_message="summary failed",
+            )
+
+    try:
+        await summarize(
+            provider=_ErrorProvider(""),
+            model=Model(id="summary-model", provider="faux"),
+            messages_to_summarize=[UserMessage(content=[TextContent(text="new")])],
+            existing=None,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "summary failed"
+    else:  # pragma: no cover
+        raise AssertionError("provider error was not raised")
+
+
+def test_format_message_for_summary_includes_tool_calls_and_text_like_blocks() -> None:
+    message = AssistantMessage(
+        content=[
+            TextContent(text="checking"),
+            ToolCall(id="t1", name="lookup", arguments={"q": "x"}),
+        ]
+    )
+
+    formatted = _format_message_for_summary(message)
+
+    assert "[assistant]" in formatted
+    assert "checking" in formatted
+    assert "[tool_call:lookup]" in formatted

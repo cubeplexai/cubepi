@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
@@ -103,9 +105,9 @@ class SubagentMiddleware(Middleware):
             signal: Any = None,
             on_update: Any = None,
         ) -> AgentToolResult:
-            del signal, on_update
+            del on_update
             try:
-                result = await self._run_subagent(tool_call_id, args)
+                result = await self._run_subagent(tool_call_id, args, signal=signal)
             except Exception as exc:
                 logger.error("Subagent %s failed: %s", args.subagent_type, exc)
                 return AgentToolResult(
@@ -137,6 +139,8 @@ class SubagentMiddleware(Middleware):
         self,
         tool_call_id: str,
         request: SubagentRequest,
+        *,
+        signal: Any = None,
     ) -> SubagentResult:
         spec = self._subagents.get(
             request.subagent_type,
@@ -163,10 +167,12 @@ class SubagentMiddleware(Middleware):
 
         child.subscribe(listener)
 
+        abort_task = self._start_abort_forwarder(child, signal)
         detach = self._attach_tracer(child)
         try:
             await child.prompt(request.prompt)
         finally:
+            await self._stop_abort_forwarder(abort_task)
             await self._detach_tracer(detach)
 
         text = self._final_assistant_text(child) or "[subagent produced no output]"
@@ -211,7 +217,10 @@ class SubagentMiddleware(Middleware):
         mapped = self._event_mapper(event)
         if mapped is None:
             return
-        payloads = list(mapped) if isinstance(mapped, Sequence) else [mapped]
+        if isinstance(mapped, Sequence) and not isinstance(mapped, (str, bytes)):
+            payloads = list(mapped)
+        else:
+            payloads = [mapped]
         for payload in payloads:
             events.append(payload)
             if self._event_handler is not None:
@@ -227,6 +236,27 @@ class SubagentMiddleware(Middleware):
         except Exception as exc:  # noqa: BLE001
             logger.debug("subagent tracer attach failed: %s", exc)
             return None
+
+    def _start_abort_forwarder(
+        self, child: Agent[Any], signal: Any
+    ) -> asyncio.Task | None:
+        if signal is None:
+            return None
+
+        async def forward_abort() -> None:
+            await signal.wait()
+            while not child.state.is_streaming:
+                await asyncio.sleep(0)
+            child.abort()
+
+        return asyncio.create_task(forward_abort())
+
+    async def _stop_abort_forwarder(self, task: asyncio.Task | None) -> None:
+        if task is None or task.done():
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
     async def _detach_tracer(self, detach: Any) -> None:
         if detach is None:

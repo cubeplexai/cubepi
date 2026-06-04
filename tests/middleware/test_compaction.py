@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from cubepi.agent.types import AgentContext
@@ -107,6 +108,7 @@ async def test_under_threshold_returns_existing_compressed_view() -> None:
 async def test_over_threshold_writes_json_safe_state_to_ctx_extra() -> None:
     provider = _FakeSummaryProvider(reply="New summary")
     middleware = _make_middleware(provider, max_tokens_before=1)
+    signal = asyncio.Event()
     messages: list[Message] = [
         _user("turn 1"),
         _assistant("reply 1"),
@@ -117,13 +119,14 @@ async def test_over_threshold_writes_json_safe_state_to_ctx_extra() -> None:
     ]
     ctx = AgentContext(system_prompt="", messages=messages, extra={})
 
-    result = await middleware.transform_context(messages, ctx=ctx)
+    result = await middleware.transform_context(messages, ctx=ctx, signal=signal)
 
     assert isinstance(ctx.extra["compaction"], dict)
     state = CompactionState.model_validate(ctx.extra["compaction"])
     assert state.summary == "New summary"
     assert ctx.extra["compaction_until_msg_index"] > 0
     assert isinstance(result[0], UserMessage)
+    assert provider.calls[0]["options"].signal is signal
 
 
 async def test_summarizer_failure_returns_current_view_without_writing_state() -> None:
@@ -161,3 +164,5 @@ async def test_stale_boundary_larger_than_history_is_ignored() -> None:
     result = await middleware.transform_context(messages, ctx=ctx)
 
     assert result == messages
+    assert "compaction" not in ctx.extra
+    assert "compaction_until_msg_index" not in ctx.extra
