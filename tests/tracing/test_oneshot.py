@@ -242,7 +242,7 @@ async def test_oneshot_detacher_exception_is_swallowed() -> None:
     original_subscribe = provider.subscribe_request
 
     def patched_subscribe(cb):
-        unsub = original_subscribe(cb)
+        original_subscribe(cb)
 
         def raising_detach():
             raise RuntimeError("detach failed")
