@@ -581,15 +581,17 @@ class OpenAIResponsesProvider(BaseProvider):
             except BaseException as e:
                 exc = e
                 # Classify SDK stream-level errors that the narrow create()
-                # try/except didn't catch — async-for-event iteration errors
-                # arrive here raw.
+                # try/except didn't catch. Only classify exceptions from the
+                # openai SDK module — local callback/processing exceptions
+                # must not be re-tagged.
                 if isinstance(e, Exception):
                     from cubepi.errors import classify_and_raise
 
-                    try:
-                        classify_and_raise(e, model=model, messages=messages)
-                    except Exception as _classified:
-                        exc = _classified
+                    if type(e).__module__.startswith("openai"):
+                        try:
+                            classify_and_raise(e, model=model, messages=messages)
+                        except Exception as _classified:
+                            exc = _classified
                 err_text = self._error_message(exc, model)
                 error_msg = AssistantMessage(
                     content=[],
