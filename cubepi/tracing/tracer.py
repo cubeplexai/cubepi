@@ -30,6 +30,57 @@ from cubepi.tracing.schema import SCHEMA_URL, SCOPE_NAME
 
 if TYPE_CHECKING:
     from cubepi.agent.agent import Agent
+    from cubepi.providers.base import BaseProvider, Message, Model
+
+
+class _OneShotSession:
+    """Returned by :meth:`Tracer.oneshot` to issue a single traced LLM call.
+
+    The session's provider listeners are live for the lifetime of the
+    ``async with tracer.oneshot(...)`` block.  Call :meth:`generate` once
+    inside that block to run the LLM and get the response text.
+    """
+
+    def __init__(
+        self,
+        provider: "BaseProvider",
+        model: "Model",
+        run: Any,
+    ) -> None:
+        self._provider = provider
+        self._model = model
+        self._run = run
+
+    async def generate(
+        self,
+        *,
+        system: str,
+        messages: "list[Message]",
+        max_output_tokens: int,
+    ) -> str:
+        """Run one non-tool-using completion and return the full text.
+
+        The provider listeners wired by :meth:`Tracer.oneshot` will record
+        a ``chat`` child span covering this call automatically.
+        """
+        # Seed transcript so record_content captures input messages.
+        self._run.transcript = list(messages)
+
+        model = self._model.model_copy(update={"max_tokens": max_output_tokens})
+        stream = await self._provider.stream(
+            model=model,
+            messages=messages,
+            system_prompt=system,
+        )
+        parts: list[str] = []
+        async for evt in stream:
+            if evt.type == "text_delta" and evt.delta:
+                parts.append(evt.delta)
+            elif evt.type == "error":
+                raise RuntimeError(evt.error_message or "oneshot generation failed")
+            elif evt.type == "done":
+                break
+        return "".join(parts)
 
 
 class Tracer:
@@ -330,6 +381,136 @@ class Tracer:
                         await result
                     except BaseException:
                         pass
+
+    @contextlib.asynccontextmanager
+    async def oneshot(
+        self,
+        *,
+        provider: "BaseProvider",
+        model: "Model",
+        operation: str = "oneshot",
+        metadata: "dict[str, str | int | float | bool] | None" = None,
+        record_content: bool | None = None,
+    ) -> AsyncIterator["_OneShotSession"]:
+        """Instrumented one-shot LLM call that produces a trace without a full Agent.
+
+        Creates an ``invoke_agent`` root span (so the ``cubepi trace`` CLI
+        indexes it alongside normal agent runs) and wires the provider's
+        listeners for the duration of the block, producing a ``chat`` child
+        span automatically when :meth:`_OneShotSession.generate` is called.
+
+        ``metadata`` keys are stamped as ``cubepi.metadata.<key>`` attributes on
+        the root span and are queryable with
+        ``cubepi trace ls --meta <key>=<value>``.
+
+        ``operation`` is recorded as ``cubepi.oneshot.operation`` to let
+        callers filter one-shot traces from agent runs in dashboards.
+
+        Example::
+
+            async with tracer.oneshot(
+                provider=provider,
+                model=model,
+                operation="consolidate_memory",
+                metadata={"conversation_id": conv_id, "user_id": user_id},
+            ) as session:
+                text = await session.generate(
+                    system=SYSTEM_PROMPT,
+                    messages=[UserMessage(...)],
+                    max_output_tokens=1500,
+                )
+        """
+        from opentelemetry.trace import SpanKind
+
+        from cubepi.providers.base import BaseProvider as _BaseProvider
+        from cubepi.tracing.recorder import Recorder, _RunState, _active_run
+        from cubepi.tracing.schema import (
+            CUBEPI_RUN_ID,
+            GEN_AI_OPERATION_NAME,
+            GEN_AI_PROVIDER_NAME,
+            OP_INVOKE_AGENT,
+            SPAN_NAME_INVOKE_AGENT,
+        )
+
+        do_record = record_content if record_content is not None else self._record_content
+        run_id = str(uuid.uuid4())
+
+        root_attrs: dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: OP_INVOKE_AGENT,
+            CUBEPI_RUN_ID: run_id,
+            GEN_AI_PROVIDER_NAME: "cubepi",
+            "cubepi.oneshot.operation": operation,
+        }
+        for k, v in (metadata or {}).items():
+            try:
+                root_attrs[f"cubepi.metadata.{k}"] = v
+            except (TypeError, ValueError):
+                pass
+
+        root_span = self._otel_tracer.start_span(
+            name=SPAN_NAME_INVOKE_AGENT,
+            kind=SpanKind.INTERNAL,
+            attributes=root_attrs,
+        )
+
+        # _RunState with turn_span = root_span so chat spans nest directly
+        # under the root (no cubepi.turn wrapper — one-shot has no loop).
+        run = _RunState(
+            run_id=run_id,
+            agent_span=root_span,
+            turn_span=root_span,
+        )
+
+        # Minimal Recorder to handle the 3 provider lifecycle listeners.
+        # We don't subscribe agent events — there's no agent loop.
+        recorder = Recorder(
+            self,
+            record_content=do_record,
+            record_stream=self._record_stream,
+            stream_dir=self._stream_dir,
+            redact=self._redact,
+        )
+        recorder._run = run
+
+        detachers: list[Callable[[], None]] = []
+        if isinstance(provider, _BaseProvider):
+            try:
+                detachers.append(
+                    provider.subscribe_request(recorder._on_provider_request)
+                )
+                detachers.append(
+                    provider.subscribe_chunk(recorder._on_provider_chunk)
+                )
+                detachers.append(
+                    provider.subscribe_response(recorder._on_provider_response)
+                )
+            except BaseException:
+                root_span.end()
+                raise
+
+        # Set the per-task active-run gate so provider listeners recognise
+        # calls that belong to this oneshot session.
+        token = _active_run.set(run)
+        try:
+            yield _OneShotSession(provider=provider, model=model, run=run)
+        finally:
+            _active_run.reset(token)
+            for d in detachers:
+                try:
+                    d()
+                except Exception:
+                    pass
+            recorder._run = None
+            root_span.end()
+            # Best-effort flush — tracing must never break the caller's work.
+            try:
+                import asyncio
+
+                asyncio.get_running_loop().create_task(
+                    self.force_flush(timeout_seconds=5.0)
+                )
+            except RuntimeError:
+                pass
 
     async def __aenter__(self) -> "Tracer":
         return self

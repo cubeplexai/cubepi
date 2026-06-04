@@ -20,6 +20,9 @@ token/cache counts. Reach for this **before** guessing at a bug.
   `error`.
 - Token / cache / cost numbers look wrong.
 - You just need to understand the agent's actual trajectory for a given input.
+- A background LLM call (e.g. memory consolidation via `Tracer.oneshot()`) isn't
+  behaving as expected — oneshot calls produce `invoke_agent` spans too and are
+  searchable by metadata.
 
 ## Prerequisites (one-time)
 
@@ -118,6 +121,52 @@ uv run cubepi trace stats --by model --meta user_id=usr_9
 
 # Show metadata as ls columns (display, not filter):
 uv run cubepi trace ls --show-meta conversation_id,user_id
+```
+
+## Tracing one-shot LLM calls (`Tracer.oneshot`)
+
+`Tracer.oneshot()` instruments a single prompt→text LLM call (no agent loop)
+and writes it as a full `invoke_agent` trace. Cubebox uses this for background
+tasks like memory consolidation. The span tree is flat — no `cubepi.turn`
+wrapper since there's no loop:
+
+```
+trace
+└── invoke_agent  820ms  [0x3f2a1b...]
+    └── chat deepseek-v3  815ms  tok 3200/180  [0x9c45d2...]
+```
+
+The root span carries:
+- `cubepi.oneshot.operation` — the operation name (e.g. `"consolidate_memory"`)
+- `cubepi.metadata.*` — caller-supplied metadata (e.g. `conversation_id`)
+
+Find oneshot traces by operation or conversation:
+
+```bash
+# All consolidation runs
+uv run cubepi trace ls --meta cubepi.oneshot.operation=consolidate_memory
+
+# Oneshot traces for a specific conversation (alongside its agent runs)
+uv run cubepi trace ls --meta conversation_id=conv-1fwZQ8u3ZDukx3
+
+# Stats on consolidation token usage
+uv run cubepi trace stats --by model --meta cubepi.oneshot.operation=consolidate_memory
+```
+
+Cubebox wires this in `run_manager.py`; the consolidation pass calls:
+
+```python
+async with tracer.oneshot(
+    provider=provider,
+    model=model,
+    operation="consolidate_memory",
+    metadata={"conversation_id": conv_id, "user_id": user_id},
+) as session:
+    raw = await session.generate(
+        system=CONSOLIDATION_SYSTEM,
+        messages=[UserMessage(...)],
+        max_output_tokens=1500,
+    )
 ```
 
 ## Replaying a failing LLM call (`trace convert`)
