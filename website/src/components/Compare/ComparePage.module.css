@@ -1,0 +1,26 @@
+.page { max-width: 880px; margin: 48px auto 80px; padding: 0 24px; }
+.h1 { font-family: 'Inter Tight', 'Inter', system-ui; font-size: 40px; line-height: 1.1; letter-spacing: -0.03em; font-weight: 600; color: var(--ink-12); margin: 0 0 20px; }
+.lead { font-size: 17px; line-height: 1.6; color: var(--ink-11); margin: 0 0 16px; max-width: 680px; }
+.h2 { font-family: 'Inter Tight'; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; color: var(--ink-7); margin: 48px 0 16px; }
+
+.tableWrap { overflow-x: auto; border: 1px solid var(--ink-5); border-radius: 8px; background: var(--surface); }
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th, .table td { padding: 12px 16px; border-bottom: 1px solid var(--ink-5); text-align: left; vertical-align: top; line-height: 1.55; }
+.table tr:last-child td { border-bottom: 0; }
+.table th { font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-7); background: var(--ink-3); }
+.label { font-weight: 500; color: var(--ink-12); width: 20%; }
+.us { color: var(--ink-12); }
+
+.codeSection { margin-top: 8px; }
+.codeGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.codeTitle { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: var(--ink-9); margin-bottom: 8px; letter-spacing: 0.04em; }
+@media (max-width: 800px) { .codeGrid { grid-template-columns: 1fr; } }
+
+.prose { }
+.body { font-size: 15px; line-height: 1.65; color: var(--ink-11); margin: 0 0 14px; max-width: 680px; }
+
+.ctaRow { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 48px; }
+.cta { display: inline-flex; align-items: center; height: 38px; padding: 0 16px; border: 1px solid var(--ink-12); border-radius: 5px; background: var(--ink-12); color: var(--surface); font-size: 14px; font-weight: 500; text-decoration: none; }
+.cta:hover { background: var(--ink-11); color: var(--surface); text-decoration: none; }
+.cta + .cta { background: transparent; color: var(--ink-12); border-color: var(--ink-5); }
+.cta + .cta:hover { background: var(--ink-3); color: var(--ink-12); }
