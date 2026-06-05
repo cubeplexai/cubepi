@@ -83,3 +83,19 @@ After that it is **not** automatic — drive it manually:
 - Repeat poll → fix → `@codex` until codex reports no remaining issues.
 
 Merge only after the PR codex review is clean and CI passes.
+
+## Releasing
+
+When shipping a new release `X.Y`, the docs site needs a frozen snapshot
+under `website/versioned_docs/version-X.Y/` (and the zh-Hans mirror) so
+later edits on `main` don't rewrite history for the released version. The
+order of operations is non-obvious — `pnpm apiref` must run before
+`pnpm docusaurus docs:version X.Y` or the API mdx is missing from the
+snapshot, the `current/` and `version-X.Y/` trees must be byte-identical
+at cut time, the previous latest needs `noIndex: true` and a
+`sitemap.ignorePatterns` entry, and a handful of other traps the 0.5 → 0.7
+cuts surfaced.
+
+See [`dev/runbooks/cut-doc-version.md`](dev/runbooks/cut-doc-version.md) for
+the full checklist, command order, and gotchas. Run that runbook **before**
+tagging the release.
