@@ -425,6 +425,19 @@ class AnthropicProvider(BaseProvider):
         an interior tool result stays on that result's block instead of sliding
         to the end of the merge.
         """
+        # Trim trailing empty AssistantMessage(s) — the persisted marker of a
+        # turn that errored before producing any content. Anthropic treats the
+        # last assistant message as a prefill, so handing it back (or even a
+        # synthesised placeholder in its place) would make the model continue
+        # *from* the empty turn instead of regenerating from the preceding
+        # user prompt, which is exactly the stuck-retry path this fix targets.
+        while (
+            messages
+            and isinstance(messages[-1], AssistantMessage)
+            and not messages[-1].content
+        ):
+            messages = messages[:-1]
+
         api_messages: list[dict[str, Any]] = []
         breakpoints: list[tuple[int, int]] = []
         prev_tool_result = False
