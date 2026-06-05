@@ -508,9 +508,13 @@ class TestMiddlewareProviders:
         main = FauxProvider()
         summarizer = FauxProvider()
         # Cap at near-zero so transform_context triggers immediately.
+        # Distinct ``provider`` labels on the two Models so the test can also
+        # verify the root ``invoke_agent`` span stays attributed to the agent's
+        # own provider, not the summarizer that fires first.
+        summary_model = Model(id="summary-1", provider="faux-summary")
         mw = CompactionMiddleware(
             summary_provider=summarizer,
-            summary_model=Model(id="summary-1", provider="faux"),
+            summary_model=summary_model,
             max_tokens_before_compact=1,
             keep_recent_messages=1,
             max_summary_tokens=128,
@@ -533,7 +537,7 @@ class TestMiddlewareProviders:
         agent = Agent(
             provider=main,
             model=MODEL,
-            system_prompt="test",
+            system_prompt="agent system prompt — kept on root",
             middleware=[mw],
             checkpointer=cp,
             thread_id=thread_id,
@@ -565,6 +569,74 @@ class TestMiddlewareProviders:
         turn = [s for s in exporter.spans if s.name == "cubepi.turn"][0]
         for chat in chats:
             assert chat.context.trace_id == turn.context.trace_id
+
+        # Root ``invoke_agent`` attribution must reflect the agent's own
+        # provider, not the summarizer that fires first during
+        # ``transform_context``. Without the per-listener gate the root
+        # would carry "faux-summary" + the summarizer's system prompt.
+        root = [s for s in exporter.spans if s.name.startswith("invoke_agent")][0]
+        assert _attrs(root)["gen_ai.provider.name"] == "faux"
+
+    async def test_extra_provider_does_not_clobber_root_provider_attribution(self):
+        # Direct exercise of the listener-gating contract: extra-provider
+        # requests must go through ``_on_extra_provider_request``, which
+        # leaves the root span's ``gen_ai.provider.name`` placeholder alone.
+        # Driving the recorder synthetically also covers the path where the
+        # extra provider fires *before* the main provider, the exact ordering
+        # the compaction summarizer creates.
+        from cubepi.tracing.recorder import Recorder
+
+        agent, main, exporter, tracer = await _build()
+        recorder = _find_attached_recorder(main)
+        assert isinstance(recorder, Recorder)
+        # Recorder needs a run to attribute spans to — open one by issuing a
+        # normal prompt that will emit the main chat span first.
+        main.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = [s for s in exporter.spans if s.name.startswith("invoke_agent")][0]
+        assert _attrs(root)["gen_ai.provider.name"] == "faux"
+
+    def test_middleware_providers_default_is_empty(self):
+        # ``Middleware.providers()`` default must return an empty iterable so
+        # middlewares that don't drive any LLM are zero-cost on Recorder.attach.
+        from cubepi.middleware.base import Middleware
+
+        assert list(Middleware().providers()) == []
+
+    async def test_middleware_providers_raising_is_swallowed(self):
+        # If a middleware's ``providers()`` raises during attach the recorder
+        # must keep going — the agent's own provider is the load-bearing
+        # subscription, a buggy middleware mustn't break tracing.
+        from cubepi.middleware.base import Middleware
+
+        class _BoomMiddleware(Middleware):
+            def providers(self):
+                raise RuntimeError("boom")
+
+        provider = FauxProvider()
+        agent = Agent(
+            provider=provider,
+            model=MODEL,
+            system_prompt="test",
+            middleware=[_BoomMiddleware()],
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            exporters=[exporter],
+        )
+        # Should not raise.
+        tracer.attach(agent)
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+        # Trace still emits.
+        assert any(s.name.startswith("chat ") for s in exporter.spans)
 
 
 class TestSafeToolName:

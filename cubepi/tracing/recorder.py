@@ -234,10 +234,26 @@ class Recorder:
         provider = getattr(agent, "_provider", None) or getattr(agent, "provider", None)
         provider_detachers: list[Callable[[], None]] = []
 
-        def _subscribe(p: Any) -> None:
+        def _subscribe(p: Any, *, is_main: bool) -> None:
             if not isinstance(p, BaseProvider):
                 return
-            provider_detachers.append(p.subscribe_request(self._on_provider_request))
+            # Middleware-driven providers must not write to the root
+            # ``invoke_agent`` span's attribution attributes — the root
+            # represents the agent invocation, not a per-middleware
+            # detour. Without this gate the first middleware request
+            # (typically ``CompactionMiddleware`` firing in
+            # ``transform_context`` before the agent's own model call)
+            # would clobber ``gen_ai.provider.name`` /
+            # ``cubepi.agent.system_prompt_sha256`` /
+            # ``cubepi.agent.tools`` with the summarizer's values, and
+            # provider-level trace filters / aggregate metrics would
+            # mis-attribute the whole run to the summarizer's provider.
+            on_request = (
+                self._on_provider_request
+                if is_main
+                else self._on_extra_provider_request
+            )
+            provider_detachers.append(p.subscribe_request(on_request))
             provider_detachers.append(p.subscribe_chunk(self._on_provider_chunk))
             provider_detachers.append(p.subscribe_response(self._on_provider_response))
 
@@ -246,7 +262,7 @@ class Recorder:
         # so a failed attach() leaves no dangling listeners. The caller never
         # gets a ``detach`` callable on this path, so we cannot defer cleanup.
         try:
-            _subscribe(provider)
+            _subscribe(provider, is_main=True)
             # Middlewares may drive their own LLM providers (e.g.
             # ``CompactionMiddleware``'s summary provider) — wire them too
             # so those calls show up in the trace tree instead of
@@ -263,7 +279,7 @@ class Recorder:
                     if id(p) in seen:
                         continue
                     seen.add(id(p))
-                    _subscribe(p)
+                    _subscribe(p, is_main=False)
         except BaseException:
             for d in provider_detachers:
                 try:
@@ -888,7 +904,15 @@ class Recorder:
     # Provider listeners — drive the chat span lifetime
     # ------------------------------------------------------------------
 
-    def _on_provider_request(self, payload: dict, model: "Model") -> None:
+    def _on_extra_provider_request(self, payload: dict, model: "Model") -> None:
+        """Variant for middleware-supplied providers (e.g. the compaction
+        summarizer) — emits a chat span but does not touch the root
+        ``invoke_agent`` span's attribution attributes."""
+        self._on_provider_request(payload, model, attribute_root=False)
+
+    def _on_provider_request(
+        self, payload: dict, model: "Model", *, attribute_root: bool = True
+    ) -> None:
         run = self._run
         if run is None or run.turn_span is None:
             return
@@ -935,21 +959,22 @@ class Recorder:
         ):
             attrs[CUBEPI_LLM_THINKING_LEVEL] = payload["reasoning"]["effort"]
 
-        # System prompt sha256 on root agent span (once per run).
-        self._maybe_record_system_prompt_hash(payload, run)
+        if attribute_root:
+            # System prompt sha256 on root agent span (once per run).
+            self._maybe_record_system_prompt_hash(payload, run)
 
-        # Update root's gen_ai.provider.name with the first concrete one.
-        if (run.agent_span.attributes or {}).get(GEN_AI_PROVIDER_NAME) == "cubepi":
-            run.agent_span.set_attribute(
-                GEN_AI_PROVIDER_NAME, attrs[GEN_AI_PROVIDER_NAME]
-            )
+            # Update root's gen_ai.provider.name with the first concrete one.
+            if (run.agent_span.attributes or {}).get(GEN_AI_PROVIDER_NAME) == "cubepi":
+                run.agent_span.set_attribute(
+                    GEN_AI_PROVIDER_NAME, attrs[GEN_AI_PROVIDER_NAME]
+                )
 
-        # Tool count on root.
-        tools = payload.get("tools")
-        if isinstance(tools, list) and tools:
-            run.agent_span.set_attribute(
-                CUBEPI_AGENT_TOOLS, [_safe_tool_name(t) for t in tools]
-            )
+            # Tool count on root.
+            tools = payload.get("tools")
+            if isinstance(tools, list) and tools:
+                run.agent_span.set_attribute(
+                    CUBEPI_AGENT_TOOLS, [_safe_tool_name(t) for t in tools]
+                )
 
         chat_span = self._tracer.otel_tracer.start_span(
             name=f"{SPAN_NAME_CHAT} {model.id}",
