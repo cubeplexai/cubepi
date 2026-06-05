@@ -183,3 +183,19 @@ class TestEngineIntegration:
         assert batch.messages[0].tool_call_id == "t1"
         assert not batch.messages[0].is_error
         assert batch.messages[0].content[0].text == "5"
+
+    async def test_is_error_result_surfaces_through_engine(self):
+        """A tool that returns is_error=True (without raising) is an error."""
+
+        @tool
+        async def flaky(value: str) -> AgentToolResult:
+            "Return an explicit error result."
+            return AgentToolResult(content=[TextContent(text="nope")], is_error=True)
+
+        ctx = _ctx([flaky])
+        msg = _assistant([ToolCall(id="t1", name="flaky", arguments={"value": "x"})])
+        batch = await execute_tool_calls(
+            ctx, msg, tool_execution="sequential", emit=lambda e: None
+        )
+
+        assert batch.messages[0].is_error

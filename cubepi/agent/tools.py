@@ -242,7 +242,11 @@ async def _execute_prepared(
                     ),
                 ),
             )
-            return result, False
+            # Honor an explicit is_error set by the tool body: the pipeline
+            # tracks error state as a separate bool, so a tool returning
+            # AgentToolResult(is_error=True) without raising must surface here
+            # (otherwise the model sees a successful result).
+            return result, bool(result.is_error)
         except HitlControlException:
             raise
         except Exception as exc:
