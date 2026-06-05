@@ -1,27 +1,4 @@
-from __future__ import annotations
+"""Image generation types — placeholder during the 0.7 redesign.
 
-from typing import Literal
-
-from pydantic import BaseModel, Field
-
-from cubepi.providers.base import ImageContent, TextContent
-
-
-class ImagesModel(BaseModel):
-    id: str
-    provider: str
-    api: str = ""
-
-
-class ImagesContext(BaseModel):
-    prompt: str
-    input_images: list[ImageContent] = Field(default_factory=list)
-
-
-class AssistantImages(BaseModel):
-    api: str
-    provider: str
-    model: str
-    output: list[ImageContent | TextContent] = Field(default_factory=list)
-    stop_reason: Literal["stop", "error", "aborted"] = "stop"
-    error_message: str | None = None
+The real types are added back in Task 2 of the implementation plan.
+"""
