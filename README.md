@@ -23,7 +23,7 @@ CubePi is a Pythonic, async-native agent framework designed for high performance
 | **Dependencies** | Pulls in langchain-core, langgraph-sdk, and transitive deps | 3 core deps: `pydantic`, `anthropic`, `openai` |
 | **Tool execution** | Tools are graph nodes with manual wiring | Declare tools as functions, framework handles routing and parallel execution |
 | **Multi-provider** | Via langchain chat model adapters | Native `Provider` protocol — Anthropic, OpenAI built in, add your own with one class |
-| **Middleware** | Graph-level middleware on node entry/exit | Agent-level middleware with 7 typed hooks and declarative composition rules |
+| **Middleware** | Graph-level middleware on node entry/exit | Agent-level middleware with 8 typed hooks and declarative composition rules |
 | **Observability** | LangSmith / Langfuse integration, full trace visualization | Native OpenTelemetry — `Tracer`, `Meter`, GenAI semconv, OTLP / JSONL exporters built in |
 
 ## Install
@@ -58,7 +58,7 @@ from cubepi.agent.types import AgentToolResult
 from cubepi.providers.anthropic import AnthropicProvider
 from cubepi.providers.base import TextContent
 
-provider = AnthropicProvider(api_key="sk-...")
+provider = AnthropicProvider(provider_id="anthropic", api_key="sk-...")
 
 class GetWeatherParams(BaseModel):
     city: str
@@ -69,8 +69,7 @@ async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on
     )
 
 agent = Agent(
-    provider=provider,
-    model=Model(id="claude-sonnet-4-5-20250929", provider="anthropic"),
+    model=provider.model("claude-sonnet-4-5-20250929"),
     tools=[
         AgentTool(
             name="get_weather",
@@ -106,11 +105,11 @@ from cubepi.providers.openai import OpenAIProvider
 from cubepi.providers import FauxProvider
 
 # Real providers
-anthropic = AnthropicProvider(api_key="...")
-openai = OpenAIProvider(api_key="...")
+anthropic = AnthropicProvider(provider_id="anthropic", api_key="...")
+openai = OpenAIProvider(provider_id="openai", api_key="...")
 
 # Test provider — no API calls, fully deterministic
-faux = FauxProvider()
+faux = FauxProvider(provider_id="faux")
 faux.set_responses(["Hello!", "How can I help?"])
 ```
 
@@ -145,16 +144,17 @@ Composable hooks that modify behavior without touching the core loop:
 
 ```python
 from cubepi import Middleware, compose_middleware
+from cubepi.agent.types import BeforeToolCallResult
 
 class LoggingMiddleware(Middleware):
-    async def transform_context(self, messages, *, signal=None):
+    async def transform_context(self, messages, *, ctx, signal=None):
         print(f"Context has {len(messages)} messages")
         return messages
 
 class SafetyMiddleware(Middleware):
     async def before_tool_call(self, ctx, *, signal=None):
         if ctx.tool_call.name == "dangerous_tool":
-            return BeforeToolCallResult(block=True, content="Blocked by policy")
+            return BeforeToolCallResult(block=True, reason="Blocked by policy")
         return None
 
 hooks = compose_middleware([LoggingMiddleware(), SafetyMiddleware()])
@@ -214,7 +214,7 @@ Ship your agent tests without API keys:
 ```python
 from cubepi.providers import FauxProvider, faux_text, faux_tool_call, faux_assistant_message
 
-provider = FauxProvider()
+provider = FauxProvider(provider_id="faux")
 provider.set_responses([
     faux_assistant_message([
         faux_tool_call("search", {"query": "python"}),
@@ -222,7 +222,7 @@ provider.set_responses([
     faux_assistant_message("Here are the results..."),
 ])
 
-agent = Agent(provider=provider, model=Model(id="test", provider="faux"), tools=[search_tool])
+agent = Agent(model=provider.model("test"), tools=[search_tool])
 agent.subscribe(lambda event, signal=None: None)  # subscribe before prompt to receive events
 await agent.prompt("Search for python")
 # Streams realistic deltas — content_block_start, text_delta, etc.

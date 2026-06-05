@@ -35,10 +35,10 @@ working tool-using agent in under five minutes.
   conversation length — SQLite for laptops, Postgres for production.
 - **Native multi-provider.** Anthropic and OpenAI ship in the box,
   through a `Provider` Protocol. Add a new provider in one class.
-- **Seven-hook middleware.** `transform_context`, `convert_to_llm`,
+- **Eight-hook middleware.** `transform_context`, `convert_to_llm`,
   `transform_system_prompt`, `before_tool_call`, `after_tool_call`,
-  `should_stop_after_turn`, `after_model_response` — each with explicit
-  composition rules. No mystery node ordering.
+  `should_stop_after_turn`, `after_model_response`, `on_run_end` — each
+  with explicit composition rules. No mystery node ordering.
 - **MCP loaders.** Point at any
   [Model Context Protocol](https://modelcontextprotocol.io) server
   (HTTP or stdio) and get back a list of `AgentTool`s.
@@ -70,13 +70,10 @@ You are reading the **Next 🚧** channel — unreleased docs that track
 the `main` branch. APIs documented here can still change before they
 ship in a tagged release.
 
-The latest released version is `v<PackageVersion/>` ([switch to it
-from the version picker, top-right](pathname:///)). Human-in-the-Loop
-([guide →](./guides/hitl/overview)) — `HitlChannel`, `CheckpointedChannel`,
-`ask_user`, `ConfirmToolCallMiddleware` — landed in 0.6. The native
-OpenTelemetry tracing module ([guide →](./guides/tracing/overview))
-— `Tracer`, `Meter`, content recording, MCP CLIENT spans, per-run
-`tracing_context` tags — landed in 0.4.
+The latest released version is v<PackageVersion /> ([switch to it from the
+version picker, top-right](pathname:///)). CubePi 0.7 adds provider-level
+`generate()`, compaction and subagent middleware, `on_run_end`, typed provider
+errors, `Tracer.oneshot()`, and checkpointed HITL run IDs.
 
 Source, issues, and discussion live on
 [GitHub](https://github.com/cubeplexai/cubepi).

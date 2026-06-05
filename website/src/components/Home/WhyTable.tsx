@@ -9,7 +9,7 @@ const ROWS_EN: { label: string; langgraph: string; cubepi: string }[] = [
   { label: 'Dependencies',    langgraph: 'langchain-core, langgraph-sdk, and transitive deps',      cubepi: '3 core deps: pydantic, anthropic, openai' },
   { label: 'Tool execution',  langgraph: 'Tools are graph nodes with manual wiring',                cubepi: 'Declare tools as functions; framework routes and parallelizes' },
   { label: 'Multi-provider',  langgraph: 'Via langchain chat model adapters',                       cubepi: 'Native Provider protocol — Anthropic, OpenAI built in' },
-  { label: 'Middleware',      langgraph: 'Graph-level middleware on node entry/exit',               cubepi: '7 typed hooks with declarative composition rules' },
+  { label: 'Middleware',      langgraph: 'Graph-level middleware on node entry/exit',               cubepi: '8 typed hooks with declarative composition rules' },
   { label: 'Observability',   langgraph: 'LangSmith / Langfuse integration',                        cubepi: 'Native OpenTelemetry — Tracer, Meter, GenAI semconv, OTLP / JSONL out of the box' },
 ];
 
@@ -20,7 +20,7 @@ const ROWS_ZH: { label: string; langgraph: string; cubepi: string }[] = [
   { label: '依赖项',       langgraph: 'langchain-core、langgraph-sdk 及传递依赖',        cubepi: '3 个核心依赖：pydantic、anthropic、openai' },
   { label: '工具执行',     langgraph: '工具是需要手动连线的图节点',                        cubepi: '声明为函数；框架自动路由并并行执行' },
   { label: '多 Provider',  langgraph: '通过 langchain chat model 适配器',                cubepi: '原生 Provider 协议 — 内置 Anthropic、OpenAI' },
-  { label: 'Middleware',   langgraph: '图级中间件，在节点进出时触发',                     cubepi: '7 种类型化 hook，声明式组合规则' },
+  { label: 'Middleware',   langgraph: '图级中间件，在节点进出时触发',                     cubepi: '8 种类型化 hook，声明式组合规则' },
   { label: '可观测性',     langgraph: 'LangSmith / Langfuse 集成',                       cubepi: '原生 OpenTelemetry — Tracer、Meter、GenAI semconv，开箱即用 OTLP / JSONL' },
 ];
 

@@ -202,7 +202,7 @@ def classify_and_raise(
 
     msg = str(exc) or getattr(exc, "message", "")
     status = _status_of(exc)
-    provider = model.provider
+    provider = model.provider_id
     model_id = model.id
 
     tokens_in = _estimate_input_tokens(messages)

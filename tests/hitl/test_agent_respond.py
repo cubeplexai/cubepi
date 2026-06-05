@@ -16,7 +16,7 @@ from cubepi.hitl import (
 )
 from cubepi.hitl.channel import CheckpointedChannel
 from cubepi.hitl.middleware import ApprovalPolicyMiddleware
-from cubepi.providers.base import Model, TextContent
+from cubepi.providers.base import TextContent
 from cubepi.providers.faux import (
     FauxProvider,
     faux_assistant_message,
@@ -54,7 +54,7 @@ def _two_turn_bash_responses():
 
 
 def _faux_with(responses) -> FauxProvider:
-    p = FauxProvider()
+    p = FauxProvider(provider_id="faux")
     p.set_responses(responses)
     return p
 
@@ -62,11 +62,10 @@ def _faux_with(responses) -> FauxProvider:
 async def test_respond_completes_a_suspended_run():
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses(_two_turn_bash_responses())
     agent = Agent(
-        provider=provider,
-        model=Model(id="faux", provider="faux"),
+        model=provider.model("faux"),
         tools=[_bash_tool()],
         middleware=[
             ApprovalPolicyMiddleware(ch, policy=lambda c: AskUser()),
@@ -104,9 +103,9 @@ async def test_respond_completes_a_suspended_run():
 async def test_respond_stale_answer():
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
+    provider = _faux_with([faux_assistant_message("")])
     agent = Agent(
-        provider=_faux_with([faux_assistant_message("")]),
-        model=Model(id="faux", provider="faux"),
+        model=provider.model("faux"),
         channel=ch,
         checkpointer=cp,
         thread_id="t-1",
@@ -132,9 +131,9 @@ async def test_respond_stale_answer():
 async def test_respond_no_pending():
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
+    provider = _faux_with([faux_assistant_message("")])
     agent = Agent(
-        provider=_faux_with([faux_assistant_message("")]),
-        model=Model(id="faux", provider="faux"),
+        model=provider.model("faux"),
         channel=ch,
         checkpointer=cp,
         thread_id="t-1",

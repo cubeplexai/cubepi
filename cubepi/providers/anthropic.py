@@ -113,8 +113,9 @@ class AnthropicProvider(BaseProvider):
         cache_policy: CacheMarkerPolicy | None = None,
         capability: CapabilityDescriptor | None = None,
         model_capability_overrides: dict[str, CapabilityDescriptor] | None = None,
+        provider_id: str = "",
     ) -> None:
-        super().__init__()
+        super().__init__(provider_id=provider_id)
         import anthropic
 
         kwargs: dict[str, Any] = {"api_key": api_key}
@@ -268,7 +269,7 @@ class AnthropicProvider(BaseProvider):
                             content=[],
                             usage=Usage(),
                             timestamp=time.time(),
-                            provider_id=model.provider,
+                            provider_id=model.provider_id,
                             model_id=model.id,
                         )
                         await self._emit(
@@ -325,7 +326,7 @@ class AnthropicProvider(BaseProvider):
                     error_message=err_text,
                     usage=Usage(),
                     timestamp=time.time(),
-                    provider_id=model.provider,
+                    provider_id=model.provider_id,
                     model_id=model.id,
                 )
                 await self._emit(
@@ -778,7 +779,7 @@ class AnthropicProvider(BaseProvider):
                 or 0,
             ),
             timestamp=time.time(),
-            provider_id=model.provider,
+            provider_id=model.provider_id,
             model_id=model.id,
             response_id=getattr(response, "id", None),
         )

@@ -22,7 +22,7 @@ from cubepi.providers.faux import (
 
 
 def make_model() -> Model:
-    return Model(id="faux-1", provider="faux")
+    return Model(id="faux-1", provider_id="faux")
 
 
 class CalculateParams(BaseModel):
@@ -49,11 +49,10 @@ def make_calculate_tool() -> AgentTool:
 
 class TestE2EBasic:
     async def test_basic_text_prompt(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("4")])
         agent = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             system_prompt="You are a helpful assistant.",
         )
 
@@ -66,7 +65,7 @@ class TestE2EBasic:
         assert "4" in agent.state.messages[1].content[0].text
 
     async def test_tool_execution_with_pending_tracking(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message(
@@ -82,8 +81,7 @@ class TestE2EBasic:
             ]
         )
         agent = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             system_prompt="Always use the calculator tool for math.",
             tools=[make_calculate_tool()],
         )
@@ -118,7 +116,7 @@ class TestE2EBasic:
                 ),
             ]
         )
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         prompt_task = asyncio.create_task(agent.prompt("Count"))
         await asyncio.sleep(0.03)
@@ -133,7 +131,7 @@ class TestE2EBasic:
     async def test_lifecycle_events_during_streaming(self):
         provider = FauxProvider(token_size_min=1, token_size_max=1)
         provider.set_responses([faux_assistant_message("1 2 3 4 5")])
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         events = []
         agent.subscribe(lambda e, s=None: events.append(e.type))
@@ -147,7 +145,7 @@ class TestE2EBasic:
         assert "agent_end" in events
 
     async def test_context_across_multiple_turns(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message("Nice to meet you, Alice."),
@@ -166,7 +164,7 @@ class TestE2EBasic:
                 ),
             ]
         )
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         await agent.prompt("My name is Alice.")
         assert len(agent.state.messages) == 2
@@ -176,15 +174,14 @@ class TestE2EBasic:
         assert "alice" in agent.state.messages[3].content[0].text.lower()
 
     async def test_thinking_content_preserved(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message([faux_thinking("step by step"), faux_text("4")]),
             ]
         )
         agent = Agent(
-            provider=provider,
-            model=Model(id="faux-reasoning", provider="faux", reasoning=True),
+            model=provider.model("faux-reasoning", reasoning=True),
             thinking="low",
         )
 
@@ -199,8 +196,8 @@ class TestE2EBasic:
 
 class TestE2EResume:
     async def test_raises_when_no_messages(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
 
         try:
             await agent.resume()
@@ -209,9 +206,9 @@ class TestE2EResume:
             assert "no messages" in str(e).lower()
 
     async def test_continue_from_user_message(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("HELLO WORLD")])
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         agent.state.messages = [
             UserMessage(content=[TextContent(text="Say HELLO WORLD")]),
@@ -224,11 +221,10 @@ class TestE2EResume:
         assert agent.state.messages[1].role == "assistant"
 
     async def test_continue_from_tool_result(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("The answer is 8.")])
         agent = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             tools=[make_calculate_tool()],
         )
 

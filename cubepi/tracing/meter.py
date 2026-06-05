@@ -284,7 +284,7 @@ class Meter:
         self, state: "_MeterState", payload: dict, model: "Model"
     ) -> None:
         del payload
-        provider_name = map_provider_name(model.provider)
+        provider_name = map_provider_name(model.provider_id)
         state.chat_open_ns = time.time_ns()
         state.chat_first_chunk_ns = None
         # Include gen_ai.request.model so failed/cancelled chat metrics

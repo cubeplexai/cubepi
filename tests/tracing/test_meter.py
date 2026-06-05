@@ -22,7 +22,7 @@ from cubepi.tracing import Meter
 from cubepi.tracing.schema import SCHEMA_URL, SCOPE_NAME
 
 
-MODEL = Model(id="faux-1", provider="faux")
+MODEL = Model(id="faux-1", provider_id="faux")
 
 
 def _build_meter() -> tuple[Meter, InMemoryMetricReader]:
@@ -68,9 +68,9 @@ def _by_name(points: list[tuple[str, Any]], name: str) -> list[Any]:
 
 class TestDurationMetric:
     async def test_chat_and_invoke_agent_duration(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("ok")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         meter, reader = _build_meter()
         meter.attach(agent)
 
@@ -90,9 +90,9 @@ class TestDurationMetric:
 
 class TestTokenUsageMetric:
     async def test_token_usage_input_and_output(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("hi there")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         meter, reader = _build_meter()
         meter.attach(agent)
 
@@ -111,7 +111,7 @@ class TestTimeToFirstChunkMetric:
     async def test_ttfc_emitted_when_first_chunk_seen(self):
         provider = FauxProvider(tokens_per_second=200.0)
         provider.append_responses([faux_assistant_message("hello world")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         meter, reader = _build_meter()
         meter.attach(agent)
 
@@ -129,9 +129,9 @@ class TestRequestModelOnChatMetrics:
         failed / cancelled requests (no response body, no response.model)
         can still be grouped by the requested model. Codex P2 finding
         on PR #85."""
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("ok")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         meter, reader = _build_meter()
         meter.attach(agent)
 
@@ -173,7 +173,7 @@ class TestProviderOnToolMetrics:
             return AgentToolResult(content=[TextContent(text="ok")])
 
         tool = AgentTool(name="t", description="t", parameters=P, execute=run)
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses(
             [
                 faux_assistant_message(
@@ -183,7 +183,7 @@ class TestProviderOnToolMetrics:
                 faux_assistant_message("final"),
             ]
         )
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s", tools=[tool])
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s", tools=[tool])
         meter, reader = _build_meter()
         meter.attach(agent)
 
@@ -219,10 +219,13 @@ class TestConcurrentAgents:
         A → response B). With instance-level state the first response
         would record duration against B's attrs; with per-attach state
         each one records against its own attrs."""
-        agent_a = Agent(provider=FauxProvider(), model=MODEL, system_prompt="s")
+        agent_a = Agent(
+            model=FauxProvider(provider_id="faux").model(MODEL.id),
+            system_prompt="s",
+        )
+        provider_b = FauxProvider(provider_id="faux")
         agent_b = Agent(
-            provider=FauxProvider(),
-            model=Model(id="faux-2", provider="faux"),
+            model=provider_b.model("faux-2"),
             system_prompt="s",
         )
         meter, reader = _build_meter()
@@ -241,12 +244,12 @@ class TestConcurrentAgents:
 
         # Open both chat windows.
         req_a({"messages": []}, MODEL)
-        req_b({"messages": []}, Model(id="faux-2", provider="faux"))
+        req_b({"messages": []}, Model(id="faux-2", provider_id="faux"))
         # Close them in original order.
         body_a = {"model": "faux-1", "usage": {"input_tokens": 1, "output_tokens": 2}}
         body_b = {"model": "faux-2", "usage": {"input_tokens": 3, "output_tokens": 4}}
         resp_a(body_a, MODEL, None)
-        resp_b(body_b, Model(id="faux-2", provider="faux"), None)
+        resp_b(body_b, Model(id="faux-2", provider_id="faux"), None)
 
         points = _all_metric_points(reader)
         chat_durations = [
@@ -274,9 +277,9 @@ class TestAttachedContextManager:
     wrapper that detaches on exit."""
 
     async def test_basic_usage(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("ok")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         meter, reader = _build_meter()
 
         async with meter.attached(agent):
@@ -288,8 +291,8 @@ class TestAttachedContextManager:
         assert len(durations) >= 2  # chat + invoke_agent
 
     async def test_exception_inside_block_still_detaches(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         meter, _reader = _build_meter()
         try:
             async with meter.attached(agent):
@@ -307,9 +310,9 @@ class TestAttachedDefensiveBranches:
     healthy body return — covers the defensive branch."""
 
     async def test_swallows_detach_exception(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("ok")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         meter, _reader = _build_meter()
 
         # Patch attach to return a detach that raises.
@@ -333,8 +336,8 @@ class TestAttachedDefensiveBranches:
 
 class TestNoMetricsWithoutListeners:
     async def test_detach_stops_emission(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         meter, reader = _build_meter()
         detach = meter.attach(agent)
         detach()

@@ -36,9 +36,9 @@ from cubepi import Agent, AgentTool, Model
 from cubepi.providers.anthropic import AnthropicProvider
 from cubepi.providers.openai import OpenAIProvider
 
-provider = AnthropicProvider()              # or OpenAIProvider()
+provider = AnthropicProvider(provider_id="anthropic")              # or OpenAIProvider(provider_id="openai")
 model = Model(id="claude-opus-4-5-20251001")
-agent = Agent(provider=provider, model=model, system_prompt="You are helpful.")
+agent = Agent(model=model, system_prompt="You are helpful.")
 
 await agent.prompt("Hello")
 await agent.wait_for_idle()
@@ -85,10 +85,10 @@ to `Agent(middleware=[...])`:
 from cubepi import Middleware
 
 class MyMiddleware(Middleware):
-    async def transform_context(self, messages, *, signal=None):
+    async def transform_context(self, messages, *, ctx, signal=None):
         return messages          # filter / inject messages before each LLM call
 
-    async def transform_system_prompt(self, sp, *, signal=None):
+    async def transform_system_prompt(self, sp, *, ctx, signal=None):
         return sp + "\nExtra."  # append to system prompt
 
     async def before_tool_call(self, ctx, *, signal=None):

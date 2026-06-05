@@ -16,7 +16,7 @@ Agent(self, *, provider: Provider, model: Model, system_prompt: str = '', tools:
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L124)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L124)
 
 
 **Attributes**
@@ -46,7 +46,7 @@ Agent(self, *, provider: Provider, model: Model, system_prompt: str = '', tools:
 subscribe(listener: Callable) -> Callable[[], None]
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L210)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L210)
 
 
 #### `steer` {#agent-steer}
@@ -55,7 +55,7 @@ subscribe(listener: Callable) -> Callable[[], None]
 steer(message: Message) -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L216)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L216)
 
 
 #### `cancel_steer` {#agent-cancel-steer}
@@ -69,7 +69,7 @@ Remove a not-yet-drained steering message by its steer_id.
 Returns True if a queued message was removed; False if it was already
 drained or never queued (best-effort cancel).
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L219)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L219)
 
 
 #### `follow_up` {#agent-follow-up}
@@ -78,7 +78,7 @@ drained or never queued (best-effort cancel).
 follow_up(message: Message) -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L227)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L227)
 
 
 #### `abort` {#agent-abort}
@@ -87,7 +87,7 @@ follow_up(message: Message) -> None
 abort() -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L230)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L230)
 
 
 #### `wait_for_idle` {#agent-wait-for-idle}
@@ -96,7 +96,7 @@ abort() -> None
 wait_for_idle() -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L234)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L234)
 
 
 #### `reset` {#agent-reset}
@@ -105,7 +105,7 @@ wait_for_idle() -> None
 reset() -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L238)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L238)
 
 
 #### `prompt` {#agent-prompt}
@@ -114,7 +114,7 @@ reset() -> None
 prompt(message: str | Message | list[Message]) -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L247)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L247)
 
 
 #### `resume` {#agent-resume}
@@ -123,7 +123,7 @@ prompt(message: str | Message | list[Message]) -> None
 resume() -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L287)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L287)
 
 
 #### `detach` {#agent-detach}
@@ -132,7 +132,7 @@ resume() -> None
 detach() -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L385)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L385)
 
 
 #### `load_pending_hitl_request` {#agent-load-pending-hitl-request}
@@ -141,7 +141,7 @@ detach() -> None
 load_pending_hitl_request() -> HitlRequest | None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L403)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L403)
 
 
 #### `respond` {#agent-respond}
@@ -150,7 +150,7 @@ load_pending_hitl_request() -> HitlRequest | None
 respond(*, question_id: str | None = None, answer: Any) -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L411)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L411)
 
 
 #### `abort_pending` {#agent-abort-pending}
@@ -167,7 +167,7 @@ the agent signal; Phase 2 (with lock) appends synthetic deny
 tool_results + a terminal stop_reason="aborted" assistant message
 and emits AgentAbortedEvent.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L451)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L451)
 
 
 
@@ -180,7 +180,7 @@ AgentState(self, system_prompt: str = '', model: Model = (lambda: Model(id='unkn
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/agent.py#L85)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/agent.py#L85)
 
 
 **Attributes**
@@ -205,7 +205,7 @@ run_agent_loop(*, prompts: list[Message], context: AgentContext, provider: Provi
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/loop.py#L31)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/loop.py#L31)
 
 
 ### run_agent_loop_continue {#run-agent-loop-continue}
@@ -217,7 +217,7 @@ run_agent_loop_continue(*, context: AgentContext, provider: Provider, model: Mod
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/loop.py#L88)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/loop.py#L88)
 
 
 ### execute_tool_calls {#execute-tool-calls}
@@ -229,7 +229,7 @@ execute_tool_calls(context: AgentContext, assistant_message: AssistantMessage, *
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/tools.py#L260)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/tools.py#L260)
 
 
 ### AfterToolCallContext {#aftertoolcallcontext}
@@ -241,7 +241,7 @@ AfterToolCallContext(self, assistant_message: AssistantMessage, tool_call: ToolC
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L82)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L82)
 
 
 **Attributes**
@@ -259,7 +259,7 @@ AfterToolCallContext(self, assistant_message: AssistantMessage, tool_call: ToolC
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L67)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L67)
 
 
 **Attributes**
@@ -279,7 +279,7 @@ AgentContext(self, system_prompt: str, messages: list[Message], tools: list[Agen
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L48)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L48)
 
 
 **Attributes**
@@ -295,7 +295,7 @@ AgentContext(self, system_prompt: str, messages: list[Message], tools: list[Agen
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L107)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L107)
 
 
 **Attributes**
@@ -313,7 +313,7 @@ AgentEvent = AgentStartEvent | AgentEndEvent | TurnStartEvent | TurnEndEvent | M
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L196)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L196)
 
 
 ### AgentListener {#agentlistener}
@@ -325,7 +325,7 @@ AgentListener = Callable[[AgentEvent, asyncio.Event | None], Awaitable[None] | N
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L215)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L215)
 
 
 ### AgentStartEvent {#agentstartevent}
@@ -333,7 +333,7 @@ AgentListener = Callable[[AgentEvent, asyncio.Event | None], Awaitable[None] | N
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L103)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L103)
 
 
 **Attributes**
@@ -350,7 +350,7 @@ AgentTool(self, name: str, description: str, parameters: type[TParams], execute:
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L30)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L30)
 
 
 **Attributes**
@@ -371,7 +371,7 @@ AgentTool(self, name: str, description: str, parameters: type[TParams], execute:
 to_definition() -> ToolDefinition
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L39)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L39)
 
 
 
@@ -380,7 +380,7 @@ to_definition() -> ToolDefinition
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L23)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L23)
 
 
 **Attributes**
@@ -400,7 +400,7 @@ BeforeToolCallContext(self, assistant_message: AssistantMessage, tool_call: Tool
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L74)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L74)
 
 
 **Attributes**
@@ -416,7 +416,7 @@ BeforeToolCallContext(self, assistant_message: AssistantMessage, tool_call: Tool
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L59)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L59)
 
 
 **Attributes**
@@ -433,7 +433,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L133)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L133)
 
 
 **Attributes**
@@ -447,7 +447,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L122)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L122)
 
 
 **Attributes**
@@ -461,7 +461,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L127)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L127)
 
 
 **Attributes**
@@ -480,7 +480,7 @@ ShouldStopAfterTurnContext(self, message: AssistantMessage, tool_results: list[T
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L92)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L92)
 
 
 **Attributes**
@@ -496,7 +496,7 @@ ShouldStopAfterTurnContext(self, message: AssistantMessage, tool_results: list[T
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L153)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L153)
 
 
 **Attributes**
@@ -516,7 +516,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L138)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L138)
 
 
 **Attributes**
@@ -532,7 +532,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L145)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L145)
 
 
 **Attributes**
@@ -549,7 +549,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L116)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L116)
 
 
 **Attributes**
@@ -564,7 +564,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/agent/types.py#L112)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/agent/types.py#L112)
 
 
 **Attributes**
@@ -581,7 +581,7 @@ emit_event(emit_fn: Callable, event: object) -> None
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/utils/emit.py#L7)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/utils/emit.py#L7)
 
 
 

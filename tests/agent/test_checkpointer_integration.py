@@ -22,17 +22,16 @@ from cubepi.providers.faux import (
 
 
 def make_model() -> Model:
-    return Model(id="faux-1", provider="faux")
+    return Model(id="faux-1", provider_id="faux")
 
 
 class TestCheckpointerIntegration:
     async def test_messages_persisted_on_message_end(self):
         checkpointer = MemoryCheckpointer()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("Hello!")])
         agent = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             checkpointer=checkpointer,
             thread_id="thread-1",
         )
@@ -43,11 +42,10 @@ class TestCheckpointerIntegration:
 
     async def test_history_restored_on_prompt(self):
         checkpointer = MemoryCheckpointer()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("First reply")])
         agent1 = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             checkpointer=checkpointer,
             thread_id="thread-1",
         )
@@ -55,8 +53,7 @@ class TestCheckpointerIntegration:
 
         provider.set_responses([faux_assistant_message("Second reply")])
         agent2 = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             checkpointer=checkpointer,
             thread_id="thread-1",
         )
@@ -64,9 +61,9 @@ class TestCheckpointerIntegration:
         assert len(agent2.state.messages) == 4  # 2 from first + 2 from second
 
     async def test_no_checkpointer_works_as_before(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("Hi")])
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
         await agent.prompt("Hello")
         assert len(agent.state.messages) == 2
 
@@ -88,7 +85,7 @@ class TestCheckpointerIntegration:
         )
 
         checkpointer = MemoryCheckpointer()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         # First response: assistant calls the echo tool
         # Second response: assistant gives a final text answer
         provider.set_responses(
@@ -101,8 +98,7 @@ class TestCheckpointerIntegration:
             ]
         )
         agent = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             tools=[echo_tool],
             checkpointer=checkpointer,
             thread_id="thread-tool",
@@ -147,7 +143,7 @@ class TestCheckpointerIntegration:
         )
 
         checkpointer = MemoryCheckpointer()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
 
         # --- First session: tool-use conversation ---
         provider.set_responses(
@@ -160,8 +156,7 @@ class TestCheckpointerIntegration:
             ]
         )
         agent1 = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             tools=[echo_tool],
             checkpointer=checkpointer,
             thread_id="thread-tool-restore",
@@ -173,8 +168,7 @@ class TestCheckpointerIntegration:
         # --- Second session: same thread, new Agent ---
         provider.set_responses([faux_assistant_message("Sure, continuing.")])
         agent2 = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             tools=[echo_tool],
             checkpointer=checkpointer,
             thread_id="thread-tool-restore",
@@ -214,7 +208,7 @@ class TestCheckpointerIntegration:
         )
 
         checkpointer = MemoryCheckpointer()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message(
@@ -224,8 +218,7 @@ class TestCheckpointerIntegration:
             ]
         )
         agent = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             tools=[block_tool],
             checkpointer=checkpointer,
             thread_id="thread-cancel",
@@ -282,7 +275,7 @@ class TestCheckpointerIntegration:
             ],
         )
 
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message(
@@ -292,8 +285,7 @@ class TestCheckpointerIntegration:
             ]
         )
         agent = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             tools=[block_tool],
             checkpointer=checkpointer,
             thread_id="thread-reuse",
@@ -321,7 +313,7 @@ class TestCheckpointerIntegration:
     async def test_cancel_backfill_only_for_unanswered_calls(self):
         """Backfill skips already-answered tool_calls and only fills orphans —
         e.g. one of two parallel calls finished before the cancel landed."""
-        agent = Agent(provider=FauxProvider(), model=make_model())
+        agent = Agent(model=FauxProvider(provider_id="faux").model("faux-1"))
         agent._state._messages = [
             UserMessage(content=[TextContent(text="go")]),
             AssistantMessage(
@@ -348,7 +340,7 @@ class TestCheckpointerIntegration:
 
     async def test_cancel_backfill_noop_without_orphans(self):
         """No assistant message, or no unanswered tool_calls — nothing added."""
-        agent = Agent(provider=FauxProvider(), model=make_model())
+        agent = Agent(model=FauxProvider(provider_id="faux").model("faux-1"))
         # No assistant at all.
         agent._state._messages = [UserMessage(content=[TextContent(text="hi")])]
         await agent._complete_cancelled_tool_calls()

@@ -307,7 +307,7 @@ class TestCacheControlOnTools:
 def _anthropic_model(*, reasoning: bool = False, max_tokens: int = 8192) -> Model:
     return Model(
         id="claude-sonnet-4-20250514" if not reasoning else "claude-sonnet-4-20250514",
-        provider="anthropic",
+        provider_id="anthropic",
         api="anthropic",
         reasoning=reasoning,
         max_tokens=max_tokens,

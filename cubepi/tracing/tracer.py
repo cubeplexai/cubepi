@@ -30,7 +30,7 @@ from cubepi.tracing.schema import SCHEMA_URL, SCOPE_NAME
 
 if TYPE_CHECKING:
     from cubepi.agent.agent import Agent
-    from cubepi.providers.base import BaseProvider, Message, Model
+    from cubepi.providers.base import BaseProvider, BoundModel, Message, Model, Provider
 
 
 class _OneShotSession:
@@ -43,7 +43,7 @@ class _OneShotSession:
 
     def __init__(
         self,
-        provider: "BaseProvider",
+        provider: "Provider",
         model: "Model",
         run: Any,
     ) -> None:
@@ -419,8 +419,7 @@ class Tracer:
     async def oneshot(
         self,
         *,
-        provider: "BaseProvider",
-        model: "Model",
+        model: "BoundModel",
         operation: str = "oneshot",
         metadata: "dict[str, str | int | float | bool] | None" = None,
         record_content: bool | None = None,
@@ -448,7 +447,6 @@ class Tracer:
         Example::
 
             async with tracer.oneshot(
-                provider=provider,
                 model=model,
                 operation="consolidate_memory",
                 metadata={"conversation_id": conv_id, "user_id": user_id},
@@ -475,6 +473,8 @@ class Tracer:
             record_content if record_content is not None else self._record_content
         )
         run_id = str(uuid.uuid4())
+        provider = model.provider
+        model_spec = model.spec
 
         root_attrs: dict[str, Any] = {
             GEN_AI_OPERATION_NAME: OP_INVOKE_AGENT,
@@ -570,7 +570,7 @@ class Tracer:
         # calls that belong to this oneshot session.
         token = _active_run.set(run)
         try:
-            yield _OneShotSession(provider=provider, model=model, run=run)
+            yield _OneShotSession(provider=provider, model=model_spec, run=run)
         except BaseException as _exc:
             # Mark the root span as failed so `cubepi trace ls` (which
             # reads status off the root) lists this run as an error

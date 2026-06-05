@@ -36,7 +36,6 @@ from cubepi.checkpointer.mysql.alembic_helpers import (
     write_schema_version_op,
 )
 from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
-from cubepi.providers.base import Model
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
 ADMIN_DSN = os.environ.get(
@@ -98,11 +97,10 @@ async def bootstrap_schema(dsn: str) -> None:
 
 
 def build_agent(checkpointer: MySQLCheckpointer) -> Agent:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("Hi! I'll remember this.")])
     return Agent(
-        provider=provider,
-        model=Model(id="faux", provider="faux"),
+        model=provider.model("faux"),
         checkpointer=checkpointer,
         thread_id=THREAD_ID,
     )

@@ -29,7 +29,7 @@ from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubepi.tracing import Tracer
 
 
-MODEL = Model(id="faux-1", provider="faux")
+MODEL = Model(id="faux-1", provider_id="faux")
 
 
 class _Capture(SpanExporter):
@@ -59,10 +59,9 @@ def _json_attr(span: ReadableSpan, key: str) -> Any:
 
 
 async def _build(*, record_content: bool, redact=None, tools=None):
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     agent = Agent(
-        provider=provider,
-        model=MODEL,
+        model=provider.model(MODEL.id),
         system_prompt="be helpful, be careful",
         tools=tools,
     )

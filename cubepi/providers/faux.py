@@ -160,8 +160,9 @@ class FauxProvider(BaseProvider):
         tokens_per_second: float | None = None,
         token_size_min: int = 3,
         token_size_max: int = 5,
+        provider_id: str = "",
     ) -> None:
-        super().__init__()
+        super().__init__(provider_id=provider_id)
         self._responses: list[FauxResponseStep] = []
         self._tokens_per_second = tokens_per_second
         self._min = max(1, min(token_size_min, token_size_max))
@@ -346,7 +347,7 @@ class FauxProvider(BaseProvider):
                 resolved = resolved.model_copy(
                     update={
                         "usage": cache_usage,
-                        "provider_id": model.provider,
+                        "provider_id": model.provider_id,
                         "model_id": model.id,
                     }
                 )

@@ -17,7 +17,7 @@ from cubepi.providers.base import Model
 from cubepi.providers.faux import FauxProvider
 from cubepi.tracing import Tracer
 
-MODEL = Model(id="faux-1", provider="faux")
+MODEL = Model(id="faux-1", provider_id="faux")
 
 
 def _build_unattached() -> tuple[Agent, FauxProvider, Tracer]:
@@ -33,8 +33,8 @@ def _build_unattached() -> tuple[Agent, FauxProvider, Tracer]:
         def force_flush(self, timeout_millis: int = 30_000) -> bool:
             return True
 
-    provider = FauxProvider()
-    agent = Agent(provider=provider, model=MODEL, system_prompt="t")
+    provider = FauxProvider(provider_id="faux")
+    agent = Agent(model=provider.model(MODEL.id), system_prompt="t")
     tracer = Tracer(
         service_name="t",
         agent_name="t",

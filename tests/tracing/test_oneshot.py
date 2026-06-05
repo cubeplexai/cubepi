@@ -24,7 +24,7 @@ from cubepi.tracing import Tracer
 from cubepi.tracing.tracer import _OneShotSession
 
 
-MODEL = Model(id="faux-1", provider="faux")
+MODEL = Model(id="faux-1", provider_id="faux")
 
 
 class InMemoryExporter(SpanExporter):
@@ -61,9 +61,9 @@ def _spans_by_name(spans: list[ReadableSpan]) -> dict[str, ReadableSpan]:
 
 @pytest.mark.asyncio
 async def test_oneshot_session_type() -> None:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     tracer, _ = _make_tracer()
-    async with tracer.oneshot(provider=provider, model=MODEL) as session:
+    async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
         assert isinstance(session, _OneShotSession)
     await tracer.shutdown()
 
@@ -73,7 +73,7 @@ async def test_oneshot_session_uses_provider_generate() -> None:
     provider = _GenerateOnlyProvider()
     tracer, _ = _make_tracer()
 
-    async with tracer.oneshot(provider=provider, model=MODEL) as session:
+    async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
         text = await session.generate(
             system="sys",
             messages=[UserMessage(content=[TextContent(text="q")])],
@@ -90,13 +90,12 @@ async def test_oneshot_session_uses_provider_generate() -> None:
 
 @pytest.mark.asyncio
 async def test_oneshot_produces_root_and_chat_spans() -> None:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.append_responses([faux_assistant_message("hello world")])
     tracer, exporter = _make_tracer()
 
     async with tracer.oneshot(
-        provider=provider,
-        model=MODEL,
+        model=provider.model(MODEL.id),
         operation="test_op",
         metadata={"conversation_id": "conv-123", "user_id": "usr-456"},
     ) as session:
@@ -141,13 +140,12 @@ async def test_oneshot_produces_root_and_chat_spans() -> None:
 
 @pytest.mark.asyncio
 async def test_oneshot_metadata_on_root_span() -> None:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.append_responses([faux_assistant_message("ok")])
     tracer, exporter = _make_tracer()
 
     async with tracer.oneshot(
-        provider=provider,
-        model=MODEL,
+        model=provider.model(MODEL.id),
         operation="consolidate_memory",
         metadata={"conversation_id": "conv-abc"},
     ) as session:
@@ -172,13 +170,12 @@ async def test_oneshot_user_metadata_cannot_shadow_reserved_oneshot_operation() 
     """If a caller's metadata dict includes 'oneshot_operation', the value
     derived from the operation argument must still win — the documented
     `cubepi trace ls --meta oneshot_operation=<op>` filter depends on it."""
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.append_responses([faux_assistant_message("ok")])
     tracer, exporter = _make_tracer()
 
     async with tracer.oneshot(
-        provider=provider,
-        model=MODEL,
+        model=provider.model(MODEL.id),
         operation="real_op",
         metadata={"oneshot_operation": "user_supplied_value"},
     ) as session:
@@ -200,11 +197,11 @@ async def test_oneshot_user_metadata_cannot_shadow_reserved_oneshot_operation() 
 
 @pytest.mark.asyncio
 async def test_oneshot_no_metadata_ok() -> None:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.append_responses([faux_assistant_message("result")])
     tracer, exporter = _make_tracer()
 
-    async with tracer.oneshot(provider=provider, model=MODEL) as session:
+    async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
         text = await session.generate(
             system="sys",
             messages=[UserMessage(content=[TextContent(text="q")])],
@@ -220,13 +217,12 @@ async def test_oneshot_no_metadata_ok() -> None:
 
 @pytest.mark.asyncio
 async def test_oneshot_record_content_captures_messages() -> None:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.append_responses([faux_assistant_message("answer")])
     tracer, exporter = _make_tracer(record_content=True)
 
     async with tracer.oneshot(
-        provider=provider,
-        model=MODEL,
+        model=provider.model(MODEL.id),
         record_content=True,
     ) as session:
         await session.generate(
@@ -265,7 +261,7 @@ async def test_oneshot_generate_error_event_raises_and_marks_root() -> None:
     from opentelemetry.trace import StatusCode
     from unittest.mock import AsyncMock, patch
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     tracer, exporter = _make_tracer()
 
     error_stream = MessageStream()
@@ -275,7 +271,7 @@ async def test_oneshot_generate_error_event_raises_and_marks_root() -> None:
     )
     with patch.object(provider, "stream", new=AsyncMock(return_value=error_stream)):
         with pytest.raises(RuntimeError, match="boom"):
-            async with tracer.oneshot(provider=provider, model=MODEL) as session:
+            async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
                 await session.generate(
                     system="sys",
                     messages=[UserMessage(content=[TextContent(text="q")])],
@@ -308,13 +304,13 @@ async def test_oneshot_subscribe_failure_closes_stream_file(tmp_path) -> None:  
         atexit_flush=False,
     )
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
 
     with patch.object(
         provider, "subscribe_chunk", side_effect=RuntimeError("chunk sub failed")
     ):
         with pytest.raises(RuntimeError, match="chunk sub failed"):
-            async with tracer.oneshot(provider=provider, model=MODEL):
+            async with tracer.oneshot(model=provider.model(MODEL.id)):
                 pass  # pragma: no cover
 
     await tracer.shutdown()
@@ -339,7 +335,7 @@ async def test_oneshot_propagates_silent_producer_failure() -> None:
     from opentelemetry.trace import StatusCode
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     tracer, exporter = _make_tracer()
 
     # Build a stream that emits done normally but whose result() raises
@@ -357,7 +353,7 @@ async def test_oneshot_propagates_silent_producer_failure() -> None:
 
     with patch.object(provider, "stream", new=AsyncMock(return_value=fake_stream)):
         with pytest.raises(RuntimeError, match="producer crashed"):
-            async with tracer.oneshot(provider=provider, model=MODEL) as session:
+            async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
                 await session.generate(
                     system="sys",
                     messages=[UserMessage(content=[TextContent(text="q")])],
@@ -378,14 +374,14 @@ async def test_oneshot_subscribe_failure_raises_and_ends_root_span() -> None:
     """If provider subscription raises, oneshot re-raises and ends the root span."""
     from unittest.mock import patch
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     tracer, exporter = _make_tracer()
 
     with patch.object(
         provider, "subscribe_request", side_effect=RuntimeError("subscribe failed")
     ):
         with pytest.raises(RuntimeError, match="subscribe failed"):
-            async with tracer.oneshot(provider=provider, model=MODEL):
+            async with tracer.oneshot(model=provider.model(MODEL.id)):
                 pass  # pragma: no cover — never reached
 
     await tracer.force_flush()
@@ -401,7 +397,7 @@ async def test_oneshot_detacher_exception_is_swallowed() -> None:
     """Detach errors during cleanup must not propagate to the caller."""
     from unittest.mock import patch
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.append_responses([faux_assistant_message("ok")])
     tracer, _ = _make_tracer()
 
@@ -417,7 +413,7 @@ async def test_oneshot_detacher_exception_is_swallowed() -> None:
         return raising_detach
 
     with patch.object(provider, "subscribe_request", side_effect=patched_subscribe):
-        async with tracer.oneshot(provider=provider, model=MODEL) as session:
+        async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
             text = await session.generate(
                 system="sys",
                 messages=[UserMessage(content=[TextContent(text="q")])],
@@ -435,7 +431,7 @@ async def test_oneshot_passes_signal_to_provider_and_sets_on_cancel() -> None:
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     tracer, _ = _make_tracer()
 
     captured_options: dict[str, StreamOptions | None] = {"opts": None}
@@ -455,7 +451,7 @@ async def test_oneshot_passes_signal_to_provider_and_sets_on_cancel() -> None:
         return await real_stream(**kwargs)
 
     async def do_work():
-        async with tracer.oneshot(provider=provider, model=MODEL) as session:
+        async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
             with patch.object(provider, "stream", new=patched_stream):
                 await session.generate(
                     system="sys",
@@ -491,10 +487,10 @@ async def test_oneshot_record_stream_writes_jsonl(tmp_path) -> None:  # type: ig
         atexit_flush=False,
     )
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.append_responses([faux_assistant_message("streamed text")])
 
-    async with tracer.oneshot(provider=provider, model=MODEL) as session:
+    async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
         text = await session.generate(
             system="sys",
             messages=[UserMessage(content=[TextContent(text="hi")])],
@@ -521,7 +517,7 @@ async def test_oneshot_partial_subscribe_failure_unwinds_listeners() -> None:
     listener must be unsubscribed before re-raising (no dangling listeners)."""
     from unittest.mock import patch
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     tracer, exporter = _make_tracer()
 
     # Track how many listeners were subscribed / detached
@@ -546,7 +542,7 @@ async def test_oneshot_partial_subscribe_failure_unwinds_listeners() -> None:
         ),
         pytest.raises(RuntimeError, match="chunk sub failed"),
     ):
-        async with tracer.oneshot(provider=provider, model=MODEL):
+        async with tracer.oneshot(model=provider.model(MODEL.id)):
             pass  # pragma: no cover
 
     await tracer.force_flush()
@@ -567,7 +563,7 @@ async def test_oneshot_cancelled_generate_closes_chat_span() -> None:
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     tracer, exporter = _make_tracer()
 
     # A stream that never yields (blocks forever) so we can cancel it
@@ -579,7 +575,7 @@ async def test_oneshot_cancelled_generate_closes_chat_span() -> None:
     hanging.__aiter__ = lambda self: hanging_stream()
 
     async def do_work():
-        async with tracer.oneshot(provider=provider, model=MODEL) as session:
+        async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
             with patch.object(provider, "stream", new=AsyncMock(return_value=hanging)):
                 await session.generate(
                     system="sys",
@@ -620,7 +616,7 @@ async def test_oneshot_cancel_mid_stream_marks_open_chat_span_aborted() -> None:
     tracer, exporter = _make_tracer()
 
     async def do_work():
-        async with tracer.oneshot(provider=provider, model=MODEL) as session:
+        async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
             await session.generate(
                 system="sys",
                 messages=[UserMessage(content=[TextContent(text="q")])],
@@ -651,13 +647,13 @@ async def test_oneshot_does_not_interfere_with_concurrent_agent() -> None:
 
     from cubepi.agent.agent import Agent
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     # Push responses for both agent and oneshot
     provider.append_responses([faux_assistant_message("agent reply")])
     provider.append_responses([faux_assistant_message("oneshot reply")])
 
     tracer, exporter = _make_tracer()
-    agent = Agent(provider=provider, model=MODEL, system_prompt="sys")
+    agent = Agent(model=provider.model(MODEL.id), system_prompt="sys")
     detach = tracer.attach(agent)
 
     # Run agent and oneshot concurrently
@@ -666,7 +662,7 @@ async def test_oneshot_does_not_interfere_with_concurrent_agent() -> None:
         return str(agent.state.messages[-1].content[0].text)  # type: ignore[index]
 
     async def run_oneshot() -> str:
-        async with tracer.oneshot(provider=provider, model=MODEL) as session:
+        async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
             return await session.generate(
                 system="sys",
                 messages=[UserMessage(content=[TextContent(text="oneshot q")])],

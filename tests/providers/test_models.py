@@ -23,7 +23,7 @@ def _model(
 ) -> Model:
     return Model(
         id=model_id,
-        provider=provider,
+        provider_id=provider,
         reasoning=reasoning,
         thinking_level_map=thinking_level_map,
     )

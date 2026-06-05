@@ -6,13 +6,13 @@ from cubepi.hitl import ApproveAnswer
 from cubepi.hitl.channel import InMemoryChannel
 from cubepi.hitl.testing import NoopChannel, ScriptedChannel
 from cubepi.hitl.types import Question
-from cubepi.providers.base import Model, TextContent
+from cubepi.providers.base import TextContent
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
 
 def _faux_with(responses):
     """Helper: build a FauxProvider preloaded with responses (mirrors real API)."""
-    p = FauxProvider()
+    p = FauxProvider(provider_id="faux")
     p.set_responses(responses)
     return p
 
@@ -49,9 +49,9 @@ async def test_subagent_inherits_parent_channel():
 
     async def subagent_execute(call_id, args, *, signal=None, on_update=None):
         # The subagent factory uses the same channel object as parent.
+        inner_provider = _faux_with([faux_assistant_message("")])
         inner = Agent(
-            provider=_faux_with([faux_assistant_message("")]),
-            model=Model(id="faux", provider="faux"),
+            model=inner_provider.model("faux"),
             channel=parent_ch,
         )
         # Verify same channel
@@ -66,9 +66,9 @@ async def test_subagent_inherits_parent_channel():
         execution_mode="sequential",
     )
 
+    parent_provider = _faux_with([faux_assistant_message("")])
     parent = Agent(
-        provider=_faux_with([faux_assistant_message("")]),
-        model=Model(id="faux", provider="faux"),
+        model=parent_provider.model("faux"),
         tools=[subagent_tool],
         channel=parent_ch,
     )

@@ -11,7 +11,7 @@ from cubepi.checkpointer.memory import MemoryCheckpointer
 from cubepi.hitl import AskUser
 from cubepi.hitl.channel import CheckpointedChannel
 from cubepi.hitl.middleware import ApprovalPolicyMiddleware
-from cubepi.providers.base import Model, TextContent
+from cubepi.providers.base import TextContent
 from cubepi.providers.faux import (
     FauxProvider,
     faux_assistant_message,
@@ -40,7 +40,7 @@ def _bash_tool() -> AgentTool:
 async def test_abort_pending_closes_conversation():
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses(
         [
             faux_assistant_message(
@@ -50,8 +50,7 @@ async def test_abort_pending_closes_conversation():
         ]
     )
     agent = Agent(
-        provider=provider,
-        model=Model(id="faux", provider="faux"),
+        model=provider.model("faux"),
         tools=[_bash_tool()],
         middleware=[ApprovalPolicyMiddleware(ch, policy=lambda c: AskUser())],
         channel=ch,

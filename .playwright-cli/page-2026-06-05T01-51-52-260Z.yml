@@ -1,0 +1,266 @@
+- generic [ref=e2]:
+  - region "跳到主要内容":
+    - link "跳到主要内容" [ref=e3] [cursor=pointer]:
+      - /url: "#__docusaurus_skipToContent_fallback"
+  - navigation "主导航" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link "CubePi logo CubePi" [ref=e7] [cursor=pointer]:
+          - /url: /zh-Hans/
+          - img "CubePi logo" [ref=e9]
+          - generic [ref=e10]: CubePi
+        - link "文档" [ref=e11] [cursor=pointer]:
+          - /url: /zh-Hans/docs
+        - link "API" [ref=e12] [cursor=pointer]:
+          - /url: /zh-Hans/docs/api/
+        - link "示例" [ref=e13] [cursor=pointer]:
+          - /url: /zh-Hans/docs/recipes/weather-agent
+        - link "Changelog" [ref=e14] [cursor=pointer]:
+          - /url: /zh-Hans/changelog
+      - generic [ref=e15]:
+        - button "0.7（最新）" [ref=e17] [cursor=pointer]
+        - button "简体中文" [ref=e19] [cursor=pointer]:
+          - img [ref=e20]
+          - text: 简体中文
+        - link "GitHub（在新标签页中打开）" [ref=e22] [cursor=pointer]:
+          - /url: https://github.com/cubeplexai/cubepi
+          - text: GitHub
+          - img "（在新标签页中打开）" [ref=e23]
+        - button "切换浅色/暗黑模式（当前为系统模式）" [ref=e26] [cursor=pointer]:
+          - img [ref=e27]
+  - generic [ref=e31]:
+    - complementary [ref=e32]:
+      - navigation "文档侧边栏" [ref=e35]:
+        - list [ref=e36]:
+          - listitem [ref=e37]:
+            - link "CubePi" [ref=e38] [cursor=pointer]:
+              - /url: /zh-Hans/docs/
+              - generic "CubePi" [ref=e39]
+          - listitem [ref=e40]:
+            - button "快速入门" [expanded] [ref=e42] [cursor=pointer]:
+              - generic "快速入门" [ref=e43]
+            - list [ref=e44]:
+              - listitem [ref=e45]:
+                - link "安装" [ref=e46] [cursor=pointer]:
+                  - /url: /zh-Hans/docs/getting-started/installation
+                  - generic "安装" [ref=e47]
+              - listitem [ref=e48]:
+                - link "快速开始" [ref=e49] [cursor=pointer]:
+                  - /url: /zh-Hans/docs/getting-started/quick-start
+                  - generic "快速开始" [ref=e50]
+              - listitem [ref=e51]:
+                - link "核心概念" [ref=e52] [cursor=pointer]:
+                  - /url: /zh-Hans/docs/getting-started/core-concepts
+                  - generic "核心概念" [ref=e53]
+          - listitem [ref=e54]:
+            - button "指南" [ref=e56] [cursor=pointer]:
+              - generic "指南" [ref=e57]
+          - listitem [ref=e58]:
+            - generic [ref=e59]:
+              - link "API Reference" [ref=e60] [cursor=pointer]:
+                - /url: /zh-Hans/docs/api/
+                - generic "API Reference" [ref=e61]
+              - button "展开侧边栏分类 'API Reference'" [ref=e62] [cursor=pointer]
+          - listitem [ref=e63]:
+            - button "示例" [ref=e65] [cursor=pointer]:
+              - generic "示例" [ref=e66]
+          - listitem [ref=e67]:
+            - button "迁移指南" [ref=e69] [cursor=pointer]:
+              - generic "迁移指南" [ref=e70]
+    - main [ref=e71]:
+      - generic [ref=e73]:
+        - generic [ref=e75]:
+          - article [ref=e76]:
+            - navigation "页面路径" [ref=e77]:
+              - list [ref=e78]:
+                - listitem [ref=e79]:
+                  - link "主页面" [ref=e80] [cursor=pointer]:
+                    - /url: /zh-Hans/
+                    - img [ref=e81]
+                - listitem [ref=e83]:
+                  - generic [ref=e84]: CubePi
+            - generic [ref=e85]: 版本：0.7（最新）
+            - generic [ref=e86]:
+              - heading "CubePi" [level=1] [ref=e88]
+              - paragraph [ref=e89]:
+                - strong [ref=e90]: CubePi
+                - text: 是一个 Pythonic、原生异步的 Agent 框架，为高性能、可读性和 生产级持久化而设计。它把一次 Agent 运行建模为一个线性的
+                - code [ref=e91]: while
+                - text: 循环——可追踪、可调试，没有 DAG、没有图 DSL、没有出人意料的控制流。 整个核心循环你五分钟就能读完。
+              - generic [ref=e93]:
+                - code [ref=e95]:
+                  - generic [ref=e96]: pip install cubepi
+                - button "复制代码到剪贴板" [ref=e98] [cursor=pointer]:
+                  - generic [ref=e99]:
+                    - img [ref=e100]
+                    - img [ref=e102]
+              - paragraph [ref=e104]:
+                - text: 然后跳到
+                - link "快速开始" [ref=e105] [cursor=pointer]:
+                  - /url: /zh-Hans/docs/getting-started/quick-start
+                - text: ，五分钟内跑通一个 能调用工具的 Agent。
+              - heading "你能拿到什么你能拿到什么的直接链接" [level=2] [ref=e106]:
+                - text: 你能拿到什么
+                - link "你能拿到什么的直接链接" [ref=e107] [cursor=pointer]:
+                  - /url: "#你能拿到什么"
+                  - text: "#"
+              - list [ref=e108]:
+                - listitem [ref=e109]:
+                  - strong [ref=e110]: 普通 async 函数，不是图节点。
+                  - text: Agent 循环就是一个对消息轮次的
+                  - code [ref=e111]: while
+                  - text: 循环。你把工具写成
+                  - code [ref=e112]: async def
+                  - text: 函数，框架负责路由调用并并行 执行。
+                - listitem [ref=e113]:
+                  - strong [ref=e114]: 统一的流式模式。
+                  - text: 所有 provider 都通过
+                  - code [ref=e115]: MessageStream
+                  - text: 产出
+                  - code [ref=e116]: StreamEvent
+                  - text: 。你用
+                  - code [ref=e117]: async for
+                  - text: 迭代它。没有 callback 注册表，也没有 为文本和工具单独的 handler 类型。
+                - listitem [ref=e118]:
+                  - strong [ref=e119]: 追加式检查点。
+                  - text: 每一轮只写入新消息，而不是整段对话历史。无论 会话多长，数据库 I/O 都是 O(1)——SQLite 适合个人开发,Postgres 适合 生产环境。
+                - listitem [ref=e120]:
+                  - strong [ref=e121]: 原生多 provider。
+                  - text: Anthropic 和 OpenAI 开箱即用,通过
+                  - code [ref=e122]: Provider
+                  - text: Protocol 接入。要新增一个 provider 只需要写一个类。
+                - listitem [ref=e123]:
+                  - strong [ref=e124]: 八个 Hook 的中间件。
+                  - code [ref=e125]: transform_context
+                  - text: 、
+                  - code [ref=e126]: convert_to_llm
+                  - text: 、
+                  - code [ref=e127]: transform_system_prompt
+                  - text: 、
+                  - code [ref=e128]: before_tool_call
+                  - text: 、
+                  - code [ref=e129]: after_tool_call
+                  - text: 、
+                  - code [ref=e130]: should_stop_after_turn
+                  - text: 、
+                  - code [ref=e131]: after_model_response
+                  - text: 、
+                  - code [ref=e132]: on_run_end
+                  - text: —— 每一个都有明确的组合规则。没有"节点执行顺序之谜"。
+                - listitem [ref=e133]:
+                  - strong [ref=e134]: MCP 加载器。
+                  - text: 指向任意
+                  - link "Model Context Protocol" [ref=e135] [cursor=pointer]:
+                    - /url: https://modelcontextprotocol.io
+                  - text: 服务器 （HTTP 或 stdio),就能拿回一组
+                  - code [ref=e136]: AgentTool
+                  - text: 。
+                - listitem [ref=e137]:
+                  - strong [ref=e138]: 原生 OpenTelemetry。
+                  - text: 挂一个
+                  - code [ref=e139]: Tracer
+                  - text: ",每次 prompt 就产生符合 GenAI 语义约定的 OTel span 树 —— Jaeger、Tempo、Honeycomb、 Datadog 等任意 OTLP 后端都能直接接收。默认不记录任何 payload； 需要时用"
+                  - code [ref=e140]: record_content=True
+                  - text: 配合
+                  - code [ref=e141]: redact
+                  - text: 回调显式开启。
+                - listitem [ref=e142]:
+                  - strong [ref=e143]: 人机协同（HITL）。
+                  - text: 在 run 中途挂起 Agent，把决策路由给人工 （审批 / 拒绝 / 回答），然后继续执行 —— 支持检查点持久化， 等待期间进程可以重启。
+              - heading "接下来去哪儿接下来去哪儿的直接链接" [level=2] [ref=e144]:
+                - text: 接下来去哪儿
+                - link "接下来去哪儿的直接链接" [ref=e145] [cursor=pointer]:
+                  - /url: "#接下来去哪儿"
+                  - text: "#"
+              - table [ref=e146]:
+                - rowgroup [ref=e147]:
+                  - row "如果你想… 从这里开始" [ref=e148]:
+                    - columnheader "如果你想…" [ref=e149]
+                    - columnheader "从这里开始" [ref=e150]
+                - rowgroup [ref=e151]:
+                  - row "安装并跑通第一个 Agent 入门 → 安装" [ref=e152]:
+                    - cell "安装并跑通第一个 Agent" [ref=e153]
+                    - cell "入门 → 安装" [ref=e154]:
+                      - link "入门 → 安装" [ref=e155] [cursor=pointer]:
+                        - /url: /zh-Hans/docs/getting-started/installation
+                  - row "理解骨架 入门 → 核心概念" [ref=e156]:
+                    - cell "理解骨架" [ref=e157]
+                    - cell "入门 → 核心概念" [ref=e158]:
+                      - link "入门 → 核心概念" [ref=e159] [cursor=pointer]:
+                        - /url: /zh-Hans/docs/getting-started/core-concepts
+                  - row "接入一个真实的工具 Agent 指南 → 构建第一个 Agent" [ref=e160]:
+                    - cell "接入一个真实的工具 Agent" [ref=e161]
+                    - cell "指南 → 构建第一个 Agent" [ref=e162]:
+                      - link "指南 → 构建第一个 Agent" [ref=e163] [cursor=pointer]:
+                        - /url: /zh-Hans/docs/guides/agents/first-agent
+                  - row "跨重启保留对话 指南 → SQLite 检查点" [ref=e164]:
+                    - cell "跨重启保留对话" [ref=e165]
+                    - cell "指南 → SQLite 检查点" [ref=e166]:
+                      - link "指南 → SQLite 检查点" [ref=e167] [cursor=pointer]:
+                        - /url: /zh-Hans/docs/guides/checkpointing/sqlite
+                  - row "查找某个具体符号 API 参考" [ref=e168]:
+                    - cell "查找某个具体符号" [ref=e169]
+                    - cell "API 参考" [ref=e170]:
+                      - link "API 参考" [ref=e171] [cursor=pointer]:
+                        - /url: /zh-Hans/docs/api/
+                  - row "看完整的可运行示例 Recipes" [ref=e172]:
+                    - cell "看完整的可运行示例" [ref=e173]
+                    - cell "Recipes" [ref=e174]:
+                      - link "Recipes" [ref=e175] [cursor=pointer]:
+                        - /url: /zh-Hans/docs/recipes/weather-agent
+                  - row "从 langgraph Agent 迁移 迁移 → 来自 langgraph" [ref=e176]:
+                    - cell "从 langgraph Agent 迁移" [ref=e177]
+                    - cell "迁移 → 来自 langgraph" [ref=e178]:
+                      - link "迁移 → 来自 langgraph" [ref=e179] [cursor=pointer]:
+                        - /url: /zh-Hans/docs/migration/from-langgraph
+              - heading "状态状态的直接链接" [level=2] [ref=e180]:
+                - text: 状态
+                - link "状态的直接链接" [ref=e181] [cursor=pointer]:
+                  - /url: "#状态"
+                  - text: "#"
+              - paragraph [ref=e182]:
+                - text: 你正在浏览的是
+                - strong [ref=e183]: CubePi 0.7
+                - text: 发布版文档。这是当前最新的稳定文档， 适用于安装 CubePi 并基于已发布的 0.7 API 构建应用。
+              - paragraph [ref=e184]:
+                - text: CubePi 0.7 新增 provider 级
+                - code [ref=e185]: generate()
+                - text: 、压缩和子 Agent 中间件、
+                - code [ref=e186]: on_run_end
+                - text: 、类型化 provider 错误、
+                - code [ref=e187]: Tracer.oneshot()
+                - text: ，以及带
+                - code [ref=e188]: run_id
+                - text: 的 checkpointed HITL 恢复能力。未发布的
+                - code [ref=e189]: main
+                - text: 分支变更请从右上角版本 选择器切到
+                - strong [ref=e190]: Next
+                - text: 文档。
+              - paragraph [ref=e191]:
+                - text: 源代码、Issue 和讨论都在
+                - link "GitHub" [ref=e192] [cursor=pointer]:
+                  - /url: https://github.com/cubeplexai/cubepi
+                - text: 。
+            - complementary [ref=e193]:
+              - generic [ref=e194]: Was this page helpful?
+              - button "Yes" [ref=e195] [cursor=pointer]: 👍
+              - button "No" [ref=e196] [cursor=pointer]: 👎
+            - link "编辑此页" [ref=e200] [cursor=pointer]:
+              - /url: https://github.com/cubeplexai/cubepi/edit/main/website/versioned_docs/version-0.7/intro.mdx
+              - img [ref=e201]
+              - text: 编辑此页
+          - navigation "文件选项卡" [ref=e205]:
+            - link "下一页 安装 »" [ref=e206] [cursor=pointer]:
+              - /url: /zh-Hans/docs/getting-started/installation
+              - generic [ref=e207]: 下一页
+              - generic [ref=e208]: 安装 »
+        - list [ref=e211]:
+          - listitem [ref=e212]:
+            - link "你能拿到什么" [ref=e213] [cursor=pointer]:
+              - /url: "#你能拿到什么"
+          - listitem [ref=e214]:
+            - link "接下来去哪儿" [ref=e215] [cursor=pointer]:
+              - /url: "#接下来去哪儿"
+          - listitem [ref=e216]:
+            - link "状态" [ref=e217] [cursor=pointer]:
+              - /url: "#状态"

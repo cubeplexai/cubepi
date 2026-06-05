@@ -80,7 +80,7 @@ class Usage(BaseModel):
 
 class Model(BaseModel):
     id: str
-    provider: str
+    provider_id: str = ""
     api: str = ""
     reasoning: bool = False
     context_window: int = 200_000
@@ -88,6 +88,12 @@ class Model(BaseModel):
     temperature: float = 0.7
     cost: ModelCost | None = None
     thinking_level_map: dict[str, str | None] | None = None
+
+
+@dataclass(frozen=True)
+class BoundModel:
+    provider: Provider
+    spec: Model
 
 
 class TextContent(BaseModel):
@@ -189,7 +195,7 @@ def format_provider_error(
     / ``__context__``. Without provider/model/cause context, a logged or
     persisted error tells you nothing about *which* model failed or *why*.
     """
-    target = f"{model.provider}/{model.id}"
+    target = f"{model.provider_id}/{model.id}" if model.provider_id else model.id
     if base_url:
         target = f"{target} @ {base_url}"
 
@@ -614,10 +620,38 @@ class BaseProvider:
     below.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, provider_id: str = "") -> None:
+        self.provider_id = provider_id
         self._request_listeners: list[OnRequestCallback] = []
         self._chunk_listeners: list[OnChunkCallback] = []
         self._response_listeners: list[OnResponseBodyCallback] = []
+
+    def model(
+        self,
+        id: str,
+        *,
+        api: str = "",
+        reasoning: bool = False,
+        context_window: int = 200_000,
+        max_tokens: int = 8192,
+        temperature: float = 0.7,
+        cost: ModelCost | None = None,
+        thinking_level_map: dict[str, str | None] | None = None,
+    ) -> BoundModel:
+        return BoundModel(
+            provider=self,
+            spec=Model(
+                id=id,
+                provider_id=self.provider_id,
+                api=api,
+                reasoning=reasoning,
+                context_window=context_window,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                cost=cost,
+                thinking_level_map=thinking_level_map,
+            ),
+        )
 
     async def stream(
         self,

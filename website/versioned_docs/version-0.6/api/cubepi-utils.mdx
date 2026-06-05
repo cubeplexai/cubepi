@@ -16,7 +16,7 @@ emit_event(emit_fn: Callable, event: object) -> None
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/utils/emit.py#L7)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/utils/emit.py#L7)
 
 
 ### parse_streaming_json {#parse-streaming-json}
@@ -38,7 +38,7 @@ Uses a 3-tier fallback:
 Always returns a *dict* (or at minimum `\{\}`) so callers never need
 to handle parse failures.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/utils/json_parse.py#L169)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/utils/json_parse.py#L169)
 
 
 ### repair_json {#repair-json}
@@ -60,7 +60,7 @@ JSON string value.  Inside strings it:
   (e.g. `\x` becomes `\\x`), making the output parseable.
 * Handles truncated backslash at end-of-string.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/utils/json_parse.py#L39)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/utils/json_parse.py#L39)
 
 
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.agent.types import AgentContext
 from cubepi.middleware.base import Middleware, TurnAction, compose_middleware
 from cubepi.providers.base import (
@@ -126,7 +126,7 @@ def test_no_middleware_hook_absent() -> None:
 @pytest.mark.asyncio
 async def test_agent_stops_when_middleware_returns_stop() -> None:
     """decision='stop' terminates after the first model response."""
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     # Two responses queued; second should never fire because we stop after first.
     provider.set_responses(
         [
@@ -135,8 +135,7 @@ async def test_agent_stops_when_middleware_returns_stop() -> None:
         ]
     )
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         middleware=[_Stop()],
     )
     await agent.prompt("hi")
@@ -148,7 +147,7 @@ async def test_agent_stops_when_middleware_returns_stop() -> None:
 @pytest.mark.asyncio
 async def test_agent_loops_when_middleware_returns_loop_to_model() -> None:
     """decision='loop_to_model' re-invokes the model with inject_messages."""
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses(
         [
             faux_assistant_message("first"),
@@ -170,8 +169,7 @@ async def test_agent_loops_when_middleware_returns_loop_to_model() -> None:
             return None
 
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         middleware=[_LoopOnce()],
     )
     await agent.prompt("hi")
@@ -185,7 +183,7 @@ async def test_agent_loops_when_middleware_returns_loop_to_model() -> None:
 async def test_agent_direct_hook_returning_none_emits_message_end() -> None:
     """When after_model_response is passed directly (bypassing compose) and
     returns None, the loop still emits message_end via the dedicated branch."""
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("ok")])
 
     hook_calls: list[AssistantMessage] = []
@@ -195,8 +193,7 @@ async def test_agent_direct_hook_returning_none_emits_message_end() -> None:
         return None
 
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         after_model_response=_hook,
     )
 
@@ -216,11 +213,10 @@ async def test_agent_direct_hook_returning_none_emits_message_end() -> None:
 @pytest.mark.asyncio
 async def test_agent_no_middleware_natural_flow() -> None:
     """Without after_model_response middleware, natural flow proceeds."""
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("ok")])
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
     )
 
     events: list[str] = []
@@ -258,11 +254,10 @@ async def test_ctx_extra_flows_into_loop_context(tmp_path) -> None:
     # Seed extra BEFORE prompt by saving directly
     await cp.save_extra("t", {"seeded": "value"})
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("ok")])
     agent = Agent(
-        provider=provider,
-        model=Model(id="test", provider="faux"),
+        model=provider.model("test"),
         checkpointer=cp,
         thread_id="t",
         middleware=[_Observe()],
@@ -292,11 +287,10 @@ async def test_turn_action_response_persists_in_agent_state(tmp_path) -> None:
             return TurnAction(response=_mk("MUTATED"))
 
     cp = MemoryCheckpointer()
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("ORIGINAL")])
     agent = Agent(
-        provider=provider,
-        model=Model(id="test", provider="faux"),
+        model=provider.model("test"),
         checkpointer=cp,
         thread_id="t",
         middleware=[_Mutate()],
@@ -342,7 +336,7 @@ async def test_turn_action_inject_messages_persist(tmp_path) -> None:
             )
 
     cp = MemoryCheckpointer()
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses(
         [
             faux_assistant_message("first"),
@@ -350,8 +344,7 @@ async def test_turn_action_inject_messages_persist(tmp_path) -> None:
         ]
     )
     agent = Agent(
-        provider=provider,
-        model=Model(id="test", provider="faux"),
+        model=provider.model("test"),
         checkpointer=cp,
         thread_id="t",
         middleware=[_InjectOnce()],

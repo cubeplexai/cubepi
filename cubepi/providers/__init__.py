@@ -1,6 +1,7 @@
 from cubepi.providers.base import (
     AssistantMessage,
     BaseProvider,
+    BoundModel,
     Content,
     ImageContent,
     Message,
@@ -64,6 +65,7 @@ def get_openai_responses_provider():
 __all__ = [
     "AssistantMessage",
     "BaseProvider",
+    "BoundModel",
     "Content",
     "FauxProvider",
     "ImageContent",

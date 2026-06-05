@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from cubepi import Agent, AgentTool, AgentToolResult, TextContent, UserMessage
 from cubepi.middleware.subagents import SubagentMiddleware, SubagentSpec
-from cubepi.providers.base import AssistantMessage, MessageStream, Model, StreamEvent
+from cubepi.providers.base import AssistantMessage, MessageStream, StreamEvent
 from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 
@@ -17,7 +17,7 @@ def _make_middleware(
     subagents: dict[str, SubagentSpec] | None = None,
     **kwargs: Any,
 ) -> SubagentMiddleware:
-    provider = provider or FauxProvider()
+    provider = provider or FauxProvider(provider_id="faux")
     subagents = subagents or {
         "general-purpose": SubagentSpec(
             name="general-purpose",
@@ -27,8 +27,7 @@ def _make_middleware(
     }
     return SubagentMiddleware(
         subagents=subagents,
-        default_provider=provider,
-        default_model=Model(id="faux-1", provider="faux"),
+        default_model=provider.model("faux-1"),
         **kwargs,
     )
 
@@ -92,7 +91,7 @@ def test_shared_tools_filter_is_configurable() -> None:
 
 
 async def test_subagent_tool_dispatches_to_child_agent() -> None:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("subagent reply")])
     middleware = _make_middleware(provider=provider)
     [tool] = middleware.tools
@@ -113,7 +112,7 @@ async def test_subagent_tool_dispatches_to_child_agent() -> None:
 
 
 async def test_unknown_subagent_type_falls_back_to_general_purpose() -> None:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("fallback reply")])
     middleware = _make_middleware(provider=provider)
     [tool] = middleware.tools
@@ -174,7 +173,7 @@ async def test_subagent_tool_returns_only_child_final_answer() -> None:
         parameters=_EchoParams,
         execute=_echo,
     )
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses(
         [
             faux_assistant_message(
@@ -204,7 +203,7 @@ async def test_subagent_tool_returns_only_child_final_answer() -> None:
 
 
 async def test_event_mapper_and_handler_receive_child_events() -> None:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("mapped reply")])
     handled: list[tuple[str, dict[str, Any]]] = []
 
@@ -236,7 +235,7 @@ async def test_event_mapper_and_handler_receive_child_events() -> None:
 
 
 async def test_string_event_mapper_payload_is_treated_as_one_payload() -> None:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("mapped reply")])
     handled: list[tuple[str, str]] = []
 
@@ -269,9 +268,9 @@ async def test_string_event_mapper_payload_is_treated_as_one_payload() -> None:
 
 
 def test_child_error_handles_empty_non_assistant_and_error_assistant_states() -> None:
+    provider = FauxProvider(provider_id="faux")
     child = Agent(
-        provider=FauxProvider(),
-        model=Model(id="faux-1", provider="faux"),
+        model=provider.model("faux-1"),
     )
 
     assert SubagentMiddleware._child_error(child) is None
@@ -289,9 +288,9 @@ def test_child_error_handles_empty_non_assistant_and_error_assistant_states() ->
 
 
 def test_final_assistant_text_returns_empty_without_assistant_message() -> None:
+    provider = FauxProvider(provider_id="faux")
     child = Agent(
-        provider=FauxProvider(),
-        model=Model(id="faux-1", provider="faux"),
+        model=provider.model("faux-1"),
     )
     child.state.messages = [UserMessage(content=[TextContent(text="user only")])]
 
@@ -322,7 +321,7 @@ async def test_inner_agent_failure_returns_tool_error() -> None:
 
 async def test_tracer_detaches_after_success_and_cancel() -> None:
     tracer = _FakeTracer(awaitable_detach=True)
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("ok")])
     middleware = _make_middleware(provider=provider, tracer=tracer)
     [tool] = middleware.tools
@@ -457,9 +456,9 @@ def test_tracer_attach_failure_is_ignored() -> None:
             raise RuntimeError("attach failed")
 
     middleware = _make_middleware(tracer=_BadTracer())
+    provider = FauxProvider(provider_id="faux")
     child = Agent(
-        provider=FauxProvider(),
-        model=Model(id="faux-1", provider="faux"),
+        model=provider.model("faux-1"),
     )
 
     assert middleware._attach_tracer(child) is None
