@@ -258,3 +258,64 @@ def test_model_capability_overrides_per_model():
     )
     assert "size" in payload_pro
     assert payload_schnell["aspect_ratio"] == "1:1"
+
+
+def test_build_payload_does_not_alias_capability_extra_payload():
+    """Mutating the merged payload's nested values must NOT leak back
+    into ``capability.extra_payload`` — observers and on_payload mutators
+    could otherwise pollute the provider's shared state, leaking into
+    subsequent calls."""
+    cap_extra = {"nested": {"a": 1}, "list_val": [10, 20]}
+    cap = ImagesCapabilityDescriptor(extra_payload=cap_extra)
+    p = _Stub(provider_id="p", capability=cap)
+
+    payload = p._build_payload(_model(), ImagesContext(prompt="x"))
+
+    # Mutate the merged payload — original capability extras must not change.
+    payload["nested"]["a"] = 999
+    payload["list_val"].append(30)
+    payload["nested"]["new_key"] = "added"
+
+    assert cap_extra["nested"] == {"a": 1}, "nested dict leaked by reference"
+    assert cap_extra["list_val"] == [10, 20], "list leaked by reference"
+    assert cap.extra_payload["nested"] == {"a": 1}
+
+
+def test_build_payload_does_not_alias_context_extra():
+    """Same isolation guarantee for ``context.extra`` — callers reusing
+    an ImagesContext instance must not see drift after a generate_images
+    call."""
+    ctx_extra = {"settings": {"watermark": False, "tier": "basic"}}
+    p = _Stub(provider_id="p")
+    ctx = ImagesContext(prompt="x", extra=ctx_extra)
+
+    payload = p._build_payload(_model(), ctx)
+    payload["settings"]["watermark"] = True
+    payload["settings"]["new_field"] = "added"
+
+    assert ctx_extra["settings"] == {"watermark": False, "tier": "basic"}
+    assert ctx.extra["settings"] == {"watermark": False, "tier": "basic"}
+
+
+def test_build_payload_isolates_cap_and_ctx_nested_merge():
+    """When the same nested key appears in both cap.extra_payload and
+    ctx.extra, the merged result must still be fully isolated from both
+    originals (the recursive merge path)."""
+    cap_extra = {"options": {"shared": "from-cap", "cap_only": 1}}
+    ctx_extra = {"options": {"shared": "from-ctx", "ctx_only": 2}}
+    cap = ImagesCapabilityDescriptor(extra_payload=cap_extra)
+    p = _Stub(provider_id="p", capability=cap)
+
+    payload = p._build_payload(_model(), ImagesContext(prompt="x", extra=ctx_extra))
+
+    # ctx wins on the shared key; both extras are present.
+    assert payload["options"] == {
+        "shared": "from-ctx",
+        "cap_only": 1,
+        "ctx_only": 2,
+    }
+    # Mutation does NOT touch the originals.
+    payload["options"]["shared"] = "mutated"
+    payload["options"]["bad_inject"] = "evil"
+    assert cap_extra["options"] == {"shared": "from-cap", "cap_only": 1}
+    assert ctx_extra["options"] == {"shared": "from-ctx", "ctx_only": 2}

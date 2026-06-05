@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import Any, Callable, Literal, Protocol, runtime_checkable
 
 from cubepi.providers.base import (
@@ -18,18 +19,26 @@ from cubepi.providers.images.types import (
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Recursive merge that copies ``base`` and applies ``overlay`` on top.
+    """Recursive merge that returns a fully-isolated copy of ``base`` with
+    ``overlay`` applied on top.
 
-    Dict keys recurse; everything else (lists, scalars) is overwritten by
-    the overlay value. Used for ``capability.extra_payload`` and
-    ``context.extra`` application.
+    Dict keys recurse; everything else (lists, scalars, custom objects)
+    is overwritten by a deep-copied overlay value so the merged result
+    shares NO references with the input dicts. This matters because the
+    merged payload is then passed to an ``on_payload`` mutator (which can
+    do in-place writes) and to the SDK (which may also mutate); without
+    isolation, a mutator like ``payload["extra_body"]["watermark"] = True``
+    would permanently change ``cap.extra_payload`` or ``context.extra``
+    and leak into later requests.
+
+    Used for ``capability.extra_payload`` and ``context.extra`` application.
     """
-    out = dict(base)
+    out = copy.deepcopy(base)
     for k, v in overlay.items():
         if k in out and isinstance(out[k], dict) and isinstance(v, dict):
             out[k] = _deep_merge(out[k], v)
         else:
-            out[k] = v
+            out[k] = copy.deepcopy(v)
     return out
 
 
