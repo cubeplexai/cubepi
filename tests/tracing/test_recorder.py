@@ -653,6 +653,47 @@ class TestMiddlewareProviders:
 
         assert list(Middleware().extra_llm_calls()) == []
 
+    async def test_degenerate_same_model_falls_back_to_first_call_wins(self):
+        # Edge case: middleware declares the same (provider, model) as the
+        # agent — model-based gating would otherwise skip root attribution
+        # for the agent's own call too and leave the root span with the
+        # placeholder ``cubepi`` provider. The recorder must exclude these
+        # degenerate keys from the extra set so the run still gets a
+        # concrete root attribution (even if it ends up reflecting whichever
+        # call fired first).
+        from cubepi.middleware.base import Middleware
+
+        class _SameModelMiddleware(Middleware):
+            def __init__(self, provider, model):
+                self._p = provider
+                self._m = model
+
+            def extra_llm_calls(self):
+                return [(self._p, self._m)]
+
+        provider = FauxProvider()
+        agent = Agent(
+            provider=provider,
+            model=MODEL,
+            system_prompt="test",
+            middleware=[_SameModelMiddleware(provider, MODEL)],
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            exporters=[exporter],
+        )
+        tracer.attach(agent)
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = [s for s in exporter.spans if s.name.startswith("invoke_agent")][0]
+        # Root must end up with a real provider name, not the cubepi placeholder.
+        assert _attrs(root)["gen_ai.provider.name"] != "cubepi"
+
     async def test_middleware_extra_llm_calls_raising_is_swallowed(self):
         # If a middleware's ``extra_llm_calls()`` raises during attach the
         # recorder must keep going — the agent's own provider is the
