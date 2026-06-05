@@ -160,6 +160,16 @@ class TestErrors:
                 "Positional-only is not callable with **kwargs."
                 return id
 
+    def test_positional_only_reserved_param_rejected(self):
+        # A reserved arg declared positional-only is filtered out of the schema
+        # params, so it must be caught by the full-signature check.
+        with pytest.raises(TypeError, match="positional-only"):
+
+            @tool
+            async def bad(tool_call_id, /, value: str) -> str:
+                "Reserved positional-only would fail fn(**kwargs) at call time."
+                return value
+
     async def test_bad_return_type_rejected(self):
         @tool
         async def bad(value: str) -> int:  # type: ignore[return-value]

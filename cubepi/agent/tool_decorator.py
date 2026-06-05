@@ -61,15 +61,6 @@ def _build_params_model(
                 f"@tool function {fn.__name__!r} cannot use *args/**kwargs; "
                 "declare explicit parameters so an input schema can be generated."
             )
-        if p.kind is inspect.Parameter.POSITIONAL_ONLY:
-            # Tool-call arguments arrive as named JSON fields and the generated
-            # executor invokes the function with fn(**kwargs), which can't fill
-            # a positional-only parameter.
-            raise TypeError(
-                f"@tool parameter {p.name!r} of {fn.__name__!r} is "
-                "positional-only; tool-call arguments arrive by name, so "
-                "declare it as a normal parameter (remove the '/')."
-            )
         if p.name not in hints and p.annotation is inspect.Parameter.empty:
             raise TypeError(
                 f"@tool parameter {p.name!r} of {fn.__name__!r} needs a type "
@@ -113,6 +104,18 @@ def _make_agent_tool(
         )
 
     sig = inspect.signature(fn)
+
+    # The generated executor always calls the function with keyword arguments
+    # (schema fields plus any injected reserved args), so a positional-only
+    # parameter — reserved or not — would fail at call time. Reject it up front.
+    for p in sig.parameters.values():
+        if p.kind is inspect.Parameter.POSITIONAL_ONLY:
+            raise TypeError(
+                f"@tool parameter {p.name!r} of {fn.__name__!r} is "
+                "positional-only; @tool calls the function with keyword "
+                "arguments, so declare it as a normal parameter (remove the '/')."
+            )
+
     try:
         hints = get_type_hints(fn, include_extras=True)
     except Exception as exc:  # pragma: no cover — unresolved annotations
