@@ -72,8 +72,10 @@ to every message and adds a per-run completion marker.
   `Message.id` / `after_response_id` parameters are NOT in this spec.
 - Copy-on-write storage (rejected for the same partitioning / mutation
   reasons documented in §3.1).
-- Backfilling run identity into pre-existing messages. Legacy messages
-  remain `run_id=NULL` and are not forkable / not deletable — see §3.6.4.
+- Backfilling run identity into pre-existing messages. Legacy
+  messages remain `run_id=NULL`; they are not deletable by run_id but
+  ARE included in forks as the "legacy prefix" of a mixed thread —
+  see §3.6.4.
 - A `fork_into_agent()` convenience or `fork_and_switch`. Caller owns
   what to do with `new_thread_id`.
 - Resuming a `fork_once()` session.
@@ -105,25 +107,63 @@ Rejected: **logical pointer / COW**. Same rationale as v1:
 
 ### 3.2 Run as the unit of fork
 
-The **only** fork handle is `after_run_id: str`. The new thread contains
-exactly the messages of every completed run on the source up through and
-including `after_run_id` (in source seq order).
+The **only** fork handle is `after_run_id: str`. The new thread contains:
 
-Why a run is the right unit:
+1. Every message whose `run_id IS NULL` (legacy prefix — see §3.6.4),
+   PLUS
+2. Every message whose `run_id` belongs to the set of completed runs
+   on `src_thread_id` whose `completed_at` is **at or before**
+   `after_run_id`'s `completed_at`.
 
-- A run is the atomic transaction the user thinks in ("I asked X, agent
-  did its thing, gave me an answer"). Cubebox's UI button maps directly
-  to "fork after this exchange".
-- A run boundary is by construction a clean cut. Inside a run there may
-  be unresolved `tool_use` blocks awaiting `tool_result`s; once the run
-  is marked complete (terminal stop_reason, no pending HITL), no
-  unresolved tool calls remain. So **the v1 spec's `ForkBoundaryError`
-  / mid-tool-call invariants vanish structurally**: there is no API to
-  ask for a cut mid-run, so no boundary check is needed.
+Messages are inserted into the new thread in source seq order.
+
+#### Why "set of completed runs", not "seq <= last_seq_of(after_run_id)"
+
+A naive seq-cut is unsafe under concurrent runs. Example: runs A and B
+both active on the same thread; A writes seqs 1, 2, 5 and completes,
+while B writes seqs 3, 4 and is still in flight. A seq-cut
+"`seq <= 5`" would pull B's seqs 3, 4 into the fork — messages of an
+unfinished run we have no right to copy. The set-based selection
+solves this by construction: only messages tagged with a *completed*
+run_id (or NULL for legacy) are eligible.
+
+This selection is also robust to:
+
+- **Interleaved runs**: each run's messages are addressed by tag, not
+  by position. Gaps in seq are fine.
+- **In-flight runs**: their messages have a `run_id` not yet in
+  `cubepi_run_completions` → excluded.
+- **Mixed legacy + post-upgrade threads**: NULL-run_id messages are
+  preserved as a chronological prefix, post-upgrade completed runs
+  appear after.
+- **Tie in `completed_at`**: two completions at the same wall-clock
+  tick are tiebroken by lexicographic `run_id` for deterministic
+  output. (Rare in practice; documented for spec completeness.)
+
+#### Why a run is the right unit
+
+- A run is the atomic transaction the user thinks in ("I asked X,
+  agent did its thing, gave me an answer"). Cubebox's UI button maps
+  directly to "fork after this exchange".
+- A run boundary is by construction a clean cut. Inside a run there
+  may be unresolved `tool_use` blocks awaiting `tool_result`s; once
+  the run is marked complete (terminal stop_reason, no pending HITL),
+  no unresolved tool calls remain. **The v1 spec's `ForkBoundaryError`
+  / mid-tool-call invariants vanish structurally**: there is no API
+  to ask for a cut mid-run, so no boundary check is needed.
 - It generalizes to the future `delete_run()` cleanly:
   `DELETE FROM cubepi_messages WHERE thread_id=? AND run_id=?` is a
   one-line operation backed by the same `run_id` column the fork uses
   for lookup.
+
+#### Recommendation (not enforced): one active run per thread
+
+For UX clarity and predictable ordering, hosts SHOULD serialize runs
+per thread (cubebox naturally does — one conversation = one in-flight
+prompt at a time). The spec does NOT enforce this — the set-based fork
+selection means interleaved runs are *correct*, just unusual. A future
+spec may add a "one active run per thread" lease if a real workload
+needs the stronger guarantee.
 
 ### 3.3 Atomicity and concurrency
 
@@ -172,11 +212,11 @@ world the copy will see:
 
 | Field / row | Copied? | Notes |
 |---|---|---|
-| `cubepi_messages` rows with `seq <= last_seq_of(after_run_id)` | yes | physical copy; PG/MySQL preserve source `seq` values for the copied range. SQLite copies the JSON payloads under fresh global `id`s (its `messages.id` is a global auto-increment, not a per-thread seq). Memory copies in-list order. Each copied row keeps its original `run_id` value. |
+| `cubepi_messages` rows where `run_id IS NULL` OR `run_id IN {completed runs of src with completed_at <= after_run_id.completed_at}` | yes | physical copy; PG/MySQL preserve source `seq` values for the copied range. SQLite copies the JSON payloads under fresh global `id`s (its `messages.id` is a global auto-increment, not a per-thread seq). Memory copies in-list order. Each copied row keeps its original `run_id` value (or NULL). Source seq order is preserved across the copy. |
 | `cubepi_run_completions` rows for the copied runs | yes | so the new thread can be further forked / deleted by run |
 | `extra` | yes | deep copy of the source JSON object |
 | `parent_thread_id` | written (new) | set to `src_thread_id` on the new thread row |
-| `forked_at_seq` | written (PG/MySQL only) | the `seq` of the last message of `after_run_id`. Memory and SQLite store no equivalent — those backends have no per-message seq column and lineage is recoverable from `parent_thread_id` + `cubepi_run_completions` alone. |
+| `forked_at_seq` | written (PG/MySQL only) | the `seq` of the last message in the copied set (highest copied seq). Memory and SQLite store no equivalent — those backends have no per-message seq column and lineage is recoverable from `parent_thread_id` + `cubepi_run_completions` alone. |
 | `extra['fork']` | written (new) when `metadata` arg supplied | overwrites any pre-existing `extra['fork']` on source (lineage is recoverable via the `parent_thread_id` chain) |
 | `pending_request` | **no** | new thread starts clean; HITL is run-state, not history |
 | `cubepi_threads.run_id` (the host-side HITL marker, NOT a run on this thread) | **no** | new thread has no run in flight |
@@ -227,34 +267,72 @@ about to be appended. **`Checkpointer.append()` signature does not
 change** — the run_id rides on the messages themselves
 (`Message.run_id` field, §3.6.5).
 
-If the caller supplies a `run_id` that already has a completion marker
-on the source thread, `prompt()` raises `RunAlreadyCompletedError` —
-runs are append-only; you cannot continue or re-run a completed run.
-(Use a new `run_id` for a new exchange.)
+If the caller supplies a `run_id` that already has a completion
+marker on the source thread, `prompt()` raises
+`RunAlreadyCompletedError` **before any append happens** — runs are
+append-only; you cannot continue or re-run a completed run. (Use a
+new `run_id` for a new exchange.) The pre-flight check is mandatory
+to prevent "messages were written before the conflict was detected"
+half-states.
+
+There is a narrow race window: two processes both pre-check, both see
+no marker for run_id R, both begin appending. The first to call
+`mark_run_complete()` wins; the second raises
+`RunAlreadyCompletedError` from the marker INSERT (unique PK on
+`(thread_id, run_id)`). The losing process's intermediate appends
+remain on the thread, tagged with R but with no marker → fork by R
+excludes them, and the future `delete_run(thread_id, R)` cleans them
+up. Callers that race must retry with a fresh `run_id`. Hosts that
+serialize runs per thread (cubebox does) never hit this.
 
 #### 3.6.2 Completion marker — when written
 
 The marker `cubepi_run_completions(thread_id, run_id, completed_at)`
-is written **inside the same transaction as the final `append()` of
-the run** — atomic with the last message. The agent loop signals
-"this is the last append of the run" via a flag on the checkpointer
-call (or via a dedicated `Checkpointer.complete_run()` call made in
-the same lock window — exact form decided in the implementation plan,
-but the requirement is atomicity).
+is written by a dedicated, separate Protocol method
+`Checkpointer.mark_run_complete(thread_id, run_id) -> None` — a
+single-row INSERT, called AFTER the run's final `append()` and
+BEFORE `Agent.prompt()` returns to the caller.
 
-Trigger conditions for writing the marker:
+**The marker write is NOT atomic with the final append.** The
+existing cubepi event loop (`cubepi/agent/loop.py`) persists each
+message on its own `MessageEndEvent`; the loop only knows it has
+finished when `AgentEndEvent` fires, *after* the final append.
+Trying to atomically couple the two would require an Agent-layer
+buffering rewrite that is out of scope.
 
-- The agent loop exits with a terminal stop_reason (`end_turn`,
-  `tool_use_completed` followed by `end_turn`, etc. — any
+This is acceptable. Two failure modes and their consequences:
+
+- **Process crash between final append and `mark_run_complete()`**:
+  messages of run R are persisted but no completion marker exists.
+  `fork(after_run_id=R)` raises `RunNotCompletedError`. The user
+  sees "the run looks finished but I can't fork it yet." A future
+  admin / recovery API can backfill the marker. The data is not
+  corrupt — just in an unmarked state, same as an abandoned run.
+- **Transient checkpointer failure on `mark_run_complete()`**:
+  `prompt()` raises the underlying error so the caller knows. The
+  messages are already persisted; retrying just `mark_run_complete()`
+  with the same `(thread_id, run_id)` succeeds. Idempotency: if the
+  caller retries `prompt(run_id=R)` instead, it gets
+  `RunAlreadyCompletedError` from the pre-flight check (§3.6.1)
+  EXCEPT — pre-flight checks for the marker; if the marker still
+  isn't there because of the same persistent failure, the caller can
+  resume by calling `mark_run_complete()` directly, or by abandoning
+  R and starting fresh. The recommended pattern is "retry the marker
+  call, not the whole prompt".
+
+Trigger conditions for the agent loop to call `mark_run_complete()`:
+
+- The loop exits cleanly with a terminal stop_reason
+  (`end_turn` / `tool_use_completed`-then-`end_turn` / any
   non-suspended terminal state)
 - AND no pending HITL request remains for this run
 
 If `prompt()` returns because of:
 
-- HITL pause (pending_request set) → marker NOT written; the run is
-  resumed later by `respond()`.
-- Exception / abort / cancellation → marker NOT written; the run is
-  abandoned. Its messages remain on the thread under the same
+- **HITL pause** (`pending_request` set) → marker NOT written; resumed
+  by `respond()` (§3.6.3).
+- **Exception / abort / cancellation** → marker NOT written; the run
+  is abandoned. Its messages remain on the thread under the same
   `run_id`, but `fork(after_run_id=X)` raises `RunNotCompletedError`,
   and the future `delete_run(X)` can clean them up.
 
@@ -265,31 +343,84 @@ A run that pauses for HITL keeps its `run_id` across the suspension.
 - `Agent.prompt(message, run_id=R)` runs partway, hits HITL → writes
   `pending_request` with `run_id=R` (existing schema v3 mechanism), no
   completion marker.
-- `Agent.respond(question_id, answer)` recovers `run_id=R` from
-  `pending_request` (it's already there), continues the same run,
-  writes the completion marker when the resumed loop terminates
-  cleanly.
+- `Agent.respond(question_id, answer)` recovers `run_id=R` from the
+  same `pending_request` row, restores it as the active run_id in the
+  agent loop, continues the same run, stamps every subsequent
+  appended message with `run_id=R`, and calls `mark_run_complete()`
+  on terminal exit.
 
-`Agent.respond()` signature does **not** change. The run_id is
-sourced from `pending_request`.
+`Agent.respond()` signature does **not** change.
 
-#### 3.6.4 Legacy data
+**Protocol change required to support this.** Today,
+`Checkpointer.load_pending_request(thread_id) -> HitlRequest | None`
+returns only the request. The run_id lives in a backend-specific
+`load_pending_run_id(thread_id)` method that is NOT on the Protocol.
+This spec adds it to the Protocol so `respond()` can recover the
+run_id portably:
+
+```python
+class Checkpointer(Protocol):
+    async def load_pending(
+        self, thread_id: str
+    ) -> tuple[HitlRequest, str | None] | None:
+        """Load both the pending HITL request and the persisted run_id
+        in a single call. Returns None when no pending request exists.
+        The run_id may itself be None for legacy rows written before
+        run_id was tracked.
+
+        Backends MUST read both values from the same row in a single
+        statement (no separate round-trips), so the pair is internally
+        consistent.
+        """
+```
+
+`load_pending_request()` is kept as an alias for the
+request-only case (existing callers unchanged). New code uses
+`load_pending()`.
+
+Second-pause scenarios — a resumed run hits HITL *again* — work the
+same way: `respond()` re-suspends with the SAME `run_id=R` stored
+back to `pending_request`. A subsequent `respond()` call recovers R
+and continues.
+
+#### 3.6.4 Legacy data and mixed threads
 
 Messages persisted before this spec carry `run_id = NULL`. No
-completion markers exist for them. Consequence:
+completion markers exist for them. There are two cases:
 
-- `fork(src_thread_id, …, after_run_id=X)` on a legacy thread raises
-  `RunNotCompletedError` for every `X` because no marker exists.
-- Future `delete_run(thread_id, run_id)` will likewise have nothing
-  to target.
-- Legacy threads remain readable (`load()` works); only the
-  by-run operations are blocked.
+**All-legacy thread** (no post-upgrade runs ever appended):
 
-No backfill is provided. (We can not reliably reconstruct historical
+- `fork(src_thread_id, after_run_id=X)` raises `RunNotCompletedError`
+  for every `X` because no markers exist for this thread at all.
+- Future `delete_run(thread_id, run_id)` has nothing to target.
+- `load()` works; the thread is readable. Only by-run operations
+  are blocked.
+
+**Mixed thread** (legacy NULL-run_id prefix + post-upgrade
+completed runs):
+
+- `fork(src_thread_id, after_run_id=R)` where R is a completed
+  post-upgrade run on this thread:
+  - Includes ALL legacy NULL-run_id messages (the chronological
+    prefix the user has been chatting on top of)
+  - PLUS messages of every completed run with
+    `completed_at <= R.completed_at`
+  - Source seq order preserved across the copy
+- `delete_run(thread_id, R)` removes only R's messages (those with
+  `run_id = R`); the legacy NULL prefix is untouched. To clear the
+  legacy prefix the user must delete the whole thread.
+
+This means a typical cubebox upgrade path is graceful: users
+continue chatting on their existing conversations; their NEW exchanges
+get run identity automatically; clicking "fork from this new
+exchange" preserves the pre-upgrade history as expected.
+
+No backfill is provided. (We cannot reliably reconstruct historical
 run boundaries from messages alone — multi-step tool_use sequences
-look like multiple runs.) Users who need to fork a legacy
-conversation can manually start a new conversation; the loss is
-limited to "no clone shortcut on threads that predate the upgrade".
+look like multiple runs.) Users who upgrade and then immediately try
+to fork an all-legacy conversation see `RunNotCompletedError` because
+that conversation has no run-marked exchange yet; the first new
+prompt will create a forkable run.
 
 #### 3.6.5 `Message.run_id` field
 
@@ -358,22 +489,25 @@ class Checkpointer(Protocol):
         `RunNotCompletedError`.
         """
 
-    async def complete_run(
+    async def mark_run_complete(
         self,
         thread_id: str,
         run_id: str,
-        last_messages: list[Message],
     ) -> None:
-        """Atomically append `last_messages` to the thread AND write the
-        `cubepi_run_completions` row for `(thread_id, run_id)`.
+        """Insert the `cubepi_run_completions` row for `(thread_id,
+        run_id)`. Single-row write, NOT coupled to the final append
+        (see §3.6.2 for the rationale).
 
-        Called by the agent loop on terminal-state exit only. Replaces
-        the final `append()` of the run — the agent loop normally uses
-        `append()` for intermediate messages of a run and
-        `complete_run()` for the last batch. Idempotent: a second call
-        with the same `(thread_id, run_id)` is an error
-        (`RunAlreadyCompletedError`) since runs are append-only.
+        Called by the agent loop AFTER the run's final `append()` and
+        BEFORE `Agent.prompt()` returns. PK conflict on
+        `(thread_id, run_id)` raises `RunAlreadyCompletedError`.
         """
+
+    async def load_pending(
+        self, thread_id: str
+    ) -> tuple[HitlRequest, str | None] | None:
+        """See §3.6.3. Returns (request, run_id) in one read, or None
+        when no pending request exists."""
 ```
 
 #### `cubepi.checkpointer.exceptions`
@@ -468,7 +602,7 @@ class ForkOnceResult:
 ### 3.8 `Agent.fork_once()` execution detail
 
 1. `self._require_checkpointer()` — `RuntimeError` if no checkpointer.
-2. HITL pre-flight (§3.8.1) — `RuntimeError` if inherited tools or
+2. HITL pre-flight (§3.8.2) — `RuntimeError` if inherited tools or
    middleware mark `requires_hitl=True`.
 3. `snapshot = await self.checkpointer.snapshot(src_thread_id,
    after_run_id=...)` — propagates
@@ -489,7 +623,38 @@ class ForkOnceResult:
    length from the child; close the span.
 9. Return `ForkOnceResult(text, new_messages, stop_reason)`.
 
-#### 3.8.1 HITL is not supported inside `fork_once()`
+#### 3.8.1 Isolation contract
+
+`fork_once()` guarantees ONE thing: **no message produced by the
+transient run is written to the cubepi checkpointer**. The source
+thread's persisted history is byte-identical before and after the
+call.
+
+`fork_once()` does NOT guarantee:
+
+- That tools the transient agent invokes have no side effects.
+  A tool that writes to an external DB / sends an email / calls a
+  remote API will do so. A tool whose closure captures
+  `self.thread_id` and writes to a side store keyed by it will
+  contaminate the source.
+- That middleware with internal mutable state doesn't change that
+  state across the transient run.
+
+This is by design. Cubepi cannot inspect closures or external
+systems. The contract is narrowly: "cubepi's own message store is
+untouched." Anything else is the caller's responsibility — pick the
+tool/middleware set for the transient agent accordingly. The
+recommended pattern when transient-safety matters: build a second
+`Agent(...)` with only read-only / idempotent / fork-safe tools and
+call `fork_once()` on that one.
+
+The one tool/middleware shape cubepi DOES detect and reject is HITL,
+because (a) HITL has no graceful "no-op" mode (the run blocks
+forever) and (b) HITL channels write directly into the cubepi
+checkpointer, which would silently violate the isolation contract
+above. See §3.8.2.
+
+#### 3.8.2 HITL is not supported inside `fork_once()`
 
 Two reasons HITL cannot work in `fork_once()`:
 
@@ -536,30 +701,48 @@ two additive changes (alembic migration in cubebox / cubepi-using apps):
 `fork()` in one transaction:
 
 1. Advisory lock / `FOR UPDATE` on the source thread.
-2. `SELECT MAX(seq) AS last_seq FROM cubepi_messages WHERE thread_id =
-   $src AND seq <= (SELECT MAX(seq) FROM cubepi_messages WHERE
-   thread_id = $src AND run_id = $after_run_id)`
-   AND `EXISTS (SELECT 1 FROM cubepi_run_completions WHERE thread_id =
-   $src AND run_id = $after_run_id)` → if no row,
+2. `SELECT completed_at AS cutoff FROM cubepi_run_completions WHERE
+   thread_id = $src AND run_id = $after_run_id` → if no row,
    `RunNotCompletedError`.
 3. `INSERT INTO cubepi_threads (thread_id, parent_thread_id,
-   forked_at_seq, extra, …) VALUES ($new, $src, $last_seq,
-   $merged_extra, …)` — `ThreadAlreadyExistsError` on PK violation.
+   forked_at_seq, extra, …)
+   VALUES ($new, $src, $last_copied_seq, $merged_extra, …)` —
+   `ThreadAlreadyExistsError` on PK violation. `$last_copied_seq` is
+   computed below in step 4 (or set with a CTE / temp value depending
+   on implementation).
 4. `INSERT INTO cubepi_messages (thread_id, seq, role, run_id,
-   metadata, payload) SELECT $new, seq, role, run_id, metadata, payload
-   FROM cubepi_messages WHERE thread_id = $src AND seq <= $last_seq
+   metadata, payload)
+   SELECT $new, seq, role, run_id, metadata, payload
+   FROM cubepi_messages
+   WHERE thread_id = $src
+     AND (
+       run_id IS NULL                                   -- legacy prefix
+       OR run_id IN (
+         SELECT run_id FROM cubepi_run_completions
+         WHERE thread_id = $src
+           AND (completed_at, run_id) <= ($cutoff, $after_run_id)
+       )
+     )
    ORDER BY seq`.
+   The composite `(completed_at, run_id)` comparison gives the
+   deterministic tiebreak from §3.2.
 5. `INSERT INTO cubepi_run_completions (thread_id, run_id,
-   completed_at) SELECT $new, run_id, completed_at FROM
-   cubepi_run_completions WHERE thread_id = $src AND run_id IN
-   (SELECT DISTINCT run_id FROM cubepi_messages WHERE thread_id = $src
-   AND seq <= $last_seq)`.
-6. Commit.
+   completed_at)
+   SELECT $new, run_id, completed_at
+   FROM cubepi_run_completions
+   WHERE thread_id = $src
+     AND (completed_at, run_id) <= ($cutoff, $after_run_id)`.
+6. (Optional, audit) `UPDATE cubepi_threads SET forked_at_seq =
+   (SELECT MAX(seq) FROM cubepi_messages WHERE thread_id = $new)
+   WHERE thread_id = $new` — sets the lineage marker.
+7. Commit.
 
-`complete_run()` in one transaction:
+`mark_run_complete()` (single statement, own transaction OR within
+the existing append/save lock window — the spec doesn't mandate;
+either is correct because the row is independently consistent):
 
-- Same advisory lock / `FOR UPDATE` on `thread_id`.
-- `INSERT INTO cubepi_messages …` for `last_messages` (allocating seqs).
+- Take the per-thread advisory lock / `FOR UPDATE` to serialize
+  vs. concurrent appends / forks.
 - `INSERT INTO cubepi_run_completions (thread_id, run_id,
   completed_at) VALUES (?, ?, now())` —
   `RunAlreadyCompletedError` on PK violation.
@@ -588,32 +771,42 @@ Schema additions at connect time using the existing PRAGMA-probe +
 3. Validate new thread does not exist (probe `messages` /
    `thread_extra` / `run_completions` for `new_thread_id`) →
    `ThreadAlreadyExistsError`.
-4. `INSERT INTO messages (thread_id, run_id, message_json) SELECT
-   $new, run_id, message_json FROM messages WHERE thread_id = $src
-   AND id <= (SELECT MAX(id) FROM messages WHERE thread_id = $src AND
-   run_id = $after_run_id) ORDER BY id`. New rows get fresh global
-   `id`s (the `messages.id` column is a global auto-increment;
-   identity is not preserved across the copy, but per-thread row
-   order is).
-5. `INSERT INTO run_completions (thread_id, run_id, completed_at)
-   SELECT $new, run_id, completed_at FROM run_completions WHERE
-   thread_id = $src AND run_id IN (SELECT DISTINCT run_id FROM
-   messages WHERE thread_id = $src AND id <= $cut_id)`.
-6. `INSERT INTO thread_extra (thread_id, extra_json, parent_thread_id)
+4. Read cutoff: `SELECT completed_at FROM run_completions WHERE
+   thread_id = $src AND run_id = $after_run_id` (already validated
+   non-null in step 2).
+5. `INSERT INTO messages (thread_id, run_id, message_json)
+   SELECT $new, run_id, message_json FROM messages
+   WHERE thread_id = $src
+     AND (
+       run_id IS NULL
+       OR run_id IN (
+         SELECT run_id FROM run_completions
+         WHERE thread_id = $src
+           AND (completed_at, run_id) <= ($cutoff, $after_run_id)
+       )
+     )
+   ORDER BY id`. New rows get fresh global `id`s (the `messages.id`
+   column is a global auto-increment; identity is not preserved
+   across the copy, but per-thread row order is).
+6. `INSERT INTO run_completions (thread_id, run_id, completed_at)
+   SELECT $new, run_id, completed_at FROM run_completions
+   WHERE thread_id = $src
+     AND (completed_at, run_id) <= ($cutoff, $after_run_id)`.
+7. `INSERT INTO thread_extra (thread_id, extra_json, parent_thread_id)
    VALUES ($new, $merged_extra_json, $src)`.
-7. Commit.
+8. Commit.
 
-`complete_run()`:
+`mark_run_complete()`:
 
 - `BEGIN IMMEDIATE`.
-- `INSERT INTO messages …` for each `last_messages` element (each
-  carrying its `run_id`).
 - `INSERT INTO run_completions (thread_id, run_id) VALUES (?, ?)` →
   `RunAlreadyCompletedError` if `(thread_id, run_id)` PK conflict.
 - Commit.
 
 `append()` is also wrapped in `BEGIN IMMEDIATE` (uniform writer
 discipline; see §3.3). `PRAGMA busy_timeout = 5000` set at connect.
+Each appended `Message` carries its `run_id` value into the new
+`messages.run_id` column.
 
 No `forked_at_seq` column added — SQLite has no per-thread seq.
 
@@ -622,32 +815,50 @@ No `forked_at_seq` column added — SQLite has no per-thread seq.
 `MemoryCheckpointer` today is `dict[str, CheckpointData]`. This spec:
 
 - Extends `CheckpointData` with `parent_thread_id: str | None = None`.
-- Adds an internal `dict[str, set[str]]` mapping
-  `thread_id -> set of completed run_ids`.
-- Adds an `asyncio.Lock` for fork (existing single-statement methods
-  do not strictly need one, but fork is multi-step).
+- Adds an internal `dict[str, dict[str, float]]` mapping
+  `thread_id -> {run_id: completed_at_monotonic_index}` — the value
+  is just an insertion-order counter (per-thread monotonic int)
+  serving as the equivalent of `completed_at` for ordering. Memory
+  does not have a real wall-clock requirement; the counter is
+  sufficient for the `(completed_at, run_id) <= cutoff` comparison.
+- Adds a single shared `asyncio.Lock` that ALL write paths
+  (`append`, `save_extra`, `save_pending_request`,
+  `mark_run_complete`, `fork`) take. The existing single-statement
+  methods didn't strictly need one, but uniform locking removes the
+  finding-#4 check-then-write race in this backend.
 - `Message.run_id` is just a field — Memory persists the whole
-  Message via `model_dump`, so no extra storage scaffolding.
+  Message via reference, so no extra storage scaffolding.
 
 `fork()` under the lock:
 
 1. Source-exists check, new-thread-does-not-exist check.
-2. Look up the completed run_ids set; if `after_run_id` not there →
-   `RunNotCompletedError`.
-3. Walk `src.messages`, find the index of the last message with
-   `run_id == after_run_id`. Take prefix `[0..idx+1)`. Deep-copy
-   each message (`model_copy(deep=True)`).
-4. Compute the subset of `src`'s completed run_ids that appear in the
-   prefix; carry that set under the new thread_id.
-5. Deep-copy `src.extra`; merge `extra['fork']=metadata` per §3.4.
-6. Store `CheckpointData(messages=…, extra=…,
+2. Look up the completed run_ids map for `src_thread_id`; if
+   `after_run_id` not in it → `RunNotCompletedError`.
+3. Compute the cutoff index = `completions[src][after_run_id]`.
+4. Walk `src.messages` in order. For each message: include it if
+   `m.run_id is None` OR `(completions[src][m.run_id], m.run_id) <=
+   (cutoff, after_run_id)`. Deep-copy via `model_copy(deep=True)`.
+5. Subset of `src`'s completion map filtered by the same cutoff:
+   carry under the new thread_id.
+6. Deep-copy `src.extra`; merge `extra['fork']=metadata` per §3.4.
+7. Store `CheckpointData(messages=…, extra=…,
    parent_thread_id=src_thread_id)` under `new_thread_id`.
 
-`complete_run()`:
+`mark_run_complete()` under the lock:
 
-- Append `last_messages` to `src.messages`.
-- Add `run_id` to the completed-runs set; if already present →
+- Check `run_id NOT IN completions[thread_id]` → else
   `RunAlreadyCompletedError`.
+- Add `run_id` with the next monotonic counter value as the ordering
+  key.
+
+`append()` under the lock:
+
+- Optional pre-check: if any `message.run_id is not None` and that
+  run_id is already in `completions[thread_id]` → raise
+  `RunAlreadyCompletedError` (defense in depth; agent loop already
+  pre-flights at prompt() entry, but checking here protects direct
+  `Checkpointer.append()` calls).
+- Extend the messages list.
 
 No `forked_at_seq` field — Memory has no seq.
 
@@ -656,7 +867,7 @@ No `forked_at_seq` field — Memory has no seq.
 | Situation | Raised |
 |---|---|
 | `self.checkpointer is None` (fork or fork_once) | `RuntimeError("fork requires a checkpointer")` |
-| `fork_once()` finds HITL-bearing tool/middleware (§3.8.1) | `RuntimeError("fork_once() does not support HITL: <names>")` |
+| `fork_once()` finds HITL-bearing tool/middleware (§3.8.2) | `RuntimeError("fork_once() does not support HITL: <names>")` |
 | `src_thread_id` does not exist | `ThreadNotFoundError(src_thread_id)` |
 | `new_thread_id` already exists (fork) | `ThreadAlreadyExistsError(new_thread_id)` |
 | `after_run_id` has no completion marker on the source thread | `RunNotCompletedError(thread_id=src_thread_id, run_id=after_run_id)` |
@@ -669,10 +880,13 @@ No `forked_at_seq` field — Memory has no seq.
 ## 4. Migration / Compatibility
 
 - **Protocol change**: `Checkpointer.snapshot`, `Checkpointer.fork`,
-  `Checkpointer.complete_run` are new methods on the
-  `runtime_checkable` Protocol. Existing user-implemented checkpointers
-  keep type-checking; they only fail when the new methods are actually
-  called.
+  `Checkpointer.mark_run_complete`, `Checkpointer.load_pending`
+  are new methods on the `runtime_checkable` Protocol. Existing
+  user-implemented checkpointers keep type-checking; they only fail
+  when the new methods are actually called.
+  `Checkpointer.load_pending_request` is kept as a thin alias for
+  `load_pending()` returning only the request part — existing callers
+  unchanged.
 - **`Agent.prompt()` signature**: adds an optional keyword `run_id`
   and changes return type from `None` to `str`. Returning a value that
   the caller previously ignored is **not** a breaking change for
@@ -734,10 +948,32 @@ No `forked_at_seq` field — Memory has no seq.
     `forked_at_seq` is B's seq for Y, not A's
   - subsequent `prompt()` on a forked thread starts a new run_id; new
     messages get the new run_id; completion writes its own marker
-  - concurrent fork + complete_run on source serialize correctly
+  - concurrent fork + mark_run_complete on source serialize correctly
+  - **interleaved runs**: append run A's msgs (seq 1,2), append run
+    B's msgs (seq 3,4), mark B complete, mark A complete (later than
+    B). `fork(after_run_id=A)` copies A+B both (B completed earlier);
+    `fork(after_run_id=B)` copies only B; messages of B's seqs 3,4
+    are NOT pulled by `fork(after_run_id=A)` if A completed first
+    (regression test for the v2 R1 CRITICAL finding)
+  - **legacy + new mixed thread**: legacy NULL-run_id messages on a
+    pre-spec thread + a new completed run R. `fork(after_run_id=R)`
+    copies the legacy prefix AND R's messages, in source seq order;
+    `delete_run(thread_id, R)` (when implemented) removes only R's
+    messages, legacy prefix untouched
+  - **`Agent.prompt(run_id=R)` pre-flight check**: if R has a
+    completion marker on the source thread, raise
+    `RunAlreadyCompletedError` BEFORE any append happens (asserted
+    by snapshotting message count, attempting prompt, asserting
+    raise + unchanged count)
+  - **HITL resume run_id continuity**: prompt(run_id=R) pauses;
+    pending_request stores R; respond() recovers R via
+    `load_pending()` (single read), continues, every appended message
+    post-resume carries `run_id=R`, `mark_run_complete()` writes R's
+    marker on terminal exit. Second-pause variant: respond() pauses
+    again with same R, third respond() resumes again with same R
   - SQLite cross-connection: two `SQLiteCheckpointer` instances on
-    the same DB file, one `fork()` and one `complete_run()` from
-    different processes serialize via `BEGIN IMMEDIATE`
+    the same DB file, one `fork()` and one `mark_run_complete()`
+    from different processes serialize via `BEGIN IMMEDIATE`
   - legacy data: thread with `run_id=NULL` messages and no completion
     markers raises `RunNotCompletedError` on `fork(...)`
   - `CheckpointData.parent_thread_id` round-trip via `load()`
@@ -788,8 +1024,10 @@ All closed during brainstorm:
 - Run state ownership → cubepi (not cubebox)
 - Run_id source → accept-or-generate from `Agent.prompt`
 - Legacy data → not forkable / not deletable; no backfill
-- Run completion atomicity → same transaction as final append
-  (`complete_run()` Protocol method)
+- Run completion atomicity → NOT coupled to final append; separate
+  `mark_run_complete()` Protocol method called after the final
+  append, before `Agent.prompt()` returns. Crash window between the
+  two is acceptable (run looks unfinished, fork blocked, recoverable)
 - HITL pause/resume → same run_id across suspension; marker written
   on resume completion
 - fork_once HITL → banned via `requires_hitl` marker
