@@ -12,9 +12,22 @@ from __future__ import annotations
 
 import math
 import re
-from typing import NoReturn
+from typing import NoReturn, Protocol
 
-from cubepi.providers.base import Message, Model
+from cubepi.providers.base import Message
+
+
+class _ClassifyTarget(Protocol):
+    """Structural type for the `model` parameter of `classify_and_raise`.
+
+    Both `cubepi.providers.base.Model` and
+    `cubepi.providers.images.types.ImagesModel` satisfy it; `context_window`
+    is read with a getattr fallback so image models (which don't have it)
+    skip the token-budget heuristic cleanly.
+    """
+
+    id: str
+    provider_id: str
 
 
 class ProviderError(Exception):
@@ -176,7 +189,7 @@ def _retry_after_from(exc: BaseException) -> float | None:
 def classify_and_raise(
     exc: BaseException,
     *,
-    model: Model,
+    model: _ClassifyTarget,
     messages: list[Message] | None = None,
 ) -> NoReturn:
     """Inspect a raw SDK exception and raise the typed cubepi error.
@@ -206,7 +219,8 @@ def classify_and_raise(
     model_id = model.id
 
     tokens_in = _estimate_input_tokens(messages)
-    context_window = model.context_window if model.context_window else None
+    cw_val = getattr(model, "context_window", None)
+    context_window = cw_val if cw_val else None
 
     for pat in _CONTEXT_LENGTH_PATTERNS:
         if pat.search(msg):
