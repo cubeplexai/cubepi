@@ -342,14 +342,31 @@ class Checkpointer(Protocol):
 
 #### `cubepi.checkpointer.exceptions`
 
-Add:
+Today, `cubepi/checkpointer/exceptions.py` only defines schema-related
+errors (`CubepiSchemaError`, `CubepiSchemaUninitialized`,
+`CubepiSchemaMismatch`). There is no shared base for runtime-operation
+errors. This spec adds one alongside the new fork errors so callers
+have a single `except` surface:
 
 ```python
+class CheckpointerError(Exception):
+    """Base class for cubepi checkpointer runtime errors.
+
+    Separate from CubepiSchemaError: schema errors are about the DB
+    being incompatible with the library; CheckpointerError is about
+    runtime operation outcomes (missing thread, lock timeout, fork
+    boundary violations, etc.).
+    """
+
+
 class ThreadNotFoundError(CheckpointerError): ...
 class ThreadAlreadyExistsError(CheckpointerError): ...
+
 class CheckpointerLockTimeoutError(CheckpointerError):
     """SQLite (or other locking backend) could not acquire the writer
     lock within the configured busy_timeout. See §3.4."""
+
+
 class ForkBoundaryError(CheckpointerError):
     """The prefix violates one of the §3.3 tool-call/tool-result invariants."""
     def __init__(
@@ -365,7 +382,9 @@ class ForkBoundaryError(CheckpointerError):
         ...
 ```
 
-`CheckpointerError` is the existing base in `cubepi/checkpointer/exceptions.py`.
+`CheckpointerError` is a NEW base added by this spec; it does NOT
+subclass `CubepiSchemaError` (different concern). Tests assert that
+all four new errors are catchable via `except CheckpointerError`.
 
 #### `cubepi.agent.agent`
 
@@ -721,6 +740,13 @@ channel) is explicit follow-up scope.
   - error pass-through (`ThreadNotFoundError`, `ThreadAlreadyExistsError`,
     `ForkBoundaryError`, `RuntimeError` for missing checkpointer)
   - does NOT mutate `self.thread_id`
+
+- **Exception hierarchy** (`tests/checkpointer/test_exceptions.py`):
+  - `ThreadNotFoundError`, `ThreadAlreadyExistsError`,
+    `ForkBoundaryError`, `CheckpointerLockTimeoutError` are all
+    catchable via `except CheckpointerError`
+  - `CheckpointerError` is NOT a subclass of `CubepiSchemaError`
+    (schema vs. runtime concerns stay separate)
 
 - **`Agent(messages=...)` constructor (§3.7a)** — a dedicated test
   group, distinct from `fork_once()` tests, so the new constructor
