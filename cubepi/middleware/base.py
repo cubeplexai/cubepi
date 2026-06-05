@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Literal
+from typing import Callable, Iterable, Literal
 
 import asyncio
 
@@ -12,7 +12,7 @@ from cubepi.agent.types import (
     BeforeToolCallContext,
     BeforeToolCallResult,
 )
-from cubepi.providers.base import AssistantMessage, Message
+from cubepi.providers.base import AssistantMessage, Message, Model, Provider
 from cubepi.types import JsonObject, StructuredObject
 
 
@@ -89,6 +89,28 @@ class Middleware:
         signal: asyncio.Event | None = None,
     ) -> list[Message] | None:
         raise NotImplementedError
+
+    def extra_llm_calls(self) -> Iterable[tuple[Provider, Model]]:
+        """Declare LLM calls this middleware drives outside the agent's main
+        provider/model.
+
+        Each pair is ``(provider, model)``. ``cubepi.tracing.Recorder`` uses
+        these to:
+
+        * Subscribe listeners on any provider the recorder isn't already
+          watching, so the resulting calls show up in the trace tree
+          alongside the agent's own chat spans.
+        * Identify middleware-owned calls by ``(model.provider, model.id)``
+          so they don't overwrite the root ``invoke_agent`` span's
+          attribution (provider name, system prompt hash, tool list). This
+          model-based gate is what handles the common "reuse one provider
+          client, swap the model" pattern — listener identity alone would
+          attribute the middleware's first call to the agent.
+
+        Default is empty — middlewares that do not call any LLM directly
+        need not override.
+        """
+        return ()
 
 
 def _has_method(middleware: Middleware, name: str) -> bool:

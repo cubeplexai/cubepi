@@ -132,6 +132,15 @@ class CompactionMiddleware(Middleware):
         ctx.extra["compaction_until_msg_index"] = new_boundary
         return _compressed_view(messages, new_state, new_boundary)
 
+    def extra_llm_calls(self) -> tuple[tuple[Provider, Model], ...]:
+        # Surface (provider, model) so ``cubepi.tracing.Recorder`` can both
+        # subscribe its listeners (the summarizer's chat span lands in the
+        # trace) AND identify the summary call by model — important when
+        # ``summary_provider`` is the same instance as the agent's main
+        # provider, which is the common "reuse the client, swap the model"
+        # pattern.
+        return ((self._summary_provider, self._summary_model),)
+
 
 __all__ = [
     "CompactionMiddleware",

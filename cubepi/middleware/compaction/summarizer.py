@@ -13,6 +13,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
+
 SUMMARIZER_SYSTEM_PROMPT = """\
 You compress a chat transcript into a brief, faithful narrative for an AI assistant
 that is continuing the conversation. Rules:

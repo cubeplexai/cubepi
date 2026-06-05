@@ -493,6 +493,277 @@ class TestErrorAndAbort:
         assert fallback_chat.status.status_code == StatusCode.UNSET
 
 
+class TestMiddlewareProviders:
+    """Recorder must also wire listeners for any provider a middleware drives
+    directly (e.g. CompactionMiddleware.summary_provider) — without this the
+    summarizer LLM call is invisible to the trace, even though the rest of the
+    turn is recorded."""
+
+    async def test_compaction_summary_provider_emits_chat_span(self):
+        from cubepi.checkpointer.memory import MemoryCheckpointer
+        from cubepi.middleware.compaction import CompactionMiddleware
+        from cubepi.providers.base import UserMessage
+
+        main = FauxProvider()
+        summarizer = FauxProvider()
+        # Cap at near-zero so transform_context triggers immediately.
+        # Distinct ``provider`` labels on the two Models so the test can also
+        # verify the root ``invoke_agent`` span stays attributed to the agent's
+        # own provider, not the summarizer that fires first.
+        summary_model = Model(id="summary-1", provider="faux-summary")
+        mw = CompactionMiddleware(
+            summary_provider=summarizer,
+            summary_model=summary_model,
+            max_tokens_before_compact=1,
+            keep_recent_messages=1,
+            max_summary_tokens=128,
+            min_compact_messages=2,
+        )
+        # Pre-seed history via a checkpointer so transform_context sees a
+        # message list above the compaction boundary on the first prompt.
+        cp = MemoryCheckpointer()
+        thread_id = "t-compaction-trace"
+        await cp.append(
+            thread_id,
+            [
+                UserMessage(content=[TextContent(text="first")]),
+                faux_assistant_message("first reply"),
+                UserMessage(content=[TextContent(text="second")]),
+                faux_assistant_message("second reply"),
+            ],
+        )
+
+        agent = Agent(
+            provider=main,
+            model=MODEL,
+            system_prompt="agent system prompt — kept on root",
+            middleware=[mw],
+            checkpointer=cp,
+            thread_id=thread_id,
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            exporters=[exporter],
+        )
+        tracer.attach(agent)
+
+        summarizer.append_responses([faux_assistant_message("a brief summary")])
+        main.append_responses([faux_assistant_message("ok")])
+
+        await agent.prompt("third")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        chats = [s for s in exporter.spans if s.name.startswith("chat ")]
+        # One chat from the summarizer, one from the agent's main turn —
+        # both must be present so the run trace shows the summarizer call,
+        # not just the agent's own chat.
+        chat_models = sorted(_attrs(c).get("gen_ai.request.model") for c in chats)
+        assert chat_models == ["faux-1", "summary-1"], chat_models
+
+        # Both chat spans share the agent run's trace_id — the summarizer
+        # call must be part of the same trace, not a sibling root.
+        turn = [s for s in exporter.spans if s.name == "cubepi.turn"][0]
+        for chat in chats:
+            assert chat.context.trace_id == turn.context.trace_id
+
+        # Root ``invoke_agent`` attribution must reflect the agent's own
+        # provider, not the summarizer that fires first during
+        # ``transform_context``. Without the per-listener gate the root
+        # would carry "faux-summary" + the summarizer's system prompt.
+        root = [s for s in exporter.spans if s.name.startswith("invoke_agent")][0]
+        assert _attrs(root)["gen_ai.provider.name"] == "faux"
+
+    async def test_shared_provider_still_protected_by_model_gate(self):
+        # When ``summary_provider`` IS the agent's main provider (a common
+        # "reuse the client, swap the model" pattern), listener-identity
+        # dedupe would route the summarizer through the main listener and
+        # let it clobber the root attribution. The fix gates on the model,
+        # not the listener — this regression test pins that contract.
+        from cubepi.checkpointer.memory import MemoryCheckpointer
+        from cubepi.middleware.compaction import CompactionMiddleware
+        from cubepi.providers.base import UserMessage
+
+        shared = FauxProvider()
+        agent_model = Model(id="agent-1", provider="faux-main")
+        summary_model = Model(id="summary-1", provider="faux-summary")
+        mw = CompactionMiddleware(
+            summary_provider=shared,
+            summary_model=summary_model,
+            max_tokens_before_compact=1,
+            keep_recent_messages=1,
+            max_summary_tokens=128,
+            min_compact_messages=2,
+        )
+        cp = MemoryCheckpointer()
+        thread_id = "t-shared-provider"
+        await cp.append(
+            thread_id,
+            [
+                UserMessage(content=[TextContent(text="first")]),
+                faux_assistant_message("first reply"),
+                UserMessage(content=[TextContent(text="second")]),
+                faux_assistant_message("second reply"),
+            ],
+        )
+
+        agent = Agent(
+            provider=shared,
+            model=agent_model,
+            system_prompt="agent system prompt — kept on root",
+            middleware=[mw],
+            checkpointer=cp,
+            thread_id=thread_id,
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            exporters=[exporter],
+        )
+        tracer.attach(agent)
+
+        shared.append_responses(
+            [
+                faux_assistant_message("a brief summary"),  # summarizer first
+                faux_assistant_message("ok"),  # then agent
+            ]
+        )
+
+        await agent.prompt("third")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = [s for s in exporter.spans if s.name.startswith("invoke_agent")][0]
+        # Despite the summarizer firing first on the shared listener, the
+        # root must stay attributed to the agent's own provider (the
+        # ``unknown:`` prefix is just ``map_provider_name`` canonicalising
+        # the unfamiliar test label — what matters is it's the agent's
+        # ``faux-main``, not the summarizer's ``faux-summary``).
+        assert _attrs(root)["gen_ai.provider.name"].endswith("faux-main")
+
+    def test_middleware_extra_llm_calls_default_is_empty(self):
+        # ``Middleware.extra_llm_calls()`` default must return an empty
+        # iterable so middlewares that don't drive any LLM are zero-cost on
+        # Recorder.attach.
+        from cubepi.middleware.base import Middleware
+
+        assert list(Middleware().extra_llm_calls()) == []
+
+    async def test_degenerate_same_model_falls_back_to_first_call_wins(self):
+        # Edge case: middleware declares the same (provider, model) as the
+        # agent — model-based gating would otherwise skip root attribution
+        # for the agent's own call too and leave the root span with the
+        # placeholder ``cubepi`` provider. The recorder must exclude these
+        # degenerate keys from the extra set so the run still gets a
+        # concrete root attribution (even if it ends up reflecting whichever
+        # call fired first).
+        from cubepi.middleware.base import Middleware
+
+        class _SameModelMiddleware(Middleware):
+            def __init__(self, provider, model):
+                self._p = provider
+                self._m = model
+
+            def extra_llm_calls(self):
+                return [(self._p, self._m)]
+
+        provider = FauxProvider()
+        agent = Agent(
+            provider=provider,
+            model=MODEL,
+            system_prompt="test",
+            middleware=[_SameModelMiddleware(provider, MODEL)],
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            exporters=[exporter],
+        )
+        tracer.attach(agent)
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        root = [s for s in exporter.spans if s.name.startswith("invoke_agent")][0]
+        # Root must end up with a real provider name, not the cubepi placeholder.
+        assert _attrs(root)["gen_ai.provider.name"] != "cubepi"
+
+    async def test_middleware_extra_provider_not_baseprovider_is_skipped(self):
+        # A middleware that hands the recorder a provider not derived from
+        # ``BaseProvider`` (no listener registry) is skipped by
+        # ``_subscribe`` — its calls simply won't be observable, but attach
+        # must not error. Covers the early-return branch in ``_subscribe``
+        # that codecov flagged.
+        from cubepi.middleware.base import Middleware
+
+        class _DuckProvider:
+            pass
+
+        class _DuckMiddleware(Middleware):
+            def __init__(self, model):
+                self._m = model
+
+            def extra_llm_calls(self):
+                return [(_DuckProvider(), self._m)]
+
+        provider = FauxProvider()
+        agent = Agent(
+            provider=provider,
+            model=MODEL,
+            system_prompt="test",
+            middleware=[_DuckMiddleware(Model(id="dm-1", provider="duck"))],
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            exporters=[exporter],
+        )
+        tracer.attach(agent)
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+        assert any(s.name.startswith("chat ") for s in exporter.spans)
+
+    async def test_middleware_extra_llm_calls_raising_is_swallowed(self):
+        # If a middleware's ``extra_llm_calls()`` raises during attach the
+        # recorder must keep going — the agent's own provider is the
+        # load-bearing subscription, a buggy middleware mustn't break tracing.
+        from cubepi.middleware.base import Middleware
+
+        class _BoomMiddleware(Middleware):
+            def extra_llm_calls(self):
+                raise RuntimeError("boom")
+
+        provider = FauxProvider()
+        agent = Agent(
+            provider=provider,
+            model=MODEL,
+            system_prompt="test",
+            middleware=[_BoomMiddleware()],
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            exporters=[exporter],
+        )
+        # Should not raise.
+        tracer.attach(agent)
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+        # Trace still emits.
+        assert any(s.name.startswith("chat ") for s in exporter.spans)
+
+
 class TestSafeToolName:
     """``_safe_tool_name`` must handle all three tool payload shapes:
     Anthropic/cubepi top-level ``name``, OpenAI Responses top-level

@@ -162,6 +162,11 @@ class Agent(Generic[TMessage]):
         if tools:
             self._state.tools = tools
         middleware = middleware or []
+        # Retain the list so observers (e.g. cubepi.tracing.Recorder) can
+        # walk it after construction — they need to reach attributes like
+        # ``Middleware.providers()`` that aren't captured by the composed
+        # hook callables below.
+        self._middleware: list[Middleware] = list(middleware)
         middleware_tools: list[AgentTool] = []
         for mw in middleware:
             middleware_tools.extend(getattr(mw, "tools", []) or [])

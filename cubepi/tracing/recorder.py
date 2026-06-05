@@ -218,6 +218,14 @@ class Recorder:
         # ``_close_open_spans`` (the latter covers cancelled runs that
         # never emit AgentEndEvent).
         self._active_run_token: Any | None = None
+        # ``(model.provider, model.id)`` tuples for LLM calls a middleware
+        # owns (e.g. ``CompactionMiddleware``'s summarizer). When the
+        # provider listener fires with one of these models we keep the
+        # chat span but skip the root ``invoke_agent`` attribution writes
+        # so the run stays attributed to the agent's own provider /
+        # system prompt / tools. Model-based gating works even when the
+        # middleware shares the agent's main provider instance.
+        self._extra_call_models: set[tuple[str, str]] = set()
 
     # ------------------------------------------------------------------
     # Attach / detach
@@ -233,21 +241,62 @@ class Recorder:
         # alias should one be added later.
         provider = getattr(agent, "_provider", None) or getattr(agent, "provider", None)
         provider_detachers: list[Callable[[], None]] = []
+
+        def _subscribe(p: Any) -> None:
+            if not isinstance(p, BaseProvider):
+                return
+            provider_detachers.append(p.subscribe_request(self._on_provider_request))
+            provider_detachers.append(p.subscribe_chunk(self._on_provider_chunk))
+            provider_detachers.append(p.subscribe_response(self._on_provider_response))
+
         # Attach must be all-or-nothing: if a later subscription raises, unwind
         # the ones already registered (incl. the agent listener) and re-raise,
         # so a failed attach() leaves no dangling listeners. The caller never
         # gets a ``detach`` callable on this path, so we cannot defer cleanup.
         try:
-            if isinstance(provider, BaseProvider):
-                provider_detachers.append(
-                    provider.subscribe_request(self._on_provider_request)
-                )
-                provider_detachers.append(
-                    provider.subscribe_chunk(self._on_provider_chunk)
-                )
-                provider_detachers.append(
-                    provider.subscribe_response(self._on_provider_response)
-                )
+            _subscribe(provider)
+            # Middlewares may drive their own LLM calls (e.g.
+            # ``CompactionMiddleware``'s summarizer). For each declared
+            # (provider, model) pair: (a) subscribe the provider if we
+            # aren't already, so those calls show up in the trace tree;
+            # (b) record the model identity in ``_extra_call_models`` so
+            # ``_on_provider_request`` knows to skip the root-attribution
+            # write — gating by listener identity alone would fail when
+            # the middleware shares the agent's main provider instance
+            # ("reuse the client, swap the model"), since both calls
+            # would arrive on the same listener.
+            #
+            # Degenerate case: if a middleware declares the SAME (provider,
+            # model) as the agent's main, model-based gating cannot tell
+            # the two calls apart — skipping attribution for that key
+            # would also skip the agent's own request and leave the root
+            # span with the placeholder ``cubepi`` provider name (codex
+            # round-N). Exclude those keys from the extra set so the
+            # degenerate config falls back to the original first-call-wins
+            # behaviour. The configuration is self-defeating anyway —
+            # compaction with the same model gives no cost / context
+            # benefit — but the recorder still produces a usable trace.
+            agent_state = getattr(agent, "_state", None)
+            agent_model = getattr(agent_state, "model", None) if agent_state else None
+            agent_key: tuple[str, str] | None = (
+                (agent_model.provider, agent_model.id)
+                if agent_model is not None
+                else None
+            )
+            seen: set[int] = {id(provider)} if provider is not None else set()
+            for mw in getattr(agent, "_middleware", []) or []:
+                try:
+                    extra = list(mw.extra_llm_calls())
+                except Exception:
+                    extra = []
+                for p, m in extra:
+                    key = (m.provider, m.id)
+                    if key != agent_key:
+                        self._extra_call_models.add(key)
+                    if id(p) in seen:
+                        continue
+                    seen.add(id(p))
+                    _subscribe(p)
         except BaseException:
             for d in provider_detachers:
                 try:
@@ -919,21 +968,33 @@ class Recorder:
         ):
             attrs[CUBEPI_LLM_THINKING_LEVEL] = payload["reasoning"]["effort"]
 
-        # System prompt sha256 on root agent span (once per run).
-        self._maybe_record_system_prompt_hash(payload, run)
+        # Root ``invoke_agent`` span carries attribution for the agent
+        # invocation as a whole — provider name, system prompt hash, tool
+        # list. Middleware-driven LLM calls (e.g. the compaction
+        # summarizer) must NOT overwrite those, otherwise a single
+        # ``transform_context`` call that fires before the main model
+        # would mis-attribute the whole run. ``_extra_call_models`` is
+        # populated in ``attach`` from ``Middleware.extra_llm_calls()`` —
+        # if the incoming model matches, skip the root writes. Gating by
+        # model rather than listener identity is what handles the
+        # shared-provider case ("reuse the client, swap the model").
+        attribute_root = (model.provider, model.id) not in self._extra_call_models
+        if attribute_root:
+            # System prompt sha256 on root agent span (once per run).
+            self._maybe_record_system_prompt_hash(payload, run)
 
-        # Update root's gen_ai.provider.name with the first concrete one.
-        if (run.agent_span.attributes or {}).get(GEN_AI_PROVIDER_NAME) == "cubepi":
-            run.agent_span.set_attribute(
-                GEN_AI_PROVIDER_NAME, attrs[GEN_AI_PROVIDER_NAME]
-            )
+            # Update root's gen_ai.provider.name with the first concrete one.
+            if (run.agent_span.attributes or {}).get(GEN_AI_PROVIDER_NAME) == "cubepi":
+                run.agent_span.set_attribute(
+                    GEN_AI_PROVIDER_NAME, attrs[GEN_AI_PROVIDER_NAME]
+                )
 
-        # Tool count on root.
-        tools = payload.get("tools")
-        if isinstance(tools, list) and tools:
-            run.agent_span.set_attribute(
-                CUBEPI_AGENT_TOOLS, [_safe_tool_name(t) for t in tools]
-            )
+            # Tool count on root.
+            tools = payload.get("tools")
+            if isinstance(tools, list) and tools:
+                run.agent_span.set_attribute(
+                    CUBEPI_AGENT_TOOLS, [_safe_tool_name(t) for t in tools]
+                )
 
         chat_span = self._tracer.otel_tracer.start_span(
             name=f"{SPAN_NAME_CHAT} {model.id}",

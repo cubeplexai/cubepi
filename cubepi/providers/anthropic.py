@@ -153,6 +153,12 @@ class AnthropicProvider(BaseProvider):
         cap = self._resolve_capability(model.id)
 
         cache_control = self._get_cache_control()
+        # Strip persisted "this turn errored before any output" markers (empty
+        # AssistantMessages at the tail) before BOTH the API conversion and the
+        # cache-policy query: leaving them in would make Anthropic treat the
+        # trailing empty assistant as a prefill, and querying the policy with
+        # the original list would point cache_control at a now-dropped message.
+        messages = self._strip_trailing_empty_assistants(messages)
         api_messages, breakpoints = self._build_api_messages(messages)
         if cache_control:
             indices = self._cache_policy.message_breakpoint_indices(messages)
@@ -445,6 +451,30 @@ class AnthropicProvider(BaseProvider):
         return api_messages, breakpoints
 
     @staticmethod
+    def _strip_trailing_empty_assistants(messages: list[Message]) -> list[Message]:
+        """Drop trailing ``AssistantMessage`` entries with no content blocks.
+
+        These are the persisted markers of a turn that errored before the
+        model emitted anything. Two reasons to strip before doing anything
+        else with the history:
+
+        * Anthropic treats the last assistant message as a prefill, so a
+          synthesised placeholder in that position would make the model
+          continue *from* the empty turn instead of regenerating from the
+          preceding user prompt.
+        * The cache marker policy is queried with this same message list;
+          if we trimmed only inside ``_build_api_messages`` the policy
+          would still point ``cache_control`` at a message we just dropped.
+        """
+        while (
+            messages
+            and isinstance(messages[-1], AssistantMessage)
+            and not messages[-1].content
+        ):
+            messages = messages[:-1]
+        return messages
+
+    @staticmethod
     def _convert_message(msg: Message) -> dict[str, Any]:
         if isinstance(msg, UserMessage):
             user_content: list[dict[str, Any]] = []
@@ -484,6 +514,16 @@ class AnthropicProvider(BaseProvider):
                             "input": assistant_block.arguments,
                         }
                     )
+            if not assistant_content:
+                # Anthropic rejects messages with no content blocks ("all
+                # messages must have non-empty content"). This happens when a
+                # prior run failed before the model emitted anything and the
+                # empty AssistantMessage was persisted (stop_reason="error").
+                # Synthesize a single text block so replaying the history
+                # doesn't break the next request. (A trailing empty error
+                # assistant is dropped earlier in `_build_api_messages` — the
+                # placeholder only ever appears in non-trailing positions.)
+                assistant_content.append({"type": "text", "text": "[empty response]"})
             return {"role": "assistant", "content": assistant_content}
 
         elif isinstance(msg, ToolResultMessage):
