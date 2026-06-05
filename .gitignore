@@ -31,3 +31,6 @@ website/build/
 website/node_modules/
 website/docs/api/*.mdx
 !website/docs/api/index.mdx
+
+# Playwright CLI session artifacts
+.playwright-cli/
