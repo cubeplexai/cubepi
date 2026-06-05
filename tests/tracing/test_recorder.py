@@ -19,7 +19,7 @@ from cubepi.agent.types import (
     AgentToolResult,
     BeforeToolCallResult,
 )
-from cubepi.providers.base import Model, TextContent, ToolCall
+from cubepi.providers.base import BoundModel, Model, TextContent, ToolCall
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubepi.tracing import Tracer
 
@@ -510,10 +510,9 @@ class TestMiddlewareProviders:
         # Distinct ``provider`` labels on the two Models so the test can also
         # verify the root ``invoke_agent`` span stays attributed to the agent's
         # own provider, not the summarizer that fires first.
-        summary_model = Model(id="summary-1", provider="faux-summary")
+        summary_model = Model(id="summary-1", provider_id="faux-summary")
         mw = CompactionMiddleware(
-            summary_provider=summarizer,
-            summary_model=summary_model,
+            summary_model=BoundModel(provider=summarizer, spec=summary_model),
             max_tokens_before_compact=1,
             keep_recent_messages=1,
             max_summary_tokens=128,
@@ -534,8 +533,7 @@ class TestMiddlewareProviders:
         )
 
         agent = Agent(
-            provider=main,
-            model=MODEL,
+            model=BoundModel(provider=main, spec=MODEL),
             system_prompt="agent system prompt — kept on root",
             middleware=[mw],
             checkpointer=cp,
@@ -587,11 +585,10 @@ class TestMiddlewareProviders:
         from cubepi.providers.base import UserMessage
 
         shared = FauxProvider()
-        agent_model = Model(id="agent-1", provider="faux-main")
-        summary_model = Model(id="summary-1", provider="faux-summary")
+        agent_model = Model(id="agent-1", provider_id="faux-main")
+        summary_model = Model(id="summary-1", provider_id="faux-summary")
         mw = CompactionMiddleware(
-            summary_provider=shared,
-            summary_model=summary_model,
+            summary_model=BoundModel(provider=shared, spec=summary_model),
             max_tokens_before_compact=1,
             keep_recent_messages=1,
             max_summary_tokens=128,
@@ -610,8 +607,7 @@ class TestMiddlewareProviders:
         )
 
         agent = Agent(
-            provider=shared,
-            model=agent_model,
+            model=BoundModel(provider=shared, spec=agent_model),
             system_prompt="agent system prompt — kept on root",
             middleware=[mw],
             checkpointer=cp,
@@ -672,8 +668,7 @@ class TestMiddlewareProviders:
 
         provider = FauxProvider()
         agent = Agent(
-            provider=provider,
-            model=MODEL,
+            model=BoundModel(provider=provider, spec=MODEL),
             system_prompt="test",
             middleware=[_SameModelMiddleware(provider, MODEL)],
         )
@@ -713,10 +708,9 @@ class TestMiddlewareProviders:
 
         provider = FauxProvider()
         agent = Agent(
-            provider=provider,
-            model=MODEL,
+            model=BoundModel(provider=provider, spec=MODEL),
             system_prompt="test",
-            middleware=[_DuckMiddleware(Model(id="dm-1", provider="duck"))],
+            middleware=[_DuckMiddleware(Model(id="dm-1", provider_id="duck"))],
         )
         exporter = InMemoryExporter()
         tracer = Tracer(
@@ -743,8 +737,7 @@ class TestMiddlewareProviders:
 
         provider = FauxProvider()
         agent = Agent(
-            provider=provider,
-            model=MODEL,
+            model=BoundModel(provider=provider, spec=MODEL),
             system_prompt="test",
             middleware=[_BoomMiddleware()],
         )
