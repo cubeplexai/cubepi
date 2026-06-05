@@ -30,7 +30,7 @@ from cubepi.tracing.schema import SCHEMA_URL, SCOPE_NAME
 
 if TYPE_CHECKING:
     from cubepi.agent.agent import Agent
-    from cubepi.providers.base import BaseProvider, BoundModel, Message, Model, Provider
+    from cubepi.providers.base import BoundModel, Message, Model, Provider
 
 
 class _OneShotSession:
