@@ -43,6 +43,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     runs (`stop_reason in ("error", "aborted")`) skip the hook.
   - HITL-interrupted runs (HitlDetached / HitlAborted) also skip the hook —
     the conversation is paused, not finished.
+- **Compaction summarizer tracing** — `CompactionMiddleware`'s summary call is
+  now first-class in the trace tree. A `cubepi.compaction.summarize` parent
+  span (carrying `cubepi.compaction.message_count`) wraps the summarizer LLM
+  call, and the recorder auto-subscribes the middleware's `summary_provider`
+  so its `chat` span lands as a child:
+  ```
+  invoke_agent
+  └── cubepi.turn
+      ├── cubepi.compaction.summarize
+      │   └── chat <summary-model>
+      └── chat <main-model>
+  ```
+  Previously summarizer calls bypassed the trace entirely.
+- **`Middleware.providers()` protocol** — middleware authors can override this
+  method to expose any extra `BaseProvider` instances the middleware owns;
+  `Recorder.attach()` walks `agent._middleware` and wires its listener registry
+  on each one (id-deduped against `agent._provider`). Default is empty, so
+  existing custom middleware needs no change.
 
 ### Changed
 
@@ -99,6 +117,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Tracer.oneshot()` now closes chat spans on failure/cancellation, awaits
   stream completion and flushes, forwards abort signals, and surfaces silent
   producer failures.
+- **Anthropic empty-assistant recovery** — a persisted
+  `AssistantMessage(content=[], stop_reason="error")` (e.g. from a transient
+  provider failure that the checkpointer recorded) no longer poisons the
+  conversation:
+  - Trailing empty assistant turns are dropped before send (the next request
+    regenerates from the preceding user prompt instead of treating the
+    placeholder as an assistant prefill).
+  - Mid-history empty assistant content is replaced with an `[empty response]`
+    text block so the wire payload satisfies the Anthropic API's
+    `messages.N: all messages must have non-empty content` rule.
+  - The trim happens in `stream()` before the cache policy resolves
+    breakpoints, so the user's last-message `cache_control` marker survives
+    on retry paths.
+- **Tracing root attribution under middleware-driven providers** — when a
+  middleware provider (e.g. `CompactionMiddleware.summary_provider`) issues
+  the first chat span of a run before the agent's main call, the root
+  `invoke_agent` span's `gen_ai.provider.name` / `cubepi.agent.system_prompt_sha256`
+  / `cubepi.agent.tools` are no longer overwritten by the middleware's values.
+  The recorder now gates root attribution by model identity (not listener
+  identity), and falls back to first-call-wins when a middleware declares the
+  same `(provider, model)` pair as the agent's main.
+- The compaction summarizer's wrapper span now installs `turn_span` as the
+  OTel current span, so `cubepi.compaction.summarize` lands as a child of
+  `cubepi.turn` instead of becoming an orphan root.
 
 ### Removed
 

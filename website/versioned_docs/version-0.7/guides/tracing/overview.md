@@ -63,6 +63,14 @@ Each layer carries standard `gen_ai.*` attributes — `gen_ai.operation.name`,
   (`cubepi.tags = ("beta-arm",)`, `cubepi.metadata.user_id = "u-42"`)
   via a contextvar-scoped block. Concurrent agents each see their own
   values.
+- **Middleware-owned providers traced automatically** — middleware that
+  exposes extra `BaseProvider` instances via `Middleware.providers()` has
+  its listener registry wired by `Recorder.attach()` so those providers'
+  `chat` spans land in the same trace as the agent's main call.
+  `CompactionMiddleware` uses this to surface its summarizer LLM call as
+  a `chat <summary-model>` span nested under
+  `cubepi.compaction.summarize` — see the [compaction
+  guide](../middleware/compaction#tracing).
 
 ## What it costs
 

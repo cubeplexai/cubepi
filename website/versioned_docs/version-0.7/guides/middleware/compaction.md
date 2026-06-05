@@ -70,6 +70,30 @@ outputs or user corrections are especially important. Increase
 `max_summary_tokens` for long-running research or coding sessions where the
 summary needs more detail.
 
+## Tracing
+
+When `cubepi.tracing` is attached to the agent, the summarizer call is
+first-class in the trace tree. `summarize()` opens a
+`cubepi.compaction.summarize` parent span (tagged with
+`cubepi.compaction.message_count`) around the LLM call, and the recorder
+automatically subscribes the summarizer provider so its `chat` span lands
+inside:
+
+```
+invoke_agent
+└── cubepi.turn
+    ├── cubepi.compaction.summarize
+    │   └── chat <summary-model>
+    └── chat <main-model>
+```
+
+The wrapper span is a no-op context manager when OpenTelemetry isn't
+installed, so the middleware works the same on minimal installs. The
+root `invoke_agent` span's `gen_ai.provider.name` /
+`cubepi.agent.system_prompt_sha256` / `cubepi.agent.tools` continue to
+reflect the agent's main provider/model, not the summarizer's — even
+when summarization runs first.
+
 ## Failure behavior
 
 If the summary provider fails, CubePi logs a warning and continues with the
