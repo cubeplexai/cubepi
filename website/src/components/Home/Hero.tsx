@@ -26,10 +26,16 @@ export default function Hero() {
         height={640}
       />
       <div className={styles.eyebrow}>cubepi · v{version}</div>
-      <h1 className={styles.h1}>CubePi</h1>
-      <p className={styles.tagline}>
-        {zh ? '一个 Pythonic 原生异步 Agent 框架。' : 'A Pythonic, async-native agent framework.'}
-      </p>
+      {/* Tagline lives inside the <h1> (as a styled subline) so the page's
+          single H1 carries the descriptive keyword phrase, not just the brand
+          name — while rendering identically to the previous brand + tagline
+          stack. */}
+      <h1 className={styles.h1}>
+        CubePi
+        <span className={styles.h1sub}>
+          {zh ? '一个 Pythonic 原生异步 Agent 框架。' : 'A Pythonic, async-native agent framework.'}
+        </span>
+      </h1>
       <p className={styles.lead}>
         {zh ? (
           <>
