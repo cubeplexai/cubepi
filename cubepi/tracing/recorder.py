@@ -265,6 +265,24 @@ class Recorder:
             # the middleware shares the agent's main provider instance
             # ("reuse the client, swap the model"), since both calls
             # would arrive on the same listener.
+            #
+            # Degenerate case: if a middleware declares the SAME (provider,
+            # model) as the agent's main, model-based gating cannot tell
+            # the two calls apart — skipping attribution for that key
+            # would also skip the agent's own request and leave the root
+            # span with the placeholder ``cubepi`` provider name (codex
+            # round-N). Exclude those keys from the extra set so the
+            # degenerate config falls back to the original first-call-wins
+            # behaviour. The configuration is self-defeating anyway —
+            # compaction with the same model gives no cost / context
+            # benefit — but the recorder still produces a usable trace.
+            agent_state = getattr(agent, "_state", None)
+            agent_model = getattr(agent_state, "model", None) if agent_state else None
+            agent_key: tuple[str, str] | None = (
+                (agent_model.provider, agent_model.id)
+                if agent_model is not None
+                else None
+            )
             seen: set[int] = {id(provider)} if provider is not None else set()
             for mw in getattr(agent, "_middleware", []) or []:
                 try:
@@ -272,7 +290,9 @@ class Recorder:
                 except Exception:
                     extra = []
                 for p, m in extra:
-                    self._extra_call_models.add((m.provider, m.id))
+                    key = (m.provider, m.id)
+                    if key != agent_key:
+                        self._extra_call_models.add(key)
                     if id(p) in seen:
                         continue
                     seen.add(id(p))
