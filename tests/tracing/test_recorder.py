@@ -554,16 +554,17 @@ class TestMiddlewareProviders:
         await tracer.shutdown()
 
         chats = [s for s in exporter.spans if s.name.startswith("chat ")]
-        # One chat from the summarizer, one from the agent's main turn.
+        # One chat from the summarizer, one from the agent's main turn —
+        # both must be present so the run trace shows the summarizer call,
+        # not just the agent's own chat.
         chat_models = sorted(_attrs(c).get("gen_ai.request.model") for c in chats)
         assert chat_models == ["faux-1", "summary-1"], chat_models
 
-        # The C-step parent span wraps the summarizer's chat.
-        summary_spans = [
-            s for s in exporter.spans if s.name == "cubepi.compaction.summarize"
-        ]
-        assert len(summary_spans) == 1
-        assert _attrs(summary_spans[0])["cubepi.compaction.message_count"] >= 1
+        # Both chat spans share the agent run's trace_id — the summarizer
+        # call must be part of the same trace, not a sibling root.
+        turn = [s for s in exporter.spans if s.name == "cubepi.turn"][0]
+        for chat in chats:
+            assert chat.context.trace_id == turn.context.trace_id
 
 
 class TestSafeToolName:
