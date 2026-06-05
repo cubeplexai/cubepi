@@ -50,17 +50,14 @@ def _build_params_model(
     schema_params: list[inspect.Parameter],
     hints: dict[str, Any],
 ) -> type[BaseModel]:
-    """Generate a Pydantic model from the tool function's schema parameters."""
+    """Generate a Pydantic model from the tool function's schema parameters.
+
+    Structural validation (no *args/**kwargs or positional-only parameters) is
+    done by the caller over the full signature; here we only need each schema
+    parameter to carry a type annotation.
+    """
     fields: dict[str, Any] = {}
     for p in schema_params:
-        if p.kind in (
-            inspect.Parameter.VAR_POSITIONAL,
-            inspect.Parameter.VAR_KEYWORD,
-        ):
-            raise TypeError(
-                f"@tool function {fn.__name__!r} cannot use *args/**kwargs; "
-                "declare explicit parameters so an input schema can be generated."
-            )
         if p.name not in hints and p.annotation is inspect.Parameter.empty:
             raise TypeError(
                 f"@tool parameter {p.name!r} of {fn.__name__!r} needs a type "
@@ -105,10 +102,21 @@ def _make_agent_tool(
 
     sig = inspect.signature(fn)
 
-    # The generated executor always calls the function with keyword arguments
-    # (schema fields plus any injected reserved args), so a positional-only
-    # parameter — reserved or not — would fail at call time. Reject it up front.
+    # Structural validation runs over the FULL signature, before reserved names
+    # are filtered out below. The generated executor always calls the function
+    # with keyword arguments (schema fields plus any injected reserved args), so
+    # a *args/**kwargs or positional-only parameter — even one using a reserved
+    # name like *signal — would fail at call time. Reject it at definition time.
     for p in sig.parameters.values():
+        if p.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            raise TypeError(
+                f"@tool function {fn.__name__!r} cannot use *args/**kwargs "
+                f"(parameter {p.name!r}); declare explicit parameters so an "
+                "input schema can be generated."
+            )
         if p.kind is inspect.Parameter.POSITIONAL_ONLY:
             raise TypeError(
                 f"@tool parameter {p.name!r} of {fn.__name__!r} is "

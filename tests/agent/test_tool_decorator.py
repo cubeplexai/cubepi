@@ -152,6 +152,15 @@ class TestErrors:
             async def bad(*args: str) -> str:
                 return ""
 
+    def test_reserved_named_varargs_rejected(self):
+        # A vararg using a reserved name is filtered out of schema params, so it
+        # must be caught by the full-signature validation, not silently allowed.
+        with pytest.raises(TypeError, match="cannot use"):
+
+            @tool
+            async def bad(*signal) -> str:  # type: ignore[no-untyped-def]
+                return ""
+
     def test_positional_only_param_rejected(self):
         with pytest.raises(TypeError, match="positional-only"):
 
