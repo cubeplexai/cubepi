@@ -19,12 +19,29 @@ from cubepi.types import JsonObject
 # under ``from __future__ import annotations``.
 __all__ = [
     "AssistantImages",
+    "ImagesAborted",
     "ImagesContext",
     "ImagesCost",
     "ImagesModel",
     "ImagesOptions",
     "ProviderResponse",
 ]
+
+
+class ImagesAborted(Exception):
+    """Signals that a :meth:`generate_images` call was aborted via
+    :attr:`ImagesOptions.signal`.
+
+    Surfaced to ``subscribe_response`` observers as the ``exc`` argument so
+    tracing / audit listeners can distinguish a deliberate abort from a
+    normal completion (``exc=None``) or a real failure (``ProviderError``
+    subclass). Deliberately **not** an :class:`asyncio.CancelledError` —
+    the response-listener fanout takes a synchronous fast-path when ``exc``
+    is a cancellation, which schedules async listeners as detached tasks
+    that can be cancelled by ``asyncio.run()`` teardown before they run.
+    Using a distinct, non-cancellation exception keeps observers on the
+    awaited path so they finish before the call returns.
+    """
 
 
 class ImagesCost(BaseModel):

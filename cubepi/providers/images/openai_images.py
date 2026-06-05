@@ -20,6 +20,7 @@ from cubepi.providers.images.base import BaseImagesProvider
 from cubepi.providers.images.capability import ImagesCapabilityDescriptor
 from cubepi.providers.images.types import (
     AssistantImages,
+    ImagesAborted,
     ImagesContext,
     ImagesModel,
     ImagesOptions,
@@ -36,17 +37,6 @@ _OUTPUT_FORMAT_MEDIA_TYPE = {
     "jpeg": "image/jpeg",
     "webp": "image/webp",
 }
-
-
-class _SignalAborted(Exception):
-    """Internal sentinel raised by ``_run_with_signal`` when
-    ``ImagesOptions.signal`` triggers an abort.
-
-    Distinct from :class:`asyncio.CancelledError` so that external
-    cancellation (``task.cancel()``, ``asyncio.wait_for``, parent task
-    teardown) propagates cleanly instead of being silently swallowed
-    into ``AssistantImages(stop_reason="aborted")``.
-    """
 
 
 class OpenAIImagesProvider(BaseImagesProvider):
@@ -132,11 +122,15 @@ class OpenAIImagesProvider(BaseImagesProvider):
 
             return self._parse_response(sdk_resp, model, context, cap)
 
-        except _SignalAborted:
+        except ImagesAborted as aborted:
             # Signal-triggered abort: return as AssistantImages, do not re-raise.
-            # A synthetic CancelledError is surfaced to response observers so
-            # tracing can distinguish abort from successful completion.
-            exc = asyncio.CancelledError("aborted via ImagesOptions.signal")
+            # The ImagesAborted instance is surfaced to response observers so
+            # tracing can distinguish abort from successful completion. It is
+            # deliberately NOT an asyncio.CancelledError — that would push the
+            # listener fanout onto its synchronous fast-path, scheduling async
+            # observers as detached tasks that asyncio.run() teardown can
+            # cancel before they ever run.
+            exc = aborted
             return AssistantImages(
                 api=model.api,
                 provider_id=model.provider_id,
@@ -171,7 +165,7 @@ class OpenAIImagesProvider(BaseImagesProvider):
     ) -> Any:
         """Run ``sdk_call(**payload)`` while listening to ``signal``.
 
-        Raises :class:`_SignalAborted` if ``signal`` fires first.
+        Raises :class:`ImagesAborted` if ``signal`` fires first.
         Lets :class:`asyncio.CancelledError` from external cancellation
         propagate unchanged so callers can detect it.
         """
@@ -187,7 +181,7 @@ class OpenAIImagesProvider(BaseImagesProvider):
             )
             if signal_task in done and not sdk_task.done():
                 sdk_task.cancel()
-                raise _SignalAborted
+                raise ImagesAborted("aborted via ImagesOptions.signal")
             signal_task.cancel()
             return sdk_task.result()
         finally:

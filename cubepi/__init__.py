@@ -52,6 +52,7 @@ from cubepi.providers.capability import (
 from cubepi.providers.images import (
     AssistantImages,
     BaseImagesProvider,
+    ImagesAborted,
     ImagesCapabilityDescriptor,
     ImagesContext,
     ImagesCost,
@@ -75,6 +76,7 @@ __all__ = [
     "BoundModel",
     "CapabilityDescriptor",
     "ContextLengthExceeded",
+    "ImagesAborted",
     "ImagesCapabilityDescriptor",
     "ImagesContext",
     "ImagesCost",

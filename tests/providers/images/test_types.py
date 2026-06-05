@@ -143,6 +143,7 @@ def test_top_level_re_exports():
     for name in (
         "AssistantImages",
         "BaseImagesProvider",
+        "ImagesAborted",
         "ImagesCapabilityDescriptor",
         "ImagesContext",
         "ImagesCost",

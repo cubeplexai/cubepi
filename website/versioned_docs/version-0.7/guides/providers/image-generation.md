@@ -103,8 +103,27 @@ opts = ImagesOptions(
 ```
 
 When `signal` is set mid-call, the SDK request is cancelled and the
-provider returns `AssistantImages(stop_reason="aborted", output=[])` —
-the `CancelledError` does not escape.
+provider returns `AssistantImages(stop_reason="aborted", output=[])`.
+The cancellation does not escape — external `task.cancel()` and
+`asyncio.wait_for(...)` cancellations still propagate as
+`asyncio.CancelledError`, only the signal-driven abort is converted.
+
+Response observers see the abort via an `ImagesAborted` exception (a
+plain `Exception` subclass, intentionally distinct from
+`asyncio.CancelledError` so async listeners still run on the awaited
+fast-path before the call returns):
+
+```python
+from cubepi.providers.images import ImagesAborted
+
+def on_response(body, model, exc):
+    if isinstance(exc, ImagesAborted):
+        ...    # signal-driven abort — body is None
+    elif exc is not None:
+        ...    # real failure (a ProviderError subclass)
+    else:
+        ...    # success — body holds the assembled response
+```
 
 `on_payload` and `on_response` are per-call hooks; for persistent
 observers (tracing, audit), use `provider.subscribe_request()` /

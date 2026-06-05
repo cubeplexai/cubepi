@@ -97,9 +97,26 @@ opts = ImagesOptions(
 )
 ```
 
-中途 `signal.set()` 时，SDK 请求会被取消，provider 返回
-`AssistantImages(stop_reason="aborted", output=[])`，`CancelledError` 不
-冒出来。
+中途 `signal.set()` 时，SDK 请求被取消，provider 返回
+`AssistantImages(stop_reason="aborted", output=[])`，不向外抛出。
+外部的 `task.cancel()` / `asyncio.wait_for(...)` 取消仍以
+`asyncio.CancelledError` 形式正常传播——只有 signal 触发的 abort 会被转换。
+
+Response 观察者通过 `ImagesAborted` 异常（普通 `Exception` 子类，**故意不**
+继承 `asyncio.CancelledError`，这样 async listener 还能走 awaited 快路径
+在 generate 返回前完成）来看到 abort：
+
+```python
+from cubepi.providers.images import ImagesAborted
+
+def on_response(body, model, exc):
+    if isinstance(exc, ImagesAborted):
+        ...    # signal 触发的 abort —— body 为 None
+    elif exc is not None:
+        ...    # 真实失败（ProviderError 子类）
+    else:
+        ...    # 成功 —— body 是已拼好的响应
+```
 
 `on_payload` / `on_response` 是 per-call hook；对于持久观察者（tracing、
 审计），用 `provider.subscribe_request()` / `provider.subscribe_response()`

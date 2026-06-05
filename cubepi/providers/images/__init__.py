@@ -12,6 +12,7 @@ from cubepi.providers.images.faux import FauxImagesProvider
 from cubepi.providers.images.openai_images import OpenAIImagesProvider
 from cubepi.providers.images.types import (
     AssistantImages,
+    ImagesAborted,
     ImagesContext,
     ImagesCost,
     ImagesModel,
@@ -22,6 +23,7 @@ __all__ = [
     "AssistantImages",
     "BaseImagesProvider",
     "FauxImagesProvider",
+    "ImagesAborted",
     "ImagesCapabilityDescriptor",
     "ImagesContext",
     "ImagesCost",

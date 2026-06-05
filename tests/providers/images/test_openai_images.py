@@ -280,9 +280,16 @@ def test_base_url_accepted_and_constructor_works():
 
 
 @pytest.mark.asyncio
-async def test_subscribe_response_fires_on_abort_with_cancelled_error():
-    """Abort path must surface CancelledError to response listeners so tracing
-    can distinguish abort from successful completion (spec §6.5)."""
+async def test_subscribe_response_fires_on_abort_with_images_aborted():
+    """Signal-abort surfaces ImagesAborted (NOT CancelledError) to
+    response listeners. Two contracts are pinned here:
+      1. Observers can distinguish abort from success — exc is non-None.
+      2. exc is NOT an asyncio.CancelledError, so the listener fanout
+         takes the normal awaited path. If it were CancelledError, the
+         sync fast-path would schedule async listeners as detached tasks
+         that asyncio.run() teardown could cancel before they run."""
+    from cubepi.providers.images import ImagesAborted
+
     p = _provider(sleep=0.5)
     model = p.model("gpt-image-1")
     signal = asyncio.Event()
@@ -306,7 +313,53 @@ async def test_subscribe_response_fires_on_abort_with_cancelled_error():
     assert len(seen) == 1
     body, exc = seen[0]
     assert body is None
-    assert isinstance(exc, asyncio.CancelledError)
+    assert isinstance(exc, ImagesAborted)
+    assert not isinstance(exc, asyncio.CancelledError)
+
+
+@pytest.mark.asyncio
+async def test_async_response_observer_awaited_on_abort():
+    """Regression: an *async* subscribe_response observer must finish
+    running before generate_images returns on the abort path.
+
+    Previously the observer was scheduled as a detached task (sync
+    fast-path triggered by exc being a CancelledError); under
+    asyncio.run() teardown those detached tasks were getting cancelled
+    before they could record the abort."""
+    from cubepi.providers.images import ImagesAborted
+
+    p = _provider(sleep=0.5)
+    model = p.model("gpt-image-1")
+    signal = asyncio.Event()
+    observed_exc: list[BaseException | None] = []
+
+    async def async_observer(body, m, exc):
+        # Yield to the event loop to prove we ran under normal awaited
+        # semantics rather than as a detached task that could be
+        # interrupted by teardown.
+        await asyncio.sleep(0)
+        observed_exc.append(exc)
+
+    p.subscribe_response(async_observer)
+
+    async def trigger():
+        await asyncio.sleep(0.05)
+        signal.set()
+
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(trigger())
+        task = tg.create_task(
+            p.generate_images(
+                model, ImagesContext(prompt="x"), options=ImagesOptions(signal=signal)
+            )
+        )
+
+    result = task.result()
+    assert result.stop_reason == "aborted"
+    # The async observer must have completed and recorded the abort
+    # before generate_images returned.
+    assert len(observed_exc) == 1
+    assert isinstance(observed_exc[0], ImagesAborted)
 
 
 @pytest.mark.asyncio
