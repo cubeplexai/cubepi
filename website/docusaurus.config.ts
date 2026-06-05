@@ -43,6 +43,9 @@ const classicOptions: ClassicOptions = {
     customCss: './src/css/custom.css',
   },
   sitemap: {
+    lastmod: 'date',
+    changefreq: 'weekly',
+    priority: 0.5,
     ignorePatterns: [
       '/docs/next/**',
       '/docs/0.3/**',
@@ -76,19 +79,25 @@ const config: Config = {
     },
   },
 
+  // Site-wide structured data: an Organization is the only schema that is
+  // genuinely true on *every* page. The product-level SoftwareApplication
+  // schema is scoped to the homepage (see src/pages/index.tsx) so docs
+  // subpages aren't all mislabeled as the application itself.
   headTags: [
     {
       tagName: 'script',
       attributes: { type: 'application/ld+json' },
       innerHTML: JSON.stringify({
         '@context': 'https://schema.org',
-        '@type': 'SoftwareApplication',
+        '@type': 'Organization',
         name: 'CubePi',
-        description: 'A Pythonic, async-native alternative to langgraph and pi-agent-core. Plain async functions, append-only checkpointing, minimal dependencies.',
         url: 'https://cubepi.ai',
-        applicationCategory: 'DeveloperApplication',
-        operatingSystem: 'Linux, macOS, Windows',
-        programmingLanguage: 'Python',
+        logo: 'https://cubepi.ai/img/brand/cubepi-logo.png',
+        sameAs: [
+          'https://github.com/cubeplexai/cubepi',
+          'https://x.com/cubeplexai',
+          'https://pypi.org/project/cubepi/',
+        ],
       }),
     },
   ],
@@ -134,6 +143,15 @@ const config: Config = {
         { type: 'custom-versionAwareDocLink', section: 'docs', label: 'Docs', position: 'left' },
         { type: 'custom-versionAwareDocLink', section: 'api', label: 'API', position: 'left' },
         { type: 'custom-versionAwareDocLink', section: 'recipes', label: 'Recipes', position: 'left' },
+        {
+          type: 'dropdown',
+          label: 'Compare',
+          position: 'left',
+          items: [
+            { to: '/compare/langgraph', label: 'vs LangGraph' },
+            { to: '/compare/pi-agent-core', label: 'vs pi-agent-core' },
+          ],
+        },
         { to: '/changelog', label: 'Changelog', position: 'left' },
         { type: 'docsVersionDropdown', position: 'right' },
         { type: 'localeDropdown', position: 'right' },

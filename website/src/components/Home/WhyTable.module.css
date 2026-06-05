@@ -7,3 +7,4 @@
 .table th { font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-7); background: var(--ink-3); }
 .label { font-weight: 500; color: var(--ink-12); width: 22%; }
 .us { color: var(--ink-12); font-family: 'JetBrains Mono'; font-size: 12.5px; }
+.more { margin-top: 16px; font-size: 13px; color: var(--ink-9); }

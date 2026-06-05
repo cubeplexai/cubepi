@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from '@docusaurus/Link';
 import { useIsZhHans } from '@site/src/hooks/useIsZhHans';
 import styles from './WhyTable.module.css';
 
@@ -52,6 +53,15 @@ export default function WhyTable() {
           </tbody>
         </table>
       </div>
+      <p className={styles.more}>
+        <Link to="/compare/langgraph">
+          {zh ? '完整对比:CubePi vs LangGraph →' : 'Full comparison: CubePi vs LangGraph →'}
+        </Link>
+        {'  ·  '}
+        <Link to="/compare/pi-agent-core">
+          {zh ? 'CubePi vs pi-agent-core →' : 'CubePi vs pi-agent-core →'}
+        </Link>
+      </p>
     </section>
   );
 }
