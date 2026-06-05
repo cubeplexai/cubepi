@@ -694,6 +694,44 @@ class TestMiddlewareProviders:
         # Root must end up with a real provider name, not the cubepi placeholder.
         assert _attrs(root)["gen_ai.provider.name"] != "cubepi"
 
+    async def test_middleware_extra_provider_not_baseprovider_is_skipped(self):
+        # A middleware that hands the recorder a provider not derived from
+        # ``BaseProvider`` (no listener registry) is skipped by
+        # ``_subscribe`` — its calls simply won't be observable, but attach
+        # must not error. Covers the early-return branch in ``_subscribe``
+        # that codecov flagged.
+        from cubepi.middleware.base import Middleware
+
+        class _DuckProvider:
+            pass
+
+        class _DuckMiddleware(Middleware):
+            def __init__(self, model):
+                self._m = model
+
+            def extra_llm_calls(self):
+                return [(_DuckProvider(), self._m)]
+
+        provider = FauxProvider()
+        agent = Agent(
+            provider=provider,
+            model=MODEL,
+            system_prompt="test",
+            middleware=[_DuckMiddleware(Model(id="dm-1", provider="duck"))],
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            exporters=[exporter],
+        )
+        tracer.attach(agent)
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+        assert any(s.name.startswith("chat ") for s in exporter.spans)
+
     async def test_middleware_extra_llm_calls_raising_is_swallowed(self):
         # If a middleware's ``extra_llm_calls()`` raises during attach the
         # recorder must keep going — the agent's own provider is the
