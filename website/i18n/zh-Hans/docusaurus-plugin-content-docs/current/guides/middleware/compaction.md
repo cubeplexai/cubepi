@@ -63,6 +63,26 @@ CompactionMiddleware(
 `max_tokens_before_compact`。如果最近工具输出或用户修正很重要，可以提高
 `keep_recent_messages`。长时间研究或编码会话可提高 `max_summary_tokens`。
 
+## Tracing
+
+挂上 `cubepi.tracing` 时，摘要调用是 trace 树里的一等公民。`summarize()`
+在 LLM 调用外包一个 `cubepi.compaction.summarize` 父 span（标签
+`cubepi.compaction.message_count`），同时 recorder 自动订阅 summary
+provider，所以它的 `chat` span 也落在里面：
+
+```
+invoke_agent
+└── cubepi.turn
+    ├── cubepi.compaction.summarize
+    │   └── chat <summary-model>
+    └── chat <main-model>
+```
+
+没装 OpenTelemetry 时，wrapper span 退化为 no-op context manager，中间件
+行为不变。根 `invoke_agent` span 的 `gen_ai.provider.name` /
+`cubepi.agent.system_prompt_sha256` / `cubepi.agent.tools` 始终归属
+agent 的主 provider/model，不会被先跑的 summarizer 覆盖。
+
 ## 失败行为
 
 如果摘要 provider 失败，CubePi 会记录 warning，并继续使用之前的压缩视图或

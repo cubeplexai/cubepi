@@ -60,6 +60,13 @@ trace
 - **`tracing_context()`** —— 通过 contextvar 作用域块为单次运行设置标签和
   元数据（`cubepi.tags = ("beta-arm",)`、`cubepi.metadata.user_id = "u-42"`），
   并发 agent 各自看到独立的值。
+- **中间件自有 provider 自动接入 trace** —— 中间件通过
+  `Middleware.providers()` 暴露自己持有的 `BaseProvider`，
+  `Recorder.attach()` 会自动给这些 provider 接上 listener 注册表，它们的
+  `chat` span 就和 agent 主调用落进同一条 trace。`CompactionMiddleware`
+  就用这个机制把摘要 LLM 调用呈现为嵌在
+  `cubepi.compaction.summarize` 下的 `chat <summary-model>` —— 详见
+  [compaction 指南](../middleware/compaction#tracing)。
 
 ## 开销
 
