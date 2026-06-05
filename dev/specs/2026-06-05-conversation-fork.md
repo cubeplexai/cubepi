@@ -440,11 +440,47 @@ assistant message with `stop_reason="error"` or `"aborted"`, and
 returns normally (see `loop.py:485` early-exit branch). A naive
 "call mark_run_complete after `_run_prompt()` returns"
 implementation would mark FAILED runs complete. To prevent that, the
-spec enumerates each loop outcome:
+spec enumerates each loop outcome AND adds a structural pre-completion
+invariant (below).
+
+#### Pre-completion invariant: no orphan tool_use
+
+**Before calling `mark_run_complete()`, the agent loop MUST verify
+that no `AssistantMessage` appended under the active run carries a
+`ToolCall` whose `id` has no matching `ToolResultMessage`
+(`tool_call_id`) later in the same run's messages.**
+
+This catches a real loop-level escape hatch: a custom
+`after_model_response` middleware can return
+`TurnAction(decision="stop")` after an assistant message that
+contains `ToolCall` blocks, in which case the loop short-circuits
+WITHOUT executing the tools or appending `ToolResultMessage`s. The
+loop then emits `AgentEndEvent` with `stop_reason="tool_use"` and
+returns normally. Without this check, a naive implementation would
+call `mark_run_complete()` on a run whose messages contain orphan
+`ToolCall`s — and `fork(after_run_id=R)` would later copy those
+orphans, reintroducing the very mid-tool-call hazard the run-based
+design claims to eliminate.
+
+The check is O(N) over the run's own messages (the ones tagged with
+this `run_id` appended since `claim_run`). On violation the loop
+treats the outcome as **"incomplete tool cycle"** — a new row in
+the outcome table below — and does NOT call `mark_run_complete`.
+The cubepi_runs row remains with `completed_at IS NULL`; fork sees
+`RunNotCompletedError`. Future `delete_run(R)` can clean up.
+
+The check is the only remaining vestige of v1's boundary validation,
+relocated to run-completion time (where it can be enforced once)
+rather than fork-cut time (where v1 had to validate at arbitrary
+positions). Because runs are by construction the only fork unit, a
+single check at completion suffices.
+
+#### Outcome table
 
 | Loop outcome | Detection signal | `mark_run_complete()` called? |
 |---|---|---|
-| **Clean success** | Final `AssistantMessage` has `stop_reason in {"end_turn", "stop", "tool_use", …}` (any non-error / non-aborted stop_reason) AND `error_message is None` AND no pending HITL on the thread | **YES** |
+| **Clean success** | Final `AssistantMessage` has `stop_reason in {"end_turn", "stop", "tool_use", …}` (any non-error / non-aborted stop_reason) AND `error_message is None` AND no pending HITL on the thread AND **the pre-completion invariant above passes** (no orphan `ToolCall`s in this run) | **YES** |
+| **Incomplete tool cycle** | Pre-completion invariant fails: some `AssistantMessage` in this run has a `ToolCall` whose `id` has no matching `ToolResultMessage` later in the run (typically caused by `after_model_response(decision="stop")` middleware short-circuit on a tool-use response) | NO — same handling as a failed run; claim row remains; `delete_run()` can clean up |
 | **HITL suspended** (normal pause) | `pending_request` row written this run; `prompt()` returns with the agent in suspended state | NO — `respond()` writes the marker on resume's clean exit |
 | **HITL detached** (`HitlDetached` caught in `loop.py:196` / `loop.py:418`) | Exception caught internally; loop returns silently, NO `AgentEndEvent` emitted. `pending_request` may still be set so `respond()` can resume later. | NO — same as normal HITL pause; resume handles completion |
 | **HITL aborted** (`HitlAborted`, via `Agent.abort_pending()`) | Exception caught internally; loop returns silently, NO `AgentEndEvent` emitted. The synthetic deny + terminal aborted assistant are appended by `abort_pending()` itself (see `agent.py:582-595`). | NO — claim row remains; the run is terminally abandoned; future `delete_run()` cleans up |
@@ -495,39 +531,65 @@ pauses for HITL. This pre-dates the spec and is preserved.
 
 The spec **adds a constraint** to make the channel's bound run_id
 agree with the agent's active run_id, so HITL recovery on resume
-finds the right value. For the constraint to be checkable,
-HITL-bearing tools/middleware must EXPOSE their bound run_id —
-`requires_hitl=True` alone tells Agent "HITL exists" but not "which
-run_id is bound to the channel". This spec therefore adds:
+finds the right value. The constraint must be checkable AND must
+distinguish in-memory HITL (no persistence, no constraint) from
+checkpointed HITL (writes pending_request.run_id, must match).
 
-- New attribute `bound_hitl_run_id: str | None = None` on
-  `cubepi.agent.types.AgentTool` and `cubepi.middleware.base.Middleware`.
+Structural change — single nested attribute replaces the prior
+`requires_hitl` + `bound_hitl_run_id` pair:
+
+```python
+@dataclass(frozen=True)
+class HitlBinding:
+    """How a tool/middleware integrates with HITL."""
+    checkpointed: bool              # True iff backed by CheckpointedChannel
+    run_id: str | None              # the channel's bound run_id (str if
+                                    # checkpointed; None for in-memory)
+
+class AgentTool:                    # cubepi.agent.types
+    ...
+    hitl: HitlBinding | None = None # None = tool has no HITL involvement
+
+class Middleware:                   # cubepi.middleware.base
+    ...
+    hitl: HitlBinding | None = None
+```
+
+`hitl is not None` replaces the v1 `requires_hitl=True` flag for
+detection purposes (§3.8.2 fork_once ban).
+
 - `cubepi.hitl.ask_user_tool(channel)` factory MUST set
-  `tool.bound_hitl_run_id = channel._run_id` on the returned
-  `AgentTool` (the channel is in the factory's closure; reading
-  `_run_id` is straightforward).
-- `cubepi.hitl.middleware.ApprovalPolicyMiddleware.__init__` MUST set
-  `self.bound_hitl_run_id = channel._run_id` from its channel
-  argument; `ConfirmToolCallMiddleware` inherits.
-- Third-party HITL tools / middleware that set `requires_hitl=True`
-  MUST also set `bound_hitl_run_id` if they bind a channel; documented
-  in the user guide.
+  `tool.hitl = HitlBinding(checkpointed=isinstance(channel,
+  CheckpointedChannel), run_id=getattr(channel, "_run_id", None))`.
+- `cubepi.hitl.middleware.ApprovalPolicyMiddleware.__init__` does the
+  same with its channel argument; `ConfirmToolCallMiddleware` inherits.
+- Third-party HITL tools / middleware MUST set `hitl=HitlBinding(...)`
+  if they bind a channel; documented in the user guide.
 
 **Enforcement at `Agent.prompt()` start, before `claim_run()`:**
 
-```
-bound = {
-    t.bound_hitl_run_id for t in self.tools if t.requires_hitl
-} | {
-    m.bound_hitl_run_id for m in self.middleware if m.requires_hitl
-}
-bound.discard(None)   # tolerate unbound HITL elements (none expected
-                      # in practice, but defensive)
+```python
+bound: set[str] = set()
+for elem in (*self.tools, *self.middleware):
+    if elem.hitl is None:
+        continue
+    if not elem.hitl.checkpointed:
+        continue  # in-memory HITL has no persistence; no run_id constraint
+    # Checkpointed HITL: run_id MUST be a non-None string
+    if elem.hitl.run_id is None:
+        raise ValueError(
+            f"Checkpointed HITL element {elem!r} has no run_id bound; "
+            "construct CheckpointedChannel(run_id=...) before passing "
+            "it to ask_user_tool/HITL middleware"
+        )
+    bound.add(elem.hitl.run_id)
+
 if bound:
     if run_id is None:
         raise ValueError(
-            "Agent has HITL-bound tools/middleware; "
-            "prompt(run_id=...) must be explicitly supplied"
+            "Agent has checkpointed HITL elements bound to "
+            f"run_ids {bound!r}; prompt(run_id=...) must be "
+            "explicitly supplied (generate-mode rejected)"
         )
     if any(b != run_id for b in bound):
         raise ValueError(
@@ -536,9 +598,13 @@ if bound:
         )
 ```
 
-- For non-HITL agents (no `requires_hitl=True` element), `Agent.prompt`
-  accepts `run_id=None` and generates; no channel binding to worry
-  about.
+- For non-HITL agents (no `hitl` attribute on any element), or for
+  agents with only in-memory HITL (no checkpointed channels),
+  `Agent.prompt` accepts `run_id=None` and generates; no constraint.
+
+- For checkpointed HITL with `CheckpointedChannel(run_id=None)`
+  (genuine config error — channel can't persist run_id because it
+  has none), Agent raises immediately, before `claim_run`.
 
 This avoids the alternative of refactoring `CheckpointedChannel` to
 take run_id at call time (a backward-incompatible HITL API change
@@ -884,8 +950,8 @@ class ForkOnceResult:
 ### 3.8 `Agent.fork_once()` execution detail
 
 1. `self._require_checkpointer()` — `RuntimeError` if no checkpointer.
-2. HITL pre-flight (§3.8.2) — `RuntimeError` if inherited tools or
-   middleware mark `requires_hitl=True`.
+2. HITL pre-flight (§3.8.2) — `RuntimeError` if any inherited tool
+   or middleware has `elem.hitl is not None`.
 3. `snapshot = await self.checkpointer.snapshot(src_thread_id,
    after_run_id=...)` — propagates
    `ThreadNotFoundError` / `RunNotCompletedError`.
@@ -951,18 +1017,21 @@ Two reasons HITL cannot work in `fork_once()`:
    persist a pending HITL request to the source thread — silent
    contamination.
 
-Detection (marker-based, bypass-proof):
+Detection (structural, bypass-proof) — uses the same
+`hitl: HitlBinding | None` attribute introduced in §3.6.3.1:
 
-- New attribute `requires_hitl: bool = False` on
-  `cubepi.agent.types.AgentTool` and `cubepi.middleware.base.Middleware`.
-- Set `True` on the `AgentTool` returned by
-  `cubepi.hitl.ask_user_tool(...)` and on
-  `cubepi.hitl.middleware.ApprovalPolicyMiddleware`
-  (`ConfirmToolCallMiddleware` inherits via subclassing).
-- Third-party HITL tools / middleware MUST set the same flag.
+- Any element with `elem.hitl is not None` is rejected from
+  fork_once. This covers both checkpointed channels (CheckpointedChannel
+  side effects on source thread) and in-memory channels
+  (InMemoryChannel blocks forever waiting for an unreachable host
+  inside a transient agent).
+- `cubepi.hitl.ask_user_tool(...)` and `ApprovalPolicyMiddleware`
+  set `hitl` per §3.6.3.1; `ConfirmToolCallMiddleware` inherits.
+- Third-party HITL tools / middleware MUST set `hitl` — same
+  contract as §3.6.3.1.
 - `fork_once()` scans `self.tools` and `self.middleware`; any
-  `requires_hitl=True` element triggers `RuntimeError` BEFORE any
-  snapshot is read.
+  element with `elem.hitl is not None` triggers `RuntimeError`
+  BEFORE any snapshot is read.
 
 ### 3.9 Per-backend implementation sketch
 
@@ -1423,14 +1492,19 @@ No `forked_at_seq` field — Memory has no seq.
     Same with `ApprovalPolicyMiddleware` instead of the tool. Non-HITL
     agents accept `run_id=None` unchanged.
   - **Loop-outcome completion enumeration** (regression test for v2
-    R7 HIGH #5): exercise each row of the §3.6.2 table — clean
-    success, HITL suspended (normal pause), HITL detached
+    R7 HIGH #5 + v2 R9 HIGH #2): exercise each row of the §3.6.2
+    table — clean success, **incomplete tool cycle** (custom
+    `after_model_response(decision="stop")` on a tool-use
+    AssistantMessage), HITL suspended (normal pause), HITL detached
     (HitlDetached caught in loop), HITL aborted (abort_pending),
     provider exception, tool exception, abort during streaming,
     propagating cancellation — and assert
     `cubepi_runs.completed_at IS NULL` for every non-success outcome
     and `IS NOT NULL` for the clean-success outcome. HITL
     suspended → respond() resume → assert marker now NOT NULL.
+    The incomplete-tool-cycle test specifically asserts: (a) the
+    pre-completion invariant rejected the run, (b) no orphan
+    tool_use ever becomes forkable via `fork(after_run_id=R)`.
   - **Legacy-degraded mode** (regression test for v2 R7 HIGH #4 +
     v2 R8 HIGH #3): construct an Agent with a checkpointer that
     implements only the v3 surface (no `claim_run` /
@@ -1458,11 +1532,15 @@ No `forked_at_seq` field — Memory has no seq.
     thread unchanged
   - turn with tool calls completes fully, returns new messages
   - raises `RuntimeError` when no checkpointer
-  - raises `RuntimeError` when `requires_hitl=True` tool in
-    `self.tools` (exercised with the actual `ask_user_tool(...)`
-    factory result)
+  - raises `RuntimeError` when any tool in `self.tools` has
+    `elem.hitl is not None` (exercised with the actual
+    `ask_user_tool(...)` factory result, asserting it populated
+    `tool.hitl` from the channel)
   - raises `RuntimeError` when `ApprovalPolicyMiddleware` (or its
     subclass `ConfirmToolCallMiddleware`) in `self.middleware`
+  - both checkpointed AND in-memory HITL channels trip the rejection
+    (HitlBinding.checkpointed=False is still rejected by fork_once
+    because the transient agent cannot drive HITL to completion)
   - cancellation: `asyncio.wait_for(agent.fork_once(...), timeout=…)`
     raises `TimeoutError`; transient agent's abort fires
   - tracing span: emits `cubepi.agent.fork_once` with the documented
