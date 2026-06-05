@@ -586,3 +586,92 @@ async def test_media_type_still_uses_output_format_when_field_active():
         model, ImagesContext(prompt="x", output_format="webp")
     )
     assert out.output[0].media_type == "image/webp"
+
+
+@pytest.mark.asyncio
+async def test_pre_set_signal_short_circuits_before_sdk_call():
+    """An already-set signal must abort before any SDK call is issued —
+    no billable HTTP request, no payload landed in the fake client."""
+    p = _provider()
+    model = p.model("gpt-image-1")
+    signal = asyncio.Event()
+    signal.set()  # pre-set BEFORE generate_images is called
+
+    out = await p.generate_images(
+        model,
+        ImagesContext(prompt="x"),
+        options=ImagesOptions(signal=signal),
+    )
+    assert out.stop_reason == "aborted"
+    assert out.output == []
+    # The SDK was never reached.
+    assert p._client.images.generate_kwargs is None
+    assert p._client.images.edit_kwargs is None
+
+
+@pytest.mark.asyncio
+async def test_pre_set_signal_does_not_fire_request_listener():
+    """Pre-set signal aborts before subscribe_request fires — observers
+    must not see a payload for a call that will never be sent."""
+    p = _provider()
+    model = p.model("gpt-image-1")
+    signal = asyncio.Event()
+    signal.set()
+
+    seen_requests: list = []
+    p.subscribe_request(lambda payload, m: seen_requests.append(payload))
+
+    await p.generate_images(
+        model,
+        ImagesContext(prompt="x"),
+        options=ImagesOptions(signal=signal),
+    )
+    assert seen_requests == []
+
+
+@pytest.mark.asyncio
+async def test_pre_set_signal_still_fires_response_listener():
+    """Pre-set signal aborts cleanly but the response observer still fires
+    (with body=None, exc=ImagesAborted) so tracing records the abort."""
+    from cubepi.providers.images import ImagesAborted
+
+    p = _provider()
+    model = p.model("gpt-image-1")
+    signal = asyncio.Event()
+    signal.set()
+
+    seen: list = []
+    p.subscribe_response(lambda body, m, exc: seen.append((body, exc)))
+
+    await p.generate_images(
+        model,
+        ImagesContext(prompt="x"),
+        options=ImagesOptions(signal=signal),
+    )
+    assert len(seen) == 1
+    body, exc = seen[0]
+    assert body is None
+    assert isinstance(exc, ImagesAborted)
+
+
+@pytest.mark.asyncio
+async def test_pre_set_signal_does_not_invoke_on_payload():
+    """Pre-set signal aborts BEFORE on_payload mutator runs."""
+    p = _provider()
+    model = p.model("gpt-image-1")
+    signal = asyncio.Event()
+    signal.set()
+
+    invoked: list = []
+
+    def mutate(payload, _model):
+        invoked.append(payload)
+        return payload
+
+    out = await p.generate_images(
+        model,
+        ImagesContext(prompt="x"),
+        options=ImagesOptions(signal=signal, on_payload=mutate),
+    )
+    assert out.stop_reason == "aborted"
+    assert invoked == []

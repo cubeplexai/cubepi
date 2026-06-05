@@ -79,33 +79,46 @@ class OpenAIImagesProvider(BaseImagesProvider):
         *,
         options: ImagesOptions | None = None,
     ) -> AssistantImages:
-        cap = self._capability_for(model)
-        payload = self._build_payload(model, context)
-
-        # input_images go in via the capability-declared field name; not
-        # merged by _build_payload because they're not a wire dict slot.
-        if context.input_images and cap.supports_edit:
-            payload[cap.input_images_field] = [
-                self._to_file(img) for img in context.input_images
-            ]
-            sdk_call = self._client.images.edit
-        else:
-            sdk_call = self._client.images.generate
-
-        # per-call on_payload + persistent subscribe_request.
-        # ``invoke_on_payload`` / ``_fire_request_listeners`` /
-        # ``invoke_on_response`` / ``_fire_response_listeners`` were typed for
-        # chat ``Model``; image models are structurally compatible (they only
-        # read ``.id`` / ``.provider_id``), but mypy can't see that — so the
-        # listener calls below carry a localized ``arg-type`` ignore.
-        on_payload: OnPayloadCallback | None = options.on_payload if options else None
-        payload = await invoke_on_payload(on_payload, payload, model)  # type: ignore[arg-type]
-        if self._request_listeners:
-            await _fire_request_listeners(self._request_listeners, payload, model)  # type: ignore[arg-type]
-
         body: dict | None = None
         exc: BaseException | None = None
         try:
+            # Pre-set abort short-circuit: if ImagesOptions.signal was
+            # already set before this call, skip ALL pre-flight work —
+            # payload assembly, on_payload mutation, subscribe_request
+            # firing, and the SDK call itself. This avoids billable HTTP
+            # requests when callers reuse an already-aborted signal, and
+            # prevents request observers from seeing payloads that will
+            # never be sent. The response observer still fires in
+            # ``finally`` so tracing/audit records the abort.
+            if options and options.signal and options.signal.is_set():
+                raise ImagesAborted("signal was already set before generate_images()")
+
+            cap = self._capability_for(model)
+            payload = self._build_payload(model, context)
+
+            # input_images go in via the capability-declared field name; not
+            # merged by _build_payload because they're not a wire dict slot.
+            if context.input_images and cap.supports_edit:
+                payload[cap.input_images_field] = [
+                    self._to_file(img) for img in context.input_images
+                ]
+                sdk_call = self._client.images.edit
+            else:
+                sdk_call = self._client.images.generate
+
+            # per-call on_payload + persistent subscribe_request.
+            # ``invoke_on_payload`` / ``_fire_request_listeners`` /
+            # ``invoke_on_response`` / ``_fire_response_listeners`` were typed for
+            # chat ``Model``; image models are structurally compatible (they only
+            # read ``.id`` / ``.provider_id``), but mypy can't see that — so the
+            # listener calls below carry a localized ``arg-type`` ignore.
+            on_payload: OnPayloadCallback | None = (
+                options.on_payload if options else None
+            )
+            payload = await invoke_on_payload(on_payload, payload, model)  # type: ignore[arg-type]
+            if self._request_listeners:
+                await _fire_request_listeners(self._request_listeners, payload, model)  # type: ignore[arg-type]
+
             sdk_resp = await self._run_with_signal(
                 sdk_call,
                 payload,
