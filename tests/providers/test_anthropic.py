@@ -69,6 +69,33 @@ class TestAnthropicMessageConversion:
             block.get("text") or block.get("input") for block in result["content"]
         )
 
+    def test_build_api_messages_drops_trailing_empty_assistant(self):
+        # If the trailing message is an empty error assistant, dropping it is
+        # the only correct option: Anthropic treats the last assistant as a
+        # prefill, so a placeholder there would make the model continue from
+        # "[empty response]" instead of regenerating the failed reply.
+        messages = [
+            UserMessage(content=[TextContent(text="ask")]),
+            AssistantMessage(content=[], stop_reason="error", error_message="boom"),
+        ]
+        api_messages, breakpoints = AnthropicProvider._build_api_messages(messages)
+        assert len(api_messages) == 1
+        assert api_messages[0]["role"] == "user"
+        # Breakpoints stay aligned with the (now shorter) api_messages list.
+        assert len(breakpoints) == 1
+
+    def test_build_api_messages_fills_non_trailing_empty_assistant(self):
+        # Mid-history empty error assistant must be filled with a placeholder
+        # to preserve the user→assistant→user alternation Anthropic requires.
+        messages = [
+            UserMessage(content=[TextContent(text="first")]),
+            AssistantMessage(content=[], stop_reason="error"),
+            UserMessage(content=[TextContent(text="retry")]),
+        ]
+        api_messages, _ = AnthropicProvider._build_api_messages(messages)
+        assert [m["role"] for m in api_messages] == ["user", "assistant", "user"]
+        assert len(api_messages[1]["content"]) >= 1
+
 
 class TestAnthropicToolConversion:
     def test_convert_tool_definition(self):
