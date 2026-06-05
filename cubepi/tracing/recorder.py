@@ -218,7 +218,7 @@ class Recorder:
         # ``_close_open_spans`` (the latter covers cancelled runs that
         # never emit AgentEndEvent).
         self._active_run_token: Any | None = None
-        # ``(model.provider, model.id)`` tuples for LLM calls a middleware
+        # ``(model.provider_id, model.id)`` tuples for LLM calls a middleware
         # owns (e.g. ``CompactionMiddleware``'s summarizer). When the
         # provider listener fires with one of these models we keep the
         # chat span but skip the root ``invoke_agent`` attribution writes
@@ -279,7 +279,7 @@ class Recorder:
             agent_state = getattr(agent, "_state", None)
             agent_model = getattr(agent_state, "model", None) if agent_state else None
             agent_key: tuple[str, str] | None = (
-                (agent_model.provider, agent_model.id)
+                (agent_model.provider_id, agent_model.id)
                 if agent_model is not None
                 else None
             )
@@ -290,7 +290,7 @@ class Recorder:
                 except Exception:
                     extra = []
                 for p, m in extra:
-                    key = (m.provider, m.id)
+                    key = (m.provider_id, m.id)
                     if key != agent_key:
                         self._extra_call_models.add(key)
                     if id(p) in seen:
@@ -978,7 +978,7 @@ class Recorder:
         # if the incoming model matches, skip the root writes. Gating by
         # model rather than listener identity is what handles the
         # shared-provider case ("reuse the client, swap the model").
-        attribute_root = (model.provider, model.id) not in self._extra_call_models
+        attribute_root = (model.provider_id, model.id) not in self._extra_call_models
         if attribute_root:
             # System prompt sha256 on root agent span (once per run).
             self._maybe_record_system_prompt_hash(payload, run)

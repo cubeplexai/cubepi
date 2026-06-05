@@ -12,7 +12,14 @@ from cubepi.middleware.compaction.boundary import safe_boundary
 from cubepi.middleware.compaction.state import CompactionState, message_refs
 from cubepi.middleware.compaction.summarizer import summarize
 from cubepi.middleware.compaction.tokens import approx_tokens
-from cubepi.providers.base import BoundModel, Message, TextContent, UserMessage
+from cubepi.providers.base import (
+    BoundModel,
+    Message,
+    Model,
+    Provider,
+    TextContent,
+    UserMessage,
+)
 
 SUMMARY_PREFIX = "[Conversation summary so far]\n"
 logger = logging.getLogger(__name__)
