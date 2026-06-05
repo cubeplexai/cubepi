@@ -252,7 +252,7 @@ will see.
 | `messages` `[0..message_count)` | yes | physical copy. Postgres/MySQL preserve the source seq values for the copied range. SQLite copies the JSON payloads under fresh global `id`s — its `messages.id` is a global auto-increment, not a per-thread seq, so identity is not meaningful to preserve. Memory copies in-list order. |
 | `extra` | yes | deep copy of the source JSON object (`json.loads(json.dumps(extra))`) |
 | `parent_thread_id` | written (new) | set to `src_thread_id` on new row |
-| `forked_at_seq` | written (new, Postgres/MySQL only) | seq of the last copied message. NULL for Memory and SQLite — those backends have no per-message seq column and forging a value would invite false continuation logic. The column exists in the SQLite schema for parity but is always NULL there. |
+| `forked_at_seq` | written (new, Postgres/MySQL only) | seq of the last copied message. Memory and SQLite do NOT store this — neither has a per-message seq, and forging a value would invite false continuation logic. No `forked_at_seq` column is added to SQLite's `thread_extra`, and no field is added to Memory's `CheckpointData`. Lineage for those backends comes from `parent_thread_id` alone. |
 | `extra['fork']` | written (new) when `metadata` is supplied | merge rule below |
 | `pending_request` | **no** | new thread starts clean; HITL is run-state, not history |
 | `run_id` | **no** | host-side run identifier; new thread has none |
@@ -742,8 +742,11 @@ channel) is explicit follow-up scope.
     (CheckpointData lineage round-trip)
   - `load(src_thread_id).parent_thread_id is None` for an originally
     non-forked source
-  - `forked_at_seq` assertions: equals last copied seq for
-    Postgres/MySQL; IS NULL for Memory/SQLite
+  - Lineage assertions:
+    - Postgres/MySQL: `forked_at_seq` equals the last copied seq
+    - Memory/SQLite: no `forked_at_seq` field/column exists; lineage
+      is asserted only via `load(new_thread_id).parent_thread_id ==
+      src_thread_id`
   - fork copies `extra['fork']` from `metadata` arg (and overwrites
     a pre-existing `extra['fork']` on the source — explicit test for
     the §3.5 merge rule)
