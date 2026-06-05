@@ -231,7 +231,7 @@ world the copy will see:
 
 | Field / row | Copied? | Notes |
 |---|---|---|
-| `cubepi_messages` rows where `run_id IS NULL` OR `run_id IN {completed runs of src with completed_at <= after_run_id.completed_at}` | yes | physical copy; PG/MySQL preserve source `seq` values for the copied range. SQLite copies the JSON payloads under fresh global `id`s (its `messages.id` is a global auto-increment, not a per-thread seq). Memory copies in-list order. Each copied row keeps its original `run_id` value (or NULL). Source seq order is preserved across the copy. |
+| `cubepi_messages` rows where `run_id IS NULL` OR `run_id IN {completed runs of src with completion_seq IS NOT NULL AND completion_seq <= after_run_id.completion_seq}` | yes | physical copy; PG/MySQL preserve source `seq` values for the copied range. SQLite copies the JSON payloads under fresh global `id`s (its `messages.id` is a global auto-increment, not a per-thread seq). Memory copies in-list order. Each copied row keeps its original `run_id` value (or NULL). Source seq order is preserved across the copy. |
 | `cubepi_runs` rows for the copied runs | yes | so the new thread can be further forked / deleted by run |
 | `extra` | yes | deep copy of the source JSON object |
 | `parent_thread_id` | written (new) | set to `src_thread_id` on the new thread row |
@@ -470,7 +470,9 @@ completed runs):
   - Includes ALL legacy NULL-run_id messages (the chronological
     prefix the user has been chatting on top of)
   - PLUS messages of every completed run with
-    `completed_at <= R.completed_at`
+    `completion_seq <= R.completion_seq` (see §3.2 — `completion_seq`
+    is the per-thread monotonic ordering key; `completed_at` is
+    audit-only)
   - Source seq order preserved across the copy
 - `delete_run(thread_id, R)` removes only R's messages (those with
   `run_id = R`); the legacy NULL prefix is untouched. To clear the
@@ -1136,13 +1138,20 @@ No `forked_at_seq` field — Memory has no seq.
   - `prompt()` accept-or-generate: caller-supplied run_id is used
     verbatim; None generates a uuid; return value matches what was
     persisted on appended messages
-  - `prompt()` raises `RunAlreadyCompletedError` if caller passes a
-    run_id that already has a completion marker
-  - completion marker written atomically with the final append (test:
-    crash between final append and marker write is structurally
-    impossible — they're one transaction)
-  - HITL pause does NOT write a completion marker; `respond()` resume
-    DOES write it once the resumed loop completes
+  - `prompt(run_id=R)` raises `RunAlreadyClaimedError` if R is
+    currently claimed (completed_at IS NULL) on the thread; raises
+    `RunAlreadyCompletedError` if R is already completed
+  - `mark_run_complete()` is called AFTER the final append, NOT
+    atomically with it. Inject a checkpointer that raises on
+    `mark_run_complete()` and assert: messages of the run are
+    persisted; the `cubepi_runs` row exists with `completed_at IS
+    NULL`; `Agent.prompt()` raises
+    `CompletionMarkerFailedError(run_id=…)`. Retrying
+    `checkpointer.mark_run_complete(thread_id, exc.run_id)` succeeds
+    and the run becomes forkable.
+  - HITL pause does NOT call `mark_run_complete()`; `cubepi_runs`
+    row remains with `completed_at IS NULL`. `respond()` calls
+    `mark_run_complete()` once the resumed loop completes terminally.
   - fork happy path: source has 3 completed runs A, B, C →
     `fork(after_run_id=B)` produces a thread with messages of A+B
     (in source order), `runs` rows for A+B, and no
