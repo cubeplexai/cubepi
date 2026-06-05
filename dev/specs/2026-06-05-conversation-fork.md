@@ -443,44 +443,63 @@ implementation would mark FAILED runs complete. To prevent that, the
 spec enumerates each loop outcome AND adds a structural pre-completion
 invariant (below).
 
-#### Pre-completion invariant: no orphan tool_use
+#### Pre-completion invariant: well-formed tool-use turns
 
 **Before calling `mark_run_complete()`, the agent loop MUST verify
-that no `AssistantMessage` appended under the active run carries a
-`ToolCall` whose `id` has no matching `ToolResultMessage`
-(`tool_call_id`) later in the same run's messages.**
+that every `AssistantMessage` with `ToolCall` blocks in this run is
+immediately followed by a contiguous block of `ToolResultMessage`s
+whose `tool_call_id`s exactly cover (set-equal to) that
+assistant's `ToolCall.id`s, before any other `AssistantMessage` or
+`UserMessage` appears in the run's message list.**
 
-This catches a real loop-level escape hatch: a custom
-`after_model_response` middleware can return
-`TurnAction(decision="stop")` after an assistant message that
-contains `ToolCall` blocks, in which case the loop short-circuits
-WITHOUT executing the tools or appending `ToolResultMessage`s. The
-loop then emits `AgentEndEvent` with `stop_reason="tool_use"` and
-returns normally. Without this check, a naive implementation would
-call `mark_run_complete()` on a run whose messages contain orphan
-`ToolCall`s — and `fork(after_run_id=R)` would later copy those
-orphans, reintroducing the very mid-tool-call hazard the run-based
-design claims to eliminate.
+Concretely, for each `AssistantMessage` A in the run carrying
+ToolCalls with ids `{c1, c2, …}`:
 
-The check is O(N) over the run's own messages (the ones tagged with
+- The next K messages in the run (where K = number of A's ToolCalls)
+  MUST all be `ToolResultMessage`s.
+- Their `tool_call_id` set MUST equal `{c1, c2, …}` exactly (no
+  missing, no extras, no duplicates).
+- No `UserMessage` or `AssistantMessage` may appear within that
+  K-message window.
+
+A weaker "any matching tool_call_id later in the run" check is NOT
+sufficient: cubepi's existing code documents that `tool_call_id`s
+are not globally unique, so a later same-id result could falsely
+satisfy an earlier orphan. Strict per-turn adjacency closes that
+hole.
+
+This catches two real loop-level escape hatches:
+
+1. A custom `after_model_response` middleware returns
+   `TurnAction(decision="stop")` after an assistant message
+   containing `ToolCall` blocks — loop short-circuits without
+   executing tools, prompt() returns with `stop_reason="tool_use"`
+   and no `ToolResultMessage` ever appended for this turn.
+2. A custom middleware injects intervening messages (a user message,
+   a separate assistant message) between the tool-use assistant and
+   what would be its tool_results — leaves the providers' strict
+   adjacency expectation broken even when a matching tool_call_id
+   eventually appears later.
+
+The check is O(N) over the run's own messages (those tagged with
 this `run_id` appended since `claim_run`). On violation the loop
-treats the outcome as **"incomplete tool cycle"** — a new row in
-the outcome table below — and does NOT call `mark_run_complete`.
-The cubepi_runs row remains with `completed_at IS NULL`; fork sees
+treats the outcome as **"incomplete tool cycle"** — a row in the
+outcome table below — and does NOT call `mark_run_complete`. The
+cubepi_runs row remains with `completed_at IS NULL`; fork sees
 `RunNotCompletedError`. Future `delete_run(R)` can clean up.
 
 The check is the only remaining vestige of v1's boundary validation,
-relocated to run-completion time (where it can be enforced once)
-rather than fork-cut time (where v1 had to validate at arbitrary
-positions). Because runs are by construction the only fork unit, a
-single check at completion suffices.
+relocated from arbitrary fork-cut time to run-completion time (where
+a single pass suffices). Because runs are by construction the only
+fork unit, validating each run once at completion is enough — fork
+never needs to re-validate.
 
 #### Outcome table
 
 | Loop outcome | Detection signal | `mark_run_complete()` called? |
 |---|---|---|
 | **Clean success** | Final `AssistantMessage` has `stop_reason in {"end_turn", "stop", "tool_use", …}` (any non-error / non-aborted stop_reason) AND `error_message is None` AND no pending HITL on the thread AND **the pre-completion invariant above passes** (no orphan `ToolCall`s in this run) | **YES** |
-| **Incomplete tool cycle** | Pre-completion invariant fails: some `AssistantMessage` in this run has a `ToolCall` whose `id` has no matching `ToolResultMessage` later in the run (typically caused by `after_model_response(decision="stop")` middleware short-circuit on a tool-use response) | NO — same handling as a failed run; claim row remains; `delete_run()` can clean up |
+| **Incomplete tool cycle** | Pre-completion invariant (above) fails: some `AssistantMessage` in this run is not immediately followed by a contiguous block of `ToolResultMessage`s covering exactly its `ToolCall.id`s. Typical triggers: `after_model_response(decision="stop")` on a tool-use response; middleware injecting intervening user/assistant messages between the tool-use turn and its results | NO — same handling as a failed run; claim row remains; `delete_run()` can clean up |
 | **HITL suspended** (normal pause) | `pending_request` row written this run; `prompt()` returns with the agent in suspended state | NO — `respond()` writes the marker on resume's clean exit |
 | **HITL detached** (`HitlDetached` caught in `loop.py:196` / `loop.py:418`) | Exception caught internally; loop returns silently, NO `AgentEndEvent` emitted. `pending_request` may still be set so `respond()` can resume later. | NO — same as normal HITL pause; resume handles completion |
 | **HITL aborted** (`HitlAborted`, via `Agent.abort_pending()`) | Exception caught internally; loop returns silently, NO `AgentEndEvent` emitted. The synthetic deny + terminal aborted assistant are appended by `abort_pending()` itself (see `agent.py:582-595`). | NO — claim row remains; the run is terminally abandoned; future `delete_run()` cleans up |
@@ -1502,9 +1521,23 @@ No `forked_at_seq` field — Memory has no seq.
     `cubepi_runs.completed_at IS NULL` for every non-success outcome
     and `IS NOT NULL` for the clean-success outcome. HITL
     suspended → respond() resume → assert marker now NOT NULL.
-    The incomplete-tool-cycle test specifically asserts: (a) the
-    pre-completion invariant rejected the run, (b) no orphan
-    tool_use ever becomes forkable via `fork(after_run_id=R)`.
+    The incomplete-tool-cycle test specifically covers each
+    shape rejected by the §3.6.2 invariant:
+    - (i) `after_model_response(decision="stop")` on a tool-use
+      response (no tool_results appended at all);
+    - (ii) `after_model_response` injects a `UserMessage` between
+      the tool-use assistant and what would be its tool_results
+      (subsequent matching tool_call_id later in the run does NOT
+      satisfy the strict-adjacency requirement);
+    - (iii) `after_model_response` produces a partial cover (only
+      some of the assistant's tool_call_ids have results in the
+      adjacent block);
+    - (iv) two assistants in the run with reused tool_call_ids —
+      strict adjacency prevents the later assistant's results from
+      satisfying the earlier assistant's calls.
+    For each shape: assert (a) the pre-completion invariant
+    rejected the run; (b) `fork(after_run_id=R)` raises
+    `RunNotCompletedError`.
   - **Legacy-degraded mode** (regression test for v2 R7 HIGH #4 +
     v2 R8 HIGH #3): construct an Agent with a checkpointer that
     implements only the v3 surface (no `claim_run` /
