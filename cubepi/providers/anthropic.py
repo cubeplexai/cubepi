@@ -152,6 +152,12 @@ class AnthropicProvider(BaseProvider):
         cap = self._resolve_capability(model.id)
 
         cache_control = self._get_cache_control()
+        # Strip persisted "this turn errored before any output" markers (empty
+        # AssistantMessages at the tail) before BOTH the API conversion and the
+        # cache-policy query: leaving them in would make Anthropic treat the
+        # trailing empty assistant as a prefill, and querying the policy with
+        # the original list would point cache_control at a now-dropped message.
+        messages = self._strip_trailing_empty_assistants(messages)
         api_messages, breakpoints = self._build_api_messages(messages)
         if cache_control:
             indices = self._cache_policy.message_breakpoint_indices(messages)
@@ -425,19 +431,6 @@ class AnthropicProvider(BaseProvider):
         an interior tool result stays on that result's block instead of sliding
         to the end of the merge.
         """
-        # Trim trailing empty AssistantMessage(s) — the persisted marker of a
-        # turn that errored before producing any content. Anthropic treats the
-        # last assistant message as a prefill, so handing it back (or even a
-        # synthesised placeholder in its place) would make the model continue
-        # *from* the empty turn instead of regenerating from the preceding
-        # user prompt, which is exactly the stuck-retry path this fix targets.
-        while (
-            messages
-            and isinstance(messages[-1], AssistantMessage)
-            and not messages[-1].content
-        ):
-            messages = messages[:-1]
-
         api_messages: list[dict[str, Any]] = []
         breakpoints: list[tuple[int, int]] = []
         prev_tool_result = False
@@ -455,6 +448,30 @@ class AnthropicProvider(BaseProvider):
                 )
             prev_tool_result = is_tool_result
         return api_messages, breakpoints
+
+    @staticmethod
+    def _strip_trailing_empty_assistants(messages: list[Message]) -> list[Message]:
+        """Drop trailing ``AssistantMessage`` entries with no content blocks.
+
+        These are the persisted markers of a turn that errored before the
+        model emitted anything. Two reasons to strip before doing anything
+        else with the history:
+
+        * Anthropic treats the last assistant message as a prefill, so a
+          synthesised placeholder in that position would make the model
+          continue *from* the empty turn instead of regenerating from the
+          preceding user prompt.
+        * The cache marker policy is queried with this same message list;
+          if we trimmed only inside ``_build_api_messages`` the policy
+          would still point ``cache_control`` at a message we just dropped.
+        """
+        while (
+            messages
+            and isinstance(messages[-1], AssistantMessage)
+            and not messages[-1].content
+        ):
+            messages = messages[:-1]
+        return messages
 
     @staticmethod
     def _convert_message(msg: Message) -> dict[str, Any]:
