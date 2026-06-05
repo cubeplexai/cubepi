@@ -483,6 +483,16 @@ class AnthropicProvider(BaseProvider):
                             "input": assistant_block.arguments,
                         }
                     )
+            if not assistant_content:
+                # Anthropic rejects messages with no content blocks ("all
+                # messages must have non-empty content"). This happens when a
+                # prior run failed before the model emitted anything and the
+                # empty AssistantMessage was persisted (stop_reason="error").
+                # Synthesize a single text block so replaying the history
+                # doesn't break the next request. (A trailing empty error
+                # assistant is dropped earlier in `_build_api_messages` — the
+                # placeholder only ever appears in non-trailing positions.)
+                assistant_content.append({"type": "text", "text": "[empty response]"})
             return {"role": "assistant", "content": assistant_content}
 
         elif isinstance(msg, ToolResultMessage):

@@ -56,6 +56,19 @@ class TestAnthropicMessageConversion:
         assert result["content"][0]["type"] == "tool_result"
         assert result["content"][0]["tool_use_id"] == "tc-1"
 
+    def test_convert_assistant_with_empty_content_uses_placeholder(self):
+        # A previously-failed turn is persisted as AssistantMessage(content=[],
+        # stop_reason="error"). Anthropic rejects messages with no content
+        # blocks ("messages.N: all messages must have non-empty content"), so
+        # replaying such a history must synthesize at least one block.
+        msg = AssistantMessage(content=[], stop_reason="error", error_message="boom")
+        result = AnthropicProvider._convert_message(msg)
+        assert result["role"] == "assistant"
+        assert len(result["content"]) >= 1
+        assert all(
+            block.get("text") or block.get("input") for block in result["content"]
+        )
+
 
 class TestAnthropicToolConversion:
     def test_convert_tool_definition(self):
