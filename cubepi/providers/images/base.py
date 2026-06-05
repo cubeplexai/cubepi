@@ -17,6 +17,22 @@ from cubepi.providers.images.types import (
 )
 
 
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Recursive merge that copies ``base`` and applies ``overlay`` on top.
+
+    Dict keys recurse; everything else (lists, scalars) is overwritten by
+    the overlay value. Used for ``capability.extra_payload`` and
+    ``context.extra`` application.
+    """
+    out = dict(base)
+    for k, v in overlay.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
 @runtime_checkable
 class ImagesProvider(Protocol):
     """Protocol for image-generation providers.
@@ -115,5 +131,61 @@ class BaseImagesProvider:
 
     def _build_payload(
         self, model: ImagesModel, context: ImagesContext
-    ) -> dict[str, Any]:  # pragma: no cover — implemented in Task 5
-        raise NotImplementedError("_build_payload arrives in Task 5")
+    ) -> dict[str, Any]:
+        cap = self._capability_for(model)
+        payload: dict[str, Any] = {"model": model.id, "prompt": context.prompt}
+
+        # size — four wire shapes
+        size = context.size if context.size is not None else model.default_size
+        if size is not None:
+            kind = cap.size_spec.kind
+            if kind == "size_string":
+                payload["size"] = size
+            elif kind == "image_size_string":
+                payload["image_size"] = size
+            elif kind == "width_height":
+                w_str, h_str = size.lower().split("x")
+                payload["width"] = int(w_str)
+                payload["height"] = int(h_str)
+            elif kind == "aspect_ratio":
+                payload["aspect_ratio"] = size
+
+        # n
+        n = context.n if context.n is not None else model.default_n
+        if n is not None:
+            payload[cap.count_field] = n
+
+        # quality
+        quality = (
+            context.quality if context.quality is not None else model.default_quality
+        )
+        if quality is not None:
+            payload["quality"] = quality
+
+        # output_format
+        of = (
+            context.output_format
+            if context.output_format is not None
+            else model.default_output_format
+        )
+        if of is not None and cap.output_format_field is not None:
+            payload[cap.output_format_field] = of
+
+        # response_format — always written, controlled entirely by capability
+        payload[cap.response_format_field] = cap.response_format_value
+
+        # supports_* gating
+        if context.seed is not None and cap.supports_seed:
+            payload[cap.seed_field] = context.seed
+        if context.negative_prompt is not None and cap.supports_negative_prompt:
+            payload[cap.negative_prompt_field] = context.negative_prompt
+        if context.steps is not None and cap.supports_steps:
+            payload[cap.steps_field] = context.steps
+        if context.guidance is not None and cap.supports_guidance:
+            payload[cap.guidance_field] = context.guidance
+
+        # Provider-level extra_payload (always injected) and per-call ctx.extra,
+        # deep-merged in order: payload <- cap.extra_payload <- ctx.extra.
+        payload = _deep_merge(payload, cap.extra_payload)
+        payload = _deep_merge(payload, context.extra)
+        return payload
