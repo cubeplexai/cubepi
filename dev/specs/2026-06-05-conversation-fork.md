@@ -249,7 +249,7 @@ will see.
 
 | Field | Copied? | Notes |
 |---|---|---|
-| `messages` `[0..message_count)` | yes | physical copy; Postgres/MySQL preserve the source seq values for the copied range |
+| `messages` `[0..message_count)` | yes | physical copy. Postgres/MySQL preserve the source seq values for the copied range. SQLite copies the JSON payloads under fresh global `id`s — its `messages.id` is a global auto-increment, not a per-thread seq, so identity is not meaningful to preserve. Memory copies in-list order. |
 | `extra` | yes | deep copy of the source JSON object (`json.loads(json.dumps(extra))`) |
 | `parent_thread_id` | written (new) | set to `src_thread_id` on new row |
 | `forked_at_seq` | written (new, Postgres/MySQL only) | seq of the last copied message. NULL for Memory and SQLite — those backends have no per-message seq column and forging a value would invite false continuation logic. The column exists in the SQLite schema for parity but is always NULL there. |
@@ -302,6 +302,23 @@ checkpointer instrumentation (if any) covers it.
 ### 3.7 API
 
 #### `cubepi.checkpointer.base`
+
+`CheckpointData` (the return type of `load()`) gains one optional
+field so callers can read the lineage of a loaded thread:
+
+```python
+@dataclass
+class CheckpointData:
+    messages: list[Message] = field(default_factory=list)
+    extra: JsonObject = field(default_factory=dict)
+    parent_thread_id: str | None = None   # NEW — None for non-fork threads
+```
+
+Memory and SQLite backends populate this from the new `parent_thread_id`
+they store (CheckpointData attr / `thread_extra` column respectively).
+Postgres and MySQL populate it from `cubepi_threads.parent_thread_id`.
+The field is unconditionally present on every load; backends that
+have no lineage information set it to `None`.
 
 ```python
 @runtime_checkable
@@ -438,26 +455,76 @@ class ForkOnceResult:
 
 ### 3.8 Per-backend implementation sketch
 
-- **Memory** (`cubepi/checkpointer/memory.py`): add a `dict[str, dict]`
-  of thread metadata (parent_thread_id, forked_at_seq, extra). `fork()`
-  copies the first N messages from the source list under the new key.
-  `snapshot()` slices the list. Boundary validation walks the prefix
-  once.
-- **SQLite** (`cubepi/checkpointer/sqlite.py`): a thread is currently
-  one row keyed by `thread_id`. Schema needs an additive migration to
-  add `parent_thread_id` (TEXT, NULL) and `forked_at_seq` (INTEGER,
-  always NULL). The existing checkpointer initialises its tables via
-  `CREATE TABLE IF NOT EXISTS`; the new columns are added at connect
-  time using the existing pattern (`PRAGMA table_info` probe, then
-  `ALTER TABLE … ADD COLUMN` if missing — exact form decided by the
-  plan to match what the file already does for schema upgrades).
-  `fork()` opens a transaction with `BEGIN IMMEDIATE` (RESERVED
-  lock), re-serializes the prefix into a new row, writes the
-  `parent_thread_id` reference, leaves `forked_at_seq` NULL, commits.
-  `forked_at_seq` exists in the schema purely for parity with the SQL
-  backends — SQLite stores the messages as a single serialized blob,
-  there are no per-message seqs to record, and synthesising one would
-  give callers a false invariant to depend on.
+- **Memory** (`cubepi/checkpointer/memory.py`): today it holds
+  `dict[str, CheckpointData]` keyed by `thread_id`, where
+  `CheckpointData` already carries `messages: list[Message]` and
+  `extra: JsonObject`. The current implementation has no lock — this
+  spec adds an `asyncio.Lock` for the fork transaction (the existing
+  methods are single-statement dict mutations that don't strictly
+  need it, but the lock keeps fork's read-validate-write atomic).
+  `CheckpointData` gains one optional field: `parent_thread_id: str
+  | None = None` (defaults to None for the no-fork case). `fork()`
+  takes the lock, slices the first `message_count` messages from
+  `src.messages` (deep-copying each via `model_copy(deep=True)`),
+  deep-copies `src.extra`, merges `extra['fork']=metadata` per §3.5,
+  and stores `CheckpointData(messages=..., extra=...,
+  parent_thread_id=src_thread_id)` under the new key. `snapshot()`
+  slices in-list order and runs the §3.3 validator. `forked_at_seq`
+  is not stored — Memory has no seq concept.
+- **SQLite** (`cubepi/checkpointer/sqlite.py`): the existing schema
+  is **three flat tables**, NOT a single thread row with a blob:
+  - `messages (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT,
+    message_json TEXT, created_at REAL)` — one row per message;
+    `id` is a global auto-increment sequence (not per-thread monotonic),
+    `thread_id` is a filter column with no index/constraint.
+  - `thread_extra (thread_id TEXT PRIMARY KEY, extra_json TEXT)` —
+    per-thread JSON extra.
+  - `thread_pending_request (thread_id TEXT PRIMARY KEY, …)` — HITL.
+
+  There is no `threads` table today. This spec extends `thread_extra`
+  to also carry lineage metadata (it is already the per-thread
+  metadata row keyed by `thread_id`, so this avoids inventing a
+  fourth table):
+
+  - Add `parent_thread_id TEXT NULL` column to `thread_extra`.
+  - Do NOT add `forked_at_seq` — SQLite has no per-thread seq to
+    record (the `messages.id` column is a global counter, not a
+    per-thread sequence, and copied rows get fresh ids on INSERT).
+    Per §3.5 this column is Postgres/MySQL-only.
+
+  The new column is added at connect time using the existing pattern
+  the file already uses for the `run_id` backfill (`PRAGMA table_info`
+  probe + `ALTER TABLE thread_extra ADD COLUMN parent_thread_id TEXT`
+  if missing). Pre-existing rows get NULL — there is no lineage to
+  reconstruct.
+
+  `fork()` runs inside a single `BEGIN IMMEDIATE` transaction
+  (RESERVED lock — see §3.4):
+
+  1. Validate source exists (`SELECT 1 FROM messages WHERE thread_id=?
+     LIMIT 1` OR `SELECT 1 FROM thread_extra WHERE thread_id=?`) →
+     `ThreadNotFoundError` if neither hits.
+  2. Validate new thread does not exist (same probes against
+     `new_thread_id`) → `ThreadAlreadyExistsError` if either hits.
+  3. Snapshot + boundary validation per §3.3 (reads `messages` ordered
+     by `id` LIMIT `message_count`, deserializes, validates prefix).
+  4. Copy messages: for the first `message_count` rows (ordered by
+     `id`), insert new rows with `thread_id = new_thread_id` and the
+     same `message_json`. New rows get fresh `id` values from the
+     global sequence — copied row identity is NOT preserved (this is
+     the §3.5 table footnote about SQLite).
+  5. Insert lineage row:
+     `INSERT INTO thread_extra (thread_id, extra_json, parent_thread_id)
+      VALUES (?, ?, ?)` — with deep-copied source `extra_json`
+     (merging `extra['fork']=metadata` per §3.5 before serializing)
+     and `parent_thread_id = src_thread_id`. If the source has no
+     `thread_extra` row (extra was never written), the new row still
+     gets inserted with `extra_json='{}'` and the parent reference.
+  6. Commit (releases the lock). Lock-timeout / SQLITE_BUSY → see
+     §3.4 contract (`CheckpointerLockTimeoutError`).
+
+  `pending_request` / `run_id` are not copied (their `thread_pending_request`
+  rows are not touched for `new_thread_id`).
 - **Postgres** (`cubepi/checkpointer/postgres/`): the columns already
   exist (schema version 3). `fork()` is a single transaction:
   - `INSERT INTO cubepi_threads (thread_id, parent_thread_id, forked_at_seq, extra, …) …`
@@ -671,6 +738,10 @@ channel) is explicit follow-up scope.
   - fork all messages → new thread reads back identically
   - fork prefix → new thread holds prefix, source still holds full
   - fork preserves `extra`; sets `parent_thread_id`
+  - subsequent `load(new_thread_id).parent_thread_id == src_thread_id`
+    (CheckpointData lineage round-trip)
+  - `load(src_thread_id).parent_thread_id is None` for an originally
+    non-forked source
   - `forked_at_seq` assertions: equals last copied seq for
     Postgres/MySQL; IS NULL for Memory/SQLite
   - fork copies `extra['fork']` from `metadata` arg (and overwrites
