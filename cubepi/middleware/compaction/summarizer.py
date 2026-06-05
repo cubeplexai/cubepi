@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 from cubepi.middleware.compaction.state import CompactionState, message_refs
 from cubepi.providers.base import (
@@ -12,6 +13,48 @@ from cubepi.providers.base import (
     ToolCall,
     UserMessage,
 )
+
+
+def _compaction_summary_span(message_count: int):
+    """Open a parent span for the summarizer's LLM call.
+
+    Without this wrapper the summarizer's chat span — emitted automatically
+    once :class:`cubepi.tracing.Recorder` is wired to the summary provider —
+    sits flat under ``cubepi.turn`` and is hard to tell apart from the
+    agent's own chat span. The wrapping name makes the role obvious and
+    tags it with the number of messages being summarised.
+
+    Resolves the tracer via ``cubepi.mcp._tracing._get_tracer`` so the span
+    routes through whichever :class:`cubepi.tracing.Tracer` is currently
+    attached to the running agent. Without that lookup the OTel global
+    provider is a no-op unless the user called ``set_tracer_provider``,
+    which cubepi deliberately doesn't do. Falls back to a no-op context
+    manager if neither OpenTelemetry nor an attached Tracer is available.
+    """
+    try:
+        from cubepi.mcp._tracing import _get_tracer
+    except ImportError:
+        return contextlib.nullcontext()
+
+    try:
+        tracer = _get_tracer("cubepi.middleware.compaction")
+    except Exception:
+        return contextlib.nullcontext()
+
+    cm = tracer.start_as_current_span("cubepi.compaction.summarize")
+
+    @contextlib.contextmanager
+    def _wrapped():
+        with cm as span:
+            try:
+                if span is not None:
+                    span.set_attribute("cubepi.compaction.message_count", message_count)
+            except Exception:
+                pass
+            yield span
+
+    return _wrapped()
+
 
 SUMMARIZER_SYSTEM_PROMPT = """\
 You compress a chat transcript into a brief, faithful narrative for an AI assistant
@@ -64,19 +107,22 @@ async def summarize(
     if existing and existing.summary:
         system_prompt += "\n\n" + EXISTING_SUMMARY_SUFFIX.format(prev=existing.summary)
 
-    response = await provider.generate(
-        model=model,
-        messages=[
-            UserMessage(
-                content=[TextContent(text=_format_transcript(messages_to_summarize))]
-            )
-        ],
-        system_prompt=system_prompt,
-        options=StreamOptions(signal=abort_signal),
-        max_output_tokens=max_summary_tokens,
-        temperature=0.0,
-        thinking="off",
-    )
+    with _compaction_summary_span(len(messages_to_summarize)):
+        response = await provider.generate(
+            model=model,
+            messages=[
+                UserMessage(
+                    content=[
+                        TextContent(text=_format_transcript(messages_to_summarize))
+                    ]
+                )
+            ],
+            system_prompt=system_prompt,
+            options=StreamOptions(signal=abort_signal),
+            max_output_tokens=max_summary_tokens,
+            temperature=0.0,
+            thinking="off",
+        )
 
     text = "".join(
         block.text for block in response.content if isinstance(block, TextContent)

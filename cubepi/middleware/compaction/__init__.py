@@ -133,6 +133,13 @@ class CompactionMiddleware(Middleware):
         ctx.extra["compaction_until_msg_index"] = new_boundary
         return _compressed_view(messages, new_state, new_boundary)
 
+    def providers(self) -> tuple[Provider, ...]:
+        # Surface the summary provider so ``cubepi.tracing.Recorder`` can
+        # wire its listeners — without this the summarizer's LLM call is
+        # invisible to the trace, even though the rest of the turn is
+        # recorded.
+        return (self._summary_provider,)
+
 
 __all__ = [
     "CompactionMiddleware",

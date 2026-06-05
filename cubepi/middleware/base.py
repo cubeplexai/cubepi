@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Literal
+from typing import Callable, Iterable, Literal
 
 import asyncio
 
@@ -12,7 +12,7 @@ from cubepi.agent.types import (
     BeforeToolCallContext,
     BeforeToolCallResult,
 )
-from cubepi.providers.base import AssistantMessage, Message
+from cubepi.providers.base import AssistantMessage, Message, Provider
 from cubepi.types import JsonObject, StructuredObject
 
 
@@ -89,6 +89,18 @@ class Middleware:
         signal: asyncio.Event | None = None,
     ) -> list[Message] | None:
         raise NotImplementedError
+
+    def providers(self) -> Iterable[Provider]:
+        """Return any extra LLM providers this middleware drives directly.
+
+        Some middlewares (e.g. ``CompactionMiddleware``) make their own LLM
+        calls outside the agent's main provider. Returning those providers
+        here lets ``cubepi.tracing.Recorder`` wire its listeners so the
+        resulting calls show up in the trace tree alongside the agent's own
+        chat spans. Default is empty — middlewares that do not call any
+        LLM directly need not override.
+        """
+        return ()
 
 
 def _has_method(middleware: Middleware, name: str) -> bool:

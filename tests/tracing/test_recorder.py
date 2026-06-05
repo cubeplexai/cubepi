@@ -494,6 +494,78 @@ class TestErrorAndAbort:
         assert fallback_chat.status.status_code == StatusCode.UNSET
 
 
+class TestMiddlewareProviders:
+    """Recorder must also wire listeners for any provider a middleware drives
+    directly (e.g. CompactionMiddleware.summary_provider) — without this the
+    summarizer LLM call is invisible to the trace, even though the rest of the
+    turn is recorded."""
+
+    async def test_compaction_summary_provider_emits_chat_span(self):
+        from cubepi.checkpointer.memory import MemoryCheckpointer
+        from cubepi.middleware.compaction import CompactionMiddleware
+        from cubepi.providers.base import UserMessage
+
+        main = FauxProvider()
+        summarizer = FauxProvider()
+        # Cap at near-zero so transform_context triggers immediately.
+        mw = CompactionMiddleware(
+            summary_provider=summarizer,
+            summary_model=Model(id="summary-1", provider="faux"),
+            max_tokens_before_compact=1,
+            keep_recent_messages=1,
+            max_summary_tokens=128,
+            min_compact_messages=2,
+        )
+        # Pre-seed history via a checkpointer so transform_context sees a
+        # message list above the compaction boundary on the first prompt.
+        cp = MemoryCheckpointer()
+        thread_id = "t-compaction-trace"
+        await cp.append(
+            thread_id,
+            [
+                UserMessage(content=[TextContent(text="first")]),
+                faux_assistant_message("first reply"),
+                UserMessage(content=[TextContent(text="second")]),
+                faux_assistant_message("second reply"),
+            ],
+        )
+
+        agent = Agent(
+            provider=main,
+            model=MODEL,
+            system_prompt="test",
+            middleware=[mw],
+            checkpointer=cp,
+            thread_id=thread_id,
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            exporters=[exporter],
+        )
+        tracer.attach(agent)
+
+        summarizer.append_responses([faux_assistant_message("a brief summary")])
+        main.append_responses([faux_assistant_message("ok")])
+
+        await agent.prompt("third")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        chats = [s for s in exporter.spans if s.name.startswith("chat ")]
+        # One chat from the summarizer, one from the agent's main turn.
+        chat_models = sorted(_attrs(c).get("gen_ai.request.model") for c in chats)
+        assert chat_models == ["faux-1", "summary-1"], chat_models
+
+        # The C-step parent span wraps the summarizer's chat.
+        summary_spans = [
+            s for s in exporter.spans if s.name == "cubepi.compaction.summarize"
+        ]
+        assert len(summary_spans) == 1
+        assert _attrs(summary_spans[0])["cubepi.compaction.message_count"] >= 1
+
+
 class TestSafeToolName:
     """``_safe_tool_name`` must handle all three tool payload shapes:
     Anthropic/cubepi top-level ``name``, OpenAI Responses top-level

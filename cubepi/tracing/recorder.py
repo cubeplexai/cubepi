@@ -233,21 +233,37 @@ class Recorder:
         # alias should one be added later.
         provider = getattr(agent, "_provider", None) or getattr(agent, "provider", None)
         provider_detachers: list[Callable[[], None]] = []
+
+        def _subscribe(p: Any) -> None:
+            if not isinstance(p, BaseProvider):
+                return
+            provider_detachers.append(p.subscribe_request(self._on_provider_request))
+            provider_detachers.append(p.subscribe_chunk(self._on_provider_chunk))
+            provider_detachers.append(p.subscribe_response(self._on_provider_response))
+
         # Attach must be all-or-nothing: if a later subscription raises, unwind
         # the ones already registered (incl. the agent listener) and re-raise,
         # so a failed attach() leaves no dangling listeners. The caller never
         # gets a ``detach`` callable on this path, so we cannot defer cleanup.
         try:
-            if isinstance(provider, BaseProvider):
-                provider_detachers.append(
-                    provider.subscribe_request(self._on_provider_request)
-                )
-                provider_detachers.append(
-                    provider.subscribe_chunk(self._on_provider_chunk)
-                )
-                provider_detachers.append(
-                    provider.subscribe_response(self._on_provider_response)
-                )
+            _subscribe(provider)
+            # Middlewares may drive their own LLM providers (e.g.
+            # ``CompactionMiddleware``'s summary provider) — wire them too
+            # so those calls show up in the trace tree instead of
+            # silently bypassing it. ``Middleware.providers()`` returns
+            # an empty iterable by default, so middlewares that don't
+            # touch an LLM directly cost nothing here.
+            seen: set[int] = {id(provider)} if provider is not None else set()
+            for mw in getattr(agent, "_middleware", []) or []:
+                try:
+                    extra = list(mw.providers())
+                except Exception:
+                    extra = []
+                for p in extra:
+                    if id(p) in seen:
+                        continue
+                    seen.add(id(p))
+                    _subscribe(p)
         except BaseException:
             for d in provider_detachers:
                 try:
