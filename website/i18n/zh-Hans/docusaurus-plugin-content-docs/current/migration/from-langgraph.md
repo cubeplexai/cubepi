@@ -71,31 +71,28 @@ for chunk in app.stream({"messages": [("user", "Weather in Tokyo?")]}):
 
 ```python
 import asyncio
-from pydantic import BaseModel
-from cubepi import Agent, AgentTool, AgentToolResult, TextContent
+from cubepi import Agent, tool
 from cubepi.providers.anthropic import AnthropicProvider
 
 
-class GetWeatherParams(BaseModel):
-    city: str
-
-
-async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
-    return AgentToolResult(content=[TextContent(text=f"72°F and sunny in {params.city}")])
+@tool
+async def get_weather(city: str) -> str:
+    "Get current weather for a city."
+    return f"72°F and sunny in {city}"
 
 
 agent = Agent(
     model=AnthropicProvider(provider_id="anthropic", api_key="…").model("claude-sonnet-4-5-20250929"),
-    tools=[AgentTool(
-        name="get_weather",
-        description="Get current weather for a city.",
-        parameters=GetWeatherParams,
-        execute=get_weather,
-    )],
+    tools=[get_weather],
 )
 agent.subscribe(lambda e, s=None: print(e.type))
 asyncio.run(agent.prompt("Weather in Tokyo?"))
 ```
+
+`@tool` 装饰器对标 langgraph 的 `@tool`:输入 schema 来自函数签名,
+docstring 作为描述,返回的普通 `str` 会自动包装。(若工具需要共享参数模型
+或动态构建,完整的 `AgentTool(...)` 写法依然可用 —— 见
+[工具使用](../guides/agents/tool-use)。)
 
 CubePi 版本去除了：
 

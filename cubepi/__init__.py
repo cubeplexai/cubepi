@@ -15,6 +15,7 @@ from cubepi.agent import (
     AgentToolResult,
     run_agent_loop,
     run_agent_loop_continue,
+    tool,
 )
 from cubepi.middleware import Middleware, compose_middleware
 from cubepi.providers import (
@@ -113,4 +114,5 @@ __all__ = [
     "compose_middleware",
     "run_agent_loop",
     "run_agent_loop_continue",
+    "tool",
 ]

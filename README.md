@@ -52,32 +52,19 @@ uv add cubepi[sqlite,postgres,mysql,mcp,tracing]
 
 ```python
 import asyncio
-from pydantic import BaseModel
-from cubepi import Agent, AgentTool, Model
-from cubepi.agent.types import AgentToolResult
+from cubepi import Agent, tool
 from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.providers.base import TextContent
 
 provider = AnthropicProvider(provider_id="anthropic", api_key="sk-...")
 
-class GetWeatherParams(BaseModel):
-    city: str
-
-async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
-    return AgentToolResult(
-        content=[TextContent(text=f"72°F and sunny in {params.city}")]
-    )
+@tool
+async def get_weather(city: str) -> str:
+    "Get current weather for a city."
+    return f"72°F and sunny in {city}"
 
 agent = Agent(
     model=provider.model("claude-sonnet-4-5-20250929"),
-    tools=[
-        AgentTool(
-            name="get_weather",
-            description="Get current weather for a city",
-            parameters=GetWeatherParams,
-            execute=get_weather,
-        ),
-    ],
+    tools=[get_weather],
     system_prompt="You are a helpful weather assistant.",
 )
 
@@ -115,7 +102,21 @@ faux.set_responses(["Hello!", "How can I help?"])
 
 ### Tools
 
-Declare tools with a name, a Pydantic model for parameters, and an async `execute` returning `AgentToolResult`. The framework handles JSON Schema derivation, argument parsing, parallel execution, and error wrapping.
+Decorate an async function with `@tool`: the input schema is derived from the
+typed parameters, the docstring becomes the description, and the framework
+handles argument parsing, parallel execution, and error wrapping.
+
+```python
+from cubepi import tool
+
+@tool
+async def search(query: str) -> str:
+    "Search the web."
+    return f"Results for: {query}"
+```
+
+Need a shared params model, dynamic construction, or `execution_mode`? The
+longhand `AgentTool(...)` is equivalent and fully supported:
 
 ```python
 from pydantic import BaseModel
@@ -129,7 +130,7 @@ class SearchParams(BaseModel):
 async def execute(tool_call_id, params: SearchParams, *, signal=None, on_update=None):
     return AgentToolResult(content=[TextContent(text=f"Results for: {params.query}")])
 
-tool = AgentTool(
+search = AgentTool(
     name="search",
     description="Search the web",
     parameters=SearchParams,

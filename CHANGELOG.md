@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`@tool` decorator** — `cubepi.tool` builds an `AgentTool` from a plain
+  async function: the input schema is generated from the typed parameters
+  (honouring `Field(...)` metadata), the docstring becomes the description,
+  and the loop-supplied `tool_call_id` / `signal` / `on_update` are injected
+  only when declared. Tools may return a `str`, a `Content`, a `list` of
+  content, or a full `AgentToolResult`. The longhand `AgentTool(...)` remains
+  fully supported.
+
 ## [0.7.0] - 2026-06-05
 
 ### Added

@@ -1,5 +1,6 @@
 from cubepi.agent.agent import Agent, AgentState
 from cubepi.agent.loop import run_agent_loop, run_agent_loop_continue
+from cubepi.agent.tool_decorator import tool
 from cubepi.agent.tools import execute_tool_calls
 from cubepi.agent.types import (
     AfterToolCallContext,
@@ -52,4 +53,5 @@ __all__ = [
     "TurnEndEvent",
     "TurnStartEvent",
     "emit_event",
+    "tool",
 ]

@@ -11,7 +11,70 @@ runs the work, and feeds the result back as a `ToolResultMessage`. By
 default tools run in parallel when the model calls more than one in a
 single turn.
 
-## Anatomy of a tool
+## The `@tool` decorator
+
+The quickest way to define a tool is to decorate an async function. CubePi
+generates the input schema from the parameters, so there's no separate model
+or boilerplate `execute` signature to write:
+
+```python
+from typing import Annotated
+from pydantic import Field
+from cubepi import tool
+
+
+@tool
+async def search(
+    query: Annotated[str, Field(description="The natural-language query")],
+    limit: Annotated[int, Field(ge=1, le=100)] = 10,
+) -> str:
+    "Search the internal knowledge base."
+    results = await my_search_backend(query, limit)
+    return "\n".join(results)
+```
+
+That's a complete, registrable `AgentTool`. The decorator infers:
+
+- **name** from the function name (override with `@tool(name=...)`);
+- **description** from the docstring (override with `@tool(description=...)`);
+- **the input schema** from the typed parameters — `Field(...)` defaults and
+  metadata are honoured exactly as in a hand-written model.
+
+The return value can be a plain `str` (wrapped as text, as above), a
+`TextContent`, a `list` of content, or a full `AgentToolResult` when you need
+`details`, `is_error`, or `terminate`:
+
+```python
+from cubepi import tool, AgentToolResult, TextContent
+
+
+@tool
+async def search(query: str, limit: int = 10) -> AgentToolResult:
+    "Search the internal knowledge base."
+    results = await my_search_backend(query, limit)
+    return AgentToolResult(
+        content=[TextContent(text="\n".join(results))],
+        details={"raw_results": results},   # passes through to ToolResultMessage.details
+    )
+```
+
+To run a tool sequentially, pass `@tool(execution_mode="sequential")`. If the
+function needs the loop-supplied arguments, just declare them — any of
+`tool_call_id`, `signal`, or `on_update` are injected when present and never
+appear in the schema:
+
+```python
+@tool
+async def long_job(prompt: str, *, signal=None, on_update=None) -> str:
+    "Run a long job, streaming progress."
+    ...
+```
+
+## Anatomy of a tool (longhand)
+
+The decorator is sugar over the explicit `AgentTool`. The form below is
+equivalent and remains fully supported — reach for it when you want to build
+tools dynamically or share one params model across several tools:
 
 ```python
 from pydantic import BaseModel, Field
