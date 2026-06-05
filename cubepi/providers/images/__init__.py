@@ -1,7 +1,33 @@
-"""Image generation providers (redesigned in 0.7).
+"""Image generation providers — public exports."""
 
-This package is in the process of being rebuilt. See
-``dev/specs/2026-06-05-images-provider-redesign.md`` and the matching plan.
-"""
+from cubepi.providers.images.base import (
+    BaseImagesProvider,
+    ImagesProvider,
+)
+from cubepi.providers.images.capability import (
+    ImagesCapabilityDescriptor,
+    SizeSpec,
+)
+from cubepi.providers.images.faux import FauxImagesProvider
+from cubepi.providers.images.openai_images import OpenAIImagesProvider
+from cubepi.providers.images.types import (
+    AssistantImages,
+    ImagesContext,
+    ImagesCost,
+    ImagesModel,
+    ImagesOptions,
+)
 
-__all__: list[str] = []
+__all__ = [
+    "AssistantImages",
+    "BaseImagesProvider",
+    "FauxImagesProvider",
+    "ImagesCapabilityDescriptor",
+    "ImagesContext",
+    "ImagesCost",
+    "ImagesModel",
+    "ImagesOptions",
+    "ImagesProvider",
+    "OpenAIImagesProvider",
+    "SizeSpec",
+]

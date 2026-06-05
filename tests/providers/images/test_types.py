@@ -130,3 +130,25 @@ def test_assistant_images_provider_id_renamed():
     )
     assert out.provider_id == "openai"
     assert not hasattr(out, "provider"), "old `provider` field must be gone"
+
+
+def test_top_level_re_exports():
+    """The image types are reachable via `from cubepi import ...`."""
+    import cubepi
+
+    assert (
+        cubepi.ImagesModel
+        is __import__("cubepi.providers.images", fromlist=["ImagesModel"]).ImagesModel
+    )
+    for name in (
+        "AssistantImages",
+        "BaseImagesProvider",
+        "ImagesCapabilityDescriptor",
+        "ImagesContext",
+        "ImagesCost",
+        "ImagesModel",
+        "ImagesOptions",
+        "ImagesProvider",
+        "SizeSpec",
+    ):
+        assert hasattr(cubepi, name), f"cubepi.{name} not exported"

@@ -49,6 +49,17 @@ from cubepi.providers.capability import (
     ReasoningLevelSpec,
     TemperatureSpec,
 )
+from cubepi.providers.images import (
+    AssistantImages,
+    BaseImagesProvider,
+    ImagesCapabilityDescriptor,
+    ImagesContext,
+    ImagesCost,
+    ImagesModel,
+    ImagesOptions,
+    ImagesProvider,
+    SizeSpec,
+)
 from cubepi.types import JsonObject, JsonValue, StructuredObject, StructuredValue
 
 __all__ = [
@@ -57,11 +68,19 @@ __all__ = [
     "AgentState",
     "AgentTool",
     "AgentToolResult",
+    "AssistantImages",
     "AssistantMessage",
+    "BaseImagesProvider",
     "BaseProvider",
     "BoundModel",
     "CapabilityDescriptor",
     "ContextLengthExceeded",
+    "ImagesCapabilityDescriptor",
+    "ImagesContext",
+    "ImagesCost",
+    "ImagesModel",
+    "ImagesOptions",
+    "ImagesProvider",
     "JsonObject",
     "JsonValue",
     "Message",
@@ -75,6 +94,7 @@ __all__ = [
     "ProviderUnavailable",
     "RateLimited",
     "ReasoningLevelSpec",
+    "SizeSpec",
     "StreamEvent",
     "StreamOptions",
     "StructuredObject",
