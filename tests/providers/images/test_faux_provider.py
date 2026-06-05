@@ -103,3 +103,102 @@ async def test_unset_signal_still_returns_happy_path_image():
     assert out.stop_reason == "stop"
     assert len(out.output) == 1
     assert out.output[0].media_type == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_subscribe_request_fires_on_happy_path():
+    """Faux fires subscribe_request with a synthetic payload so observability
+    tests work the same way against Faux and OpenAIImagesProvider."""
+    p = FauxImagesProvider(png_b64=_png_b64())
+    model = p.model("faux-1")
+    seen: list = []
+    p.subscribe_request(lambda payload, m: seen.append(payload))
+
+    await p.generate_images(model, ImagesContext(prompt="hello"))
+    assert len(seen) == 1
+    assert seen[0]["model"] == "faux-1"
+    assert seen[0]["prompt"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_subscribe_response_fires_on_happy_path_with_no_exc():
+    p = FauxImagesProvider(png_b64=_png_b64())
+    model = p.model("faux-1")
+    seen: list = []
+    p.subscribe_response(lambda body, m, exc: seen.append((body, exc)))
+
+    await p.generate_images(model, ImagesContext(prompt="x"))
+    assert len(seen) == 1
+    body, exc = seen[0]
+    assert body is not None and "data" in body
+    assert exc is None
+
+
+@pytest.mark.asyncio
+async def test_subscribe_response_fires_on_raise_on_call_with_typed_exc():
+    """When raise_on_call injects RateLimited, the observer must see
+    the same exception class the caller catches."""
+    p = FauxImagesProvider(png_b64=_png_b64(), raise_on_call=RateLimited)
+    model = p.model("faux-1")
+    seen: list = []
+    p.subscribe_response(lambda body, m, exc: seen.append((body, exc)))
+
+    with pytest.raises(RateLimited):
+        await p.generate_images(model, ImagesContext(prompt="x"))
+
+    assert len(seen) == 1
+    body, exc = seen[0]
+    assert body is None
+    assert isinstance(exc, RateLimited)
+
+
+@pytest.mark.asyncio
+async def test_subscribe_response_fires_on_pre_set_abort_with_images_aborted():
+    """Faux abort path must surface ImagesAborted to response observers
+    the same way OpenAIImagesProvider does."""
+    import asyncio
+
+    from cubepi.providers.images import ImagesAborted
+    from cubepi.providers.images.types import ImagesOptions
+
+    p = FauxImagesProvider(png_b64=_png_b64())
+    model = p.model("faux-1")
+    signal = asyncio.Event()
+    signal.set()
+
+    seen: list = []
+    p.subscribe_response(lambda body, m, exc: seen.append((body, exc)))
+
+    await p.generate_images(
+        model,
+        ImagesContext(prompt="x"),
+        options=ImagesOptions(signal=signal),
+    )
+    assert len(seen) == 1
+    body, exc = seen[0]
+    assert body is None
+    assert isinstance(exc, ImagesAborted)
+
+
+@pytest.mark.asyncio
+async def test_pre_set_abort_skips_request_listener_in_faux():
+    """Pre-set signal aborts before subscribe_request fires — same
+    contract as OpenAIImagesProvider."""
+    import asyncio
+
+    from cubepi.providers.images.types import ImagesOptions
+
+    p = FauxImagesProvider(png_b64=_png_b64())
+    model = p.model("faux-1")
+    signal = asyncio.Event()
+    signal.set()
+
+    seen_requests: list = []
+    p.subscribe_request(lambda payload, m: seen_requests.append(payload))
+
+    await p.generate_images(
+        model,
+        ImagesContext(prompt="x"),
+        options=ImagesOptions(signal=signal),
+    )
+    assert seen_requests == []

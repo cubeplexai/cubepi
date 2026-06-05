@@ -675,3 +675,25 @@ async def test_pre_set_signal_does_not_invoke_on_payload():
     )
     assert out.stop_reason == "aborted"
     assert invoked == []
+
+
+@pytest.mark.asyncio
+async def test_subscribe_response_sees_typed_provider_error_not_raw_sdk():
+    """When classify_and_raise() converts a raw SDK exception into a
+    typed ProviderError, the response observer must see the SAME typed
+    error the caller catches — not the underlying SDK exception."""
+    p = _provider(exc=_StatusErr("rate limited", 429))
+    model = p.model("gpt-image-1")
+    seen: list = []
+    p.subscribe_response(lambda body, m, exc: seen.append(exc))
+
+    with pytest.raises(RateLimited) as caller_exc:
+        await p.generate_images(model, ImagesContext(prompt="x"))
+
+    assert len(seen) == 1
+    observed = seen[0]
+    # Observer sees the SAME typed class the caller does, NOT the raw
+    # _StatusErr SDK-side exception.
+    assert isinstance(observed, RateLimited)
+    assert observed is caller_exc.value
+    assert not isinstance(observed, _StatusErr)

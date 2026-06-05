@@ -158,8 +158,15 @@ class OpenAIImagesProvider(BaseImagesProvider):
             exc = cancel
             raise
         except Exception as raw:  # noqa: BLE001
-            exc = raw
-            classify_and_raise(raw, model=model)
+            # classify_and_raise() raises a typed ProviderError subclass
+            # chained from ``raw``. Catch the classified version so the
+            # response listener observes the same typed error the caller
+            # sees, not the underlying SDK exception.
+            try:
+                classify_and_raise(raw, model=model)
+            except BaseException as classified:
+                exc = classified
+                raise
         finally:
             if self._response_listeners:
                 await _fire_response_listeners(
