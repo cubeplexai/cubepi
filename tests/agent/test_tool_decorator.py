@@ -152,6 +152,14 @@ class TestErrors:
             async def bad(*args: str) -> str:
                 return ""
 
+    def test_positional_only_param_rejected(self):
+        with pytest.raises(TypeError, match="positional-only"):
+
+            @tool
+            async def bad(id: str, /) -> str:
+                "Positional-only is not callable with **kwargs."
+                return id
+
     async def test_bad_return_type_rejected(self):
         @tool
         async def bad(value: str) -> int:  # type: ignore[return-value]
