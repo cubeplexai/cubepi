@@ -288,6 +288,14 @@ provider = OpenAIProvider(
 Resolution is exact-match on `model_id`; anything not listed falls back to
 `capability`.
 
+## Image providers
+
+Image generation has its own provider surface (`cubepi.providers.images`)
+that follows the same conventions described above: `provider_id` on the
+provider, `provider.model("id", ...)` factory, typed `ProviderError`
+failures, and a capability descriptor for backend wire differences. See
+[Image Generation](./image-generation) for the full guide.
+
 ## See also
 
 - [OpenAI Provider](./openai) — concrete OpenAI / OpenAI-compatible setup.

@@ -241,6 +241,13 @@ provider = OpenAIProvider(
 
 解析方式为对 `model_id` 精确匹配；未列出的模型回退到 `capability`。
 
+## 图片生成 provider
+
+图片生成有独立的 provider 表面（`cubepi.providers.images`），范式与上文
+描述完全一致：provider 上的 `provider_id`、`provider.model("id", ...)`
+工厂、类型化的 `ProviderError` 错误，以及处理后端字段差异的 capability
+descriptor。完整指南见 [图片生成](./image-generation)。
+
 ## 参见
 
 - [OpenAI Provider](./openai) —— OpenAI / OpenAI 兼容端点的具体配置。

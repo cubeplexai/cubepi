@@ -74,6 +74,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applications must add the nullable `run_id` column to `cubepi_threads` and
   call `write_schema_version_op()` in their Alembic migration before using this
   release.
+- **Breaking:** the `cubepi.providers.images` surface has been redesigned
+  to align with the chat-provider 0.7 conventions: providers now take
+  `provider_id` and an optional `ImagesCapabilityDescriptor`; models are
+  built via `provider.model("id", ...)` (renamed `provider` field to
+  `provider_id`, added `default_size/n/quality/output_format` and `cost`
+  metadata); `ImagesContext` is typed (`size/n/quality/output_format/seed/
+  negative_prompt/steps/guidance/extra`); per-call options live on a new
+  `ImagesOptions` bag (`signal`, `on_payload`, `on_response`); failures
+  raise `cubepi.errors.ProviderError` subclasses instead of in-band
+  `AssistantImages.error_message`; the `create_images_provider` /
+  `register_images_provider_class` registry is removed. The new shape
+  reaches OpenAI, Doubao Seedream, SiliconFlow, and Together AI through
+  a single `OpenAIImagesProvider` configured with the right
+  `ImagesCapabilityDescriptor`.
 - CI now runs `mypy cubepi` in addition to pytest and ruff.
 
 ### Fixed
