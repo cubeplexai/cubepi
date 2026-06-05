@@ -12,7 +12,7 @@ from cubepi.agent.types import (
     BeforeToolCallContext,
     BeforeToolCallResult,
 )
-from cubepi.providers.base import AssistantMessage, Message, Provider
+from cubepi.providers.base import AssistantMessage, Message, Model, Provider
 from cubepi.types import JsonObject, StructuredObject
 
 
@@ -90,15 +90,25 @@ class Middleware:
     ) -> list[Message] | None:
         raise NotImplementedError
 
-    def providers(self) -> Iterable[Provider]:
-        """Return any extra LLM providers this middleware drives directly.
+    def extra_llm_calls(self) -> Iterable[tuple[Provider, Model]]:
+        """Declare LLM calls this middleware drives outside the agent's main
+        provider/model.
 
-        Some middlewares (e.g. ``CompactionMiddleware``) make their own LLM
-        calls outside the agent's main provider. Returning those providers
-        here lets ``cubepi.tracing.Recorder`` wire its listeners so the
-        resulting calls show up in the trace tree alongside the agent's own
-        chat spans. Default is empty — middlewares that do not call any
-        LLM directly need not override.
+        Each pair is ``(provider, model)``. ``cubepi.tracing.Recorder`` uses
+        these to:
+
+        * Subscribe listeners on any provider the recorder isn't already
+          watching, so the resulting calls show up in the trace tree
+          alongside the agent's own chat spans.
+        * Identify middleware-owned calls by ``(model.provider, model.id)``
+          so they don't overwrite the root ``invoke_agent`` span's
+          attribution (provider name, system prompt hash, tool list). This
+          model-based gate is what handles the common "reuse one provider
+          client, swap the model" pattern — listener identity alone would
+          attribute the middleware's first call to the agent.
+
+        Default is empty — middlewares that do not call any LLM directly
+        need not override.
         """
         return ()
 

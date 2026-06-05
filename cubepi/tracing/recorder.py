@@ -218,6 +218,14 @@ class Recorder:
         # ``_close_open_spans`` (the latter covers cancelled runs that
         # never emit AgentEndEvent).
         self._active_run_token: Any | None = None
+        # ``(model.provider, model.id)`` tuples for LLM calls a middleware
+        # owns (e.g. ``CompactionMiddleware``'s summarizer). When the
+        # provider listener fires with one of these models we keep the
+        # chat span but skip the root ``invoke_agent`` attribution writes
+        # so the run stays attributed to the agent's own provider /
+        # system prompt / tools. Model-based gating works even when the
+        # middleware shares the agent's main provider instance.
+        self._extra_call_models: set[tuple[str, str]] = set()
 
     # ------------------------------------------------------------------
     # Attach / detach
@@ -234,26 +242,10 @@ class Recorder:
         provider = getattr(agent, "_provider", None) or getattr(agent, "provider", None)
         provider_detachers: list[Callable[[], None]] = []
 
-        def _subscribe(p: Any, *, is_main: bool) -> None:
+        def _subscribe(p: Any) -> None:
             if not isinstance(p, BaseProvider):
                 return
-            # Middleware-driven providers must not write to the root
-            # ``invoke_agent`` span's attribution attributes — the root
-            # represents the agent invocation, not a per-middleware
-            # detour. Without this gate the first middleware request
-            # (typically ``CompactionMiddleware`` firing in
-            # ``transform_context`` before the agent's own model call)
-            # would clobber ``gen_ai.provider.name`` /
-            # ``cubepi.agent.system_prompt_sha256`` /
-            # ``cubepi.agent.tools`` with the summarizer's values, and
-            # provider-level trace filters / aggregate metrics would
-            # mis-attribute the whole run to the summarizer's provider.
-            on_request = (
-                self._on_provider_request
-                if is_main
-                else self._on_extra_provider_request
-            )
-            provider_detachers.append(p.subscribe_request(on_request))
+            provider_detachers.append(p.subscribe_request(self._on_provider_request))
             provider_detachers.append(p.subscribe_chunk(self._on_provider_chunk))
             provider_detachers.append(p.subscribe_response(self._on_provider_response))
 
@@ -262,24 +254,29 @@ class Recorder:
         # so a failed attach() leaves no dangling listeners. The caller never
         # gets a ``detach`` callable on this path, so we cannot defer cleanup.
         try:
-            _subscribe(provider, is_main=True)
-            # Middlewares may drive their own LLM providers (e.g.
-            # ``CompactionMiddleware``'s summary provider) — wire them too
-            # so those calls show up in the trace tree instead of
-            # silently bypassing it. ``Middleware.providers()`` returns
-            # an empty iterable by default, so middlewares that don't
-            # touch an LLM directly cost nothing here.
+            _subscribe(provider)
+            # Middlewares may drive their own LLM calls (e.g.
+            # ``CompactionMiddleware``'s summarizer). For each declared
+            # (provider, model) pair: (a) subscribe the provider if we
+            # aren't already, so those calls show up in the trace tree;
+            # (b) record the model identity in ``_extra_call_models`` so
+            # ``_on_provider_request`` knows to skip the root-attribution
+            # write — gating by listener identity alone would fail when
+            # the middleware shares the agent's main provider instance
+            # ("reuse the client, swap the model"), since both calls
+            # would arrive on the same listener.
             seen: set[int] = {id(provider)} if provider is not None else set()
             for mw in getattr(agent, "_middleware", []) or []:
                 try:
-                    extra = list(mw.providers())
+                    extra = list(mw.extra_llm_calls())
                 except Exception:
                     extra = []
-                for p in extra:
+                for p, m in extra:
+                    self._extra_call_models.add((m.provider, m.id))
                     if id(p) in seen:
                         continue
                     seen.add(id(p))
-                    _subscribe(p, is_main=False)
+                    _subscribe(p)
         except BaseException:
             for d in provider_detachers:
                 try:
@@ -904,15 +901,7 @@ class Recorder:
     # Provider listeners — drive the chat span lifetime
     # ------------------------------------------------------------------
 
-    def _on_extra_provider_request(self, payload: dict, model: "Model") -> None:
-        """Variant for middleware-supplied providers (e.g. the compaction
-        summarizer) — emits a chat span but does not touch the root
-        ``invoke_agent`` span's attribution attributes."""
-        self._on_provider_request(payload, model, attribute_root=False)
-
-    def _on_provider_request(
-        self, payload: dict, model: "Model", *, attribute_root: bool = True
-    ) -> None:
+    def _on_provider_request(self, payload: dict, model: "Model") -> None:
         run = self._run
         if run is None or run.turn_span is None:
             return
@@ -959,6 +948,17 @@ class Recorder:
         ):
             attrs[CUBEPI_LLM_THINKING_LEVEL] = payload["reasoning"]["effort"]
 
+        # Root ``invoke_agent`` span carries attribution for the agent
+        # invocation as a whole — provider name, system prompt hash, tool
+        # list. Middleware-driven LLM calls (e.g. the compaction
+        # summarizer) must NOT overwrite those, otherwise a single
+        # ``transform_context`` call that fires before the main model
+        # would mis-attribute the whole run. ``_extra_call_models`` is
+        # populated in ``attach`` from ``Middleware.extra_llm_calls()`` —
+        # if the incoming model matches, skip the root writes. Gating by
+        # model rather than listener identity is what handles the
+        # shared-provider case ("reuse the client, swap the model").
+        attribute_root = (model.provider, model.id) not in self._extra_call_models
         if attribute_root:
             # System prompt sha256 on root agent span (once per run).
             self._maybe_record_system_prompt_hash(payload, run)
