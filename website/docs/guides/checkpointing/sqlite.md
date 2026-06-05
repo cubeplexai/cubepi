@@ -22,7 +22,7 @@ This pulls in `aiosqlite`.
 
 ```python
 import asyncio
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.checkpointer import SQLiteCheckpointer
 from cubepi.providers.anthropic import AnthropicProvider
 

@@ -21,7 +21,7 @@ pip install "cubepi[postgres]"
 
 ```python
 import asyncio
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.checkpointer import PostgresCheckpointer
 from cubepi.providers.anthropic import AnthropicProvider
 

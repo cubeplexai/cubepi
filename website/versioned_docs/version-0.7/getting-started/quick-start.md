@@ -24,7 +24,7 @@ import asyncio
 import os
 from pydantic import BaseModel
 
-from cubepi import Agent, AgentTool, AgentToolResult, Model, TextContent
+from cubepi import Agent, AgentTool, AgentToolResult, TextContent
 from cubepi.providers.anthropic import AnthropicProvider
 
 

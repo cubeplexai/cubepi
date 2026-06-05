@@ -74,7 +74,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.checkpointer import PostgresCheckpointer
 from cubepi.providers.anthropic import AnthropicProvider
 

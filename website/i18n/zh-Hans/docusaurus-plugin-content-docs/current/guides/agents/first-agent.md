@@ -11,27 +11,25 @@ description: "从零开始创建并运行你的第一个 CubePi agent。"
 
 ## 第 1 步 —— 配 provider 和 model
 
-provider 是到 LLM API 的连接；`Model` 描述你想调哪个模型 + 一些能力
-开关。
+provider 是到 LLM API 的连接；用 `provider.model("id", ...)` 把模型 ID 绑定
+到 provider 上，产出 `Agent(model=...)` 需要的那个值。
 
 ```python
 import os
-from cubepi import Model
 from cubepi.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
-model = Model(
-    id="claude-sonnet-4-5-20250929",
-    provider="anthropic",
+model = provider.model(
+    "claude-sonnet-4-5-20250929",
     max_tokens=4096,         # 回复 token 上限
     context_window=200_000,  # 模型硬上限；通常默认就够
     temperature=0.7,
 )
 ```
 
-`Model.provider` 是一个字符串标签(比如 `"anthropic"`、`"openai"`)。
-框架内部用来 clamp 思考等级和打 tag —— 在你的代码库里保持稳定即可,
-不必和 provider 内部命名一致。
+`provider_id` 现在写在 provider 构造函数上，会自动传到 bound model 里——框架
+内部用来 clamp 思考等级和打 tag。0.6 那种手工构造 `Model` 再传
+`Agent(provider=..., model=...)` 的姿势在 0.7 已经不工作了。
 
 ## 第 2 步 —— 声明一个工具
 

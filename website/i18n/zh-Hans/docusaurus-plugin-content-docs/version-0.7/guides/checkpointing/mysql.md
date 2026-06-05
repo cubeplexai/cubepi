@@ -21,7 +21,7 @@ pip install "cubepi[mysql]"
 
 ```python
 import asyncio
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.checkpointer import MySQLCheckpointer
 from cubepi.providers.anthropic import AnthropicProvider
 

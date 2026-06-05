@@ -22,7 +22,7 @@ pip install "cubepi[mcp]"
 ```python
 import asyncio
 import sys
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.mcp import load_mcp_tools_stdio
 from cubepi.providers.anthropic import AnthropicProvider
 

@@ -21,7 +21,7 @@ pip install "cubepi[sqlite]"
 
 ```python
 import asyncio
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.checkpointer import SQLiteCheckpointer
 from cubepi.providers.anthropic import AnthropicProvider
 

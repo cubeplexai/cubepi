@@ -23,7 +23,7 @@ pip install "cubepi[tracing]"
 
 ```python
 import asyncio
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.providers.anthropic import AnthropicProvider
 from cubepi.tracing import Tracer
 from cubepi.tracing.exporters import JsonlSpanExporter

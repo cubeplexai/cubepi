@@ -181,7 +181,7 @@ CubePi ships `FauxProvider` for deterministic tests — no network, no
 flakiness, real streaming events:
 
 ```python
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.providers import FauxProvider, faux_assistant_message, faux_text, faux_tool_call
 
 

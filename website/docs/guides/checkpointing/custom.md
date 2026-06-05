@@ -154,7 +154,7 @@ agent = Agent(model=…, checkpointer=FileCheckpointer("/tmp/cp"), thread_id="x"
 Drop-in test pattern using `FauxProvider`:
 
 ```python
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.providers import FauxProvider, faux_assistant_message
 
 async def test_roundtrip():

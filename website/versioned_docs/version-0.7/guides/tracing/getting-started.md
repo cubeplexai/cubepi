@@ -24,7 +24,7 @@ The minimal end-to-end setup — local JSONL export, idiomatic RAII:
 
 ```python
 import asyncio
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.providers.anthropic import AnthropicProvider
 from cubepi.tracing import Tracer
 from cubepi.tracing.exporters import JsonlSpanExporter

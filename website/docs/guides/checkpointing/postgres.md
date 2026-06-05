@@ -22,7 +22,7 @@ This pulls in `asyncpg`, `sqlalchemy`, and `msgpack`.
 
 ```python
 import asyncio
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.checkpointer import PostgresCheckpointer
 from cubepi.providers.anthropic import AnthropicProvider
 

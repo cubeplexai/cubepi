@@ -159,7 +159,7 @@ await invoke_on_response(
 CubePi 内置 `FauxProvider`，用于确定性测试——无网络调用，无不稳定性，且有真实的流式事件：
 
 ```python
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.providers import FauxProvider, faux_assistant_message, faux_text, faux_tool_call
 
 
