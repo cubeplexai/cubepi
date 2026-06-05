@@ -367,3 +367,105 @@ async def test_wait_for_timeout_propagates_cancellation():
         await asyncio.wait_for(
             p.generate_images(model, ImagesContext(prompt="x")), timeout=0.05
         )
+
+
+@pytest.mark.asyncio
+async def test_per_call_on_response_observer_fires():
+    """ImagesOptions.on_response observer is invoked with ProviderResponse."""
+    p = _provider()
+    model = p.model("gpt-image-1")
+    seen: list = []
+
+    async def on_response(resp, m):
+        seen.append((resp.status, m.id))
+
+    await p.generate_images(
+        model,
+        ImagesContext(prompt="x"),
+        options=ImagesOptions(on_response=on_response),
+    )
+    assert seen == [(200, "gpt-image-1")]
+
+
+@pytest.mark.asyncio
+async def test_signal_present_but_unset_lets_sdk_complete():
+    """When ImagesOptions.signal is provided but never fires, the SDK
+    completion branch in _run_with_signal must clean up the signal task
+    and return the result normally."""
+    p = _provider()
+    model = p.model("gpt-image-1")
+    signal = asyncio.Event()  # never set
+    out = await p.generate_images(
+        model, ImagesContext(prompt="x"), options=ImagesOptions(signal=signal)
+    )
+    assert out.stop_reason == "stop"
+    assert out.output[0].type == "image"
+
+
+@pytest.mark.asyncio
+async def test_empty_data_returns_stop_with_empty_output():
+    """SDK returns data items without b64_json — provider returns
+    AssistantImages(stop_reason='stop', output=[]) rather than erroring."""
+    p = _provider()
+
+    async def _empty_data(**kwargs):
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=None)])
+
+    p._client.images.generate = _empty_data
+    model = p.model("gpt-image-1")
+    out = await p.generate_images(model, ImagesContext(prompt="x"))
+    assert out.stop_reason == "stop"
+    assert out.output == []
+
+
+@pytest.mark.asyncio
+async def test_resp_to_dict_falls_back_when_model_dump_raises():
+    """When ``model_dump()`` raises (pydantic edge cases), the body
+    recorded for subscribe_response falls back to the SimpleNamespace
+    ``{"data": ...}`` shape rather than failing the whole call."""
+    p = _provider()
+    seen_bodies: list = []
+    p.subscribe_response(lambda body, m, exc: seen_bodies.append(body))
+
+    class _BadDumpResp:
+        data = [SimpleNamespace(b64_json=base64.b64encode(b"GEN").decode())]
+
+        def model_dump(self):
+            raise RuntimeError("dump exploded")
+
+    async def _resp(**kwargs):
+        return _BadDumpResp()
+
+    p._client.images.generate = _resp
+    model = p.model("gpt-image-1")
+    out = await p.generate_images(model, ImagesContext(prompt="x"))
+    assert out.stop_reason == "stop"  # call still succeeded
+    assert len(seen_bodies) == 1
+    # Fallback returns {"data": <list>} from the SimpleNamespace path
+    assert "data" in seen_bodies[0]
+    assert isinstance(seen_bodies[0]["data"], list)
+
+
+@pytest.mark.asyncio
+async def test_resp_to_dict_uses_model_dump_when_available():
+    """When the SDK response exposes model_dump (pydantic-style), the
+    response body recorded for subscribe_response is the dumped dict —
+    not the SimpleNamespace fallback."""
+    p = _provider()
+    seen_bodies: list = []
+    p.subscribe_response(lambda body, m, exc: seen_bodies.append(body))
+
+    class _PydanticLikeResp:
+        data = [SimpleNamespace(b64_json=base64.b64encode(b"GEN").decode())]
+
+        def model_dump(self):
+            return {"data": [{"b64_json": "DUMPED"}], "id": "resp_123"}
+
+    async def _resp(**kwargs):
+        return _PydanticLikeResp()
+
+    p._client.images.generate = _resp
+    model = p.model("gpt-image-1")
+    await p.generate_images(model, ImagesContext(prompt="x"))
+    assert len(seen_bodies) == 1
+    assert seen_bodies[0] == {"data": [{"b64_json": "DUMPED"}], "id": "resp_123"}
