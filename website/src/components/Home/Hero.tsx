@@ -24,6 +24,7 @@ export default function Hero() {
         alt="CubePi · A Pythonic, async-native agent framework"
         width={1280}
         height={640}
+        fetchPriority="high"
       />
       <div className={styles.eyebrow}>cubepi · v{version}</div>
       {/* Tagline lives inside the <h1> (as a styled subline) so the page's
