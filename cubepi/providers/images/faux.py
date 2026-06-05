@@ -38,6 +38,18 @@ class FauxImagesProvider(BaseImagesProvider):
         *,
         options: ImagesOptions | None = None,
     ) -> AssistantImages:
+        # Honor a pre-set abort signal the same way the real provider does
+        # — return ``stop_reason="aborted"`` without the happy-path image
+        # so tests / local flows that exercise cancellation behave the same
+        # against Faux as they would against ``OpenAIImagesProvider``.
+        if options and options.signal and options.signal.is_set():
+            return AssistantImages(
+                api=model.api,
+                provider_id=model.provider_id,
+                model=model.id,
+                output=[],
+                stop_reason="aborted",
+            )
         if self._raise is not None:
             raise self._raise(
                 f"injected by FauxImagesProvider for {model.provider_id}/{model.id}"
