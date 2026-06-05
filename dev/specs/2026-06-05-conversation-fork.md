@@ -817,18 +817,33 @@ two additive changes (alembic migration in cubebox / cubepi-using apps):
   - PRIMARY KEY `(thread_id, run_id)`
   - INDEX `(thread_id, completion_seq)` for fork's set-selection query
   - Postgres: `HASH (thread_id)` partitioned to match
-    `cubepi_messages`; FK to `cubepi_threads(thread_id)`
-  - MySQL: `KEY (thread_id)` partitioned (no FK, consistent with
-    `cubepi_messages`)
+    `cubepi_messages`;
+    **`FOREIGN KEY (thread_id) REFERENCES cubepi_threads(thread_id)
+    ON DELETE CASCADE`** so thread deletion cleans up runs (mirrors
+    `cubepi_messages`).
+  - MySQL: `KEY (thread_id)` partitioned, **no FK** (consistent with
+    `cubepi_messages` — MySQL forbids FKs on partitioned tables).
+    Hosts that delete threads MUST also DELETE the matching
+    `cubepi_runs` rows in the same transaction, the same as they
+    already do for `cubepi_messages`. Document this in the MySQL
+    backend guide.
 
-`fork()` in one transaction:
+`fork()` in one transaction. **The thread row is created BEFORE
+the message INSERT because `cubepi_messages.thread_id` FKs to
+`cubepi_threads(thread_id)`. `forked_at_seq` is populated in a
+trailing UPDATE since its value isn't known until messages have
+been copied.**
 
 1. Advisory lock / `FOR UPDATE` on the source thread.
 2. `SELECT completion_seq AS cutoff FROM cubepi_runs WHERE
    thread_id = $src AND run_id = $after_run_id AND completion_seq IS
    NOT NULL` → if no row, `RunNotCompletedError`.
-3. Copy messages (compute `$last_copied_seq` in the same statement
-   via RETURNING or follow-up):
+3. `INSERT INTO cubepi_threads (thread_id, parent_thread_id,
+   forked_at_seq, extra, …)
+   VALUES ($new, $src, NULL, $merged_extra, …)` —
+   `ThreadAlreadyExistsError` on PK violation. `forked_at_seq` is
+   NULL for now; populated in step 6.
+4. Copy messages:
    ```sql
    INSERT INTO cubepi_messages (thread_id, seq, role, run_id,
                                 metadata, payload)
@@ -846,12 +861,6 @@ two additive changes (alembic migration in cubebox / cubepi-using apps):
      )
    ORDER BY seq;
    ```
-4. `INSERT INTO cubepi_threads (thread_id, parent_thread_id,
-   forked_at_seq, extra, …)
-   VALUES ($new, $src, $last_copied_seq, $merged_extra, …)` —
-   `ThreadAlreadyExistsError` on PK violation.
-   `$last_copied_seq = (SELECT MAX(seq) FROM cubepi_messages WHERE
-   thread_id = $new)`.
 5. `INSERT INTO cubepi_runs (thread_id, run_id, claimed_at,
    completed_at, completion_seq)
    SELECT $new, run_id, claimed_at, completed_at, completion_seq
@@ -859,16 +868,34 @@ two additive changes (alembic migration in cubebox / cubepi-using apps):
    WHERE thread_id = $src
      AND completion_seq IS NOT NULL
      AND completion_seq <= $cutoff`.
-6. Commit.
+6. `UPDATE cubepi_threads SET forked_at_seq = (SELECT MAX(seq)
+   FROM cubepi_messages WHERE thread_id = $new) WHERE thread_id =
+   $new`. The MAX subquery returns NULL for an empty-prefix fork
+   (e.g., fork of a thread with only legacy NULL-run messages where
+   the chosen run_id excluded everything) — NULL is the correct
+   value in that edge case.
+7. Commit.
 
-`claim_run()`:
+`claim_run()`. **Must lazily ensure the `cubepi_threads` row exists
+before inserting into `cubepi_runs`, because `cubepi_runs.thread_id`
+FKs to it. This mirrors the existing `append()` lazy-creation
+pattern: a brand-new thread's first writer creates the threads row
+with defaults.**
 
 - Take per-thread advisory lock / `FOR UPDATE`.
+- `INSERT INTO cubepi_threads (thread_id) VALUES (?)
+  ON CONFLICT (thread_id) DO NOTHING` — idempotently ensures the
+  thread row exists with defaults (`parent_thread_id=NULL`,
+  `forked_at_seq=NULL`, `extra='{}'`).
 - `INSERT INTO cubepi_runs (thread_id, run_id) VALUES (?, ?)` →
   on PK conflict, `SELECT completed_at FROM cubepi_runs WHERE
   thread_id = ? AND run_id = ?` → if NULL,
   `RunAlreadyClaimedError`; else `RunAlreadyCompletedError`.
 - Commit.
+
+(MySQL equivalent: `INSERT IGNORE INTO cubepi_threads`. The same
+lazy-create lives in `append()` today; spec just promotes the
+pattern to `claim_run()`.)
 
 `mark_run_complete()`:
 
