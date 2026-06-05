@@ -275,3 +275,64 @@ def test_base_url_accepted_and_constructor_works():
         base_url="https://ark.cn-beijing.volces.com/api/v3",
     )
     assert p.provider_id == "doubao"
+
+
+@pytest.mark.asyncio
+async def test_subscribe_response_fires_on_abort_with_cancelled_error():
+    """Abort path must surface CancelledError to response listeners so tracing
+    can distinguish abort from successful completion (spec §6.5)."""
+    p = _provider(sleep=0.5)
+    model = p.model("gpt-image-1")
+    signal = asyncio.Event()
+    seen: list[tuple[dict | None, BaseException | None]] = []
+    p.subscribe_response(lambda body, m, exc: seen.append((body, exc)))
+
+    async def trigger():
+        await asyncio.sleep(0.05)
+        signal.set()
+
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(trigger())
+        task = tg.create_task(
+            p.generate_images(
+                model, ImagesContext(prompt="x"), options=ImagesOptions(signal=signal)
+            )
+        )
+
+    result = task.result()
+    assert result.stop_reason == "aborted"
+    assert len(seen) == 1
+    body, exc = seen[0]
+    assert body is None
+    assert isinstance(exc, asyncio.CancelledError)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "output_format,expected_media_type",
+    [
+        ("png", "image/png"),
+        ("jpeg", "image/jpeg"),
+        ("webp", "image/webp"),
+    ],
+)
+async def test_media_type_follows_requested_output_format(
+    output_format, expected_media_type
+):
+    """media_type on returned ImageContent must reflect the requested
+    output_format, not a hardcoded default (final-review fix)."""
+    p = _provider()
+    model = p.model("gpt-image-1")
+    out = await p.generate_images(
+        model, ImagesContext(prompt="x", output_format=output_format)
+    )
+    assert out.output[0].media_type == expected_media_type
+
+
+@pytest.mark.asyncio
+async def test_media_type_uses_model_default_output_format():
+    """When ctx.output_format is None, fall back to model.default_output_format."""
+    p = _provider()
+    model = p.model("gpt-image-1", default_output_format="webp")
+    out = await p.generate_images(model, ImagesContext(prompt="x"))
+    assert out.output[0].media_type == "image/webp"

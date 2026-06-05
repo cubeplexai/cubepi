@@ -119,10 +119,13 @@ class OpenAIImagesProvider(BaseImagesProvider):
                     model,  # type: ignore[arg-type]
                 )
 
-            return self._parse_response(sdk_resp, model, cap)
+            return self._parse_response(sdk_resp, model, context, cap)
 
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as cancel:
             # Signal-triggered abort: return as AssistantImages, do not re-raise.
+            # The CancelledError is recorded so subscribe_response observers
+            # can distinguish abort from successful completion.
+            exc = cancel
             return AssistantImages(
                 api=model.api,
                 provider_id=model.provider_id,
@@ -179,16 +182,22 @@ class OpenAIImagesProvider(BaseImagesProvider):
         self,
         resp: Any,
         model: ImagesModel,
+        context: ImagesContext,
         cap: ImagesCapabilityDescriptor,
     ) -> AssistantImages:
-        # Determine output media type from output_format if present.
-        out_format = "png"
+        # Resolve output_format the same way _build_payload does, so the
+        # returned ImageContent.media_type matches what the user requested.
+        # When the capability dropped output_format from the wire payload
+        # (output_format_field=None), fall back to png labelling.
+        out_format = (
+            context.output_format
+            if context.output_format is not None
+            else model.default_output_format
+        ) or "png"
+        media_type = _OUTPUT_FORMAT_MEDIA_TYPE.get(out_format, "image/png")
         data = getattr(resp, "data", None) or []
         images: list[ImageContent | TextContent] = [
-            ImageContent(
-                source=item.b64_json,
-                media_type=_OUTPUT_FORMAT_MEDIA_TYPE.get(out_format, "image/png"),
-            )
+            ImageContent(source=item.b64_json, media_type=media_type)
             for item in data
             if getattr(item, "b64_json", None)
         ]
