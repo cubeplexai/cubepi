@@ -118,10 +118,10 @@ The user-facing cut is **`message_count`: include the first N messages**.
 - Memory and SQLite backends have no native seq column; `message_count`
   reduces to "len of the first N elements" there.
 
-Storage-level `forked_at_seq` is still written for Postgres/MySQL
-(it equals the seq of the last copied message — for the in-memory and
-SQLite backends it equals `message_count` because seq == index+1 there).
-It is metadata; callers do not pass or read it directly.
+Storage-level `forked_at_seq` is written only for Postgres/MySQL
+(equal to the seq of the last copied message). It is NULL for Memory
+and SQLite — see §3.5 for the canonical rule. It is metadata; callers
+do not pass or read it directly.
 
 ### 3.3 Boundary validation
 
@@ -188,6 +188,29 @@ prefix; it is performed by `snapshot()` and reused by `fork()`.
   relies on aiosqlite's single-connection serialization within one
   process; the upgrade makes the contract explicit and
   cross-process-safe.)
+
+  **SQLITE_BUSY contract.** When the immediate-lock acquisition
+  contends with another writer, SQLite returns `SQLITE_BUSY`. The
+  spec defines a deterministic policy:
+
+  - At connect time the checkpointer sets `PRAGMA busy_timeout = 5000`
+    (5 seconds) — SQLite internally retries lock acquisition for that
+    long before raising. This is set unconditionally for all writer
+    operations, not just fork.
+  - If the 5 s window elapses without acquiring the lock, the
+    `aiosqlite.OperationalError("database is locked")` propagates as
+    a new typed error `CheckpointerLockTimeoutError(CheckpointerError)`
+    so callers can distinguish it from boundary / not-found / collision
+    errors. No further in-process retry is attempted — that's the
+    caller's policy decision.
+  - `BEGIN IMMEDIATE` (RESERVED lock) is the right strength: it lets
+    readers continue (good for UI list refresh during a fork) but
+    blocks the next writer. `BEGIN EXCLUSIVE` would needlessly stall
+    reads. The trade-off is documented in the SQLite section of
+    `website/docs/guides/checkpointing/`.
+
+  The 5 s default and the new typed error apply to fork, append,
+  save_extra, and save_pending_request uniformly.
 - **Postgres**: single transaction. Inside it:
   1. `pg_advisory_xact_lock(hashtext($src_thread_id))` — the same
      per-thread advisory lock `append()` uses, but here taken on the
@@ -324,9 +347,21 @@ Add:
 ```python
 class ThreadNotFoundError(CheckpointerError): ...
 class ThreadAlreadyExistsError(CheckpointerError): ...
+class CheckpointerLockTimeoutError(CheckpointerError):
+    """SQLite (or other locking backend) could not acquire the writer
+    lock within the configured busy_timeout. See §3.4."""
 class ForkBoundaryError(CheckpointerError):
-    """message_count cuts across an unresolved tool_call/tool_result pair."""
-    def __init__(self, message_count: int, unresolved_tool_call_ids: list[str]):
+    """The prefix violates one of the §3.3 tool-call/tool-result invariants."""
+    def __init__(
+        self,
+        message_count: int,
+        *,
+        unresolved_tool_call_ids: list[str] | None = None,
+        orphan_tool_result_ids: list[str] | None = None,
+    ):
+        # At least one of unresolved_tool_call_ids / orphan_tool_result_ids
+        # is non-empty. Both may be present for prefixes with multiple
+        # protocol violations of different kinds.
         ...
 ```
 
@@ -436,25 +471,68 @@ the same pattern applies to the new columns).
 4. Build a transient `Agent` configured with this agent's `model`,
    `system_prompt`, `tools`, `middleware`, and `convert_to_llm`, with
    `checkpointer=None` and `thread_id=None`. Pre-seed its message
-   history with `snapshot`.
+   history with `snapshot` via the new constructor argument
+   `messages=...` (see §3.7a below).
 
-   **This requires a new public Agent surface for seeding initial
-   history.** The exact form (constructor arg `messages=...` vs. a
-   dedicated `Agent.preload(messages)` method) is decided in the
-   implementation plan, but it is in scope for THIS spec — `fork_once()`
-   MUST NOT reach into private attributes of `Agent`. The plan SHOULD
-   prefer a constructor arg because it keeps the agent's "ready to run"
-   state machine single-phase; if the plan picks a separate method,
-   document that the method must be called before any `prompt()`.
+   #### 3.7a — Required public `Agent` API addition
+
+   This spec adds one new constructor argument to `Agent.__init__`:
+
+   ```python
+   class Agent(Generic[TMessage]):
+       def __init__(
+           self,
+           *,
+           # ... all existing args unchanged ...
+           messages: Sequence[Message] | None = None,
+       ):
+           ...
+   ```
+
+   Semantics:
+
+   - When `messages` is provided, `Agent` deep-copies the sequence
+     (`list(map(model_copy, messages))`) into its initial
+     `_state._messages`. The deep copy prevents external mutation of
+     the source list from corrupting agent state.
+   - When `messages` is provided AND (`thread_id` AND `checkpointer`)
+     are also set, the constructor raises `ValueError`: the lazy-load
+     contract in `prompt()` would either drop the preload or duplicate
+     history. Pre-seeding is for ephemeral agents only.
+   - When `messages` is provided AND any of the messages violates the
+     §3.3 boundary invariants, `Agent.__init__` raises
+     `ForkBoundaryError` (the same validator function powers both
+     `Checkpointer.snapshot()` and the constructor — single source of
+     truth).
+   - When `messages` is `None`, behavior is unchanged from today.
+
+   `fork_once()` uses this argument. `fork_once()` MUST NOT touch
+   any private `Agent` attribute. No `Agent.preload(...)` method is
+   added — keeping pre-seeding in `__init__` makes the agent's
+   "ready to run" lifecycle single-phase.
 
 5. Start a `cubepi.agent.fork_once` span (inheriting the surrounding
    OTel context per §3.6). Capture the pre-seed length.
-6. Cancellation is propagated: if the surrounding task is cancelled
-   (or `asyncio.CancelledError` is raised), the transient agent's
-   abort signal fires and the cancellation re-raises after the agent
-   loop returns — same semantics as cancelling `Agent.prompt()`. The
-   tracing span is closed in a `finally` block with the failure
-   status set.
+6. Cancellation is **best-effort**, not bounded. If the surrounding
+   task is cancelled (or `asyncio.CancelledError` is raised), the
+   transient agent's abort signal fires; the agent loop honors the
+   signal at each tool/turn checkpoint; cancellation re-raises after
+   the agent loop returns. This matches `Agent.prompt()` cancellation.
+
+   Caveat: cubepi tools are not required to honor the abort signal
+   mid-call (a tool can run a blocking subprocess and ignore the
+   signal until it returns). In that case `fork_once()` blocks until
+   the offending tool returns, then re-raises `CancelledError`. The
+   spec does NOT add an unconditional hard timeout — that would
+   change the cancellation surface for all of `Agent.prompt()` /
+   `fork_once()` consistently and is out of scope. Callers that need
+   a hard wall-clock bound MUST wrap with `asyncio.wait_for(...)` AND
+   accept that a poorly-behaved tool will still hold the task until
+   it returns. This is documented in the user guide.
+
+   The tracing span is closed in a `finally` block with status
+   `error` and the cancellation tag set, regardless of how long the
+   cancellation actually takes to land.
 7. `await child.prompt(message)` — runs the full turn (any tool calls
    included).
 8. Read final assistant text + the messages added after the pre-seed
@@ -481,13 +559,30 @@ Two reasons HITL cannot work in `fork_once()`:
    SOURCE conversation, contaminating it. Silent failure mode.
 
 `fork_once()` therefore pre-checks `self.tools` and `self.middleware`
-for HITL involvement. Detection rule:
+for HITL involvement. Name-based detection is bypassable (anyone can
+wrap `ask_user_tool` and rename it), so the spec uses **marker-based
+detection**:
 
-- Any tool whose `name` is `ask_user` (cubepi's built-in HITL tool name).
-- Any middleware that is an instance of `cubepi.hitl.middleware.HitlMiddleware`
-  (or any subclass).
-- Any tool whose `name` matches a configurable host-supplied set —
-  the spec defers the exact extension hook to the plan.
+- This spec adds an attribute `requires_hitl: bool = False` to
+  `cubepi.agent.types.AgentTool` and an attribute
+  `requires_hitl: bool = False` to `cubepi.middleware.base.Middleware`.
+- This spec sets `requires_hitl=True` on the `AgentTool` returned by
+  the built-in `cubepi.hitl.ask_user_tool(...)` factory and on
+  `cubepi.hitl.middleware.HitlMiddleware`. Third-party HITL tools
+  and middleware MUST set the same flag — this is the documented
+  contract for "this tool/middleware requires HITL".
+- `fork_once()` scans `self.tools` and `self.middleware` and rejects
+  the call if any element has `requires_hitl is True`.
+- The detection is documented in `website/docs/guides/checkpointing/forking.md`
+  with the cross-link to the contract: third-party HITL implementers
+  must set the flag or they break `fork_once()` safety guarantees.
+
+Channel-binding inspection (walking each tool's closure to find a
+`CheckpointedChannel` pointing at the source thread) was considered
+and rejected: cubepi tools are constructed as closures or partials
+with no structural channel exposure, so the check would be
+non-portable and easy to evade. A boolean marker is uniformly
+discoverable and self-documenting.
 
 If any match, `fork_once()` raises:
 
@@ -522,7 +617,10 @@ channel) is explicit follow-up scope.
 | `message_count = None` | normalized to `len(messages_in_src)` — copy everything currently present |
 | cut violates any §3.3 invariant (unresolved tool_call, orphan tool_result, partial multi-call close, two assistants in a row with unresolved calls) | `ForkBoundaryError(message_count, unresolved_tool_call_ids=[…], orphan_tool_result_ids=[…])` |
 | `Agent.fork_once()` child run errors | propagates (same surface as `Agent.prompt()`) |
-| `Agent.fork_once()` is cancelled mid-turn | `asyncio.CancelledError` re-raises after transient agent abort completes |
+| `Agent.fork_once()` is cancelled mid-turn | `asyncio.CancelledError` re-raises after transient agent abort completes (best-effort — see §3.9 step 6) |
+| SQLite cannot acquire writer lock within `busy_timeout` | `CheckpointerLockTimeoutError` (applies to fork, append, save_extra, save_pending_request uniformly) |
+| `Agent(messages=..., thread_id=X, checkpointer=Y)` | `ValueError` — pre-seeding conflicts with lazy load |
+| `Agent(messages=...)` with a prefix that violates §3.3 | `ForkBoundaryError` (constructor uses the same validator as snapshot()) |
 
 ## 4. Migration / Compatibility
 
@@ -571,8 +669,13 @@ channel) is explicit follow-up scope.
   - concurrent fork + append on source serializes correctly (no
     half-copied state) — exercise with two concurrent tasks
   - fork-of-fork: fork A → B; fork B → C. C's `parent_thread_id`
-    points to B (not A). Walking the chain via `parent_thread_id`
-    reaches A.
+    points to B (not A). C's `forked_at_seq` is computed from the
+    snapshot of B at C's fork point — it is B's seq value at that
+    point, NOT A's original seq (Postgres/MySQL preserve source seqs
+    on copy, so if B's seqs come from A unchanged the value
+    coincides; but the spec contract is "immediate source's seq",
+    which the test asserts explicitly). Walking the chain via
+    `parent_thread_id` reaches A.
   - fork after `respond()`-injected synthetic deny: the synthetic
     messages are in the snapshot and survive the fork
   - SQLite cross-connection: open two separate `SQLiteCheckpointer`
