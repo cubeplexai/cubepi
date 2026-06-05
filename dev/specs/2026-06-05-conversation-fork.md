@@ -149,15 +149,37 @@ unfinished run we have no right to copy. The set-based selection
 solves this by construction: only messages tagged with a *completed*
 run_id (or NULL for legacy) are eligible.
 
-This selection is also robust to:
+This selection is **row-correct** in the presence of:
 
-- **Interleaved runs**: each run's messages are addressed by tag, not
-  by position. Gaps in seq are fine.
 - **In-flight runs**: their messages have a `run_id` whose row has
   `completion_seq IS NULL` → excluded.
 - **Mixed legacy + post-upgrade threads**: NULL-run_id messages are
   preserved as a chronological prefix, post-upgrade completed runs
   appear after.
+
+#### What "row-correct" does NOT cover: context consistency under interleaved runs
+
+If two runs A and B run concurrently on the same thread, the agent
+loop's lazy load (`load(thread_id)`) at the start of B will pick up
+A's in-flight messages as context. If B then completes and A doesn't,
+`fork(after_run_id=B)` copies B's messages but EXCLUDES A's — yet B's
+outputs were conditioned on A's context. The fork is row-correct (no
+orphan tool_use, no half-truncated run) but **semantically dangling**:
+B's assistant reply may refer to information that no longer exists in
+the forked thread's history.
+
+The spec **does not solve this** at the cubepi layer. It is left as a
+host responsibility:
+
+- **Recommended pattern**: one active run per thread (cubebox's actual
+  pattern — RunManager serializes per conversation; `Agent.prompt()`
+  inside a single Agent instance is also single-flight via the
+  existing `_run_lock`).
+- **If hosts want multi-process / multi-Agent prompts on the same
+  thread**: they must accept that fork can produce semantically
+  dangling artifacts when runs overlap. This is documented as a
+  known limitation; a future spec may add a per-thread run lease
+  if a real workload needs the stronger guarantee.
 
 #### Why a run is the right unit
 
@@ -175,14 +197,17 @@ This selection is also robust to:
   one-line operation backed by the same `run_id` column the fork uses
   for lookup.
 
-#### Recommendation (not enforced): one active run per thread
+#### Single-flight per Agent instance (existing, enforced)
 
-For UX clarity and predictable ordering, hosts SHOULD serialize runs
-per thread (cubebox naturally does — one conversation = one in-flight
-prompt at a time). The spec does NOT enforce this — the set-based fork
-selection means interleaved runs are *correct*, just unusual. A future
-spec may add a "one active run per thread" lease if a real workload
-needs the stronger guarantee.
+`Agent.prompt()` is single-flight on its own instance — the existing
+`_run_lock` (see `cubepi/agent/agent.py:204`) guards `prompt()` and
+`respond()` so two coroutines on the SAME Agent object serialize.
+`Agent.state.active_run_id` is therefore safe from clobbering under
+single-instance concurrency.
+
+The unguarded case (and the context-consistency caveat above) is
+**multiple Agent instances or multiple processes** on the same thread.
+Spec does not protect that case.
 
 ### 3.3 Atomicity and concurrency
 
@@ -376,22 +401,33 @@ The recommended retry pattern: "retry `mark_run_complete()`, not the
 whole `prompt()`" — re-running `prompt(run_id=R)` raises
 `RunAlreadyClaimedError` because R's claim row already exists.
 
-Trigger conditions for the agent loop to call `mark_run_complete()`:
+#### Trigger conditions for `mark_run_complete()` — enumerated by loop outcome
 
-- The loop exits cleanly with a terminal stop_reason
-  (`end_turn` / `tool_use_completed`-then-`end_turn` / any
-  non-suspended terminal state)
-- AND no pending HITL request remains for this run
+The current `cubepi/agent/loop.py` is **not** a "return-means-success"
+machine. It catches provider/tool exceptions, appends a synthetic
+assistant message with `stop_reason="error"` or `"aborted"`, and
+returns normally (see `loop.py:485` early-exit branch). A naive
+"call mark_run_complete after `_run_prompt()` returns"
+implementation would mark FAILED runs complete. To prevent that, the
+spec enumerates each loop outcome:
 
-If `prompt()` returns / raises because of:
+| Loop outcome | Detection signal | `mark_run_complete()` called? |
+|---|---|---|
+| **Clean success** | Final `AssistantMessage` has `stop_reason in {"end_turn", "stop", "tool_use", …}` (any non-error / non-aborted stop_reason) AND `error_message is None` AND no pending HITL on the thread | **YES** |
+| **HITL suspended** | `pending_request` row written this run; `prompt()` returns with the agent in suspended state | NO — `respond()` writes the marker on resume's clean exit |
+| **Provider / tool error** | Final assistant message has `stop_reason="error"` OR `error_message is not None` (set on the message by the loop's exception handler) | NO — claim row remains; future `delete_run()` cleans up |
+| **Abort** (`agent.abort()` or `agent.abort_pending()`) | Final assistant message has `stop_reason="aborted"` | NO — claim row remains |
+| **Cancellation** (`asyncio.CancelledError`, `HitlDetached`, `HitlAborted`) | Exception propagates out of `prompt()`; no `AgentEndEvent` emitted | NO — claim row remains; `active_run_id` left set (§3.7) |
 
-- **HITL pause** (`pending_request` set) → completion NOT written;
-  resumed by `respond()` (§3.6.3). Claim row remains (`completed_at
-  IS NULL`) so concurrent attempts to reuse the run_id correctly
-  hit `RunAlreadyClaimedError`.
-- **Exception / abort / cancellation** → completion NOT written;
-  claim row remains. `fork(after_run_id=R)` raises
-  `RunNotCompletedError`. The future `delete_run(R)` can clean up.
+The agent loop's existing `if message.stop_reason in ("error",
+"aborted"): … return early` branch (`loop.py:485`) is the natural
+gating point. After it, on the success path, the loop calls
+`mark_run_complete()` once before final cleanup.
+
+Tests MUST cover each row of this table independently (provider
+exception, tool exception, abort, abort_pending, cancel,
+HitlDetached) and assert the cubepi_runs row's `completed_at IS
+NULL` for every non-success outcome.
 
 #### 3.6.3 HITL pause / resume continuity
 
@@ -416,6 +452,39 @@ HITL-bearing run calls `claim_run()` exactly once across all
 `prompt()` + N × `respond()` invocations.
 
 `Agent.respond()` signature does **not** change.
+
+#### 3.6.3.1 HITL channel run_id binding constraint
+
+`cubepi.hitl.channel.CheckpointedChannel.__init__` takes `run_id` as a
+constructor argument (`self._run_id`) and never updates it per call.
+The value is written to `pending_request.run_id` whenever the channel
+pauses for HITL. This pre-dates the spec and is preserved.
+
+The spec **adds a constraint** to make the channel's bound run_id
+agree with the agent's active run_id, so HITL recovery on resume
+finds the right value:
+
+- When the agent has both a `checkpointer` AND any tool/middleware
+  with `requires_hitl=True` (§3.8.2) bound that holds a
+  `CheckpointedChannel`, `Agent.prompt(run_id=...)` MUST be
+  host-supplied (NOT generate-mode) and MUST equal the channel's
+  `_run_id`. Mismatch / `None` raises `ValueError` at the start of
+  `prompt()`, before `claim_run()`.
+
+- This is the existing cubebox pattern: `RunManager` generates a
+  `uuid7()` run_id per request, constructs
+  `CheckpointedChannel(checkpointer=cp, thread_id=conv_id,
+  run_id=run_id)`, then calls `Agent.prompt(run_id=run_id)`. Same
+  value in both places, no change needed at the host.
+
+- For non-HITL agents (no `requires_hitl=True` element), `Agent.prompt`
+  accepts `run_id=None` and generates; no channel binding to worry
+  about.
+
+This avoids the alternative of refactoring `CheckpointedChannel` to
+take run_id at call time (a backward-incompatible HITL API change
+beyond this spec's scope) while still making the binding semantics
+unambiguous.
 
 **Protocol change required to support this.** Today,
 `Checkpointer.load_pending_request(thread_id) -> HitlRequest | None`
@@ -584,9 +653,16 @@ class Checkpointer(Protocol):
         BEFORE `Agent.prompt()` returns. NOT coupled to the final
         append — see §3.6.2.
 
+        **Idempotent on already-completed rows.** If the row exists
+        and already has `completed_at IS NOT NULL`, the call returns
+        successfully (no-op) — does NOT raise
+        `RunAlreadyCompletedError`. This makes the
+        `CompletionMarkerFailedError` recovery story honest: a retry
+        after the DB committed but the ack was lost succeeds cleanly.
+
         Raises `RunNotClaimedError` if no row exists for
-        `(thread_id, run_id)`, or `RunAlreadyCompletedError` if the
-        row's `completed_at` is already non-NULL.
+        `(thread_id, run_id)` (genuine logic bug — claim_run never
+        ran or its row was lost).
         """
 
     async def load_pending(
@@ -632,9 +708,12 @@ class RunAlreadyClaimedError(CheckpointerError):
 
 
 class RunAlreadyCompletedError(CheckpointerError):
-    """claim_run() or mark_run_complete() called but the cubepi_runs
-    row already has completed_at IS NOT NULL. Runs are append-only;
-    start a new run with a different run_id."""
+    """claim_run() called but the cubepi_runs row already has
+    completed_at IS NOT NULL. Runs are append-only; start a new run
+    with a different run_id.
+
+    NOT raised by mark_run_complete() — that path is idempotent on
+    already-completed rows (see §3.6.2 retry semantics)."""
 
 
 class CompletionMarkerFailedError(CheckpointerError):
@@ -669,9 +748,19 @@ class AgentState:
 ```
 
 Set to the claimed run_id at the start of `prompt()` (after a
-successful `claim_run()`), cleared back to `None` when the prompt
-returns or raises. Observable to listeners / debugging without
-needing the prompt() return value.
+successful `claim_run()`). Cleared back to `None` ONLY on clean
+return; on exception it is left set so callers reading
+`agent.state.active_run_id` from the except block can still recover
+it. For the specific `CompletionMarkerFailedError` case the run_id is
+ALSO carried on the exception (`exc.run_id`) — that is the
+recommended source of truth in `except` blocks because it survives
+any subsequent `prompt()` invocation that would otherwise overwrite
+`active_run_id`. `active_run_id` is also cleared back to None on
+successful resume completion via `respond()`.
+
+The single-flight `_run_lock` (see `cubepi/agent/agent.py:204`)
+prevents two concurrent `prompt()` / `respond()` calls on the same
+Agent instance from racing on `active_run_id`.
 
 ```python
 class Agent(Generic[TMessage]):
@@ -923,13 +1012,15 @@ idiom in `cubepi/checkpointer/mysql/checkpointer.py`.
 `mark_run_complete()`:
 
 - Take per-thread advisory lock / `FOR UPDATE`.
+- `SELECT completed_at FROM cubepi_runs WHERE thread_id=? AND run_id=?`.
+  - No row → `RunNotClaimedError`.
+  - Existing row with `completed_at IS NOT NULL` → **idempotent
+    success**, commit, return.
+  - Existing row with `completed_at IS NULL` → proceed to UPDATE.
 - `next_seq = (SELECT COALESCE(MAX(completion_seq), 0) + 1 FROM
   cubepi_runs WHERE thread_id = ? AND completion_seq IS NOT NULL)`.
 - `UPDATE cubepi_runs SET completed_at = now(), completion_seq =
-  $next_seq WHERE thread_id = ? AND run_id = ? AND completed_at IS
-  NULL`.
-- If 0 rows updated: SELECT to distinguish
-  `RunNotClaimedError` vs `RunAlreadyCompletedError`.
+  $next_seq WHERE thread_id = ? AND run_id = ?`.
 - Commit.
 
 `append()` (existing) is unchanged in surface but must persist
@@ -999,12 +1090,14 @@ Schema additions at connect time using the existing PRAGMA-probe +
 `mark_run_complete()`:
 
 - `BEGIN IMMEDIATE`.
+- `SELECT completed_at FROM runs WHERE thread_id=? AND run_id=?`.
+  - No row → `RunNotClaimedError`.
+  - `completed_at IS NOT NULL` → idempotent success, commit, return.
+  - `completed_at IS NULL` → proceed.
 - `next_seq = (SELECT COALESCE(MAX(completion_seq), 0) + 1 FROM
   runs WHERE thread_id=? AND completion_seq IS NOT NULL)`.
 - `UPDATE runs SET completed_at = julianday('now'), completion_seq =
-  $next_seq WHERE thread_id=? AND run_id=? AND completed_at IS NULL`.
-- If 0 rows updated: SELECT to distinguish
-  `RunNotClaimedError` vs `RunAlreadyCompletedError`.
+  $next_seq WHERE thread_id=? AND run_id=?`.
 - Commit.
 
 `append()` is also wrapped in `BEGIN IMMEDIATE` (uniform writer
@@ -1060,7 +1153,7 @@ No `forked_at_seq` column added — SQLite has no per-thread seq.
 
 - `state = runs[thread_id].get(run_id)`.
 - If missing → `RunNotClaimedError`.
-- If `state.completed_at is not None` → `RunAlreadyCompletedError`.
+- If `state.completed_at is not None` → **idempotent success**, return.
 - Else allocate `next_seq = max((s.completion_seq for s in
   runs[thread_id].values() if s.completion_seq is not None),
   default=0) + 1`; update state's completed_at + completion_seq.
@@ -1088,6 +1181,7 @@ No `forked_at_seq` field — Memory has no seq.
 | `prompt(run_id=R)` and `R` is currently claimed (completed_at IS NULL) on the thread | `RunAlreadyClaimedError(thread_id=..., run_id=R)` |
 | `prompt(run_id=R)` and `R` has completed_at IS NOT NULL on the thread | `RunAlreadyCompletedError(thread_id=..., run_id=R)` |
 | `mark_run_complete()` called without a prior `claim_run()` | `RunNotClaimedError(thread_id=..., run_id=...)` — indicates an agent-loop logic bug |
+| `mark_run_complete()` called on a row that already has `completed_at IS NOT NULL` | **success (no-op)** — idempotent; supports retry-after-lost-ack from `CompletionMarkerFailedError` |
 | `mark_run_complete()` fails AFTER the run's final append succeeded | `CompletionMarkerFailedError(thread_id=..., run_id=..., cause=...)` — `run_id` is recoverable even when `prompt(run_id=None)` was used |
 | `Agent.fork_once()` child run errors | propagates (same surface as `Agent.prompt()`) |
 | `Agent.fork_once()` is cancelled mid-turn | `asyncio.CancelledError` re-raises after transient agent abort completes (best-effort; see §3.8 step 6) |
@@ -1096,15 +1190,38 @@ No `forked_at_seq` field — Memory has no seq.
 
 ## 4. Migration / Compatibility
 
-- **Protocol change**: `Checkpointer.snapshot`, `Checkpointer.fork`,
-  `Checkpointer.claim_run`, `Checkpointer.mark_run_complete`,
-  `Checkpointer.load_pending` are new methods on the
-  `runtime_checkable` Protocol. Existing user-implemented
-  checkpointers keep type-checking; they only fail when the new
-  methods are actually called.
+- **Protocol change — full impact disclosure.** This is a v4
+  Checkpointer contract change, not just a "fork API addition".
+  Five new Protocol methods: `snapshot`, `fork`, `claim_run`,
+  `mark_run_complete`, `load_pending`. Existing third-party
+  checkpointers that implement only the v3 surface (`load`, `append`,
+  `save_extra`, `save_pending_request`, `load_pending_request`) will
+  fail **ordinary `Agent.prompt()` calls** once `claim_run()` is
+  invoked at the start of every run — not just fork API calls.
+
+  Mitigation: `Agent.prompt()` checks `hasattr(self.checkpointer,
+  "claim_run")` at the start. If the method is absent, `prompt()`
+  runs in **legacy degraded mode**:
+
+  - No `claim_run()` / `mark_run_complete()` call.
+  - `Message.run_id` is still stamped on appended messages (purely
+    informational — no marker exists to anchor it).
+  - `Agent.fork()` / `Agent.fork_once()` on this checkpointer raises
+    `CheckpointerError("backend does not support fork; missing
+    claim_run / mark_run_complete")`.
+
+  This keeps existing third-party Protocol-only impls working for
+  vanilla `prompt()` while making the missing fork capability an
+  explicit error rather than a silent corruption path. First-party
+  backends (Memory, SQLite, Postgres, MySQL) always implement the
+  new methods after this spec lands; the degraded mode is purely a
+  third-party compatibility shim.
+
   `Checkpointer.load_pending_request` is kept as a thin alias for
-  `load_pending()` returning only the request part — existing callers
-  unchanged.
+  `load_pending()` returning only the request part — existing
+  callers unchanged. The matching backend-specific
+  `load_pending_run_id()` methods are deprecated in favor of
+  `load_pending()` but left in place for one release.
 - **`Agent.prompt()` signature**: adds an optional keyword `run_id`
   and changes return type from `None` to `str`. Returning a value that
   the caller previously ignored is **not** a breaking change for
@@ -1230,6 +1347,31 @@ No `forked_at_seq` field — Memory has no seq.
     `claim_run()` or `mark_run_complete()` call is made (assert via
     spying on a checkpointer instance that would have been used by
     the parent — and observe no calls from the transient agent).
+  - **`mark_run_complete()` idempotency** (regression test for v2 R7
+    HIGH #3): call mark_run_complete twice on the same
+    `(thread_id, run_id)`; second call returns success (no raise),
+    `completion_seq` unchanged from the first call.
+  - **HITL channel run_id binding** (regression test for v2 R7 HIGH
+    #2): construct Agent with a `requires_hitl=True` tool whose
+    `CheckpointedChannel(run_id="R1")` is bound at construction.
+    Then call `Agent.prompt(message, run_id=None)` → raises
+    `ValueError` (generate-mode rejected). Then call
+    `Agent.prompt(message, run_id="R2")` (mismatch) → raises
+    `ValueError`. Then `Agent.prompt(message, run_id="R1")` →
+    succeeds. Non-HITL agents accept `run_id=None` unchanged.
+  - **Loop-outcome completion enumeration** (regression test for v2
+    R7 HIGH #5): exercise each row of the §3.6.2 table — clean
+    success, HITL pause, provider exception, tool exception, abort,
+    cancellation, HitlDetached — and assert
+    `cubepi_runs.completed_at IS NULL` for every non-success outcome
+    and `IS NOT NULL` for the success outcome.
+  - **Legacy-degraded mode** (regression test for v2 R7 HIGH #4):
+    construct an Agent with a checkpointer that implements only the
+    v3 surface (no `claim_run` / `mark_run_complete`). Vanilla
+    `Agent.prompt(msg)` succeeds (no claim attempted; messages
+    stamped with run_id but no marker written). Calling
+    `Agent.fork(...)` or `Agent.fork_once(...)` raises
+    `CheckpointerError` explaining the missing methods.
   - SQLite cross-connection: two `SQLiteCheckpointer` instances on
     the same DB file, one `fork()` and one `mark_run_complete()`
     from different processes serialize via `BEGIN IMMEDIATE`
