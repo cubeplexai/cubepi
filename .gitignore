@@ -34,3 +34,6 @@ website/docs/api/*.mdx
 
 # Playwright CLI session artifacts
 .playwright-cli/
+
+# Local development worktrees (see CLAUDE.md workflow)
+.worktrees/
