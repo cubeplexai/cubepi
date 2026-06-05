@@ -38,6 +38,17 @@ _OUTPUT_FORMAT_MEDIA_TYPE = {
 }
 
 
+class _SignalAborted(Exception):
+    """Internal sentinel raised by ``_run_with_signal`` when
+    ``ImagesOptions.signal`` triggers an abort.
+
+    Distinct from :class:`asyncio.CancelledError` so that external
+    cancellation (``task.cancel()``, ``asyncio.wait_for``, parent task
+    teardown) propagates cleanly instead of being silently swallowed
+    into ``AssistantImages(stop_reason="aborted")``.
+    """
+
+
 class OpenAIImagesProvider(BaseImagesProvider):
     """OpenAI-shape image provider.
 
@@ -121,11 +132,11 @@ class OpenAIImagesProvider(BaseImagesProvider):
 
             return self._parse_response(sdk_resp, model, context, cap)
 
-        except asyncio.CancelledError as cancel:
+        except _SignalAborted:
             # Signal-triggered abort: return as AssistantImages, do not re-raise.
-            # The CancelledError is recorded so subscribe_response observers
-            # can distinguish abort from successful completion.
-            exc = cancel
+            # A synthetic CancelledError is surfaced to response observers so
+            # tracing can distinguish abort from successful completion.
+            exc = asyncio.CancelledError("aborted via ImagesOptions.signal")
             return AssistantImages(
                 api=model.api,
                 provider_id=model.provider_id,
@@ -133,6 +144,12 @@ class OpenAIImagesProvider(BaseImagesProvider):
                 output=[],
                 stop_reason="aborted",
             )
+        except asyncio.CancelledError as cancel:
+            # External cancellation (task.cancel(), asyncio.wait_for(),
+            # parent teardown). Record it for response observers, then
+            # re-raise so callers see the cancellation they asked for.
+            exc = cancel
+            raise
         except Exception as raw:  # noqa: BLE001
             exc = raw
             classify_and_raise(raw, model=model)
@@ -154,8 +171,9 @@ class OpenAIImagesProvider(BaseImagesProvider):
     ) -> Any:
         """Run ``sdk_call(**payload)`` while listening to ``signal``.
 
-        If ``signal`` fires first, the SDK task is cancelled and
-        ``asyncio.CancelledError`` propagates upward.
+        Raises :class:`_SignalAborted` if ``signal`` fires first.
+        Lets :class:`asyncio.CancelledError` from external cancellation
+        propagate unchanged so callers can detect it.
         """
         if signal is None:
             return await sdk_call(**payload)
@@ -169,7 +187,7 @@ class OpenAIImagesProvider(BaseImagesProvider):
             )
             if signal_task in done and not sdk_task.done():
                 sdk_task.cancel()
-                raise asyncio.CancelledError
+                raise _SignalAborted
             signal_task.cancel()
             return sdk_task.result()
         finally:

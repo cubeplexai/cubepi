@@ -171,8 +171,11 @@ class BaseImagesProvider:
         if of is not None and cap.output_format_field is not None:
             payload[cap.output_format_field] = of
 
-        # response_format — always written, controlled entirely by capability
-        payload[cap.response_format_field] = cap.response_format_value
+        # response_format — written only when the capability opts in
+        # (None default avoids 400s on OpenAI GPT image models, which
+        # reject the field and return base64 by default).
+        if cap.response_format_field is not None:
+            payload[cap.response_format_field] = cap.response_format_value
 
         # supports_* gating
         if context.seed is not None and cap.supports_seed:

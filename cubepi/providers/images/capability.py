@@ -45,7 +45,11 @@ class ImagesCapabilityDescriptor(BaseModel):
     guidance_field: str = "guidance_scale"
 
     output_format_field: str | None = "output_format"
-    response_format_field: str = "response_format"
+    # response_format is opt-in: OpenAI's GPT image models reject
+    # `response_format` and return base64 by default. Older OpenAI image
+    # endpoints (dall-e-3), SiliconFlow, Together, and similar backends
+    # that accept the field can set this to "response_format" explicitly.
+    response_format_field: str | None = None
     response_format_value: Literal["b64_json", "url"] = "b64_json"
 
     supports_edit: bool = True

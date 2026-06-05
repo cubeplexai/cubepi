@@ -11,28 +11,28 @@ you'll want next: streaming UI, error handling, and a cancel button.
 
 ## Step 1 — set up the provider and model
 
-The provider is the connection to the LLM API; the `Model` describes
-which model you want to invoke and a few capabilities.
+The provider is the connection to the LLM API; `provider.model("id", ...)`
+binds a model id to that provider and produces the value `Agent(model=...)`
+expects.
 
 ```python
 import os
-from cubepi import Model
 from cubepi.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
-model = Model(
-    id="claude-sonnet-4-5-20250929",
-    provider="anthropic",
-    max_tokens=4096,        # response cap
+model = provider.model(
+    "claude-sonnet-4-5-20250929",
+    max_tokens=4096,         # response cap
     context_window=200_000,  # hard model limit; defaults are usually fine
     temperature=0.7,
 )
 ```
 
-The `provider` field on `Model` is a string label (e.g. `"anthropic"`,
-`"openai"`). It's used by the framework to clamp thinking levels and
-tag responses — keep it stable, it doesn't have to match the
-provider's internal name.
+`provider_id` lives on the provider constructor and is propagated into the
+bound model automatically — used by the framework to clamp thinking levels
+and tag responses. Building a `Model` by hand and passing both
+`provider=` and `model=` to `Agent` is the 0.6 idiom and no longer works
+in 0.7.
 
 ## Step 2 — declare a tool
 

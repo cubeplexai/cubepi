@@ -26,7 +26,33 @@ def test_baseline_payload_has_model_and_prompt():
     payload = p._build_payload(_model(), ImagesContext(prompt="A robot"))
     assert payload["model"] == "m"
     assert payload["prompt"] == "A robot"
+    # response_format is opt-in via the capability descriptor; the default
+    # OpenAI-shape descriptor leaves it off so gpt-image-1 doesn't 400.
+    assert "response_format" not in payload
+
+
+def test_response_format_opt_in_when_field_set():
+    p = _Stub(
+        provider_id="p",
+        capability=ImagesCapabilityDescriptor(
+            response_format_field="response_format",
+        ),
+    )
+    payload = p._build_payload(_model(), ImagesContext(prompt="x"))
     assert payload["response_format"] == "b64_json"
+
+
+def test_response_format_renamed_when_field_overridden():
+    p = _Stub(
+        provider_id="p",
+        capability=ImagesCapabilityDescriptor(
+            response_format_field="resp_fmt",
+            response_format_value="url",
+        ),
+    )
+    payload = p._build_payload(_model(), ImagesContext(prompt="x"))
+    assert payload["resp_fmt"] == "url"
+    assert "response_format" not in payload
 
 
 def test_size_spec_size_string():

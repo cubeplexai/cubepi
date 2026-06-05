@@ -90,7 +90,9 @@ async def test_happy_path_writes_canonical_openai_fields():
     assert kw["size"] == "1024x1024"
     assert kw["n"] == 2
     assert kw["quality"] == "high"
-    assert kw["response_format"] == "b64_json"
+    # response_format is NOT sent by default — OpenAI's GPT image models
+    # reject the field and return base64 anyway.
+    assert "response_format" not in kw
     assert out.stop_reason == "stop"
     assert out.output[0].type == "image"
 
@@ -336,3 +338,32 @@ async def test_media_type_uses_model_default_output_format():
     model = p.model("gpt-image-1", default_output_format="webp")
     out = await p.generate_images(model, ImagesContext(prompt="x"))
     assert out.output[0].media_type == "image/webp"
+
+
+@pytest.mark.asyncio
+async def test_external_cancel_propagates_not_swallowed():
+    """task.cancel() on the caller must propagate as CancelledError, not
+    be silently converted into AssistantImages(stop_reason='aborted').
+    Only ImagesOptions.signal triggers the aborted path."""
+    p = _provider(sleep=0.5)
+    model = p.model("gpt-image-1")
+
+    task = asyncio.create_task(p.generate_images(model, ImagesContext(prompt="x")))
+    await asyncio.sleep(0.05)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_wait_for_timeout_propagates_cancellation():
+    """asyncio.wait_for cancellation on the caller must propagate as a
+    timeout, not be swallowed into stop_reason='aborted'."""
+    p = _provider(sleep=0.5)
+    model = p.model("gpt-image-1")
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(
+            p.generate_images(model, ImagesContext(prompt="x")), timeout=0.05
+        )

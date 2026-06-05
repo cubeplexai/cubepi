@@ -13,7 +13,9 @@ def test_default_descriptor_is_openai_shape():
     assert d.supports_steps is False
     assert d.supports_guidance is False
     assert d.output_format_field == "output_format"
-    assert d.response_format_field == "response_format"
+    # response_format defaults to OFF so OpenAI gpt-image-1 — which rejects
+    # the field — works without an explicit override.
+    assert d.response_format_field is None
     assert d.response_format_value == "b64_json"
     assert d.supports_edit is True
     assert d.input_images_field == "image"
