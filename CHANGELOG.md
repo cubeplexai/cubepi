@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content, or a full `AgentToolResult`. The longhand `AgentTool(...)` remains
   fully supported.
 
+### Fixed
+
+- **Tool results that set `is_error=True` are now reported as errors.** A tool
+  body that returned `AgentToolResult(is_error=True)` without raising was
+  surfaced to the model as a successful result; the flag is now honored on the
+  execution path (affects both `@tool` and longhand `AgentTool` tools).
+
 ## [0.7.0] - 2026-06-05
 
 ### Added
