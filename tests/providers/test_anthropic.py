@@ -69,20 +69,27 @@ class TestAnthropicMessageConversion:
             block.get("text") or block.get("input") for block in result["content"]
         )
 
-    def test_build_api_messages_drops_trailing_empty_assistant(self):
-        # If the trailing message is an empty error assistant, dropping it is
-        # the only correct option: Anthropic treats the last assistant as a
-        # prefill, so a placeholder there would make the model continue from
-        # "[empty response]" instead of regenerating the failed reply.
+    def test_strip_trailing_empty_assistants_drops_persisted_error_tail(self):
+        # Trailing empty error assistant must be dropped before both the API
+        # build and the cache-policy query: Anthropic treats the last assistant
+        # as a prefill, and leaving the dropped index visible to the policy
+        # would point cache_control at a non-existent message.
         messages = [
             UserMessage(content=[TextContent(text="ask")]),
             AssistantMessage(content=[], stop_reason="error", error_message="boom"),
+            AssistantMessage(content=[], stop_reason="error"),
         ]
-        api_messages, breakpoints = AnthropicProvider._build_api_messages(messages)
-        assert len(api_messages) == 1
-        assert api_messages[0]["role"] == "user"
-        # Breakpoints stay aligned with the (now shorter) api_messages list.
-        assert len(breakpoints) == 1
+        stripped = AnthropicProvider._strip_trailing_empty_assistants(messages)
+        assert len(stripped) == 1
+        assert isinstance(stripped[0], UserMessage)
+
+    def test_strip_trailing_empty_assistants_preserves_real_tail(self):
+        messages = [
+            UserMessage(content=[TextContent(text="ask")]),
+            AssistantMessage(content=[TextContent(text="reply")]),
+        ]
+        stripped = AnthropicProvider._strip_trailing_empty_assistants(messages)
+        assert stripped == messages
 
     def test_build_api_messages_fills_non_trailing_empty_assistant(self):
         # Mid-history empty error assistant must be filled with a placeholder
@@ -893,6 +900,35 @@ class TestAnthropicStreamKwargsBuilding:
 
         assert captured["status"] == 200
         assert captured["headers"]["x-request-id"] == "req-xyz"
+
+    @pytest.mark.asyncio
+    async def test_trailing_empty_assistant_dropped_and_cache_marker_preserved(self):
+        """Stripping the trailing empty error assistant must keep cache_control
+        on the new last message, not silently drop it because the policy was
+        queried against the original (un-trimmed) message list."""
+        events = []
+        final = _make_final_message(content=[])
+        mock_stream = _MockAnthropicStream(events, final)
+
+        provider = _make_provider("short")
+        mock_client = _inject_mock_stream(provider, mock_stream)
+
+        history = [
+            UserMessage(content=[TextContent(text="ask")]),
+            AssistantMessage(content=[TextContent(text="reply")]),
+            AssistantMessage(content=[], stop_reason="error", error_message="boom"),
+        ]
+        ms = await provider.stream(_anthropic_model(), history)
+        async for _ in ms:
+            pass
+        await ms.result()
+
+        sent = mock_client.messages.stream.call_args[1]["messages"]
+        assert len(sent) == 2  # trailing empty error assistant dropped
+        # Default cache policy marks the now-last message; cache_control must
+        # still reach the wire.
+        last_block = sent[-1]["content"][-1]
+        assert last_block.get("cache_control") == {"type": "ephemeral"}
 
 
 class TestAnthropicParallelToolResults:
