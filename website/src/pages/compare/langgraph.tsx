@@ -60,27 +60,19 @@ graph.add_edge("tools", "llm")
 app = graph.compile()
 `,
     usTitle: '# CubePi',
-    us: `from pydantic import BaseModel
-from cubepi import Agent, AgentTool, AgentToolResult, TextContent
+    us: `from cubepi import Agent, tool
 from cubepi.providers.anthropic import AnthropicProvider
 
 
-class GetWeatherParams(BaseModel):
-    city: str
-
-
-async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
-    return AgentToolResult(content=[TextContent(text=f"72F and sunny in {params.city}")])
+@tool
+async def get_weather(city: str) -> str:
+    "Get current weather for a city."
+    return f"72F and sunny in {city}"
 
 
 agent = Agent(
     model=AnthropicProvider(provider_id="anthropic", api_key="...").model("claude-sonnet-4-5"),
-    tools=[AgentTool(
-        name="get_weather",
-        description="Get current weather for a city.",
-        parameters=GetWeatherParams,
-        execute=get_weather,
-    )],
+    tools=[get_weather],
 )
 await agent.prompt("Weather in Tokyo?")
 `,
@@ -170,27 +162,19 @@ graph.add_edge("tools", "llm")
 app = graph.compile()
 `,
     usTitle: '# CubePi',
-    us: `from pydantic import BaseModel
-from cubepi import Agent, AgentTool, AgentToolResult, TextContent
+    us: `from cubepi import Agent, tool
 from cubepi.providers.anthropic import AnthropicProvider
 
 
-class GetWeatherParams(BaseModel):
-    city: str
-
-
-async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
-    return AgentToolResult(content=[TextContent(text=f"72F and sunny in {params.city}")])
+@tool
+async def get_weather(city: str) -> str:
+    "Get current weather for a city."
+    return f"72F and sunny in {city}"
 
 
 agent = Agent(
     model=AnthropicProvider(provider_id="anthropic", api_key="...").model("claude-sonnet-4-5"),
-    tools=[AgentTool(
-        name="get_weather",
-        description="Get current weather for a city.",
-        parameters=GetWeatherParams,
-        execute=get_weather,
-    )],
+    tools=[get_weather],
 )
 await agent.prompt("Weather in Tokyo?")
 `,
