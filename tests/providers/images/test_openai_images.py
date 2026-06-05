@@ -469,3 +469,67 @@ async def test_resp_to_dict_uses_model_dump_when_available():
     await p.generate_images(model, ImagesContext(prompt="x"))
     assert len(seen_bodies) == 1
     assert seen_bodies[0] == {"data": [{"b64_json": "DUMPED"}], "id": "resp_123"}
+
+
+@pytest.mark.asyncio
+async def test_url_response_items_surface_as_imagecontent():
+    """When a capability requests response_format='url', SDK items expose
+    `url` instead of `b64_json`. Parse path must surface those rather than
+    silently drop them (P2 codex finding)."""
+    p = _provider(
+        capability=ImagesCapabilityDescriptor(
+            response_format_field="response_format",
+            response_format_value="url",
+        ),
+    )
+
+    async def _url_resp(**kwargs):
+        return SimpleNamespace(
+            data=[
+                SimpleNamespace(b64_json=None, url="https://cdn.example/img1.png"),
+                SimpleNamespace(b64_json=None, url="https://cdn.example/img2.png"),
+            ]
+        )
+
+    p._client.images.generate = _url_resp
+    model = p.model("gpt-image-1")
+    out = await p.generate_images(model, ImagesContext(prompt="x"))
+    assert out.stop_reason == "stop"
+    assert len(out.output) == 2
+    assert out.output[0].source == "https://cdn.example/img1.png"
+    assert out.output[1].source == "https://cdn.example/img2.png"
+    assert all(o.source.startswith("https://") for o in out.output)
+
+
+@pytest.mark.asyncio
+async def test_media_type_defaults_to_png_when_output_format_dropped():
+    """When the capability sets output_format_field=None (SiliconFlow shape),
+    the backend chooses its own format. The parse path must NOT trust the
+    user's requested output_format for media_type labelling — it defaults
+    to png instead of mislabelling backend-default bytes (P2 codex finding)."""
+    p = _provider(
+        capability=ImagesCapabilityDescriptor(
+            size_spec=SizeSpec(kind="image_size_string"),
+            count_field="batch_size",
+            output_format_field=None,
+        ),
+    )
+    model = p.model("Kwai-Kolors/Kolors")
+    # User asks for webp but the backend ignores that field and returns its
+    # own default — media_type should NOT lie and claim webp.
+    out = await p.generate_images(
+        model, ImagesContext(prompt="x", output_format="webp")
+    )
+    assert out.output[0].media_type == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_media_type_still_uses_output_format_when_field_active():
+    """Sanity guard for the dual-condition fix: when output_format_field IS
+    active (default OpenAI shape), the media_type follows the request."""
+    p = _provider()  # default descriptor → output_format_field="output_format"
+    model = p.model("gpt-image-1")
+    out = await p.generate_images(
+        model, ImagesContext(prompt="x", output_format="webp")
+    )
+    assert out.output[0].media_type == "image/webp"

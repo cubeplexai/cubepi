@@ -203,22 +203,35 @@ class OpenAIImagesProvider(BaseImagesProvider):
         context: ImagesContext,
         cap: ImagesCapabilityDescriptor,
     ) -> AssistantImages:
-        # Resolve output_format the same way _build_payload does, so the
-        # returned ImageContent.media_type matches what the user requested.
-        # When the capability dropped output_format from the wire payload
-        # (output_format_field=None), fall back to png labelling.
-        out_format = (
-            context.output_format
-            if context.output_format is not None
-            else model.default_output_format
-        ) or "png"
+        # Resolve media_type. Only trust ctx/model defaults when the
+        # capability actually forwarded output_format on the wire; otherwise
+        # the backend chose the format independently and we cannot know it,
+        # so default to png labelling instead of lying about what came back.
+        if cap.output_format_field is not None:
+            out_format = (
+                context.output_format
+                if context.output_format is not None
+                else model.default_output_format
+            ) or "png"
+        else:
+            out_format = "png"
         media_type = _OUTPUT_FORMAT_MEDIA_TYPE.get(out_format, "image/png")
+
+        # Build the output list. When the capability asked for url responses
+        # (response_format_value="url"), SDK items expose `url` instead of
+        # `b64_json` — surface those verbatim so they aren't silently lost.
         data = getattr(resp, "data", None) or []
-        images: list[ImageContent | TextContent] = [
-            ImageContent(source=item.b64_json, media_type=media_type)
-            for item in data
-            if getattr(item, "b64_json", None)
-        ]
+        images: list[ImageContent | TextContent] = []
+        for item in data:
+            b64 = getattr(item, "b64_json", None)
+            if b64:
+                images.append(ImageContent(source=b64, media_type=media_type))
+                continue
+            url = getattr(item, "url", None)
+            if url:
+                # ImageContent.source holds the URL string; callers can
+                # detect it via source.startswith(("http://", "https://")).
+                images.append(ImageContent(source=url, media_type=media_type))
         if not images:
             # Empty response: still a "stop" — but no images. Surface via empty output.
             return AssistantImages(
