@@ -202,7 +202,7 @@ class TestAgentMiddlewareWiring:
 
     async def test_agent_uses_middleware_convert_to_llm(self):
         """Middleware-declared convert_to_llm must be wired up by Agent."""
-        from cubepi import Agent, Model
+        from cubepi import Agent
         from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
         captured: dict = {}
@@ -214,11 +214,10 @@ class TestAgentMiddlewareWiring:
                 captured["ctx"] = ctx
                 return list(messages)
 
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("ok")])
         agent = Agent(
-            model=Model(id="test", provider="faux"),
-            provider=provider,
+            model=provider.model("test"),
             middleware=[MarkConvert()],
         )
         await agent.prompt("hi")

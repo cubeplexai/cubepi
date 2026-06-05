@@ -30,7 +30,7 @@ from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubepi.tracing import Tracer
 
 
-MODEL = Model(id="faux-1", provider="faux")
+MODEL = Model(id="faux-1", provider_id="faux")
 
 
 class InMemoryExporter(SpanExporter):
@@ -54,15 +54,14 @@ class _Empty(BaseModel):
 
 def _make_agent(provider: FauxProvider, tools: list[AgentTool] | None) -> Agent:
     return Agent(
-        provider=provider,
-        model=MODEL,
+        model=provider.model(MODEL.id),
         system_prompt="test prompt",
         tools=tools,
     )
 
 
 async def test_shared_provider_does_not_double_mint_inner_chat():
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     exporter = InMemoryExporter()
     tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
 
@@ -121,7 +120,7 @@ async def test_cancelled_inner_gate_released_for_parents_next_turn():
     proves both that the gate was released AND that no inner chat leaked onto
     the parent run.
     """
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     exporter = InMemoryExporter()
     tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
 
@@ -195,7 +194,7 @@ async def test_inner_run_nests_under_active_tool_span():
     """
     from cubepi.mcp import _tracing as mcp_tracing
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     exporter = InMemoryExporter()
     tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
 
@@ -238,7 +237,7 @@ async def test_full_nested_subtree_via_real_tool():
     execute_tool inner_tool}`` — the inner chat and inner tool span both descend
     from the inner run's root, and the inner root nests under the tool span.
     """
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     exporter = InMemoryExporter()
     tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
 

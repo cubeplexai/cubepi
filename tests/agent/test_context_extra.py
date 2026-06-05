@@ -55,7 +55,6 @@ async def test_agent_hydrates_ctx_extra_from_checkpointer() -> None:
     through the turn and written back via save_extra."""
     from cubepi.agent.agent import Agent
     from cubepi.checkpointer import SQLiteCheckpointer
-    from cubepi.providers.base import Model
     from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
     with tempfile.TemporaryDirectory() as d:
@@ -63,11 +62,10 @@ async def test_agent_hydrates_ctx_extra_from_checkpointer() -> None:
         async with SQLiteCheckpointer(str(path)) as cp:
             await cp.save_extra("t-hyd", {"seeded": True})
 
-            provider = FauxProvider()
+            provider = FauxProvider(provider_id="faux")
             provider.set_responses([faux_assistant_message("ok")])
             agent = Agent(
-                provider=provider,
-                model=Model(id="test", provider="faux"),
+                model=provider.model("test"),
                 checkpointer=cp,
                 thread_id="t-hyd",
             )
@@ -86,18 +84,16 @@ async def test_agent_persists_ctx_extra_mutation_after_turn() -> None:
     save_extra after the turn completes."""
     from cubepi.agent.agent import Agent
     from cubepi.checkpointer import SQLiteCheckpointer
-    from cubepi.providers.base import Model
     from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
     with tempfile.TemporaryDirectory() as d:
         path = Path(d) / "persist.db"
         async with SQLiteCheckpointer(str(path)) as cp:
-            provider = FauxProvider()
+            provider = FauxProvider(provider_id="faux")
             provider.set_responses([faux_assistant_message("ok")])
 
             agent = Agent(
-                provider=provider,
-                model=Model(id="test", provider="faux"),
+                model=provider.model("test"),
                 checkpointer=cp,
                 thread_id="t-pst",
             )

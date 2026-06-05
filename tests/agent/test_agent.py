@@ -16,13 +16,22 @@ from pydantic import BaseModel
 
 
 def make_model() -> Model:
-    return Model(id="faux-1", provider="faux")
+    return Model(id="faux-1", provider_id="faux")
 
 
 class TestAgentInit:
+    def test_agent_unwraps_bound_model(self):
+        provider = FauxProvider(provider_id="faux")
+        bound_model = provider.model("faux-1")
+
+        agent = Agent(model=bound_model)
+
+        assert agent.state.model.id == "faux-1"
+        assert agent.state.model.provider_id == "faux"
+
     def test_default_state(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
 
         assert agent.state.system_prompt == ""
         assert agent.state.thinking == "off"
@@ -34,10 +43,9 @@ class TestAgentInit:
         assert agent.state.error_message is None
 
     def test_custom_initial_state(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         agent = Agent(
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             system_prompt="You are a helpful assistant.",
             thinking="low",
         )
@@ -63,8 +71,7 @@ class TestAgentInit:
             tools = [tool]
 
         agent = Agent(
-            provider=FauxProvider(),
-            model=make_model(),
+            model=FauxProvider(provider_id="faux").model("faux-1"),
             middleware=[ToolMiddleware()],
         )
 
@@ -73,8 +80,8 @@ class TestAgentInit:
 
 class TestAgentSubscribe:
     def test_subscribe_and_unsubscribe(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
 
         count = 0
 
@@ -88,9 +95,9 @@ class TestAgentSubscribe:
         unsub()
 
     async def test_events_emitted_on_prompt(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("ok")])
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         events = []
         agent.subscribe(lambda e, s=None: events.append(e.type))
@@ -106,9 +113,9 @@ class TestAgentSubscribe:
         async def bad_stream(*args, **kwargs):
             raise RuntimeError("provider exploded")
 
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.stream = bad_stream
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         events = []
         agent.subscribe(lambda e, s=None: events.append(e.type))
@@ -132,9 +139,9 @@ class TestAgentSubscribe:
         assert agent.state.error_message == "provider exploded"
 
     async def test_await_async_subscribers_before_prompt_resolves(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("ok")])
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         barrier = asyncio.Event()
         listener_finished = False
@@ -171,8 +178,8 @@ class TestAgentSubscribe:
 
 class TestAgentState:
     def test_tools_are_copied(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
 
         tools = [
             AgentTool(
@@ -188,8 +195,8 @@ class TestAgentState:
         assert agent.state.tools is not tools
 
     def test_messages_are_copied(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
 
         messages = [UserMessage(content=[TextContent(text="hi")])]
         agent.state.messages = messages
@@ -198,16 +205,16 @@ class TestAgentState:
 
 class TestAgentQueues:
     def test_steer_queues_message(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
 
         msg = UserMessage(content=[TextContent(text="steering")])
         agent.steer(msg)
         assert msg not in agent.state.messages
 
     def test_follow_up_queues_message(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
 
         msg = UserMessage(content=[TextContent(text="follow-up")])
         agent.follow_up(msg)
@@ -216,15 +223,15 @@ class TestAgentQueues:
 
 class TestAgentAbort:
     def test_abort_without_active_run_does_not_throw(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
         agent.abort()
 
 
 class TestAgentPromptGuards:
     async def test_raises_when_prompt_called_while_streaming(self):
         barrier = asyncio.Event()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
 
         async def slow_stream(*args, **kwargs):
             from cubepi.providers.base import MessageStream, StreamEvent
@@ -241,7 +248,7 @@ class TestAgentPromptGuards:
             return ms
 
         provider.stream = slow_stream
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         task = asyncio.create_task(agent.prompt("first"))
         await asyncio.sleep(0.02)
@@ -258,7 +265,7 @@ class TestAgentPromptGuards:
 
     async def test_raises_when_resume_called_while_streaming(self):
         barrier = asyncio.Event()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
 
         async def slow_stream(*args, **kwargs):
             from cubepi.providers.base import MessageStream, StreamEvent
@@ -275,7 +282,7 @@ class TestAgentPromptGuards:
             return ms
 
         provider.stream = slow_stream
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         task = asyncio.create_task(agent.prompt("first"))
         await asyncio.sleep(0.02)
@@ -292,14 +299,14 @@ class TestAgentPromptGuards:
 
 class TestAgentResume:
     async def test_resume_processes_follow_up_messages(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message("Initial response"),
                 faux_assistant_message("Processed"),
             ]
         )
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         await agent.prompt("Initial")
         agent.follow_up(UserMessage(content=[TextContent(text="follow-up")]))
@@ -318,14 +325,14 @@ class TestAgentResume:
     async def test_resume_drains_steering_queue_before_follow_up(self):
         """resume() should drain the steering queue first when the last
         message is from the assistant."""
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message("Initial"),
                 faux_assistant_message("Steered"),
             ]
         )
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         await agent.prompt("hello")
         agent.steer(UserMessage(content=[TextContent(text="steer-msg")]))
@@ -344,9 +351,9 @@ class TestAgentResume:
     async def test_resume_raises_on_assistant_last_with_empty_queues(self):
         """resume() raises RuntimeError when the last message is from the
         assistant and both steering and follow-up queues are empty."""
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("done")])
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         await agent.prompt("hello")
 
@@ -390,8 +397,8 @@ class TestMessageQueueAllMode:
 
 class TestAgentStatePendingToolCalls:
     def test_setter_makes_a_copy(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
 
         original = {"call-1", "call-2"}
         agent.state.pending_tool_calls = original
@@ -404,9 +411,9 @@ class TestAgentStatePendingToolCalls:
 
 class TestAgentReset:
     async def test_reset_clears_state_after_prompt(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("response")])
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         await agent.prompt("hello")
         assert len(agent.state.messages) > 0
@@ -420,8 +427,8 @@ class TestAgentReset:
         assert agent.state.error_message is None
 
     async def test_reset_clears_queues(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
 
         agent.steer(UserMessage(content=[TextContent(text="steer")]))
         agent.follow_up(UserMessage(content=[TextContent(text="follow")]))
@@ -436,7 +443,7 @@ class TestAgentReset:
 class TestAgentAbortSignal:
     async def test_abort_sets_signal_during_active_run(self):
         barrier = asyncio.Event()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
 
         async def slow_stream(*args, **kwargs):
             from cubepi.providers.base import MessageStream, StreamEvent
@@ -453,7 +460,7 @@ class TestAgentAbortSignal:
             return ms
 
         provider.stream = slow_stream
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         task = asyncio.create_task(agent.prompt("hello"))
         await asyncio.sleep(0.02)
@@ -470,15 +477,15 @@ class TestAgentAbortSignal:
 
 class TestAgentWaitForIdle:
     async def test_returns_immediately_when_no_active_run(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=make_model())
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"))
 
         # No active run, _active_done is None — should return immediately
         await agent.wait_for_idle()
 
     async def test_waits_until_prompt_completes(self):
         barrier = asyncio.Event()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
 
         async def slow_stream(*args, **kwargs):
             from cubepi.providers.base import MessageStream, StreamEvent
@@ -495,7 +502,7 @@ class TestAgentWaitForIdle:
             return ms
 
         provider.stream = slow_stream
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         prompt_task = asyncio.create_task(agent.prompt("hello"))
         await asyncio.sleep(0.02)
@@ -519,9 +526,9 @@ class TestAgentWaitForIdle:
 
 class TestAgentPromptInputTypes:
     async def test_prompt_with_message_object(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("response")])
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         msg = UserMessage(content=[TextContent(text="direct message")])
         await agent.prompt(msg)
@@ -538,9 +545,9 @@ class TestAgentPromptInputTypes:
         assert isinstance(agent.state.messages[-1], AssistantMessage)
 
     async def test_prompt_with_list_of_messages(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("response")])
-        agent = Agent(provider=provider, model=make_model())
+        agent = Agent(model=provider.model("faux-1"))
 
         msgs = [
             UserMessage(content=[TextContent(text="first")]),
@@ -589,7 +596,7 @@ def test_message_queue_remove_ignores_messages_without_steer_id():
 
 @pytest.mark.asyncio
 async def test_agent_cancel_steer_removes_queued_steer():
-    agent = Agent(provider=FauxProvider(), model=make_model())
+    agent = Agent(model=FauxProvider(provider_id="faux").model("faux-1"))
     agent.steer(_steer_msg("hi", "s1"))
     assert agent.cancel_steer("s1") is True
     assert agent.cancel_steer("s1") is False

@@ -22,7 +22,7 @@ from cubepi.providers.base import (
 
 
 def _model() -> Model:
-    return Model(id="deepseek-chat", provider="deepseek", api="openai")
+    return Model(id="deepseek-chat", provider_id="deepseek", api="openai")
 
 
 def _make_chunk(

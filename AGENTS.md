@@ -11,11 +11,11 @@ uv run pytest tests/                      # run tests (asyncio_mode=auto)
 uv run pytest tests/path/test.py::test -v # single test
 uv run ruff check cubepi/ tests/
 uv run ruff format --check cubepi/ tests/ # CI checks formatting, doesn't fix
+uv run mypy cubepi
 ```
 
-CI runs pytest + ruff only. **There is no mypy step** — ignore the stale
-`.mypy_cache/`. Tests run on Python 3.11–3.14 (3.14 is `continue-on-error`);
-local default is 3.13 (`.python-version`).
+CI runs pytest + ruff + mypy. Tests run on Python 3.11–3.14 (3.14 is
+`continue-on-error`); local default is 3.13 (`.python-version`).
 
 ## Architecture
 
@@ -28,7 +28,7 @@ execution engine), `middleware/`, `checkpointer/` (memory / sqlite / postgres),
 
 ## Conventions & gotchas
 
-- **Lean deps**: core deps are anthropic, openai, pydantic, pyyaml only.
+- **Lean deps**: core deps are anthropic, openai, pydantic only.
   Everything else (sqlite, postgres, mcp, tracing, trace-cli) is an optional
   extra in `pyproject.toml`. Don't add a hard dependency without strong reason.
 - **`cubepi.tracing` is lazily importable** (PEP 562 `__getattr__`): schema

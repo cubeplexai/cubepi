@@ -122,6 +122,16 @@ def test_anchor_lowercases_and_dehyphens():
     assert mod._anchor("__init__") == "init"
 
 
+def test_source_relpath_strips_worktree_prefix():
+    mod = _load_module()
+    path = (
+        "/home/chris/cubepi/.worktrees/2026-06-05-release-0.7-review/"
+        "cubepi/agent/agent.py"
+    )
+
+    assert mod._source_relpath(path) == "cubepi/agent/agent.py"
+
+
 def test_build_ref_index_includes_class_members():
     mod = _load_module()
 

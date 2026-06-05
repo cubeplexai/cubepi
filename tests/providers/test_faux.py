@@ -68,7 +68,7 @@ class TestFauxProvider:
     def _make_model(self):
         from cubepi.providers.base import Model
 
-        return Model(id="faux-1", provider="faux")
+        return Model(id="faux-1", provider_id="faux")
 
     async def test_basic_text_response(self):
         provider = FauxProvider()
@@ -298,7 +298,7 @@ class TestFauxProvider:
     async def test_provider_metadata_set(self):
         provider = FauxProvider()
         provider.set_responses([faux_assistant_message("hello")])
-        model = Model(id="faux-1", provider="faux")
+        model = Model(id="faux-1", provider_id="faux")
         stream = await provider.stream(model, [])
         _ = [e async for e in stream]
         result = await stream.result()
@@ -308,7 +308,7 @@ class TestFauxProvider:
     async def test_provider_metadata_on_partial_events(self):
         provider = FauxProvider()
         provider.set_responses([faux_assistant_message("hello")])
-        model = Model(id="faux-1", provider="faux")
+        model = Model(id="faux-1", provider_id="faux")
         stream = await provider.stream(model, [])
         events = [e async for e in stream]
         start_event = next(e for e in events if e.type == "start")
@@ -323,7 +323,7 @@ class TestFauxProviderExtendedFactory:
     def _make_model(self):
         from cubepi.providers.base import Model
 
-        return Model(id="faux-1", provider="faux")
+        return Model(id="faux-1", provider_id="faux")
 
     async def test_extended_sync_factory_receives_all_args(self):
         """Factory with 4 params receives system_prompt and tools."""
@@ -470,7 +470,7 @@ class TestFauxProviderPromptCache:
     def _make_model(self):
         from cubepi.providers.base import Model
 
-        return Model(id="faux-1", provider="faux")
+        return Model(id="faux-1", provider_id="faux")
 
     async def test_first_call_populates_cache_write(self):
         """First call should have cache_write > 0 and cache_read == 0."""
@@ -666,7 +666,7 @@ class TestFauxProviderProduceExceptionHandling:
     """Tests for the _produce exception handler (lines 279-290)."""
 
     def _make_model(self):
-        return Model(id="faux-1", provider="faux")
+        return Model(id="faux-1", provider_id="faux")
 
     async def test_factory_raising_exception_produces_error_result(self):
         """When a factory raises an Exception, _produce catches it and
@@ -720,7 +720,7 @@ class TestFauxProviderAbortDuringBlocks:
     """Tests for abort signal checks during block iteration and chunk streaming."""
 
     def _make_model(self):
-        return Model(id="faux-1", provider="faux")
+        return Model(id="faux-1", provider_id="faux")
 
     async def test_abort_between_blocks(self):
         """Abort signal set between blocks triggers the block-level abort
@@ -877,7 +877,7 @@ class TestFauxProviderCacheTokenCalculation:
     """Tests for cache token calculation logic (lines 185-216)."""
 
     def _make_model(self):
-        return Model(id="faux-1", provider="faux")
+        return Model(id="faux-1", provider_id="faux")
 
     async def test_cache_usage_first_call_structure(self):
         """First call: input_tokens == prompt_tokens, cache_write == prompt_tokens,

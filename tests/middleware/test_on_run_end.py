@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.agent.types import AgentContext
 from cubepi.middleware.base import Middleware, compose_middleware
 from cubepi.providers.base import TextContent, UserMessage
@@ -85,7 +85,7 @@ async def test_all_none_returns_none() -> None:
 @pytest.mark.asyncio
 async def test_on_run_end_fires_after_main_run() -> None:
     """on_run_end injects a message and the agent runs one more model call."""
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses(
         [
             faux_assistant_message("main"),
@@ -101,8 +101,7 @@ async def test_on_run_end_fires_after_main_run() -> None:
             return [UserMessage(content=[TextContent(text="reflect now")])]
 
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         middleware=[_Reflect()],
     )
     await agent.prompt("hi")
@@ -114,7 +113,7 @@ async def test_on_run_end_fires_after_main_run() -> None:
 @pytest.mark.asyncio
 async def test_on_run_end_fires_exactly_once() -> None:
     """Reflection pass does NOT trigger another on_run_end (_reflection_fired guard)."""
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses(
         [
             faux_assistant_message("main"),
@@ -131,8 +130,7 @@ async def test_on_run_end_fires_exactly_once() -> None:
             return [UserMessage(content=[TextContent(text="reflect")])]
 
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         middleware=[_CountFires()],
     )
     await agent.prompt("hi")
@@ -144,7 +142,7 @@ async def test_on_run_end_fires_exactly_once() -> None:
 @pytest.mark.asyncio
 async def test_on_run_end_none_does_not_add_turn() -> None:
     """Returning None from on_run_end does not trigger an extra model call."""
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("main")])
 
     class _NoOp(Middleware):
@@ -152,8 +150,7 @@ async def test_on_run_end_none_does_not_add_turn() -> None:
             return None
 
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         middleware=[_NoOp()],
     )
     await agent.prompt("hi")
@@ -166,7 +163,7 @@ async def test_on_run_end_injected_messages_in_history() -> None:
     """Messages injected by on_run_end appear in agent.state.messages."""
     from cubepi.providers.base import AssistantMessage
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses(
         [
             faux_assistant_message("main"),
@@ -179,8 +176,7 @@ async def test_on_run_end_injected_messages_in_history() -> None:
             return [UserMessage(content=[TextContent(text="reflect")])]
 
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         middleware=[_Inject()],
     )
     await agent.prompt("hi")
@@ -201,7 +197,7 @@ async def test_on_run_end_fires_via_should_stop_after_turn() -> None:
     """on_run_end fires when should_stop_after_turn exits the inner loop."""
     from cubepi.agent.types import ShouldStopAfterTurnContext
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses(
         [
             faux_assistant_message("main"),
@@ -224,8 +220,7 @@ async def test_on_run_end_fires_via_should_stop_after_turn() -> None:
             return [UserMessage(content=[TextContent(text="reflect")])]
 
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         middleware=[_StopAfterFirst(), _Reflect()],
     )
     await agent.prompt("hi")
@@ -237,7 +232,7 @@ async def test_on_run_end_fires_via_should_stop_after_turn() -> None:
 @pytest.mark.asyncio
 async def test_on_run_end_skipped_on_error() -> None:
     """on_run_end does NOT fire when stop_reason is error/aborted."""
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     err_msg = faux_assistant_message("oops")
     err_msg = err_msg.model_copy(update={"stop_reason": "error"})
     provider.set_responses([err_msg])
@@ -250,8 +245,7 @@ async def test_on_run_end_skipped_on_error() -> None:
             return None
 
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         middleware=[_Reflect()],
     )
     await agent.prompt("hi")

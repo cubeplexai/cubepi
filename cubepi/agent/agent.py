@@ -26,6 +26,7 @@ from cubepi.agent.types import (
 )
 from cubepi.providers.base import (
     AssistantMessage,
+    BoundModel,
     Message,
     Model,
     OnPayloadCallback,
@@ -91,7 +92,7 @@ class _MessageQueue:
 class AgentState:
     system_prompt: str = ""
     model: Model = field(
-        default_factory=lambda: Model(id="unknown", provider="unknown")
+        default_factory=lambda: Model(id="unknown", provider_id="unknown")
     )
     thinking: ThinkingLevel = "off"
     is_streaming: bool = False
@@ -130,8 +131,7 @@ class Agent(Generic[TMessage]):
     def __init__(
         self,
         *,
-        provider: Provider,
-        model: Model,
+        model: BoundModel,
         system_prompt: str = "",
         tools: list[AgentTool] | None = None,
         thinking: ThinkingLevel = "off",
@@ -153,10 +153,10 @@ class Agent(Generic[TMessage]):
         middleware: list[Middleware] | None = None,
         channel: HitlChannel | None = None,
     ) -> None:
-        self._provider = provider
+        self._provider: Provider = model.provider
         self._state = AgentState(
             system_prompt=system_prompt,
-            model=model,
+            model=model.spec,
             thinking=thinking,
         )
         if tools:

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-05
+
 ### Added
 
 - **`Provider.generate(...)` one-shot helper** — providers now expose a
@@ -21,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `subagent` tool that runs an ephemeral child `Agent`, supports shared tools
   and middleware inheritance, captures child events, and exposes host callbacks
   for application-specific event streaming.
+- **Typed provider error taxonomy** — built-in providers wrap SDK failures in
+  `ProviderError` subclasses such as `ContextLengthExceeded`, `RateLimited`,
+  `ProviderAuthFailed`, `ProviderUnavailable`, and `ProviderBadRequest`.
+- **`Tracer.oneshot(...)`** — trace a single background LLM call without a full
+  `Agent` loop; the trace CLI can filter these runs via
+  `--meta oneshot_operation=...`.
+- **Checkpointed HITL run IDs** — checkpointers now persist the owning
+  `run_id` atomically with pending HITL requests so hosts can resume the
+  correct detached run after a restart.
 - **`on_run_end` middleware hook** — fires exactly once after all turns and tool
   calls complete, before `AgentEndEvent`. Return a `list[Message]` to inject
   additional messages and run one extra model turn (e.g. a memory-reflection
@@ -35,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** agent construction now takes a bound model from
+  `provider.model(...)`. Replace
+  `Agent(provider=provider, model=Model(...))` with
+  `Agent(model=provider.model("model-id", ...))`. `provider_id` now lives on
+  provider constructors and is copied into model metadata used for tracing,
+  response metadata, and error messages. `Tracer.oneshot(...)`,
+  `CompactionMiddleware`, and `SubagentMiddleware` use the same bound-model
+  shape.
 - **Breaking:** pre-model middleware hooks now receive `AgentContext` directly.
   Update custom middleware and explicit hook callables from the old signatures:
   - `transform_context(messages, *, signal=None)`
@@ -51,6 +70,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** custom providers must implement `Provider.generate(...)` or
   inherit from `BaseProvider`, which supplies `generate()` by consuming
   `stream()`.
+- **Breaking:** Postgres and MySQL checkpointer schemas are now version 3. Host
+  applications must add the nullable `run_id` column to `cubepi_threads` and
+  call `write_schema_version_op()` in their Alembic migration before using this
+  release.
+- CI now runs `mypy cubepi` in addition to pytest and ruff.
+
+### Fixed
+
+- Tool argument `ValidationError`s are formatted as model-readable tool
+  results, including literal and extra-field errors.
+- Provider stream-level SDK exceptions are classified into typed cubepi errors
+  instead of leaking raw vendor exception types.
+- `Tracer.oneshot()` now closes chat spans on failure/cancellation, awaits
+  stream completion and flushes, forwards abort signals, and surfaces silent
+  producer failures.
+
+### Removed
+
+- Removed unused `PyYAML` from the default dependency set; the core dependency
+  set is back to `anthropic`, `openai`, and `pydantic`.
 
 ## [0.6.0] - 2026-05-31
 
@@ -138,7 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/cubeplexai/cubepi/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/cubeplexai/cubepi/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cubeplexai/cubepi/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cubeplexai/cubepi/compare/v0.3.0...v0.4.0

@@ -16,7 +16,7 @@ from cubepi.providers.base import Model, StreamEvent, StreamOptions, UserMessage
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
 
-MODEL = Model(id="faux-1", provider="faux")
+MODEL = Model(id="faux-1", provider_id="faux")
 
 
 async def _drain(stream) -> None:
@@ -385,8 +385,8 @@ class TestConcurrentStreams:
                 faux_assistant_message("b"),
             ]
         )
-        model_a = Model(id="faux-a", provider="faux")
-        model_b = Model(id="faux-b", provider="faux")
+        model_a = Model(id="faux-a", provider_id="faux")
+        model_b = Model(id="faux-b", provider_id="faux")
 
         ms_a, ms_b = await asyncio.gather(
             provider.stream(model_a, [UserMessage(content=[])]),

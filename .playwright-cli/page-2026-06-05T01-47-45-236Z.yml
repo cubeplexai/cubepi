@@ -1,0 +1,35 @@
+- generic [ref=e2]:
+  - region "跳到主要内容":
+    - link "跳到主要内容" [ref=e3] [cursor=pointer]:
+      - /url: "#__docusaurus_skipToContent_fallback"
+  - navigation "主导航" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link "CubePi logo CubePi" [ref=e7] [cursor=pointer]:
+          - /url: /zh-Hans/
+          - img "CubePi logo" [ref=e9]
+          - generic [ref=e10]: CubePi
+        - link "文档" [ref=e11] [cursor=pointer]:
+          - /url: /zh-Hans/docs
+        - link "API" [ref=e12] [cursor=pointer]:
+          - /url: /zh-Hans/docs/api/
+        - link "示例" [ref=e13] [cursor=pointer]:
+          - /url: /zh-Hans/docs/recipes/weather-agent
+        - link "Changelog" [ref=e14] [cursor=pointer]:
+          - /url: /zh-Hans/changelog
+      - generic [ref=e15]:
+        - button "0.7（最新）" [ref=e17] [cursor=pointer]
+        - button "简体中文" [ref=e19] [cursor=pointer]:
+          - img [ref=e20]
+          - text: 简体中文
+        - link "GitHub（在新标签页中打开）" [ref=e22] [cursor=pointer]:
+          - /url: https://github.com/cubeplexai/cubepi
+          - text: GitHub
+          - img "（在新标签页中打开）" [ref=e23]
+        - button "切换浅色/暗黑模式（当前为系统模式）" [disabled] [ref=e26]:
+          - img [ref=e27]
+  - main [ref=e30]:
+    - generic [ref=e32]:
+      - heading "找不到页面" [level=1] [ref=e33]
+      - paragraph [ref=e34]: 我们找不到您要找的页面。
+      - paragraph [ref=e35]: 请联系原始链接来源网站的所有者，并告知他们链接已损坏。

@@ -5,7 +5,7 @@ import { useLocation } from '@docusaurus/router';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import DocFeedback from '@site/src/components/DocFeedback';
 
-export default function FooterWrapper(props: any): JSX.Element {
+export default function FooterWrapper(props: any): React.ReactElement {
   const { metadata } = useDoc();
   const { i18n } = useDocusaurusContext();
   const { pathname } = useLocation();

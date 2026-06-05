@@ -27,7 +27,7 @@ from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_too
 
 
 def make_model() -> Model:
-    return Model(id="faux-1", provider="faux")
+    return Model(id="faux-1", provider_id="faux")
 
 
 def make_user_message(text: str) -> UserMessage:

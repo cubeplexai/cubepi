@@ -64,7 +64,9 @@ class TestOpenAIRequestAttrs:
             "messages": [],
             "service_tier": "scale",
         }
-        recorder._on_provider_request(payload, Model(id="gpt-test", provider="openai"))
+        recorder._on_provider_request(
+            payload, Model(id="gpt-test", provider_id="openai")
+        )
         chat = recorder._run.chat_span  # type: ignore[union-attr]
         # chat_span is an actual SDK Span; read via .attributes
         attrs = dict(chat.attributes or {})

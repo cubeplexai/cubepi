@@ -49,6 +49,8 @@ MODULES = [
     ("cubepi.utils",        "Utils",         7),
 ]
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 # ---------------------------------------------------------------------------
 # Public-surface detection
@@ -154,6 +156,19 @@ def _anchor(name: str) -> str:
     s = re.sub(r"[^a-z0-9\-]", "", s)
     s = re.sub(r"-+", "-", s).strip("-")
     return s
+
+
+def _source_relpath(filepath: str | Path) -> str:
+    """Return a GitHub-linkable source path relative to the repo root."""
+    path = Path(str(filepath))
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        parts = path.as_posix().split("/")
+        for index in range(len(parts) - 1, -1, -1):
+            if parts[index] == "cubepi":
+                return "/".join(parts[index:])
+        return path.as_posix()
 
 
 def build_ref_index(modules_to_symbols: dict[str, list]) -> dict[str, str]:
@@ -576,9 +591,7 @@ def render_class_members(
             fp = getattr(member, "filepath", None)
             ln = getattr(member, "lineno", None)
             if fp and ln:
-                rel = Path(str(fp)).as_posix()
-                if "/cubepi/" in rel:
-                    rel = "cubepi/" + rel.split("/cubepi/", 1)[1]
+                rel = _source_relpath(fp)
                 link = f"{github_blob_root}/{rel}#L{ln}"
                 lines.append(f"[source]({link})")
                 lines.append("")
@@ -649,9 +662,7 @@ def render_symbol(
     fp = getattr(symbol, "filepath", None)
     ln = getattr(symbol, "lineno", None)
     if fp and ln:
-        rel = Path(str(fp)).as_posix()
-        if "/cubepi/" in rel:
-            rel = "cubepi/" + rel.split("/cubepi/", 1)[1]
+        rel = _source_relpath(fp)
         link = f"{github_blob_root}/{rel}#L{ln}"
         block.append(f"[source]({link})")
         block.append("")

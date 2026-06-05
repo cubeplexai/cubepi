@@ -12,7 +12,7 @@ hide_table_of_contents: false
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/middleware/base.py#L24)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/middleware/base.py#L24)
 
 
 **Methods**
@@ -23,7 +23,7 @@ _class_
 transform_context(messages: list, *, signal = None) -> list
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/middleware/base.py#L25)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/middleware/base.py#L25)
 
 
 #### `convert_to_llm` {#middleware-convert-to-llm}
@@ -32,7 +32,7 @@ transform_context(messages: list, *, signal = None) -> list
 convert_to_llm(messages: list) -> list
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/middleware/base.py#L28)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/middleware/base.py#L28)
 
 
 #### `before_tool_call` {#middleware-before-tool-call}
@@ -41,7 +41,7 @@ convert_to_llm(messages: list) -> list
 before_tool_call(ctx: Any, *, signal = None) -> Any
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/middleware/base.py#L31)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/middleware/base.py#L31)
 
 
 #### `after_tool_call` {#middleware-after-tool-call}
@@ -50,7 +50,7 @@ before_tool_call(ctx: Any, *, signal = None) -> Any
 after_tool_call(ctx: Any, *, signal = None) -> Any
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/middleware/base.py#L34)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/middleware/base.py#L34)
 
 
 #### `transform_system_prompt` {#middleware-transform-system-prompt}
@@ -59,7 +59,7 @@ after_tool_call(ctx: Any, *, signal = None) -> Any
 transform_system_prompt(system_prompt: str, *, signal = None) -> str
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/middleware/base.py#L37)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/middleware/base.py#L37)
 
 
 #### `should_stop_after_turn` {#middleware-should-stop-after-turn}
@@ -68,7 +68,7 @@ transform_system_prompt(system_prompt: str, *, signal = None) -> str
 should_stop_after_turn(ctx: Any) -> bool
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/middleware/base.py#L45)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/middleware/base.py#L45)
 
 
 #### `after_model_response` {#middleware-after-model-response}
@@ -77,7 +77,7 @@ should_stop_after_turn(ctx: Any) -> bool
 after_model_response(response: AssistantMessage, ctx: Any, *, signal: Any = None) -> TurnAction | None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/middleware/base.py#L48)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/middleware/base.py#L48)
 
 
 
@@ -95,7 +95,7 @@ Composition (chain): each middleware sees previous middleware's
 TurnAction. Last middleware's value wins for response and decision.
 inject_messages concatenates across the chain.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/middleware/base.py#L10)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/middleware/base.py#L10)
 
 
 **Attributes**
@@ -114,7 +114,7 @@ compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/middleware/base.py#L64)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/middleware/base.py#L64)
 
 
 

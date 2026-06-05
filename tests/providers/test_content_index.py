@@ -9,7 +9,7 @@ from cubepi.providers.faux import (
 
 
 def _make_model() -> Model:
-    return Model(id="faux-1", provider="faux")
+    return Model(id="faux-1", provider_id="faux")
 
 
 class TestContentIndexTextOnly:

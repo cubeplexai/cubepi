@@ -44,7 +44,7 @@ wrap initialize/list/call awaits in `asyncio.wait_for` so a server
 that accepts the connection but stalls on protocol messages still
 aborts.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/mcp/http_loader.py#L112)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/mcp/http_loader.py#L112)
 
 
 ### load_mcp_tools_stdio {#load-mcp-tools-stdio}
@@ -75,7 +75,7 @@ simplicity, no process pooling).
 - `timeout` — per-call wall-clock timeout for initialize/list/call awaits.
         A hung server raises asyncio.TimeoutError instead of blocking forever.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/mcp/stdio_loader.py#L16)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/mcp/stdio_loader.py#L16)
 
 
 ### MCPDiscoveryResult {#mcpdiscoveryresult}
@@ -92,7 +92,7 @@ Outcome of an MCP discovery handshake.
 server exposes). `server` and `tool_infos` are display metadata
 captured from the same handshake; both follow MCP spec rev 2025-11-25.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/mcp/types.py#L56)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/mcp/types.py#L56)
 
 
 **Attributes**
@@ -119,7 +119,7 @@ the server supplies separate variants — the spec lets clients pick the
 variant matching the current UI theme and fall back to the first entry
 otherwise.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/mcp/types.py#L10)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/mcp/types.py#L10)
 
 
 **Attributes**
@@ -144,7 +144,7 @@ Sourced from `InitializeResult.serverInfo` (an `Implementation`):
 the server's display name + version, an optional website URL, and an
 optional list of icons that clients can render as the server's logo.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/mcp/types.py#L28)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/mcp/types.py#L28)
 
 
 **Attributes**
@@ -169,7 +169,7 @@ Carries `Tool.icons` separately from the executable `AgentTool` so
 consumers can render tool-specific icons without coupling cubepi's
 core `AgentTool` type to MCP display concerns.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/mcp/types.py#L43)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/mcp/types.py#L43)
 
 
 **Attributes**

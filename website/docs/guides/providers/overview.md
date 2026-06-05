@@ -1,21 +1,92 @@
 ---
-title: Capability Descriptors
-description: "Provider capabilities and model presets in CubePi — compare features across providers."
+title: Providers Overview
+description: "Provider setup, capabilities, and presets in CubePi."
 ---
 
-# Capability Descriptors
+# Providers Overview
 
-_Capability descriptors added in CubePi `0.5`._
+_Start here for provider setup in CubePi._
 
-This page is about reaching **any** model — the big SaaS APIs, a regional
-endpoint, a coding-plan tier, or your own vLLM box — without writing
-per-vendor glue. The progression is deliberate:
+This page is the entry point for provider configuration. It covers the
+default path for Anthropic and OpenAI, then explains how to describe
+wire-level differences and preset overrides when you need to reach a
+different backend without writing per-vendor glue. The progression is
+deliberate:
 
 1. **The default is zero config.** For Anthropic and OpenAI you write a
    provider and a model. Nothing on this page is required.
 2. **For an off-default endpoint, describe the quirks as data.** A
    `CapabilityDescriptor` captures the differences declaratively — no
    subclassing, no forking.
+
+## `provider.model(...)` parameters
+
+Use `provider.model(model_id, ...)` to create a bound model for an agent.
+`model_id` is required and positional; everything else is optional keyword
+arguments:
+
+- `api: str` — alternate API name/route tag for downstream integrations.
+- `reasoning: bool` — enable reasoning mode and thinking-level negotiation.
+- `context_window: int` — context-capacity hint used for validation and prompt planning.
+- `max_tokens: int` — default max generation cap for this model.
+- `temperature: float` — default sampling temperature for this model.
+- `cost: ModelCost | None` — optional cost metadata object.
+- `thinking_level_map: dict[str, str | None] | None` — optional map for level
+  overrides and unsupported levels (`None` disables a level).
+
+## `CapabilityDescriptor` is what to use when behavior differs by backend
+
+`CapabilityDescriptor` is passed to a provider to express wire differences for
+all models served by that provider:
+
+```python
+from cubepi import CapabilityDescriptor
+from cubepi.providers.openai import OpenAIProvider
+
+provider = OpenAIProvider(
+    api_key="...",
+    base_url="https://api.deepseek.com",
+    capability=CapabilityDescriptor(
+        reasoning_on_payload={"extra_body": {"thinking": True}},
+        reasoning_off_payload={"extra_body": {"thinking": False}},
+        max_tokens_field="max_completion_tokens",
+    ),
+)
+```
+
+If only one model needs an override, use
+`model_capability_overrides`:
+
+```python
+from cubepi import CapabilityDescriptor
+from cubepi.providers.openai import OpenAIProvider
+
+provider = OpenAIProvider(
+    api_key="...",
+    base_url="https://openrouter.ai/api/v1",
+    capability=CapabilityDescriptor(
+        reasoning_on_payload={"extra_body": {"thinking": True}},
+    ),
+    model_capability_overrides={
+        "deepseek-r1": CapabilityDescriptor(
+            reasoning_on_payload={"extra_body": {"thinking": "enabled"}},
+        ),
+    },
+)
+```
+
+`model_capability_overrides` is matched by exact `model_id`.
+
+`CapabilityDescriptor` supports these fields:
+
+- `reasoning_on_payload / reasoning_off_payload` — payload merged when
+  reasoning is on/off.
+- `reasoning_level` (`ReasoningLevelSpec`) — map `off`/`minimal`/... to backend
+  payload paths.
+- `temperature` (`TemperatureSpec`) — clip, force, or strip temperature.
+- `max_tokens_field` — pick `max_tokens` or `max_completion_tokens`.
+- `supports_tools` / `supports_images` / `supports_streaming` — metadata consumed
+  by host UI and product code.
 
 :::note Preset catalogs live in the host application
 CubePi ships the **mechanism** (the `CapabilityDescriptor` and the wire
@@ -34,13 +105,11 @@ sensible defaults:
 
 ```python
 import cubepi
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.providers.anthropic import AnthropicProvider
 
-agent = Agent(
-    provider=AnthropicProvider(),                 # reads ANTHROPIC_API_KEY
-    model=Model(id="claude-sonnet-4-6", provider="anthropic"),
-)
+provider = AnthropicProvider(provider_id="anthropic")  # reads ANTHROPIC_API_KEY
+agent = Agent(model=provider.model("claude-sonnet-4-6"))
 await agent.prompt("Hello!")
 ```
 
@@ -132,6 +201,40 @@ the capability value wins.
 Beyond on/off, CubePi maps a `ThinkingLevel`
 (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`) onto a concrete wire value
 written at a dotted `path`. `kind` picks the shape:
+
+`ReasoningLevelSpec` only changes how that level is serialized. You still need
+two call-site controls:
+
+- set `reasoning=True` when binding the model (enable reasoning for that model)
+- set the Agent's `thinking` argument to one of `off|minimal|low|medium|high|xhigh`
+  (defaults to `off`).
+
+```python
+from cubepi import CapabilityDescriptor, ReasoningLevelSpec
+from cubepi.providers.openai import OpenAIProvider
+from cubepi import Agent
+
+provider = OpenAIProvider(
+    api_key="...",
+    capability=CapabilityDescriptor(
+        reasoning_on_payload={"extra_body": {"reasoning": {"enabled": True}}},
+        reasoning_level=ReasoningLevelSpec(
+            path="reasoning.effort",
+            kind="effort",
+            level_to_effort={
+                "off": "low",
+                "minimal": "low",
+                "low": "low",
+                "medium": "medium",
+                "high": "high",
+                "xhigh": "high",
+            },
+        ),
+    ),
+)
+
+agent = Agent(model=provider.model("deepseek-r1", reasoning=True), thinking="high")
+```
 
 ```python
 from cubepi import ReasoningLevelSpec

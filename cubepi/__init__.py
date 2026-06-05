@@ -20,6 +20,7 @@ from cubepi.middleware import Middleware, compose_middleware
 from cubepi.providers import (
     AssistantMessage,
     BaseProvider,
+    BoundModel,
     Message,
     MessageStream,
     Model,
@@ -58,6 +59,7 @@ __all__ = [
     "AgentToolResult",
     "AssistantMessage",
     "BaseProvider",
+    "BoundModel",
     "CapabilityDescriptor",
     "ContextLengthExceeded",
     "JsonObject",

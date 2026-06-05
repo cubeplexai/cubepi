@@ -87,11 +87,11 @@ def clamp_thinking_level(model: Model, level: ThinkingLevel) -> ThinkingLevel:
 def models_are_equal(a: Model | None, b: Model | None) -> bool:
     """Return ``True`` if *a* and *b* refer to the same model.
 
-    Comparison is by ``id`` and ``provider``.  Returns ``False`` when either
+    Comparison is by ``id`` and ``provider_id``.  Returns ``False`` when either
     argument is ``None``.
     """
     if a is None and b is None:
         return True
     if a is None or b is None:
         return False
-    return a.id == b.id and a.provider == b.provider
+    return a.id == b.id and a.provider_id == b.provider_id

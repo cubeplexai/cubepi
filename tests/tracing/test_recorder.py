@@ -24,7 +24,7 @@ from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubepi.tracing import Tracer
 
 
-MODEL = Model(id="faux-1", provider="faux")
+MODEL = Model(id="faux-1", provider_id="faux")
 
 
 class InMemoryExporter(SpanExporter):
@@ -48,10 +48,9 @@ async def _build(
     tools: list[AgentTool] | None = None,
     before_tool_call=None,
 ) -> tuple[Agent, FauxProvider, InMemoryExporter, Tracer]:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     agent = Agent(
-        provider=provider,
-        model=MODEL,
+        model=provider.model(MODEL.id),
         system_prompt=system_prompt,
         tools=tools,
         before_tool_call=before_tool_call,
@@ -383,7 +382,7 @@ class TestErrorAndAbort:
     async def test_agent_aborted_marks_cubepi_aborted(self):
         # Slow chunking so the abort signal lands MID-stream.
         provider = FauxProvider(tokens_per_second=10.0)
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = InMemoryExporter()
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)
@@ -421,8 +420,8 @@ class TestErrorAndAbort:
         the provider to actually cooperate."""
         import asyncio as _asyncio
 
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = InMemoryExporter()
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)
@@ -462,8 +461,8 @@ class TestErrorAndAbort:
         case; only a (None, None) shape coinciding with the agent's
         abort signal counts as a real abort (codex P2 follow-up on
         PR #87)."""
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = InMemoryExporter()
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)
@@ -538,8 +537,8 @@ class TestRequestMaxTokensCrossProvider:
     MINOR)."""
 
     async def test_max_output_tokens_lands_in_request_max_tokens(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = InMemoryExporter()
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)
@@ -600,8 +599,8 @@ class TestDetachFlushGuarantee:
 
     def test_detach_outside_loop_returns_none(self):
         # Build a Tracer + Agent in sync context (no running loop).
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(service_name="t", agent_name="a", exporters=[])
         detach = tracer.attach(agent)
         # No running loop → flush is the caller's responsibility.
@@ -618,7 +617,7 @@ class TestCancellationExportsSpans:
 
     async def test_cancelled_run_still_exports_invoke_agent_span(self):
         provider = FauxProvider(tokens_per_second=10.0)
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = InMemoryExporter()
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         detach = tracer.attach(agent)
@@ -788,8 +787,8 @@ class TestAttachedContextManager:
     pile up handlers."""
 
     async def test_basic_usage(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = InMemoryExporter()
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         provider.append_responses([faux_assistant_message("ok")])
@@ -806,7 +805,7 @@ class TestAttachedContextManager:
 
     async def test_cancellation_inside_block_still_closes_spans(self):
         provider = FauxProvider(tokens_per_second=10.0)
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = InMemoryExporter()
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         provider.append_responses([faux_assistant_message("x" * 400)])
@@ -831,8 +830,8 @@ class TestAttachedContextManager:
                 assert attrs.get("cubepi.aborted") is True
 
     async def test_exception_inside_block_still_detaches(self):
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(service_name="t", agent_name="a", exporters=[])
 
         try:
@@ -852,8 +851,8 @@ class TestAttachedContextManager:
         what ``await detach()`` would do manually. Otherwise users
         continue past the block thinking spans landed (codex P2 on
         PR #90)."""
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(service_name="t", agent_name="a", exporters=[])
         provider.append_responses([faux_assistant_message("ok")])
 
@@ -880,8 +879,8 @@ class TestAttachedContextManager:
         """When the body raised, the flush failure must NOT mask the
         original exception — the body's exception is the real
         problem. Matches the standard contextlib pattern."""
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(service_name="t", agent_name="a", exporters=[])
 
         async def _bad_flush(*_a, **_kw):
@@ -899,8 +898,8 @@ class TestAttachedContextManager:
         """The intended top-level idiom — Tracer + attached in one
         ``async with`` line.
         """
-        provider = FauxProvider()
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         provider.append_responses([faux_assistant_message("ok")])
         exporter = InMemoryExporter()
 
@@ -1237,9 +1236,9 @@ class TestJsonlExporter:
     async def test_writes_jsonl_files(self, tmp_path):
         from cubepi.tracing.exporters import JsonlSpanExporter
 
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("ok")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = JsonlSpanExporter(directory=tmp_path)
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)

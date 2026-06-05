@@ -322,7 +322,7 @@ async def test_agent_abort_during_mcp_call_does_not_raise() -> None:
 
     from cubepi.agent.agent import Agent
     from cubepi.mcp._adapter import make_mcp_agent_tool
-    from cubepi.providers.base import Model, ToolCall
+    from cubepi.providers.base import ToolCall
     from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
     in_flight = _asyncio.Event()
@@ -338,7 +338,7 @@ async def test_agent_abort_during_mcp_call_does_not_raise() -> None:
         input_schema={"type": "object", "properties": {}, "required": []},
         call_remote=_slow,
     )
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.append_responses(
         [
             faux_assistant_message(
@@ -351,8 +351,7 @@ async def test_agent_abort_during_mcp_call_does_not_raise() -> None:
         ]
     )
     agent = Agent(
-        provider=provider,
-        model=Model(id="faux-1", provider="faux"),
+        model=provider.model("faux-1"),
         system_prompt="s",
         tools=[mcp_tool],
     )

@@ -24,10 +24,11 @@ const sidebars: SidebarsConfig = {
           'guides/agents/streaming',
         ]},
         { type: 'category', label: 'Providers', items: [
+          'guides/providers/overview',
           'guides/providers/anthropic',
           'guides/providers/openai',
-          'guides/providers/capability-and-presets',
           'guides/providers/custom',
+          'guides/providers/image-generation',
         ]},
         { type: 'category', label: 'Checkpointing', items: [
           'guides/checkpointing/sqlite',
@@ -39,6 +40,8 @@ const sidebars: SidebarsConfig = {
           'guides/middleware/hooks',
           'guides/middleware/composition',
           'guides/middleware/examples',
+          'guides/middleware/compaction',
+          'guides/middleware/subagents',
         ]},
         { type: 'category', label: 'Human-in-the-Loop', items: [
           'guides/hitl/overview',

@@ -26,7 +26,7 @@ from cubepi.providers.base import (
 
 
 def _model() -> Model:
-    return Model(id="gpt-4o", provider="openai", api="openai")
+    return Model(id="gpt-4o", provider_id="openai", api="openai")
 
 
 def _make_chunk(

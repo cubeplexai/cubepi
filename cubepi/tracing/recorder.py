@@ -881,7 +881,7 @@ class Recorder:
         ctx = trace.set_span_in_context(run.turn_span)
         attrs: dict[str, Any] = {
             GEN_AI_OPERATION_NAME: OP_CHAT,
-            GEN_AI_PROVIDER_NAME: map_provider_name(model.provider),
+            GEN_AI_PROVIDER_NAME: map_provider_name(model.provider_id),
             GEN_AI_REQUEST_MODEL: model.id,
             GEN_AI_REQUEST_STREAM: True,
             # Record run_id as a span attribute (for filtering); the JSONL

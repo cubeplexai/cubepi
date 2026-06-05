@@ -44,7 +44,7 @@ keys winning).
         tuple/list of those); other shapes will be silently
         dropped by the recorder.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/context.py#L51)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/context.py#L51)
 
 
 ### JsonlSpanExporter {#jsonlspanexporter}
@@ -65,7 +65,7 @@ id; spans without a context fall back to `"unknown-trace"`.
 
 Permissions: files are created mode `0o600` (user-only).
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/exporters/jsonl.py#L23)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/exporters/jsonl.py#L23)
 
 
 **Methods**
@@ -76,7 +76,7 @@ Permissions: files are created mode `0o600` (user-only).
 export(spans: Sequence[ReadableSpan]) -> SpanExportResult
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/exporters/jsonl.py#L42)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/exporters/jsonl.py#L42)
 
 
 #### `shutdown` {#jsonlspanexporter-shutdown}
@@ -85,7 +85,7 @@ export(spans: Sequence[ReadableSpan]) -> SpanExportResult
 shutdown() -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/exporters/jsonl.py#L69)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/exporters/jsonl.py#L69)
 
 
 #### `force_flush` {#jsonlspanexporter-force-flush}
@@ -94,7 +94,7 @@ shutdown() -> None
 force_flush(timeout_millis: int = 30000) -> bool
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/exporters/jsonl.py#L72)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/exporters/jsonl.py#L72)
 
 
 
@@ -128,7 +128,7 @@ tracer.attach(agent)
 meter.attach(agent)
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/meter.py#L71)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/meter.py#L71)
 
 
 **Attributes**
@@ -154,7 +154,7 @@ the Meter instance, so a second agent's `provider_request`
 overwrote the first agent's `_chat_open_ns` / `_chat_attrs`
 before its response landed).
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/meter.py#L144)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/meter.py#L144)
 
 
 #### `force_flush` {#meter-force-flush}
@@ -163,7 +163,7 @@ before its response landed).
 force_flush(timeout_seconds: float = 30.0) -> bool
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/meter.py#L194)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/meter.py#L194)
 
 
 #### `shutdown` {#meter-shutdown}
@@ -172,7 +172,7 @@ force_flush(timeout_seconds: float = 30.0) -> bool
 shutdown(timeout_seconds: float = 30.0) -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/meter.py#L197)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/meter.py#L197)
 
 
 #### `attached` {#meter-attached}
@@ -199,7 +199,7 @@ async with (
 # auto: detach both + shutdown both
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/meter.py#L204)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/meter.py#L204)
 
 
 
@@ -212,7 +212,7 @@ SCHEMA_URL = 'https://opentelemetry.io/schemas/1.41.0'
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/schema.py#L13)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/schema.py#L13)
 
 
 ### Tracer {#tracer}
@@ -248,7 +248,7 @@ finally:
     await tracer.shutdown()
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/tracer.py#L35)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/tracer.py#L35)
 
 
 **Attributes**
@@ -292,7 +292,7 @@ back to the OTel global default (a no-op provider when the
 caller didn't separately call `trace.set_tracer_provider`).
 The detach callable unregisters.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/tracer.py#L155)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/tracer.py#L155)
 
 
 #### `force_flush` {#tracer-force-flush}
@@ -305,7 +305,7 @@ Block until all currently buffered spans are exported.
 
 Returns `False` on timeout.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/tracer.py#L235)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/tracer.py#L235)
 
 
 #### `shutdown` {#tracer-shutdown}
@@ -316,7 +316,7 @@ shutdown(timeout_seconds: float = 30.0) -> None
 
 Flush and close all exporters. Tracer is unusable after this.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/tracer.py#L243)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/tracer.py#L243)
 
 
 #### `attached` {#tracer-attached}
@@ -352,7 +352,7 @@ async with Tracer(...) as tracer, tracer.attached(agent):
 # auto: detach (closes cancelled spans) + shutdown (flush + close)
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/tracer.py#L284)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/tracer.py#L284)
 
 
 
@@ -388,7 +388,7 @@ async with trace(tracer, agent):
     await agent.prompt("...")
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/.worktrees/2026-05-31-release-0.6.0/cubepi/tracing/tracer.py#L398)
+[source](https://github.com/cubeplexai/cubepi/blob/v0.6.0/cubepi/tracing/tracer.py#L398)
 
 
 

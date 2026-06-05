@@ -27,7 +27,7 @@ from cubepi.providers.base import (
 class TestFormatProviderError:
     @staticmethod
     def _model() -> Model:
-        return Model(id="gpt-4o", provider="openai")
+        return Model(id="gpt-4o", provider_id="openai")
 
     def test_includes_provider_model_and_exception(self):
         msg = format_provider_error(RuntimeError("boom"), self._model())
@@ -131,7 +131,7 @@ class TestMessageTypes:
         assert msg.is_error is False
 
     def test_model_defaults(self):
-        m = Model(id="gpt-4o", provider="openai")
+        m = Model(id="gpt-4o", provider_id="openai")
         assert m.context_window == 200_000
         assert m.max_tokens == 8192
         assert m.reasoning is False
@@ -244,7 +244,7 @@ class TestBaseProviderGenerate:
         )
 
         result = await provider.generate(
-            Model(id="gpt-4o", provider="openai"),
+            Model(id="gpt-4o", provider_id="openai"),
             [UserMessage(content=[TextContent(text="hi")])],
             system_prompt="system",
         )
@@ -254,7 +254,7 @@ class TestBaseProviderGenerate:
 
     async def test_generate_applies_common_per_call_overrides(self):
         provider = _RecordingProvider(AssistantMessage(content=[]))
-        base_model = Model(id="gpt-4o", provider="openai", max_tokens=128)
+        base_model = Model(id="gpt-4o", provider_id="openai", max_tokens=128)
         base_options = StreamOptions(thinking="low")
         budgets = ThinkingBudgets(low=4096)
 

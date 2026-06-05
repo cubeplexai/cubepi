@@ -27,6 +27,10 @@
     "message": "中间件",
     "description": "The label for category 'Middleware' in sidebar 'docs'"
   },
+  "sidebar.docs.category.Human-in-the-Loop": {
+    "message": "人机协同",
+    "description": "The label for category 'Human-in-the-Loop' in sidebar 'docs'"
+  },
   "sidebar.docs.category.MCP": {
     "message": "MCP",
     "description": "The label for category 'MCP' in sidebar 'docs'"

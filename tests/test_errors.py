@@ -31,7 +31,7 @@ def _model(
     model_id: str = "gpt-4o",
     context_window: int = 128_000,
 ) -> Model:
-    return Model(id=model_id, provider=provider, context_window=context_window)
+    return Model(id=model_id, provider_id=provider, context_window=context_window)
 
 
 def _messages(text: str = "hello") -> list:

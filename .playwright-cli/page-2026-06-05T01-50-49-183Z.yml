@@ -1,0 +1,35 @@
+- generic [ref=e2]:
+  - region "Skip to main content":
+    - link "Skip to main content" [ref=e3] [cursor=pointer]:
+      - /url: "#__docusaurus_skipToContent_fallback"
+  - navigation "Main" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link "CubePi logo CubePi" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img "CubePi logo" [ref=e9]
+          - generic [ref=e10]: CubePi
+        - link "Docs" [ref=e11] [cursor=pointer]:
+          - /url: /docs
+        - link "API" [ref=e12] [cursor=pointer]:
+          - /url: /docs/api/
+        - link "Recipes" [ref=e13] [cursor=pointer]:
+          - /url: /docs/recipes/weather-agent
+        - link "Changelog" [ref=e14] [cursor=pointer]:
+          - /url: /changelog
+      - generic [ref=e15]:
+        - button "0.7 (latest)" [ref=e17] [cursor=pointer]
+        - button "English" [ref=e19] [cursor=pointer]:
+          - img [ref=e20]
+          - text: English
+        - link "GitHub(opens in new tab)" [ref=e22] [cursor=pointer]:
+          - /url: https://github.com/cubeplexai/cubepi
+          - text: GitHub
+          - img "(opens in new tab)" [ref=e23]
+        - button "Switch between dark and light mode (currently system mode)" [disabled] [ref=e26]:
+          - img [ref=e27]
+  - main [ref=e30]:
+    - generic [ref=e32]:
+      - heading "Page Not Found" [level=1] [ref=e33]
+      - paragraph [ref=e34]: We could not find what you were looking for.
+      - paragraph [ref=e35]: Please contact the owner of the site that linked you to the original URL and let them know their link is broken.

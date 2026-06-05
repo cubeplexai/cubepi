@@ -12,7 +12,7 @@ from cubepi.middleware.compaction.boundary import safe_boundary
 from cubepi.middleware.compaction.state import CompactionState, message_refs
 from cubepi.middleware.compaction.summarizer import summarize
 from cubepi.middleware.compaction.tokens import approx_tokens
-from cubepi.providers.base import Message, Model, Provider, TextContent, UserMessage
+from cubepi.providers.base import BoundModel, Message, TextContent, UserMessage
 
 SUMMARY_PREFIX = "[Conversation summary so far]\n"
 logger = logging.getLogger(__name__)
@@ -68,15 +68,14 @@ class CompactionMiddleware(Middleware):
     def __init__(
         self,
         *,
-        summary_provider: Provider,
-        summary_model: Model,
+        summary_model: BoundModel,
         max_tokens_before_compact: int,
         keep_recent_messages: int = 8,
         max_summary_tokens: int = 1024,
         min_compact_messages: int = 4,
     ) -> None:
-        self._summary_provider = summary_provider
-        self._summary_model = summary_model
+        self._summary_provider = summary_model.provider
+        self._summary_model = summary_model.spec
         self._max_tokens_before = max_tokens_before_compact
         self._keep_recent = keep_recent_messages
         self._max_summary_tokens = max_summary_tokens

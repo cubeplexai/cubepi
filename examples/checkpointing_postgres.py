@@ -35,7 +35,6 @@ from cubepi.checkpointer.postgres.alembic_helpers import (
     create_message_partitions_op,
     write_schema_version_op,
 )
-from cubepi.providers.base import Model
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
 ADMIN_DSN = os.environ.get(
@@ -92,11 +91,10 @@ async def bootstrap_schema(dsn: str) -> None:
 
 
 def build_agent(checkpointer: PostgresCheckpointer) -> Agent:
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("Hi! I'll remember this.")])
     return Agent(
-        provider=provider,
-        model=Model(id="faux", provider="faux"),
+        model=provider.model("faux"),
         checkpointer=checkpointer,
         thread_id=THREAD_ID,
     )

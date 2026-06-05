@@ -3,15 +3,13 @@ from cubepi.agent.agent import Agent
 from cubepi.hitl import HitlError
 from cubepi.hitl.channel import InMemoryChannel
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
-from cubepi.providers.base import Model
 
 
 def _agent(channel=None):
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("")])
     return Agent(
-        provider=provider,
-        model=Model(id="faux", provider="faux"),
+        model=provider.model("faux"),
         channel=channel,
     )
 

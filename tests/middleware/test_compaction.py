@@ -9,6 +9,7 @@ from cubepi.middleware.compaction import _load_state
 from cubepi.middleware.compaction.state import message_ref, message_refs
 from cubepi.providers.base import (
     AssistantMessage,
+    BoundModel,
     Message,
     Model,
     StreamOptions,
@@ -71,8 +72,10 @@ def _make_middleware(
     max_tokens_before: int = 1000,
 ) -> CompactionMiddleware:
     return CompactionMiddleware(
-        summary_provider=provider,
-        summary_model=Model(id="summary-model", provider="faux"),
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
         max_tokens_before_compact=max_tokens_before,
         keep_recent_messages=2,
         max_summary_tokens=512,

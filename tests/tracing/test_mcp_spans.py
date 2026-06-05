@@ -359,7 +359,7 @@ class TestTracerProviderRouting:
 
     async def test_mcp_span_lands_in_tracer_exporter(self):
         from cubepi.agent.agent import Agent
-        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.base import ToolCall
         from cubepi.providers.faux import (
             FauxProvider,
             faux_assistant_message,
@@ -389,7 +389,7 @@ class TestTracerProviderRouting:
             protocol_version="2025-11-25",
         )
 
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses(
             [
                 faux_assistant_message(
@@ -400,8 +400,7 @@ class TestTracerProviderRouting:
             ]
         )
         agent = Agent(
-            provider=provider,
-            model=Model(id="faux-1", provider="faux"),
+            model=provider.model("faux-1"),
             system_prompt="s",
             tools=[mcp_tool],
         )
@@ -444,7 +443,7 @@ class TestTracerProviderRouting:
         exporter. Refcounted register/unregister is the contract
         (codex round-6 review on PR #86)."""
         from cubepi.agent.agent import Agent
-        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.base import ToolCall
         from cubepi.providers.faux import FauxProvider, faux_assistant_message
         from cubepi.tracing import Tracer
 
@@ -465,7 +464,7 @@ class TestTracerProviderRouting:
                 },
                 call_remote=call_remote,
             )
-            provider_a = FauxProvider()
+            provider_a = FauxProvider(provider_id="faux")
             provider_a.append_responses(
                 [
                     faux_assistant_message(
@@ -476,8 +475,7 @@ class TestTracerProviderRouting:
                 ]
             )
             return Agent(
-                provider=provider_a,
-                model=Model(id="faux-1", provider="faux"),
+                model=provider_a.model("faux-1"),
                 system_prompt="s",
                 tools=[mcp_tool],
             )
@@ -597,7 +595,7 @@ class TestMCPSpanParentage:
         leg and Tracer B's exporter would receive a stray span with
         agent A's trace_id (codex round-7 review on PR #86)."""
         from cubepi.agent.agent import Agent
-        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.base import ToolCall
         from cubepi.providers.faux import FauxProvider, faux_assistant_message
         from cubepi.tracing import Tracer
 
@@ -616,7 +614,7 @@ class TestMCPSpanParentage:
                 },
                 call_remote=call_remote,
             )
-            provider = FauxProvider()
+            provider = FauxProvider(provider_id="faux")
             provider.append_responses(
                 [
                     faux_assistant_message(
@@ -627,8 +625,7 @@ class TestMCPSpanParentage:
                 ]
             )
             return Agent(
-                provider=provider,
-                model=Model(id="faux-1", provider="faux"),
+                model=provider.model("faux-1"),
                 system_prompt="s",
                 tools=[mcp_tool],
             )
@@ -693,7 +690,7 @@ class TestMCPSpanParentage:
 
         from cubepi.agent.agent import Agent
         from cubepi.mcp._adapter import make_mcp_agent_tool
-        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.base import ToolCall
         from cubepi.providers.faux import FauxProvider, faux_assistant_message
         from cubepi.tracing import Tracer
 
@@ -719,7 +716,7 @@ class TestMCPSpanParentage:
                 },
                 call_remote=call_remote,
             )
-            prov = FauxProvider()
+            prov = FauxProvider(provider_id="faux")
             prov.append_responses(
                 [
                     faux_assistant_message(
@@ -730,8 +727,7 @@ class TestMCPSpanParentage:
                 ]
             )
             return Agent(
-                provider=prov,
-                model=Model(id="faux-1", provider="faux"),
+                model=prov.model("faux-1"),
                 system_prompt="s",
                 tools=[mcp_tool],
             )
@@ -794,7 +790,7 @@ class TestMCPSpanParentage:
         from cubepi.agent.agent import Agent
         from cubepi.agent.types import AgentTool
         from cubepi.mcp._adapter import make_mcp_agent_tool
-        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.base import ToolCall
         from cubepi.providers.faux import FauxProvider, faux_assistant_message
         from cubepi.tracing import Tracer
 
@@ -820,7 +816,7 @@ class TestMCPSpanParentage:
             execution_mode="parallel",
         )
 
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses(
             [
                 faux_assistant_message(
@@ -831,8 +827,7 @@ class TestMCPSpanParentage:
             ]
         )
         agent = Agent(
-            provider=provider,
-            model=Model(id="faux-1", provider="faux"),
+            model=provider.model("faux-1"),
             system_prompt="s",
             tools=[mcp_tool],
         )
@@ -872,7 +867,7 @@ class TestMCPSpanParentage:
         from cubepi.agent.agent import Agent
         from cubepi.mcp import _tracing as mcp_tracing
         from cubepi.mcp._adapter import make_mcp_agent_tool
-        from cubepi.providers.base import Model, ToolCall
+        from cubepi.providers.base import ToolCall
         from cubepi.providers.faux import FauxProvider, faux_assistant_message
         from cubepi.tracing import Tracer
 
@@ -898,7 +893,7 @@ class TestMCPSpanParentage:
             call_remote=call_remote,
         )
 
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses(
             [
                 faux_assistant_message(
@@ -909,8 +904,7 @@ class TestMCPSpanParentage:
             ]
         )
         agent = Agent(
-            provider=provider,
-            model=Model(id="faux-1", provider="faux"),
+            model=provider.model("faux-1"),
             system_prompt="s",
             tools=[mcp_tool],
         )

@@ -56,7 +56,7 @@ class _FakeProvider:
 
 async def test_summarize_uses_provider_generate_with_common_overrides() -> None:
     provider = _FakeProvider(" Compressed summary. ")
-    model = Model(id="summary-model", provider="faux")
+    model = Model(id="summary-model", provider_id="faux")
     signal = asyncio.Event()
 
     result = await summarize(
@@ -86,7 +86,7 @@ async def test_summarize_merges_existing_state() -> None:
 
     result = await summarize(
         provider=provider,
-        model=Model(id="summary-model", provider="faux"),
+        model=Model(id="summary-model", provider_id="faux"),
         messages_to_summarize=[UserMessage(content=[TextContent(text="new")])],
         existing=existing,
     )
@@ -121,7 +121,7 @@ async def test_summarize_raises_on_provider_error_message() -> None:
     try:
         await summarize(
             provider=_ErrorProvider(""),
-            model=Model(id="summary-model", provider="faux"),
+            model=Model(id="summary-model", provider_id="faux"),
             messages_to_summarize=[UserMessage(content=[TextContent(text="new")])],
             existing=None,
         )

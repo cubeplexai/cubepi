@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubepi import Agent, Model
+from cubepi import Agent
 from cubepi.agent.types import AgentContext
 from cubepi.middleware.base import Middleware, compose_middleware
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
@@ -69,11 +69,10 @@ async def test_agent_applies_transform_system_prompt() -> None:
             captured.append(sp)
             return sp + "\n[C]"
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("ok")])
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         system_prompt="base",
         middleware=[_AppendA(), _AppendB(), _Capturing()],
     )
@@ -97,13 +96,12 @@ async def test_agent_without_middleware_passes_system_prompt_unchanged() -> None
             self, model, messages, system_prompt=system_prompt, **kw
         )
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("ok")])
     provider.stream = _capturing_stream.__get__(provider, FauxProvider)  # type: ignore[method-assign]
 
     agent = Agent(
-        model=Model(id="test", provider="faux"),
-        provider=provider,
+        model=provider.model("test"),
         system_prompt="base",
     )
     await agent.prompt("hi")

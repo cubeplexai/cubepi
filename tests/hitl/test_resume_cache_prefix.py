@@ -12,7 +12,7 @@ from cubepi.checkpointer.sqlite import SQLiteCheckpointer
 from cubepi.hitl import ApproveAnswer, AskUser
 from cubepi.hitl.channel import CheckpointedChannel
 from cubepi.hitl.middleware import ApprovalPolicyMiddleware
-from cubepi.providers.base import Model, TextContent
+from cubepi.providers.base import TextContent
 from cubepi.providers.faux import (
     FauxProvider,
     faux_assistant_message,
@@ -50,15 +50,14 @@ def _two_turn_bash_responses():
 
 async def _suspend_resume_and_capture(checkpointer):
     ch = CheckpointedChannel(checkpointer=checkpointer, thread_id="t-1")
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses(_two_turn_bash_responses())
 
     captured: list[dict] = []
     provider.subscribe_request(lambda payload, model: captured.append(payload))
 
     agent = Agent(
-        provider=provider,
-        model=Model(id="faux", provider="faux"),
+        model=provider.model("faux"),
         tools=[_bash_tool()],
         middleware=[ApprovalPolicyMiddleware(ch, policy=lambda c: AskUser())],
         channel=ch,

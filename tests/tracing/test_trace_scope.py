@@ -19,7 +19,7 @@ from cubepi.providers.base import Model
 from cubepi.providers.faux import FauxProvider
 from cubepi.tracing import Tracer, trace
 
-MODEL = Model(id="faux-1", provider="faux")
+MODEL = Model(id="faux-1", provider_id="faux")
 
 
 class _NullExporter(SpanExporter):
@@ -34,8 +34,8 @@ class _NullExporter(SpanExporter):
 
 
 def _build() -> tuple[Agent, FauxProvider, Tracer]:
-    provider = FauxProvider()
-    agent = Agent(provider=provider, model=MODEL, system_prompt="t")
+    provider = FauxProvider(provider_id="faux")
+    agent = Agent(model=provider.model(MODEL.id), system_prompt="t")
     tracer = Tracer(
         service_name="t",
         agent_name="t",

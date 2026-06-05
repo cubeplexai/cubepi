@@ -21,7 +21,7 @@ from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubepi.tracing import Tracer
 
 
-MODEL = Model(id="faux-1", provider="faux")
+MODEL = Model(id="faux-1", provider_id="faux")
 
 
 class _Capture(SpanExporter):
@@ -50,9 +50,9 @@ def _attrs(span: ReadableSpan) -> dict[str, Any]:
 
 class TestRunIdOnEverySpan:
     async def test_run_id_propagated_to_all_spans(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("ok")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = _Capture()
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)
@@ -76,9 +76,9 @@ class TestJsonlSharding:
         JsonlSpanExporter routed them to unknown-run.jsonl."""
         from cubepi.tracing.exporters import JsonlSpanExporter
 
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("ok")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = JsonlSpanExporter(directory=tmp_path)
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)
@@ -100,7 +100,7 @@ class TestJsonlSharding:
 class TestChatSpanAbort:
     async def test_chat_span_marks_aborted_on_cooperative_abort(self):
         provider = FauxProvider(tokens_per_second=10.0)
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = _Capture()
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)
@@ -346,9 +346,9 @@ class TestSchemaConstants:
 
 class TestDetach:
     async def test_detach_unsubscribes(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("a")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         exporter = _Capture()
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         detach = tracer.attach(agent)
@@ -403,9 +403,9 @@ class TestTracerConfig:
 class TestStreamRecording:
     async def test_stream_file_created_and_closed(self, tmp_path):
         """record_stream=True writes a .stream.jsonl file for the run."""
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("hello world")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(
             service_name="t",
             agent_name="a",
@@ -426,7 +426,7 @@ class TestStreamRecording:
         """Each text chunk produces a text_delta line in the stream file."""
         provider = FauxProvider(tokens_per_second=1000.0)
         provider.append_responses([faux_assistant_message("abc")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(
             service_name="t",
             agent_name="a",
@@ -456,7 +456,7 @@ class TestStreamRecording:
         """
         provider = FauxProvider(tokens_per_second=5.0)
         provider.append_responses([faux_assistant_message("x" * 300)])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(
             service_name="t",
             agent_name="a",
@@ -494,7 +494,7 @@ class TestStreamRecording:
             return AgentToolResult(content=[TextContent(text="done")])
 
         tool = AgentTool(name="noop", description="d", parameters=P, execute=noop)
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses(
             [
                 faux_assistant_message(
@@ -504,7 +504,7 @@ class TestStreamRecording:
                 faux_assistant_message("all done"),
             ]
         )
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s", tools=[tool])
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s", tools=[tool])
         tracer = Tracer(
             service_name="t",
             agent_name="a",
@@ -534,9 +534,9 @@ class TestStreamRecording:
 
     async def test_no_stream_file_without_record_stream(self, tmp_path):
         """Default (record_stream=False) must not create any stream file."""
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("hi")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(service_name="t", agent_name="a", exporters=[])
         tracer.attach(agent)
 
@@ -548,9 +548,9 @@ class TestStreamRecording:
 
     async def test_stream_events_have_elapsed_time_field(self, tmp_path):
         """Every recorded stream event must carry a numeric 't' (elapsed) field."""
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("hi")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(
             service_name="t",
             agent_name="a",
@@ -576,11 +576,11 @@ class TestStreamRecording:
     async def test_stream_error_event_recorded(self, tmp_path):
         """An error stop_reason causes FauxProvider to emit an 'error' StreamEvent,
         which _write_stream_event captures in the stream file."""
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses(
             [faux_assistant_message("oops", stop_reason="error", error_message="boom")]
         )
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(
             service_name="t",
             agent_name="a",
@@ -608,9 +608,9 @@ class TestStreamRecording:
         """If the stream file write raises, _write_stream_event swallows it silently."""
         from unittest.mock import MagicMock, patch
 
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("hi")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(
             service_name="t",
             agent_name="a",
@@ -652,9 +652,9 @@ class TestStreamRecording:
 
     async def test_stream_open_exception_swallowed(self, tmp_path):
         """If the stream file cannot be opened, the recorder continues without crashing."""
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("hi")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         # Pass stream_dir as an existing file (not a directory) so mkdir fails.
         bad_dir = tmp_path / "not_a_dir.txt"
         bad_dir.write_text("i am a file")
@@ -677,9 +677,9 @@ class TestStreamRecording:
         import cubepi.tracing.recorder as _rec_mod
         from unittest.mock import MagicMock, patch
 
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("hi")])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(
             service_name="t",
             agent_name="a",
@@ -716,7 +716,7 @@ class TestStreamRecording:
 
         provider = FauxProvider(tokens_per_second=5.0)
         provider.append_responses([faux_assistant_message("x" * 300)])
-        agent = Agent(provider=provider, model=MODEL, system_prompt="s")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
         tracer = Tracer(
             service_name="t",
             agent_name="a",

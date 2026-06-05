@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from cubepi.agent.agent import Agent
 from cubepi.agent.types import AgentEvent, AgentTool, AgentToolResult
 from cubepi.middleware.base import Middleware
-from cubepi.providers.base import AssistantMessage, Model, Provider, TextContent
+from cubepi.providers.base import AssistantMessage, BoundModel, TextContent
 from cubepi.types import StructuredValue
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,7 @@ class SubagentSpec:
     name: str
     description: str
     system_prompt: str
-    provider: Provider | None = None
-    model: Model | None = None
+    model: BoundModel | None = None
     tools: Sequence[AgentTool[BaseModel]] = field(default_factory=tuple)
     middleware: Sequence[Middleware] = field(default_factory=tuple)
 
@@ -62,8 +61,7 @@ class SubagentMiddleware(Middleware):
         self,
         *,
         subagents: dict[str, SubagentSpec],
-        default_provider: Provider,
-        default_model: Model,
+        default_model: BoundModel,
         shared_tools: Sequence[AgentTool[BaseModel]] = (),
         inherited_middleware: Sequence[Middleware] = (),
         excluded_tool_names: set[str] | None = None,
@@ -83,7 +81,6 @@ class SubagentMiddleware(Middleware):
 
         excluded = excluded_tool_names or {"subagent"}
         self._subagents = dict(subagents)
-        self._default_provider = default_provider
         self._default_model = default_model
         self._shared_tools = tuple(
             tool for tool in shared_tools if tool.name not in excluded
@@ -153,12 +150,10 @@ class SubagentMiddleware(Middleware):
             request.subagent_type,
             self._subagents["general-purpose"],
         )
-        provider = spec.provider or self._default_provider
         model = spec.model or self._default_model
         tools = [*self._shared_tools, *spec.tools]
         middleware = [*self._inherited_middleware, *spec.middleware]
         child: Agent[BaseModel] = Agent(
-            provider=provider,
             model=model,
             system_prompt=spec.system_prompt,
             tools=tools,

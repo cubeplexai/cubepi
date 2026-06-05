@@ -14,7 +14,7 @@ function capture(event: string, payload: object) {
   if (ph && typeof ph.capture === 'function') ph.capture(event, payload);
 }
 
-export default function DocFeedback({ slug, version, locale }: Props): JSX.Element {
+export default function DocFeedback({ slug, version, locale }: Props): React.ReactElement {
   const [phase, setPhase] = useState<Phase>('ask');
   const [comment, setComment] = useState('');
 

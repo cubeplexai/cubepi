@@ -23,7 +23,6 @@ from cubepi.hitl.testing import NoopChannel, ScriptedChannel
 from cubepi.hitl.types import ApproveRequest, HitlRequest
 from cubepi.providers.base import (
     AssistantMessage,
-    Model,
     TextContent,
     ToolCall,
     Usage,
@@ -35,11 +34,10 @@ from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
 
 def _agent(*, channel=None, checkpointer=None, thread_id=None):
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="faux")
     provider.set_responses([faux_assistant_message("done")])
     return Agent(
-        provider=provider,
-        model=Model(id="faux", provider="faux"),
+        model=provider.model("faux"),
         channel=channel,
         checkpointer=checkpointer,
         thread_id=thread_id,
