@@ -492,9 +492,14 @@ the same pattern applies to the new columns).
    Semantics:
 
    - When `messages` is provided, `Agent` deep-copies the sequence
-     (`list(map(model_copy, messages))`) into its initial
-     `_state._messages`. The deep copy prevents external mutation of
-     the source list from corrupting agent state.
+     (`[m.model_copy(deep=True) for m in messages]`) into its initial
+     `_state._messages`. **`deep=True` is mandatory** — pydantic's
+     `model_copy()` is shallow by default, which would leave
+     `AssistantMessage.content` (a list of ToolCall / TextContent /
+     ThinkingContent), `ToolCall.arguments` (a dict), `UserMessage.content`,
+     `ToolResultMessage.content`, and the `metadata` dicts on all three
+     message variants sharing references with the source. Shallow copy
+     defeats the isolation `fork_once()` depends on.
    - When `messages` is provided AND (`thread_id` AND `checkpointer`)
      are also set, the constructor raises `ValueError`: the lazy-load
      contract in `prompt()` would either drop the preload or duplicate
@@ -566,11 +571,15 @@ detection**:
 - This spec adds an attribute `requires_hitl: bool = False` to
   `cubepi.agent.types.AgentTool` and an attribute
   `requires_hitl: bool = False` to `cubepi.middleware.base.Middleware`.
-- This spec sets `requires_hitl=True` on the `AgentTool` returned by
-  the built-in `cubepi.hitl.ask_user_tool(...)` factory and on
-  `cubepi.hitl.middleware.HitlMiddleware`. Third-party HITL tools
-  and middleware MUST set the same flag — this is the documented
-  contract for "this tool/middleware requires HITL".
+- This spec sets `requires_hitl=True` on:
+  - the `AgentTool` returned by the built-in
+    `cubepi.hitl.ask_user_tool(...)` factory, AND
+  - `cubepi.hitl.middleware.ApprovalPolicyMiddleware` (the in-tree
+    HITL base; `ConfirmToolCallMiddleware` inherits the flag through
+    subclassing).
+  Third-party HITL tools and middleware MUST set the same flag —
+  this is the documented contract for "this tool/middleware requires
+  HITL".
 - `fork_once()` scans `self.tools` and `self.middleware` and rejects
   the call if any element has `requires_hitl is True`.
 - The detection is documented in `website/docs/guides/checkpointing/forking.md`
@@ -688,10 +697,11 @@ channel) is explicit follow-up scope.
   - turn with tool calls completes fully, returns new messages
   - source thread (and its checkpointer) is byte-for-byte unchanged
   - raises `RuntimeError` when no checkpointer bound
-  - raises `RuntimeError` when an `ask_user` tool is in
-    `self.tools` (HITL pre-flight, §3.9.1)
-  - raises `RuntimeError` when `HitlMiddleware` is in
-    `self.middleware`
+  - raises `RuntimeError` when any tool in `self.tools` has
+    `requires_hitl=True` (HITL pre-flight, §3.9.1) — exercised with
+    the actual `ask_user_tool(...)` factory result, not a stub
+  - raises `RuntimeError` when `ApprovalPolicyMiddleware` (or its
+    subclass `ConfirmToolCallMiddleware`) is in `self.middleware`
   - cancellation: `asyncio.wait_for(agent.fork_once(...), timeout=…)`
     raises `TimeoutError` and the transient agent's abort signal
     fires (verified via FauxProvider abort hook)
@@ -711,6 +721,26 @@ channel) is explicit follow-up scope.
   - error pass-through (`ThreadNotFoundError`, `ThreadAlreadyExistsError`,
     `ForkBoundaryError`, `RuntimeError` for missing checkpointer)
   - does NOT mutate `self.thread_id`
+
+- **`Agent(messages=...)` constructor (§3.7a)** — a dedicated test
+  group, distinct from `fork_once()` tests, so the new constructor
+  path is exercised even if `fork_once()` is later refactored:
+  - happy path: `Agent(messages=[UserMessage(...)])` ends up with
+    those messages reflected by the next `prompt()` call
+  - `Agent(messages=[...], thread_id="t", checkpointer=cp)` raises
+    `ValueError`
+  - `Agent(messages=<invalid-prefix>)` raises `ForkBoundaryError`
+    for each §3.3 invariant violation (re-uses the
+    snapshot-validator test fixtures)
+  - **deep-copy isolation**: construct an `Agent` with a list
+    containing one `UserMessage`, one `AssistantMessage` carrying a
+    `ToolCall` (with mutable `arguments` dict), and one
+    `ToolResultMessage` (with `content` list and `metadata` dict).
+    Mutate every nested mutable field on the ORIGINAL message
+    objects after construction. Assert the agent's internal copies
+    are unchanged. Mirror the mutation against the agent and assert
+    the originals are unchanged (isolation runs both directions).
+  - `messages=None` is the no-op default (sanity check)
 
 ## 6. Open questions
 
