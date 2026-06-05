@@ -1,326 +1,328 @@
-# Conversation Fork — `Agent.fork()` + `Agent.fork_once()`
+# Conversation Fork — `Agent.fork()` + `Agent.fork_once()` (run-based)
 
 - **Date**: 2026-06-05
-- **Status**: Draft
+- **Status**: Draft (v2 — run-based fork model)
 - **Branch / worktree**: `2026-06-05-conversation-fork` in `.worktrees/2026-06-05-conversation-fork`
-- **Drives**: cubebox "copy this conversation from message N" UI button; future
-  A/B exploration / reflection-runner side experiments.
+- **Drives**: cubebox "copy this conversation from this assistant reply" UI button;
+  one-shot off-thread probes; data model foundation for future
+  `Agent.delete_run()`.
 
 ## 1. Motivation
 
-Two related needs are unaddressed today:
+Three related needs are unaddressed today:
 
 1. **Persistent fork.** Cubebox wants a per-assistant-message button that
-   spawns a new conversation, pre-populated with all prior messages from a
-   chosen point. The user keeps both conversations and can continue them
-   independently (compare answers, try a different next question, save a
-   branch before risky edits, etc.).
+   spawns a new conversation, pre-populated with the prior runs up to a
+   chosen point. The user keeps both conversations and continues them
+   independently.
 2. **One-shot off-thread prompt.** Application code wants to ask the model a
-   follow-up question from the context of an existing thread without
-   polluting that thread's persisted history. Reflection-runner-style
-   probes, automated evaluation harnesses, scratch "what if I asked X
-   instead?" queries.
+   follow-up from the context of an existing thread without polluting the
+   thread's persisted history. Reflection-runner probes, automated eval
+   harnesses, scratch "what if I asked X instead?" queries.
+3. **Future: per-run deletion.** Cubebox plans a "delete this run" UX
+   (undo the last exchange). Not in this PR, but the data model laid down
+   here MUST make it a one-line query later.
 
-The Postgres and MySQL checkpointer schemas reserved `parent_thread_id` and
-`forked_at_seq` columns for this exact eventuality (see
+A "run" in cubepi is **one `Agent.prompt()` call from start to terminal
+completion** — the user message that initiated it plus every tool_use /
+tool_result / assistant message produced before the loop exits with a
+terminal stop_reason. Multi-step assistant loops live inside a single run.
+HITL pause/resume keep the same run_id across the suspension.
+
+The Postgres and MySQL checkpointer schemas reserved `parent_thread_id`
+and `forked_at_seq` columns for fork (see
 `website/docs/migration/from-langgraph.md` and
-`website/docs/guides/checkpointing/postgres.md`), but no API exists yet.
-The Memory and SQLite backends have no fork hooks at all.
-
-This spec adds the missing API across all four backends and exposes it on
-`Agent` as `fork()` (persistent) and `fork_once()` (ephemeral one-shot).
+`website/docs/guides/checkpointing/postgres.md`), but no API existed.
+The Memory and SQLite backends have no fork hooks at all. **Run-as-a-unit
+is a new concept**: today only `cubepi_threads.pending_request.run_id`
+mentions run, and only for HITL recovery. This spec extends run identity
+to every message and adds a per-run completion marker.
 
 ## 2. Goals / Non-goals
 
 **Goals**
 
-- A `Checkpointer.fork()` operation that physically copies a prefix of a
-  thread's messages under a caller-supplied new `thread_id`, records
-  lineage, and is atomic.
-- A `Checkpointer.snapshot()` operation that returns the same prefix as
-  `list[Message]` without writing anything — the shared primitive both
-  `fork()` and `fork_once()` build on.
-- `Agent.fork()` — thin wrapper over `Checkpointer.fork()`.
-- `Agent.fork_once()` — in-memory single-turn continuation from a snapshot
-  prefix; not persisted; emits its own tracing span.
+- Per-message `run_id` field on `Message` (all three variants), persisted
+  by every backend.
+- New `cubepi_run_completions` storage per backend recording which runs
+  have finished cleanly.
+- `Agent.prompt(message, *, run_id=None) -> str` (accept-or-generate;
+  returns the run_id actually used).
+- `Checkpointer.fork(src, new, *, after_run_id, metadata=None) -> None`
+  — physical copy of all messages of completed runs up through
+  `after_run_id`.
+- `Checkpointer.snapshot(thread_id, *, after_run_id) -> list[Message]`
+  — shared read primitive used by fork_once and tests.
+- `Agent.fork(src, new, *, after_run_id, metadata=None) -> None` — thin
+  wrapper over `Checkpointer.fork()`.
+- `Agent.fork_once(src, message, *, after_run_id) -> ForkOnceResult` —
+  in-memory single-turn continuation from a snapshot prefix.
 - Implementations across Memory, SQLite, Postgres, MySQL.
-- Boundary validation that rejects cuts that would orphan a `tool_call`
-  from its `tool_result`.
 - User-facing docs page under `website/docs/guides/checkpointing/`.
+- Foundation that makes `Agent.delete_run(thread_id, run_id, …)` a small
+  follow-up PR.
 
 **Non-goals**
 
-- Copy-on-write / logical pointer storage (deliberately rejected — see §3.1).
-- Forking subagent state, MCP session state, or external resources spun up
-  during the parent run.
-- Mutating the source thread (this is purely a read operation on the source).
-- A `fork_into_agent()` convenience that hands back a ready-to-use `Agent`
-  instance bound to the new thread. Caller decides what to do with the new
-  `thread_id`; constructing the next `Agent` is one line of user code and
-  keeping `Agent` state machinery out of `fork()` avoids confusing
-  "which agent instance owns which thread" questions.
-- Resuming a `fork_once()` session. By construction it is single-turn,
-  in-memory, and discarded.
-- Multi-turn ephemeral sessions. If they become a real need later they can
-  ship as a separate `EphemeralAgent` handle returned from a future call;
-  YAGNI for now.
-- A `cubepi fork` CLI subcommand. Not needed by the cubebox driving use
-  case; can be added later if it earns its keep.
+- `Agent.delete_run()` itself — separate follow-up spec.
+- Fork at message granularity (the cubebox UX and forward design only
+  ever fork at run boundaries; per-message cuts were considered and
+  rejected with the user — they produce surprising states mid-tool-call
+  and are not needed). The previously-discussed `message_count` /
+  `Message.id` / `after_response_id` parameters are NOT in this spec.
+- Copy-on-write storage (rejected for the same partitioning / mutation
+  reasons documented in §3.1).
+- Backfilling run identity into pre-existing messages. Legacy messages
+  remain `run_id=NULL` and are not forkable / not deletable — see §3.6.4.
+- A `fork_into_agent()` convenience or `fork_and_switch`. Caller owns
+  what to do with `new_thread_id`.
+- Resuming a `fork_once()` session.
+- A `cubepi fork` CLI subcommand.
 
 ## 3. Design
 
 ### 3.1 Storage semantics: physical copy
 
-`fork()` physically copies the prefix `[0..message_count)` of source-thread
-messages into the new thread, then records lineage metadata
-(`parent_thread_id`, `forked_at_seq`) on the new thread row. The new
-thread is fully independent — subsequent reads on either thread are
-single-thread operations.
+`fork()` physically copies messages of all completed runs up through
+`after_run_id` to the new thread, then records lineage
+(`parent_thread_id`, `forked_at_seq` for SQL backends) and copies the
+relevant `cubepi_run_completions` rows so the new thread keeps its
+run history.
 
-Considered and rejected: **logical pointer / copy-on-write** (store only
-parent reference + new tail in the child). Reasons:
+Rejected: **logical pointer / COW**. Same rationale as v1:
 
-- All four backends are designed to keep a single thread's reads local.
-  Postgres uses `HASH (thread_id)` partitioning on `cubepi_messages`;
-  MySQL uses `KEY` partitioning by `thread_id`. COW reads would have to
-  span parent and child partitions, defeating that invariant.
-- The source thread is mutable in real cubepi usage: `agent.respond()`,
-  HITL deny appends synthetic messages, future compaction may rewrite
-  history. Under COW the child silently drifts when the parent changes;
-  under physical copy the child is frozen at fork time.
-- Deletion semantics: with physical copy the parent and child are
-  independently deletable. Under COW, deleting the parent either breaks
-  the child (FK violation) or wipes it (CASCADE) — neither is
-  expressible cleanly across the four backends.
-- The `parent_thread_id` + `forked_at_seq` columns retain value as pure
-  lineage metadata (UI family tree, audit, debugging) under physical
-  copy. They keep the cost of a few bytes per fork, not the cost of a
-  recursive read.
-- LangGraph's `copy_thread` uses physical copy for the same reasons.
+- All four backends partition / shard reads per `thread_id`
+  (HASH/KEY partitioning in Postgres/MySQL; per-thread dict slot in
+  Memory). COW reads span parent and child partitions.
+- The source thread is mutable (`agent.respond()` injects synthetic
+  messages; future compaction may rewrite). Under COW the child
+  silently drifts; physical copy freezes the child at fork time.
+- Deletion semantics are clean under physical copy: parent and child
+  independently deletable. Under COW, parent deletion breaks the child.
+- The reserved `parent_thread_id` + `forked_at_seq` columns retain
+  value as lineage metadata at no recurring read cost.
+- LangGraph's `copy_thread` makes the same choice.
 
-Space cost (long conversations forked many times) is acknowledged. If a
-real workload hits it we add a GC / compaction job later — that is much
-cheaper to layer on physical copy than to retrofit COW.
+### 3.2 Run as the unit of fork
 
-### 3.2 Cut point: `message_count`, not `seq`
+The **only** fork handle is `after_run_id: str`. The new thread contains
+exactly the messages of every completed run on the source up through and
+including `after_run_id` (in source seq order).
 
-The user-facing cut is **`message_count`: include the first N messages**.
-`message_count=None` copies everything currently in the thread.
+Why a run is the right unit:
 
-`seq` is intentionally NOT exposed to callers:
+- A run is the atomic transaction the user thinks in ("I asked X, agent
+  did its thing, gave me an answer"). Cubebox's UI button maps directly
+  to "fork after this exchange".
+- A run boundary is by construction a clean cut. Inside a run there may
+  be unresolved `tool_use` blocks awaiting `tool_result`s; once the run
+  is marked complete (terminal stop_reason, no pending HITL), no
+  unresolved tool calls remain. So **the v1 spec's `ForkBoundaryError`
+  / mid-tool-call invariants vanish structurally**: there is no API to
+  ask for a cut mid-run, so no boundary check is needed.
+- It generalizes to the future `delete_run()` cleanly:
+  `DELETE FROM cubepi_messages WHERE thread_id=? AND run_id=?` is a
+  one-line operation backed by the same `run_id` column the fork uses
+  for lookup.
 
-- Cubepi's `Message` types (`UserMessage`, `AssistantMessage`,
-  `ToolResultMessage`) carry no `seq` field. Only the
-  Postgres/MySQL storage layer assigns seqs.
-- Cubebox renders messages from `Checkpointer.load()` and identifies the
-  click target by list index. "First N messages" lines up trivially with
-  that.
-- Memory and SQLite backends have no native seq column; `message_count`
-  reduces to "len of the first N elements" there.
-
-Storage-level `forked_at_seq` is written only for Postgres/MySQL
-(equal to the seq of the last copied message). It is NULL for Memory
-and SQLite — see §3.5 for the canonical rule. It is metadata; callers
-do not pass or read it directly.
-
-### 3.3 Boundary validation
-
-Cubepi's message protocol requires every `AssistantMessage` that emits
-`ToolCall` blocks to be followed (eventually) by `ToolResultMessage`s
-for every call before the next assistant turn. Forking mid-tool-call
-would leave the new thread in a state the provider rejects on the next
-`prompt()` call ("`tool_use` block without matching `tool_result`").
-
-`snapshot()` and `fork()` validate the **entire prefix**
-`[0..message_count)`, not just the last message. The prefix is valid
-iff all of the following hold:
-
-1. Every `ToolCall.id` produced by an `AssistantMessage` in the prefix
-   has exactly one `ToolResultMessage.tool_call_id` later in the
-   prefix that matches it.
-2. Every `ToolResultMessage.tool_call_id` in the prefix matches a
-   `ToolCall.id` produced by some earlier `AssistantMessage` in the
-   prefix.
-3. Tool-result messages for the same producing assistant turn appear
-   contiguously after that assistant turn (no other assistant turn
-   interleaves).
-
-Examples that MUST raise `ForkBoundaryError`:
-
-- `[assistant(tc-1), user(...)]` — assistant emits `tc-1` but the
-  prefix never carries its tool_result before another user turn.
-- `[assistant(tc-1), tool_result(tc-1), assistant(tc-2)]` with
-  `message_count=3` — the last assistant has an unresolved `tc-2`.
-- `[tool_result(tc-99)]` — orphan tool_result; no producer.
-- `[assistant(tc-1, tc-2), tool_result(tc-1)]` — partial close of a
-  multi-call turn; `tc-2` is unresolved.
-- `[assistant(tc-1), assistant(...)]` — two assistants in a row with
-  `tc-1` unresolved between them.
-
-The error payload lists the offending state (`unresolved_tool_call_ids`,
-`orphan_tool_result_ids`) so the caller can re-pick a valid
-`message_count`. `ForkBoundaryError` is raised before any write
-happens.
-
-The check runs in O(message_count) time and a single pass over the
-prefix; it is performed by `snapshot()` and reused by `fork()`.
-
-### 3.4 Atomicity and concurrency
+### 3.3 Atomicity and concurrency
 
 `fork()` is atomic per backend:
 
-- **Memory**: holds `asyncio.Lock` for the source thread (a single
-  shared lock is acceptable for this backend's scale); copies under
-  the lock. Memory backend is **single-process only by definition**;
-  this is already documented for the existing methods and applies to
-  fork unchanged. The fork doc page calls it out explicitly so users
-  do not expect fork lineage to survive a process restart.
-- **SQLite**: opens its transaction with `BEGIN IMMEDIATE` to take a
-  RESERVED lock on the database for the duration of the fork. This
-  blocks concurrent writers (`append`, `save_extra`,
-  `save_pending_request`, other `fork`s) — including writers from
-  other processes sharing the same DB file — until the fork commits
-  or rolls back. Readers (`load`, `load_pending_request`, `snapshot`)
-  continue under WAL. The existing `append()` does NOT currently use
-  `BEGIN IMMEDIATE`; this spec promotes it to `BEGIN IMMEDIATE` as
-  well so writer-vs-writer races are uniformly serialized. (The
-  promotion is a strict subset of correctness — current behavior
-  relies on aiosqlite's single-connection serialization within one
-  process; the upgrade makes the contract explicit and
-  cross-process-safe.)
+- **Memory**: `asyncio.Lock`; copy messages, completions row, and
+  lineage under the lock. Memory backend is single-process only by
+  definition (existing limitation, documented for fork too).
+- **SQLite**: `BEGIN IMMEDIATE` (RESERVED lock) wraps the entire fork
+  (validation, completion lookup, message copy, completions copy,
+  thread_extra insert with lineage). The existing `append()` /
+  `save_extra()` / `save_pending_request()` are also promoted to
+  `BEGIN IMMEDIATE` so writer-vs-writer races are uniformly
+  serialized, including across processes sharing the DB file.
+  At connect time the checkpointer sets `PRAGMA busy_timeout = 5000`.
+  If the 5 s window elapses without acquiring the lock, the
+  `aiosqlite.OperationalError` propagates as
+  `CheckpointerLockTimeoutError`.
+- **Postgres**: single transaction. Takes
+  `pg_advisory_xact_lock(hashtext($src_thread_id))` — the same
+  per-thread advisory lock `append()` / `save_extra()` /
+  `save_pending_request()` use — to fence racing appends on the source
+  for the duration of the fork. Then `INSERT INTO cubepi_threads`,
+  `INSERT INTO cubepi_messages … SELECT …`,
+  `INSERT INTO cubepi_run_completions … SELECT …`. Commit releases
+  the lock.
+- **MySQL**: single transaction with `SELECT … FOR UPDATE` on the
+  source `cubepi_threads` row. The existing `append()` already takes
+  the same row lock; this spec confirms `save_extra` /
+  `save_pending_request` follow suit. Then the same three INSERTs.
 
-  **SQLITE_BUSY contract.** When the immediate-lock acquisition
-  contends with another writer, SQLite returns `SQLITE_BUSY`. The
-  spec defines a deterministic policy:
+Concurrent forks from the same source serialize on the per-thread
+lock/row-lock; identical or different message-set outcomes both
+correct depending on append interleaving.
 
-  - At connect time the checkpointer sets `PRAGMA busy_timeout = 5000`
-    (5 seconds) — SQLite internally retries lock acquisition for that
-    long before raising. This is set unconditionally for all writer
-    operations, not just fork.
-  - If the 5 s window elapses without acquiring the lock, the
-    `aiosqlite.OperationalError("database is locked")` propagates as
-    a new typed error `CheckpointerLockTimeoutError(CheckpointerError)`
-    so callers can distinguish it from boundary / not-found / collision
-    errors. No further in-process retry is attempted — that's the
-    caller's policy decision.
-  - `BEGIN IMMEDIATE` (RESERVED lock) is the right strength: it lets
-    readers continue (good for UI list refresh during a fork) but
-    blocks the next writer. `BEGIN EXCLUSIVE` would needlessly stall
-    reads. The trade-off is documented in the SQLite section of
-    `website/docs/guides/checkpointing/`.
+Error pre-checks happen inside the transaction so they see the same
+world the copy will see:
 
-  The 5 s default and the new typed error apply to fork, append,
-  save_extra, and save_pending_request uniformly.
-- **Postgres**: single transaction. Inside it:
-  1. `pg_advisory_xact_lock(hashtext($src_thread_id))` — the same
-     per-thread advisory lock `append()` uses, but here taken on the
-     SOURCE thread to fence racing appends to the source for the
-     duration of the fork.
-  2. `INSERT INTO cubepi_threads` for the new thread.
-  3. `INSERT INTO cubepi_messages (...) SELECT ... FROM cubepi_messages
-     WHERE thread_id=$src AND seq <= $cut_seq ORDER BY seq`.
-  4. Commit (releases the advisory lock).
+- new thread already exists → `ThreadAlreadyExistsError`, nothing
+  written
+- source thread does not exist → `ThreadNotFoundError`
+- `after_run_id` has no completion marker on the source thread →
+  `RunNotCompletedError`
 
-  `save_extra`, `save_pending_request`, and `compaction` on the source
-  also take this same per-thread advisory lock, so they serialize
-  against the fork.
+### 3.4 What gets copied
 
-- **MySQL**: single transaction with `SELECT ... FOR UPDATE` on the
-  source thread row in `cubepi_threads` (MySQL has no advisory lock
-  equivalent that fits the model). The existing `append()` already
-  takes the same row lock; this spec confirms `save_extra`,
-  `save_pending_request`, and compaction follow suit. Then the same
-  thread-row INSERT + messages `INSERT…SELECT` as Postgres.
-
-Concurrent forks from the same source (`fork(src=X, new=A)` and
-`fork(src=X, new=B)`) serialize cleanly on the source-thread
-lock/row-lock in every backend; the two new threads end up with
-identical or differently-prefixed message sets depending on which
-fork ran first relative to any concurrent append, and either ordering
-is correct.
-
-Error pre-checks: if the new thread already exists, `fork()` raises
-`ThreadAlreadyExistsError` and writes nothing. If the source thread
-does not exist, `fork()` raises `ThreadNotFoundError`. Both checks
-happen inside the transaction so they see the same world the copy
-will see.
-
-### 3.5 What gets copied
-
-| Field | Copied? | Notes |
+| Field / row | Copied? | Notes |
 |---|---|---|
-| `messages` `[0..message_count)` | yes | physical copy. Postgres/MySQL preserve the source seq values for the copied range. SQLite copies the JSON payloads under fresh global `id`s — its `messages.id` is a global auto-increment, not a per-thread seq, so identity is not meaningful to preserve. Memory copies in-list order. |
-| `extra` | yes | deep copy of the source JSON object (`json.loads(json.dumps(extra))`) |
-| `parent_thread_id` | written (new) | set to `src_thread_id` on new row |
-| `forked_at_seq` | written (new, Postgres/MySQL only) | seq of the last copied message. Memory and SQLite do NOT store this — neither has a per-message seq, and forging a value would invite false continuation logic. No `forked_at_seq` column is added to SQLite's `thread_extra`, and no field is added to Memory's `CheckpointData`. Lineage for those backends comes from `parent_thread_id` alone. |
-| `extra['fork']` | written (new) when `metadata` is supplied | merge rule below |
+| `cubepi_messages` rows with `seq <= last_seq_of(after_run_id)` | yes | physical copy; PG/MySQL preserve source `seq` values for the copied range. SQLite copies the JSON payloads under fresh global `id`s (its `messages.id` is a global auto-increment, not a per-thread seq). Memory copies in-list order. Each copied row keeps its original `run_id` value. |
+| `cubepi_run_completions` rows for the copied runs | yes | so the new thread can be further forked / deleted by run |
+| `extra` | yes | deep copy of the source JSON object |
+| `parent_thread_id` | written (new) | set to `src_thread_id` on the new thread row |
+| `forked_at_seq` | written (PG/MySQL only) | the `seq` of the last message of `after_run_id`. Memory and SQLite store no equivalent — those backends have no per-message seq column and lineage is recoverable from `parent_thread_id` + `cubepi_run_completions` alone. |
+| `extra['fork']` | written (new) when `metadata` arg supplied | overwrites any pre-existing `extra['fork']` on source (lineage is recoverable via the `parent_thread_id` chain) |
 | `pending_request` | **no** | new thread starts clean; HITL is run-state, not history |
-| `run_id` | **no** | host-side run identifier; new thread has none |
+| `cubepi_threads.run_id` (the host-side HITL marker, NOT a run on this thread) | **no** | new thread has no run in flight |
 | `created_at` / `updated_at` | new | server-default to fork time |
 
-**`extra['fork']` merge rule.** The source's existing `extra` is
-deep-copied first. Then, if the caller passes `metadata`, fork writes
-`new_extra['fork'] = metadata` — unconditionally overwriting whatever
-key was at `extra['fork']` in the source. Rationale: a fork's `fork`
-key describes THIS fork, not the parent's fork ancestry. Lineage is
-already recoverable from the `parent_thread_id` chain in the threads
-table, so callers that want full ancestry walk the chain rather than
-reading nested `fork` blobs. Callers who want to preserve the source's
-`extra['fork']` under a different key are free to do so themselves via
-a follow-up `save_extra()` call.
+### 3.5 Tracing for `fork_once()`
 
-### 3.6 Tracing for `fork_once()`
+Unchanged from v1:
 
-`fork_once()` emits a span named `cubepi.agent.fork_once` that:
-
-- **Inherits the active OTel parent context** if one is bound when
-  `fork_once()` is called (e.g., the FastAPI request span, a
-  cubebox stream span). This is standard OTel convention; "fork_once
-  emits its own logical root" does NOT mean "detach from the
-  surrounding trace_id". A `fork_once` invoked outside any active
-  context becomes a true trace root.
-- Does **not** attempt to attach to or replay spans from the source
-  thread's prior runs. Those spans are completed and live in
-  different traces; we only carry forward the source thread's
-  identity via attributes.
-
-Attributes on the span:
-
-- `cubepi.fork.src_thread_id`
-- `cubepi.fork.src_message_count`
-- `cubepi.fork.src_seq` (Postgres/MySQL only — the storage seq of the
-  last copied message; absent for Memory/SQLite for the same reason
-  `forked_at_seq` is NULL there)
-- The standard cubepi tracing attributes (`cubepi.model.id`, etc.)
-
-The in-process child `Agent` it runs nests its agent / turn / tool
-spans under the `cubepi.agent.fork_once` span as normal.
+- Span name: `cubepi.agent.fork_once`
+- Inherits the active OTel parent context if one is bound; otherwise
+  becomes a true trace root. Does NOT attempt to attach to or replay
+  spans from the source thread's prior runs.
+- Attributes: `cubepi.fork.src_thread_id`, `cubepi.fork.after_run_id`,
+  `cubepi.fork.src_seq` (PG/MySQL only — the seq of the last copied
+  message), plus the standard cubepi tracing attributes.
+- The in-process child Agent's spans nest under this span.
 
 The persistent `fork()` does not need a special span; existing
-checkpointer instrumentation (if any) covers it.
+checkpointer instrumentation covers it.
 
-### 3.7 API
+### 3.6 Run lifecycle in cubepi
+
+#### 3.6.1 `Agent.prompt()` signature change
+
+```python
+class Agent(Generic[TMessage]):
+    async def prompt(
+        self,
+        message: str | Message | list[Message],
+        *,
+        run_id: str | None = None,
+    ) -> str: ...
+```
+
+`run_id` is accept-or-generate:
+
+- If the caller supplies a string, cubepi uses it verbatim.
+- If `None`, cubepi generates one via `uuid.uuid4().hex` (no host
+  dependency on uuid7; cubebox can keep generating its own and pass it
+  in — single source of truth).
+- The return value is the run_id actually in effect, so the caller can
+  store it / cross-check.
+
+The active `run_id` is threaded through the agent loop to
+`Checkpointer.append()` by stamping it on every `Message` instance
+about to be appended. **`Checkpointer.append()` signature does not
+change** — the run_id rides on the messages themselves
+(`Message.run_id` field, §3.6.5).
+
+If the caller supplies a `run_id` that already has a completion marker
+on the source thread, `prompt()` raises `RunAlreadyCompletedError` —
+runs are append-only; you cannot continue or re-run a completed run.
+(Use a new `run_id` for a new exchange.)
+
+#### 3.6.2 Completion marker — when written
+
+The marker `cubepi_run_completions(thread_id, run_id, completed_at)`
+is written **inside the same transaction as the final `append()` of
+the run** — atomic with the last message. The agent loop signals
+"this is the last append of the run" via a flag on the checkpointer
+call (or via a dedicated `Checkpointer.complete_run()` call made in
+the same lock window — exact form decided in the implementation plan,
+but the requirement is atomicity).
+
+Trigger conditions for writing the marker:
+
+- The agent loop exits with a terminal stop_reason (`end_turn`,
+  `tool_use_completed` followed by `end_turn`, etc. — any
+  non-suspended terminal state)
+- AND no pending HITL request remains for this run
+
+If `prompt()` returns because of:
+
+- HITL pause (pending_request set) → marker NOT written; the run is
+  resumed later by `respond()`.
+- Exception / abort / cancellation → marker NOT written; the run is
+  abandoned. Its messages remain on the thread under the same
+  `run_id`, but `fork(after_run_id=X)` raises `RunNotCompletedError`,
+  and the future `delete_run(X)` can clean them up.
+
+#### 3.6.3 HITL pause / resume continuity
+
+A run that pauses for HITL keeps its `run_id` across the suspension.
+
+- `Agent.prompt(message, run_id=R)` runs partway, hits HITL → writes
+  `pending_request` with `run_id=R` (existing schema v3 mechanism), no
+  completion marker.
+- `Agent.respond(question_id, answer)` recovers `run_id=R` from
+  `pending_request` (it's already there), continues the same run,
+  writes the completion marker when the resumed loop terminates
+  cleanly.
+
+`Agent.respond()` signature does **not** change. The run_id is
+sourced from `pending_request`.
+
+#### 3.6.4 Legacy data
+
+Messages persisted before this spec carry `run_id = NULL`. No
+completion markers exist for them. Consequence:
+
+- `fork(src_thread_id, …, after_run_id=X)` on a legacy thread raises
+  `RunNotCompletedError` for every `X` because no marker exists.
+- Future `delete_run(thread_id, run_id)` will likewise have nothing
+  to target.
+- Legacy threads remain readable (`load()` works); only the
+  by-run operations are blocked.
+
+No backfill is provided. (We can not reliably reconstruct historical
+run boundaries from messages alone — multi-step tool_use sequences
+look like multiple runs.) Users who need to fork a legacy
+conversation can manually start a new conversation; the loss is
+limited to "no clone shortcut on threads that predate the upgrade".
+
+#### 3.6.5 `Message.run_id` field
+
+```python
+class UserMessage(BaseModel):
+    ...
+    run_id: str | None = None     # NEW
+
+class AssistantMessage(BaseModel):
+    ...
+    run_id: str | None = None     # NEW
+
+class ToolResultMessage(BaseModel):
+    ...
+    run_id: str | None = None     # NEW
+```
+
+Default `None` preserves backward compatibility for callers that
+construct `Message`s directly without going through `Agent.prompt()`.
+The agent loop populates it from the active run before every append.
+
+### 3.7 API surface
 
 #### `cubepi.checkpointer.base`
-
-`CheckpointData` (the return type of `load()`) gains one optional
-field so callers can read the lineage of a loaded thread:
 
 ```python
 @dataclass
 class CheckpointData:
     messages: list[Message] = field(default_factory=list)
     extra: JsonObject = field(default_factory=dict)
-    parent_thread_id: str | None = None   # NEW — None for non-fork threads
-```
+    parent_thread_id: str | None = None     # NEW (v1 had this too)
 
-Memory and SQLite backends populate this from the new `parent_thread_id`
-they store (CheckpointData attr / `thread_extra` column respectively).
-Postgres and MySQL populate it from `cubepi_threads.parent_thread_id`.
-The field is unconditionally present on every load; backends that
-have no lineage information set it to `None`.
 
-```python
 @runtime_checkable
 class Checkpointer(Protocol):
     # existing: load, append, save_extra, save_pending_request, load_pending_request
@@ -329,12 +331,12 @@ class Checkpointer(Protocol):
         self,
         thread_id: str,
         *,
-        message_count: int | None = None,
+        after_run_id: str,
     ) -> list[Message]:
-        """Return messages [0..message_count) of `thread_id`.
+        """Return all messages of completed runs up through `after_run_id`
+        (inclusive), in source order.
 
-        `message_count=None` returns all messages currently in the thread.
-        Raises `ThreadNotFoundError`, `ForkBoundaryError`.
+        Raises `ThreadNotFoundError`, `RunNotCompletedError`.
         """
 
     async def fork(
@@ -342,105 +344,115 @@ class Checkpointer(Protocol):
         src_thread_id: str,
         new_thread_id: str,
         *,
-        message_count: int | None = None,
+        after_run_id: str,
         metadata: JsonObject | None = None,
     ) -> None:
-        """Atomically create `new_thread_id` with the first `message_count`
-        messages of `src_thread_id`.
-
-        Records `parent_thread_id=src_thread_id` and `forked_at_seq` on
-        the new thread row. Copies `extra` deeply. Writes
-        `extra['fork'] = metadata` when `metadata` is not None.
+        """Atomically create `new_thread_id` populated with the messages
+        of every completed run on `src_thread_id` up through
+        `after_run_id`. Copies `cubepi_run_completions` rows for the
+        included runs. Records `parent_thread_id=src_thread_id` and
+        (PG/MySQL only) `forked_at_seq`. Copies `extra` deeply. Writes
+        `extra['fork'] = metadata` when `metadata` is supplied.
 
         Raises `ThreadNotFoundError`, `ThreadAlreadyExistsError`,
-        `ForkBoundaryError`.
+        `RunNotCompletedError`.
+        """
+
+    async def complete_run(
+        self,
+        thread_id: str,
+        run_id: str,
+        last_messages: list[Message],
+    ) -> None:
+        """Atomically append `last_messages` to the thread AND write the
+        `cubepi_run_completions` row for `(thread_id, run_id)`.
+
+        Called by the agent loop on terminal-state exit only. Replaces
+        the final `append()` of the run — the agent loop normally uses
+        `append()` for intermediate messages of a run and
+        `complete_run()` for the last batch. Idempotent: a second call
+        with the same `(thread_id, run_id)` is an error
+        (`RunAlreadyCompletedError`) since runs are append-only.
         """
 ```
 
 #### `cubepi.checkpointer.exceptions`
 
-Today, `cubepi/checkpointer/exceptions.py` only defines schema-related
-errors (`CubepiSchemaError`, `CubepiSchemaUninitialized`,
-`CubepiSchemaMismatch`). There is no shared base for runtime-operation
-errors. This spec adds one alongside the new fork errors so callers
-have a single `except` surface:
-
 ```python
 class CheckpointerError(Exception):
     """Base class for cubepi checkpointer runtime errors.
 
-    Separate from CubepiSchemaError: schema errors are about the DB
-    being incompatible with the library; CheckpointerError is about
-    runtime operation outcomes (missing thread, lock timeout, fork
-    boundary violations, etc.).
+    Separate from CubepiSchemaError (which is about DB-vs-library
+    schema incompatibility). CheckpointerError is for runtime
+    operation outcomes (missing thread, lock timeout, run state, etc.).
     """
 
 
 class ThreadNotFoundError(CheckpointerError): ...
 class ThreadAlreadyExistsError(CheckpointerError): ...
 
+
+class RunNotCompletedError(CheckpointerError):
+    """No completion marker for (thread_id, run_id). The run either
+    does not exist on this thread, was paused for HITL and never
+    resumed, or failed / was aborted before terminal completion."""
+
+
+class RunAlreadyCompletedError(CheckpointerError):
+    """The run already has a completion marker. Runs are append-only;
+    start a new run with a different run_id."""
+
+
 class CheckpointerLockTimeoutError(CheckpointerError):
     """SQLite (or other locking backend) could not acquire the writer
-    lock within the configured busy_timeout. See §3.4."""
-
-
-class ForkBoundaryError(CheckpointerError):
-    """The prefix violates one of the §3.3 tool-call/tool-result invariants."""
-    def __init__(
-        self,
-        message_count: int,
-        *,
-        unresolved_tool_call_ids: list[str] | None = None,
-        orphan_tool_result_ids: list[str] | None = None,
-    ):
-        # At least one of unresolved_tool_call_ids / orphan_tool_result_ids
-        # is non-empty. Both may be present for prefixes with multiple
-        # protocol violations of different kinds.
-        ...
+    lock within the configured busy_timeout. See §3.3."""
 ```
-
-`CheckpointerError` is a NEW base added by this spec; it does NOT
-subclass `CubepiSchemaError` (different concern). Tests assert that
-all four new errors are catchable via `except CheckpointerError`.
 
 #### `cubepi.agent.agent`
 
 ```python
 class Agent(Generic[TMessage]):
+    def __init__(
+        self,
+        *,
+        # ... all existing args unchanged ...
+        messages: Sequence[Message] | None = None,
+    ):
+        """`messages`: pre-seed initial history for ephemeral runs
+        (used by fork_once). Deep-copies via `m.model_copy(deep=True)`.
+        Raises `ValueError` if `messages` is combined with
+        `thread_id` + `checkpointer` (pre-seed conflicts with lazy
+        load). The exact validation of pre-seeded messages is
+        backend-agnostic at this point (no §3.3-style invariants);
+        callers passing arbitrary `messages` are on their own."""
+
+    async def prompt(
+        self,
+        message: str | Message | list[Message],
+        *,
+        run_id: str | None = None,
+    ) -> str:
+        """See §3.6.1. Returns the run_id actually used."""
 
     async def fork(
         self,
         src_thread_id: str,
         new_thread_id: str,
         *,
-        message_count: int | None = None,
+        after_run_id: str,
         metadata: JsonObject | None = None,
     ) -> None:
         """Persistent fork. Requires `self.checkpointer`. Delegates to
-        `self.checkpointer.fork(...)`. Does NOT mutate `self`.
-        """
+        `self.checkpointer.fork(...)`. Does NOT mutate `self`."""
 
     async def fork_once(
         self,
         src_thread_id: str,
         message: str | Message | list[Message],
         *,
-        message_count: int | None = None,
+        after_run_id: str,
     ) -> ForkOnceResult:
-        """One-shot continuation. Reads snapshot from `self.checkpointer`,
-        constructs an ephemeral `Agent` with this agent's `model`,
-        `tools`, `middleware`, `system_prompt`; runs one full turn
-        (including any tool calls); returns the result. Never writes
-        to the checkpointer.
-
-        The `message` parameter accepts the same types as
-        `Agent.prompt()` for consistency. The transient agent receives
-        the snapshot as pre-seeded history, then `prompt(message)` runs
-        the single turn.
-
-        Raises `RuntimeError` if any inherited tool or middleware
-        requires HITL (see §3.9.1).
-        """
+        """See §3.8."""
 ```
 
 #### `cubepi.agent.types`
@@ -453,414 +465,346 @@ class ForkOnceResult:
     stop_reason: str
 ```
 
-### 3.8 Per-backend implementation sketch
+### 3.8 `Agent.fork_once()` execution detail
 
-- **Memory** (`cubepi/checkpointer/memory.py`): today it holds
-  `dict[str, CheckpointData]` keyed by `thread_id`, where
-  `CheckpointData` already carries `messages: list[Message]` and
-  `extra: JsonObject`. The current implementation has no lock — this
-  spec adds an `asyncio.Lock` for the fork transaction (the existing
-  methods are single-statement dict mutations that don't strictly
-  need it, but the lock keeps fork's read-validate-write atomic).
-  `CheckpointData` gains one optional field: `parent_thread_id: str
-  | None = None` (defaults to None for the no-fork case). `fork()`
-  takes the lock, slices the first `message_count` messages from
-  `src.messages` (deep-copying each via `model_copy(deep=True)`),
-  deep-copies `src.extra`, merges `extra['fork']=metadata` per §3.5,
-  and stores `CheckpointData(messages=..., extra=...,
-  parent_thread_id=src_thread_id)` under the new key. `snapshot()`
-  slices in-list order and runs the §3.3 validator. `forked_at_seq`
-  is not stored — Memory has no seq concept.
-- **SQLite** (`cubepi/checkpointer/sqlite.py`): the existing schema
-  is **three flat tables**, NOT a single thread row with a blob:
-  - `messages (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT,
-    message_json TEXT, created_at REAL)` — one row per message;
-    `id` is a global auto-increment sequence (not per-thread monotonic),
-    `thread_id` is a filter column with no index/constraint.
-  - `thread_extra (thread_id TEXT PRIMARY KEY, extra_json TEXT)` —
-    per-thread JSON extra.
-  - `thread_pending_request (thread_id TEXT PRIMARY KEY, …)` — HITL.
-
-  There is no `threads` table today. This spec extends `thread_extra`
-  to also carry lineage metadata (it is already the per-thread
-  metadata row keyed by `thread_id`, so this avoids inventing a
-  fourth table):
-
-  - Add `parent_thread_id TEXT NULL` column to `thread_extra`.
-  - Do NOT add `forked_at_seq` — SQLite has no per-thread seq to
-    record (the `messages.id` column is a global counter, not a
-    per-thread sequence, and copied rows get fresh ids on INSERT).
-    Per §3.5 this column is Postgres/MySQL-only.
-
-  The new column is added at connect time using the existing pattern
-  the file already uses for the `run_id` backfill (`PRAGMA table_info`
-  probe + `ALTER TABLE thread_extra ADD COLUMN parent_thread_id TEXT`
-  if missing). Pre-existing rows get NULL — there is no lineage to
-  reconstruct.
-
-  `fork()` runs inside a single `BEGIN IMMEDIATE` transaction
-  (RESERVED lock — see §3.4):
-
-  1. Validate source exists (`SELECT 1 FROM messages WHERE thread_id=?
-     LIMIT 1` OR `SELECT 1 FROM thread_extra WHERE thread_id=?`) →
-     `ThreadNotFoundError` if neither hits.
-  2. Validate new thread does not exist (same probes against
-     `new_thread_id`) → `ThreadAlreadyExistsError` if either hits.
-  3. Snapshot + boundary validation per §3.3 (reads `messages` ordered
-     by `id` LIMIT `message_count`, deserializes, validates prefix).
-  4. Copy messages: for the first `message_count` rows (ordered by
-     `id`), insert new rows with `thread_id = new_thread_id` and the
-     same `message_json`. New rows get fresh `id` values from the
-     global sequence — copied row identity is NOT preserved (this is
-     the §3.5 table footnote about SQLite).
-  5. Insert lineage row:
-     `INSERT INTO thread_extra (thread_id, extra_json, parent_thread_id)
-      VALUES (?, ?, ?)` — with deep-copied source `extra_json`
-     (merging `extra['fork']=metadata` per §3.5 before serializing)
-     and `parent_thread_id = src_thread_id`. If the source has no
-     `thread_extra` row (extra was never written), the new row still
-     gets inserted with `extra_json='{}'` and the parent reference.
-  6. Commit (releases the lock). Lock-timeout / SQLITE_BUSY → see
-     §3.4 contract (`CheckpointerLockTimeoutError`).
-
-  `pending_request` / `run_id` are not copied (their `thread_pending_request`
-  rows are not touched for `new_thread_id`).
-- **Postgres** (`cubepi/checkpointer/postgres/`): the columns already
-  exist (schema version 3). `fork()` is a single transaction:
-  - `INSERT INTO cubepi_threads (thread_id, parent_thread_id, forked_at_seq, extra, …) …`
-  - `INSERT INTO cubepi_messages (thread_id, seq, role, metadata, payload)
-     SELECT $new_thread_id, seq, role, metadata, payload
-     FROM cubepi_messages
-     WHERE thread_id=$src AND ($n IS NULL OR seq <= $cut_seq)
-     ORDER BY seq`
-  - Holds the per-thread advisory lock on `src_thread_id` so an
-    in-flight `append()` cannot make the count drift mid-copy.
-- **MySQL** (`cubepi/checkpointer/mysql/`): same idea, MySQL syntax.
-  The `cubepi_messages` table is KEY-partitioned by `thread_id` and
-  has no FK to `cubepi_threads`. Order is enforced by `ORDER BY seq`
-  in the `INSERT…SELECT`. Uses the existing locking idiom.
-
-Schema bump from v3 → v4 for Postgres/MySQL is **not** required —
-the necessary columns are already there. SQLite needs a small
-in-process migration (it has no formal schema_version table today;
-the code already handles backfills on `CREATE TABLE … IF NOT EXISTS`,
-the same pattern applies to the new columns).
-
-### 3.9 `Agent.fork_once()` execution detail
-
-1. `self._require_checkpointer()` — raises `RuntimeError` with a
-   clear message when the agent has no checkpointer bound.
-2. **HITL pre-flight check** (see §3.9.1) — raises before doing any
-   work if the inherited toolset is HITL-capable.
-3. `snapshot = await self.checkpointer.snapshot(src_thread_id, message_count=...)`
-   — performs the full-prefix boundary validation in §3.3.
-4. Build a transient `Agent` configured with this agent's `model`,
-   `system_prompt`, `tools`, `middleware`, and `convert_to_llm`, with
-   `checkpointer=None` and `thread_id=None`. Pre-seed its message
-   history with `snapshot` via the new constructor argument
-   `messages=...` (see §3.7a below).
-
-   #### 3.7a — Required public `Agent` API addition
-
-   This spec adds one new constructor argument to `Agent.__init__`:
-
-   ```python
-   class Agent(Generic[TMessage]):
-       def __init__(
-           self,
-           *,
-           # ... all existing args unchanged ...
-           messages: Sequence[Message] | None = None,
-       ):
-           ...
-   ```
-
-   Semantics:
-
-   - When `messages` is provided, `Agent` deep-copies the sequence
-     (`[m.model_copy(deep=True) for m in messages]`) into its initial
-     `_state._messages`. **`deep=True` is mandatory** — pydantic's
-     `model_copy()` is shallow by default, which would leave
-     `AssistantMessage.content` (a list of ToolCall / TextContent /
-     ThinkingContent), `ToolCall.arguments` (a dict), `UserMessage.content`,
-     `ToolResultMessage.content`, and the `metadata` dicts on all three
-     message variants sharing references with the source. Shallow copy
-     defeats the isolation `fork_once()` depends on.
-   - When `messages` is provided AND (`thread_id` AND `checkpointer`)
-     are also set, the constructor raises `ValueError`: the lazy-load
-     contract in `prompt()` would either drop the preload or duplicate
-     history. Pre-seeding is for ephemeral agents only.
-   - When `messages` is provided AND any of the messages violates the
-     §3.3 boundary invariants, `Agent.__init__` raises
-     `ForkBoundaryError` (the same validator function powers both
-     `Checkpointer.snapshot()` and the constructor — single source of
-     truth).
-   - When `messages` is `None`, behavior is unchanged from today.
-
-   `fork_once()` uses this argument. `fork_once()` MUST NOT touch
-   any private `Agent` attribute. No `Agent.preload(...)` method is
-   added — keeping pre-seeding in `__init__` makes the agent's
-   "ready to run" lifecycle single-phase.
-
+1. `self._require_checkpointer()` — `RuntimeError` if no checkpointer.
+2. HITL pre-flight (§3.8.1) — `RuntimeError` if inherited tools or
+   middleware mark `requires_hitl=True`.
+3. `snapshot = await self.checkpointer.snapshot(src_thread_id,
+   after_run_id=...)` — propagates
+   `ThreadNotFoundError` / `RunNotCompletedError`.
+4. Build a transient `Agent` with this agent's `model`, `system_prompt`,
+   `tools`, `middleware`, `convert_to_llm`, `messages=snapshot`,
+   `checkpointer=None`, `thread_id=None`.
 5. Start a `cubepi.agent.fork_once` span (inheriting the surrounding
-   OTel context per §3.6). Capture the pre-seed length.
-6. Cancellation is **best-effort**, not bounded. If the surrounding
-   task is cancelled (or `asyncio.CancelledError` is raised), the
-   transient agent's abort signal fires; the agent loop honors the
-   signal at each tool/turn checkpoint; cancellation re-raises after
-   the agent loop returns. This matches `Agent.prompt()` cancellation.
-
-   Caveat: cubepi tools are not required to honor the abort signal
-   mid-call (a tool can run a blocking subprocess and ignore the
-   signal until it returns). In that case `fork_once()` blocks until
-   the offending tool returns, then re-raises `CancelledError`. The
-   spec does NOT add an unconditional hard timeout — that would
-   change the cancellation surface for all of `Agent.prompt()` /
-   `fork_once()` consistently and is out of scope. Callers that need
-   a hard wall-clock bound MUST wrap with `asyncio.wait_for(...)` AND
-   accept that a poorly-behaved tool will still hold the task until
-   it returns. This is documented in the user guide.
-
-   The tracing span is closed in a `finally` block with status
-   `error` and the cancellation tag set, regardless of how long the
-   cancellation actually takes to land.
-7. `await child.prompt(message)` — runs the full turn (any tool calls
-   included).
-8. Read final assistant text + the messages added after the pre-seed
+   OTel context per §3.5). Capture the pre-seed length.
+6. Cancellation is best-effort, not bounded — same caveats as
+   `Agent.prompt()` (a tool that ignores abort can hold the task until
+   it returns). Span is closed in `finally` with the appropriate
+   status.
+7. `await child.prompt(message, run_id=<fresh-uuid>)`. The fresh run_id
+   is internal — never persisted (no checkpointer), but populated on
+   the in-memory messages so observers see consistent metadata.
+8. Read final assistant text + messages added after the pre-seed
    length from the child; close the span.
 9. Return `ForkOnceResult(text, new_messages, stop_reason)`.
 
-The transient `Agent` is local to the call frame and dropped on return.
-No state leak to `self`.
-
-#### 3.9.1 HITL is not supported inside `fork_once()`
+#### 3.8.1 HITL is not supported inside `fork_once()`
 
 Two reasons HITL cannot work in `fork_once()`:
 
 1. **No persistence target.** HITL pending requests are written via
    `Checkpointer.save_pending_request(thread_id, ...)`. The transient
-   agent has no checkpointer and no thread_id; there is nowhere to
-   persist the pause.
-2. **Worse: inherited HITL channels would write to the SOURCE thread.**
-   A real cubepi host typically constructs a
+   agent has no checkpointer and no thread_id.
+2. **Worse: inherited HITL channels write to the source thread.** A
+   host typically constructs
    `CheckpointedChannel(checkpointer=cp, thread_id=conversation_id, …)`
    and binds it to `ask_user_tool(channel)`. The channel object holds
-   the source `thread_id` by reference. Reusing such a tool inside
-   `fork_once()` would persist the fork's pending HITL request to the
-   SOURCE conversation, contaminating it. Silent failure mode.
+   the source `thread_id`. Reusing such a tool in `fork_once()` would
+   persist a pending HITL request to the source thread — silent
+   contamination.
 
-`fork_once()` therefore pre-checks `self.tools` and `self.middleware`
-for HITL involvement. Name-based detection is bypassable (anyone can
-wrap `ask_user_tool` and rename it), so the spec uses **marker-based
-detection**:
+Detection (marker-based, bypass-proof):
 
-- This spec adds an attribute `requires_hitl: bool = False` to
-  `cubepi.agent.types.AgentTool` and an attribute
-  `requires_hitl: bool = False` to `cubepi.middleware.base.Middleware`.
-- This spec sets `requires_hitl=True` on:
-  - the `AgentTool` returned by the built-in
-    `cubepi.hitl.ask_user_tool(...)` factory, AND
-  - `cubepi.hitl.middleware.ApprovalPolicyMiddleware` (the in-tree
-    HITL base; `ConfirmToolCallMiddleware` inherits the flag through
-    subclassing).
-  Third-party HITL tools and middleware MUST set the same flag —
-  this is the documented contract for "this tool/middleware requires
-  HITL".
-- `fork_once()` scans `self.tools` and `self.middleware` and rejects
-  the call if any element has `requires_hitl is True`.
-- The detection is documented in `website/docs/guides/checkpointing/forking.md`
-  with the cross-link to the contract: third-party HITL implementers
-  must set the flag or they break `fork_once()` safety guarantees.
+- New attribute `requires_hitl: bool = False` on
+  `cubepi.agent.types.AgentTool` and `cubepi.middleware.base.Middleware`.
+- Set `True` on the `AgentTool` returned by
+  `cubepi.hitl.ask_user_tool(...)` and on
+  `cubepi.hitl.middleware.ApprovalPolicyMiddleware`
+  (`ConfirmToolCallMiddleware` inherits via subclassing).
+- Third-party HITL tools / middleware MUST set the same flag.
+- `fork_once()` scans `self.tools` and `self.middleware`; any
+  `requires_hitl=True` element triggers `RuntimeError` BEFORE any
+  snapshot is read.
 
-Channel-binding inspection (walking each tool's closure to find a
-`CheckpointedChannel` pointing at the source thread) was considered
-and rejected: cubepi tools are constructed as closures or partials
-with no structural channel exposure, so the check would be
-non-portable and easy to evade. A boolean marker is uniformly
-discoverable and self-documenting.
+### 3.9 Per-backend implementation sketch
 
-If any match, `fork_once()` raises:
+#### Postgres / MySQL
 
-```
-RuntimeError(
-    "fork_once() does not support HITL. Found HITL-bearing tools/"
-    "middleware: <names>. Construct a different Agent without these "
-    "for ephemeral probes."
-)
-```
+Existing schema is at version 3. This spec bumps to **version 4** with
+two additive changes (alembic migration in cubebox / cubepi-using apps):
 
-The error is raised BEFORE the snapshot is read. The
-recommended pattern for callers that need probes with most of the
-host's tools but no HITL is to build a second `Agent` with a filtered
-toolset and call `fork_once()` on that one.
+- `ALTER TABLE cubepi_messages ADD COLUMN run_id VARCHAR/TEXT NULL`
+  + index `(thread_id, run_id)`.
+- New table `cubepi_run_completions(thread_id TEXT/VARCHAR, run_id
+  TEXT/VARCHAR, completed_at TIMESTAMPTZ, PRIMARY KEY (thread_id,
+  run_id), FOREIGN KEY (thread_id) REFERENCES cubepi_threads)`.
+  Postgres: `HASH (thread_id)` partitioned to match `cubepi_messages`.
+  MySQL: `KEY (thread_id)` partitioned, no FK (consistent with
+  `cubepi_messages`).
 
-This is documented in the user guide page as a known limitation.
-Lifting it (e.g., supporting in-memory HITL via a special transient
-channel) is explicit follow-up scope.
+`fork()` in one transaction:
+
+1. Advisory lock / `FOR UPDATE` on the source thread.
+2. `SELECT MAX(seq) AS last_seq FROM cubepi_messages WHERE thread_id =
+   $src AND seq <= (SELECT MAX(seq) FROM cubepi_messages WHERE
+   thread_id = $src AND run_id = $after_run_id)`
+   AND `EXISTS (SELECT 1 FROM cubepi_run_completions WHERE thread_id =
+   $src AND run_id = $after_run_id)` → if no row,
+   `RunNotCompletedError`.
+3. `INSERT INTO cubepi_threads (thread_id, parent_thread_id,
+   forked_at_seq, extra, …) VALUES ($new, $src, $last_seq,
+   $merged_extra, …)` — `ThreadAlreadyExistsError` on PK violation.
+4. `INSERT INTO cubepi_messages (thread_id, seq, role, run_id,
+   metadata, payload) SELECT $new, seq, role, run_id, metadata, payload
+   FROM cubepi_messages WHERE thread_id = $src AND seq <= $last_seq
+   ORDER BY seq`.
+5. `INSERT INTO cubepi_run_completions (thread_id, run_id,
+   completed_at) SELECT $new, run_id, completed_at FROM
+   cubepi_run_completions WHERE thread_id = $src AND run_id IN
+   (SELECT DISTINCT run_id FROM cubepi_messages WHERE thread_id = $src
+   AND seq <= $last_seq)`.
+6. Commit.
+
+`complete_run()` in one transaction:
+
+- Same advisory lock / `FOR UPDATE` on `thread_id`.
+- `INSERT INTO cubepi_messages …` for `last_messages` (allocating seqs).
+- `INSERT INTO cubepi_run_completions (thread_id, run_id,
+  completed_at) VALUES (?, ?, now())` —
+  `RunAlreadyCompletedError` on PK violation.
+- Commit.
+
+`append()` (existing) is unchanged in surface but must persist
+`message.run_id` into the new column.
+
+#### SQLite
+
+Schema additions at connect time using the existing PRAGMA-probe +
+`ALTER TABLE` pattern (the file already does this for `run_id` on
+`thread_pending_request`):
+
+- `ALTER TABLE messages ADD COLUMN run_id TEXT NULL`.
+- `CREATE TABLE IF NOT EXISTS run_completions (thread_id TEXT NOT
+  NULL, run_id TEXT NOT NULL, completed_at REAL NOT NULL DEFAULT
+  (julianday('now')), PRIMARY KEY (thread_id, run_id))`.
+- `ALTER TABLE thread_extra ADD COLUMN parent_thread_id TEXT NULL`.
+
+`fork()`:
+
+1. `BEGIN IMMEDIATE`.
+2. Validate source exists; validate `(src_thread_id, after_run_id)`
+   has a `run_completions` row → else `RunNotCompletedError`.
+3. Validate new thread does not exist (probe `messages` /
+   `thread_extra` / `run_completions` for `new_thread_id`) →
+   `ThreadAlreadyExistsError`.
+4. `INSERT INTO messages (thread_id, run_id, message_json) SELECT
+   $new, run_id, message_json FROM messages WHERE thread_id = $src
+   AND id <= (SELECT MAX(id) FROM messages WHERE thread_id = $src AND
+   run_id = $after_run_id) ORDER BY id`. New rows get fresh global
+   `id`s (the `messages.id` column is a global auto-increment;
+   identity is not preserved across the copy, but per-thread row
+   order is).
+5. `INSERT INTO run_completions (thread_id, run_id, completed_at)
+   SELECT $new, run_id, completed_at FROM run_completions WHERE
+   thread_id = $src AND run_id IN (SELECT DISTINCT run_id FROM
+   messages WHERE thread_id = $src AND id <= $cut_id)`.
+6. `INSERT INTO thread_extra (thread_id, extra_json, parent_thread_id)
+   VALUES ($new, $merged_extra_json, $src)`.
+7. Commit.
+
+`complete_run()`:
+
+- `BEGIN IMMEDIATE`.
+- `INSERT INTO messages …` for each `last_messages` element (each
+  carrying its `run_id`).
+- `INSERT INTO run_completions (thread_id, run_id) VALUES (?, ?)` →
+  `RunAlreadyCompletedError` if `(thread_id, run_id)` PK conflict.
+- Commit.
+
+`append()` is also wrapped in `BEGIN IMMEDIATE` (uniform writer
+discipline; see §3.3). `PRAGMA busy_timeout = 5000` set at connect.
+
+No `forked_at_seq` column added — SQLite has no per-thread seq.
+
+#### Memory
+
+`MemoryCheckpointer` today is `dict[str, CheckpointData]`. This spec:
+
+- Extends `CheckpointData` with `parent_thread_id: str | None = None`.
+- Adds an internal `dict[str, set[str]]` mapping
+  `thread_id -> set of completed run_ids`.
+- Adds an `asyncio.Lock` for fork (existing single-statement methods
+  do not strictly need one, but fork is multi-step).
+- `Message.run_id` is just a field — Memory persists the whole
+  Message via `model_dump`, so no extra storage scaffolding.
+
+`fork()` under the lock:
+
+1. Source-exists check, new-thread-does-not-exist check.
+2. Look up the completed run_ids set; if `after_run_id` not there →
+   `RunNotCompletedError`.
+3. Walk `src.messages`, find the index of the last message with
+   `run_id == after_run_id`. Take prefix `[0..idx+1)`. Deep-copy
+   each message (`model_copy(deep=True)`).
+4. Compute the subset of `src`'s completed run_ids that appear in the
+   prefix; carry that set under the new thread_id.
+5. Deep-copy `src.extra`; merge `extra['fork']=metadata` per §3.4.
+6. Store `CheckpointData(messages=…, extra=…,
+   parent_thread_id=src_thread_id)` under `new_thread_id`.
+
+`complete_run()`:
+
+- Append `last_messages` to `src.messages`.
+- Add `run_id` to the completed-runs set; if already present →
+  `RunAlreadyCompletedError`.
+
+No `forked_at_seq` field — Memory has no seq.
 
 ### 3.10 Error semantics summary
 
 | Situation | Raised |
 |---|---|
 | `self.checkpointer is None` (fork or fork_once) | `RuntimeError("fork requires a checkpointer")` |
-| `fork_once()` finds HITL-bearing tool/middleware (§3.9.1) | `RuntimeError("fork_once() does not support HITL: <names>")` |
+| `fork_once()` finds HITL-bearing tool/middleware (§3.8.1) | `RuntimeError("fork_once() does not support HITL: <names>")` |
 | `src_thread_id` does not exist | `ThreadNotFoundError(src_thread_id)` |
 | `new_thread_id` already exists (fork) | `ThreadAlreadyExistsError(new_thread_id)` |
-| `message_count < 0` | `ValueError` |
-| `message_count > len(messages)` | `ValueError` (caller asked for more than exists) |
-| `message_count = 0` | **valid**: clones an empty starter thread. Boundary check passes vacuously. For Postgres/MySQL, `forked_at_seq IS NULL`. The new thread row is created with no messages and acts as if just-created with a `parent_thread_id` reference. |
-| `message_count = None` | normalized to `len(messages_in_src)` — copy everything currently present |
-| cut violates any §3.3 invariant (unresolved tool_call, orphan tool_result, partial multi-call close, two assistants in a row with unresolved calls) | `ForkBoundaryError(message_count, unresolved_tool_call_ids=[…], orphan_tool_result_ids=[…])` |
+| `after_run_id` has no completion marker on the source thread | `RunNotCompletedError(thread_id=src_thread_id, run_id=after_run_id)` |
+| `prompt(run_id=R)` and `R` already has a completion marker on the thread | `RunAlreadyCompletedError(thread_id=..., run_id=R)` |
 | `Agent.fork_once()` child run errors | propagates (same surface as `Agent.prompt()`) |
-| `Agent.fork_once()` is cancelled mid-turn | `asyncio.CancelledError` re-raises after transient agent abort completes (best-effort — see §3.9 step 6) |
-| SQLite cannot acquire writer lock within `busy_timeout` | `CheckpointerLockTimeoutError` (applies to fork, append, save_extra, save_pending_request uniformly) |
+| `Agent.fork_once()` is cancelled mid-turn | `asyncio.CancelledError` re-raises after transient agent abort completes (best-effort; see §3.8 step 6) |
+| SQLite cannot acquire writer lock within `busy_timeout` | `CheckpointerLockTimeoutError` |
 | `Agent(messages=..., thread_id=X, checkpointer=Y)` | `ValueError` — pre-seeding conflicts with lazy load |
-| `Agent(messages=...)` with a prefix that violates §3.3 | `ForkBoundaryError` (constructor uses the same validator as snapshot()) |
 
 ## 4. Migration / Compatibility
 
-- **Protocol change**: `Checkpointer.snapshot` and `Checkpointer.fork` are
-  new methods on the `runtime_checkable` Protocol. Existing
-  user-implemented checkpointers will keep type-checking (Protocol
-  membership is structural; missing methods only matter when called).
-  Documenting the new optional surface in the checkpointer guide is
-  sufficient.
-- **Storage**: Postgres / MySQL — no migration. SQLite — additive
-  columns, in-process backfill (`ALTER TABLE … ADD COLUMN`). Memory —
-  N/A.
-- **No public API changes** to existing methods. No deprecations.
+- **Protocol change**: `Checkpointer.snapshot`, `Checkpointer.fork`,
+  `Checkpointer.complete_run` are new methods on the
+  `runtime_checkable` Protocol. Existing user-implemented checkpointers
+  keep type-checking; they only fail when the new methods are actually
+  called.
+- **`Agent.prompt()` signature**: adds an optional keyword `run_id`
+  and changes return type from `None` to `str`. Returning a value that
+  the caller previously ignored is **not** a breaking change for
+  callers that wrote `await agent.prompt(msg)` — the return value can
+  simply be discarded. Callers using `await agent.prompt(msg); …` keep
+  working. Documenting the new return type in the migration page is
+  enough.
+- **`Agent.respond()` signature**: unchanged. Internal logic reads
+  `run_id` from `pending_request`.
+- **Storage**: Postgres / MySQL — schema v3 → v4 (additive: one
+  column on `cubepi_messages`, one new table `cubepi_run_completions`,
+  matching partition strategy). Alembic migration provided.
+  SQLite — additive `ALTER TABLE` and `CREATE TABLE IF NOT EXISTS` at
+  connect time. Memory — N/A.
+- **Existing messages** (`run_id IS NULL`) remain readable; not
+  forkable / not deletable (§3.6.4). No backfill.
+- **Existing `cubepi_threads.pending_request.run_id`** semantics
+  unchanged — it is the host-side run identifier for HITL recovery.
+  The new `Message.run_id` is structurally the same string; the same
+  value lives in both places during an active HITL pause, and that is
+  intentional (the value passed to `Agent.prompt(run_id=…)` is the
+  value written to `pending_request.run_id` and to every appended
+  `Message.run_id`).
 
 ## 5. Testing
 
-- **Unit / per-backend** (Memory + SQLite in-process; Postgres
-  against the bundled docker fixture; MySQL against the live test
-  server documented at `reference_mysql_test_server`):
-  - fork all messages → new thread reads back identically
-  - fork prefix → new thread holds prefix, source still holds full
-  - fork preserves `extra`; sets `parent_thread_id`
-  - subsequent `load(new_thread_id).parent_thread_id == src_thread_id`
-    (CheckpointData lineage round-trip)
-  - `load(src_thread_id).parent_thread_id is None` for an originally
-    non-forked source
-  - Lineage assertions:
-    - Postgres/MySQL: `forked_at_seq` equals the last copied seq
-    - Memory/SQLite: no `forked_at_seq` field/column exists; lineage
-      is asserted only via `load(new_thread_id).parent_thread_id ==
-      src_thread_id`
-  - fork copies `extra['fork']` from `metadata` arg (and overwrites
-    a pre-existing `extra['fork']` on the source — explicit test for
-    the §3.5 merge rule)
-  - fork does NOT copy `pending_request`: verified via
-    `load_pending_request(new_thread_id) is None`
-  - fork does NOT copy `run_id`
+- **Unit / per-backend** (Memory + SQLite in-process; Postgres against
+  the bundled docker fixture; MySQL against the live test server at
+  `reference_mysql_test_server`):
+
+  - `prompt()` accept-or-generate: caller-supplied run_id is used
+    verbatim; None generates a uuid; return value matches what was
+    persisted on appended messages
+  - `prompt()` raises `RunAlreadyCompletedError` if caller passes a
+    run_id that already has a completion marker
+  - completion marker written atomically with the final append (test:
+    crash between final append and marker write is structurally
+    impossible — they're one transaction)
+  - HITL pause does NOT write a completion marker; `respond()` resume
+    DOES write it once the resumed loop completes
+  - fork happy path: source has 3 completed runs A, B, C →
+    `fork(after_run_id=B)` produces a thread with messages of A+B
+    (in source order), `run_completions` rows for A+B, and no
+    pending_request
+  - fork preserves `extra`; sets `parent_thread_id`; (PG/MySQL) sets
+    `forked_at_seq` to the last copied seq
+  - `forked_at_seq` is NOT stored for Memory/SQLite (no column/field)
+  - `extra['fork']` overwrites any pre-existing `extra['fork']` on
+    the source
+  - `fork` does NOT copy `pending_request` / host-side run_id
   - `ThreadAlreadyExistsError` on collision; nothing written
-    (no partial thread row, no orphan messages)
   - `ThreadNotFoundError` on bad source
-  - `ValueError` for `message_count < 0` and `message_count > len`
-  - `message_count = 0` succeeds, produces an empty new thread with
-    `parent_thread_id` set
-  - `message_count = None` copies all current messages
-  - `ForkBoundaryError` for each illegal-prefix case enumerated in
-    §3.3: unresolved tool_call at end, orphan tool_result, partial
-    multi-call close, two assistants in a row with unresolved calls.
-    The error payload lists the offending ids.
-  - source thread unaffected by fork (independence test —
-    snapshot/load source before and after, byte-equal)
-  - Postgres/MySQL only: subsequent `append()` to the new thread
-    continues seq numbering from `forked_at_seq + 1`
-  - concurrent fork + append on source serializes correctly (no
-    half-copied state) — exercise with two concurrent tasks
-  - fork-of-fork: fork A → B; fork B → C. C's `parent_thread_id`
-    points to B (not A). C's `forked_at_seq` is computed from the
-    snapshot of B at C's fork point — it is B's seq value at that
-    point, NOT A's original seq (Postgres/MySQL preserve source seqs
-    on copy, so if B's seqs come from A unchanged the value
-    coincides; but the spec contract is "immediate source's seq",
-    which the test asserts explicitly). Walking the chain via
-    `parent_thread_id` reaches A.
-  - fork after `respond()`-injected synthetic deny: the synthetic
-    messages are in the snapshot and survive the fork
-  - SQLite cross-connection: open two separate `SQLiteCheckpointer`
-    instances against the same DB file, exercise `fork()` from one
-    while `append()` runs from the other; `BEGIN IMMEDIATE`
-    serializes the two writers correctly
+  - `RunNotCompletedError` when `after_run_id` does not exist, is
+    from a different thread, or is paused / aborted (no marker)
+  - source thread unaffected by fork (independence test, byte-equal
+    before/after)
+  - fork-of-fork lineage: A → B at run X; B → C at run Y (Y is one of
+    B's runs). C's `parent_thread_id == B`; for PG/MySQL,
+    `forked_at_seq` is B's seq for Y, not A's
+  - subsequent `prompt()` on a forked thread starts a new run_id; new
+    messages get the new run_id; completion writes its own marker
+  - concurrent fork + complete_run on source serialize correctly
+  - SQLite cross-connection: two `SQLiteCheckpointer` instances on
+    the same DB file, one `fork()` and one `complete_run()` from
+    different processes serialize via `BEGIN IMMEDIATE`
+  - legacy data: thread with `run_id=NULL` messages and no completion
+    markers raises `RunNotCompletedError` on `fork(...)`
+  - `CheckpointData.parent_thread_id` round-trip via `load()`
 
 - **`Agent.fork_once()` (FauxProvider)**:
-  - simple text-only follow-up returns expected final text
+
+  - simple text-only follow-up returns expected final text; source
+    thread unchanged
   - turn with tool calls completes fully, returns new messages
-  - source thread (and its checkpointer) is byte-for-byte unchanged
-  - raises `RuntimeError` when no checkpointer bound
-  - raises `RuntimeError` when any tool in `self.tools` has
-    `requires_hitl=True` (HITL pre-flight, §3.9.1) — exercised with
-    the actual `ask_user_tool(...)` factory result, not a stub
+  - raises `RuntimeError` when no checkpointer
+  - raises `RuntimeError` when `requires_hitl=True` tool in
+    `self.tools` (exercised with the actual `ask_user_tool(...)`
+    factory result)
   - raises `RuntimeError` when `ApprovalPolicyMiddleware` (or its
-    subclass `ConfirmToolCallMiddleware`) is in `self.middleware`
+    subclass `ConfirmToolCallMiddleware`) in `self.middleware`
   - cancellation: `asyncio.wait_for(agent.fork_once(...), timeout=…)`
-    raises `TimeoutError` and the transient agent's abort signal
-    fires (verified via FauxProvider abort hook)
+    raises `TimeoutError`; transient agent's abort fires
   - tracing span: emits `cubepi.agent.fork_once` with the documented
-    attributes. When called inside an existing span context, the
-    fork_once span is a child of the surrounding span (parent
-    propagation test). When called outside any span, it is a trace
-    root.
-  - The existing tracing test infrastructure
-    (`tests/tracing/conftest.py` in-memory exporter, if present) is
-    reused; if no such infrastructure exists, the plan stage
-    introduces a minimal `InMemorySpanExporter` fixture as a
-    prerequisite.
+    attributes; nests under surrounding span if one exists; otherwise
+    is a trace root
 
-- **`Agent.fork()` (FauxProvider)**:
-  - happy path returns None; checkpointer state is correct
-  - error pass-through (`ThreadNotFoundError`, `ThreadAlreadyExistsError`,
-    `ForkBoundaryError`, `RuntimeError` for missing checkpointer)
-  - does NOT mutate `self.thread_id`
+- **`Agent(messages=...)` constructor (§3.7)**:
 
-- **Exception hierarchy** (`tests/checkpointer/test_exceptions.py`):
-  - `ThreadNotFoundError`, `ThreadAlreadyExistsError`,
-    `ForkBoundaryError`, `CheckpointerLockTimeoutError` are all
-    catchable via `except CheckpointerError`
-  - `CheckpointerError` is NOT a subclass of `CubepiSchemaError`
-    (schema vs. runtime concerns stay separate)
-
-- **`Agent(messages=...)` constructor (§3.7a)** — a dedicated test
-  group, distinct from `fork_once()` tests, so the new constructor
-  path is exercised even if `fork_once()` is later refactored:
-  - happy path: `Agent(messages=[UserMessage(...)])` ends up with
-    those messages reflected by the next `prompt()` call
+  - happy path: pre-seeded messages reflected in the next `prompt()`
   - `Agent(messages=[...], thread_id="t", checkpointer=cp)` raises
     `ValueError`
-  - `Agent(messages=<invalid-prefix>)` raises `ForkBoundaryError`
-    for each §3.3 invariant violation (re-uses the
-    snapshot-validator test fixtures)
-  - **deep-copy isolation**: construct an `Agent` with a list
-    containing one `UserMessage`, one `AssistantMessage` carrying a
-    `ToolCall` (with mutable `arguments` dict), and one
-    `ToolResultMessage` (with `content` list and `metadata` dict).
-    Mutate every nested mutable field on the ORIGINAL message
-    objects after construction. Assert the agent's internal copies
-    are unchanged. Mirror the mutation against the agent and assert
-    the originals are unchanged (isolation runs both directions).
-  - `messages=None` is the no-op default (sanity check)
+  - deep-copy isolation: mutate every nested mutable field
+    (`AssistantMessage.content`, `ToolCall.arguments`,
+    `ToolResultMessage.content`, every `metadata` dict) on the
+    ORIGINAL messages after construction; assert the agent's
+    internals are unchanged. Mirror the mutation against the agent
+    and assert the originals are unchanged.
+
+- **Exception hierarchy** (`tests/checkpointer/test_exceptions.py`):
+  every new error (`ThreadNotFoundError`, `ThreadAlreadyExistsError`,
+  `RunNotCompletedError`, `RunAlreadyCompletedError`,
+  `CheckpointerLockTimeoutError`) is catchable via
+  `except CheckpointerError`. `CheckpointerError` is NOT a subclass
+  of `CubepiSchemaError`.
 
 ## 6. Open questions
 
-None remaining — answers locked in during brainstorm:
+All closed during brainstorm:
 
 - Storage model → physical copy
-- Cut parameter → `message_count`
-- Caller supplies `new_thread_id` (required, not auto-generated)
-- Boundary on unresolved tool_calls → raise `ForkBoundaryError`
-- `extra` copied; `pending_request` / `run_id` not copied
-- `metadata` arg merged into `extra['fork']`
-- Spec scope → both `fork()` and `fork_once()` together
-- Both methods live on `Agent` (thin wrappers over checkpointer
-  primitives for `fork`; runtime work for `fork_once`)
+- Fork handle → `after_run_id` only (no message_count, no Message.id,
+  no after_response_id)
+- Run state ownership → cubepi (not cubebox)
+- Run_id source → accept-or-generate from `Agent.prompt`
+- Legacy data → not forkable / not deletable; no backfill
+- Run completion atomicity → same transaction as final append
+  (`complete_run()` Protocol method)
+- HITL pause/resume → same run_id across suspension; marker written
+  on resume completion
+- fork_once HITL → banned via `requires_hitl` marker
 
 ## 7. Out of this PR (follow-ups)
 
-- Cubebox-side wiring: new `Conversation.parent_conversation_id` column,
+- **`Agent.delete_run(thread_id, run_id, *, including_subsequent: bool
+  = True)`** — separate spec. Data model laid down here makes it a
+  small change: a `DELETE WHERE thread_id=? AND run_id=?` (single-run
+  surgical delete, leaves a hole; documented caveat) or a
+  `DELETE WHERE thread_id=? AND seq >= min_seq_of_run` (rollback,
+  also drops subsequent run_completions).
+- Cubebox wiring: new `Conversation.parent_conversation_id` column,
   `POST /conversations/{id}/fork` endpoint, per-assistant-message UI
   button. Lives in the cubebox repo.
 - CLI sugar (`cubepi fork`) — only if a real user asks.
-- GC / size cap for heavily forked thread trees — only if a real
-  workload hits the space cost.
+- Backfill heuristic for legacy threads (best-effort run-boundary
+  inference) — only if a real workload needs it.
