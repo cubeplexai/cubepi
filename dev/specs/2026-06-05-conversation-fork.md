@@ -311,14 +311,35 @@ about to be appended. **`Checkpointer.append()` signature does not
 change** — the run_id rides on the messages themselves
 (`Message.run_id` field, §3.6.5).
 
-When the agent has both `self.checkpointer` and `self.thread_id`
-bound, `Agent.prompt()` calls
+`Agent.prompt()` calls
 `self.checkpointer.claim_run(self.thread_id, run_id)` before any
-append. **When `self.checkpointer` is None OR `self.thread_id` is
-None** (e.g., the transient agent inside `fork_once()` —
-see §3.8), `prompt()` skips the claim entirely; it still stamps
-`run_id` on every in-memory Message but no `cubepi_runs` row is
-written. `mark_run_complete()` is similarly skipped in that case.
+append, gated by:
+
+- **Skip when the checkpointer or thread_id is absent**: when
+  `self.checkpointer is None` OR `self.thread_id is None` (e.g., the
+  transient agent inside `fork_once()` — see §3.8), `prompt()` skips
+  the claim entirely; it still stamps `run_id` on every in-memory
+  Message but no `cubepi_runs` row is written.
+  `mark_run_complete()` is similarly skipped.
+
+- **Skip when the checkpointer is run-unaware (legacy degraded
+  mode)**: when `self.checkpointer` exists but does NOT implement
+  BOTH `claim_run` AND `mark_run_complete` (a third-party v3-only
+  Protocol impl), `prompt()` skips both. Messages still get
+  `run_id` stamped; no marker is ever written; `Agent.fork()` and
+  `Agent.fork_once()` on this checkpointer raise
+  `CheckpointerError`. The detection is one capability check at
+  `prompt()` entry:
+  ```python
+  run_aware = (
+      hasattr(self.checkpointer, "claim_run")
+      and hasattr(self.checkpointer, "mark_run_complete")
+  )
+  ```
+  Partial implementations (one but not the other) are treated as
+  NOT run-aware — never call into a checkpointer that can claim
+  but not complete, or the inverse. See §4 for the full
+  compatibility story.
 
 The claim INSERT atomically inserts a row into `cubepi_runs` with
 `claimed_at = now()` and `completed_at = NULL`. The insert is the
@@ -357,13 +378,23 @@ checkpointer, etc.), no row is inserted.
 Completion is recorded by `Checkpointer.mark_run_complete(thread_id,
 run_id)`, which under the per-thread lock:
 
-1. Allocates the next per-thread `completion_seq` (see §3.2).
-2. `UPDATE cubepi_runs SET completed_at = now(), completion_seq = ?
-   WHERE thread_id = ? AND run_id = ? AND completed_at IS NULL`.
-3. If 0 rows updated: either the row doesn't exist
-   (`RunNotClaimedError`) or it is already completed
-   (`RunAlreadyCompletedError`). Backends distinguish the two by a
-   followup SELECT under the same lock.
+1. `SELECT completed_at FROM cubepi_runs WHERE thread_id=? AND
+   run_id=?`.
+2. **No row** → `RunNotClaimedError`. (Agent-loop logic bug: claim
+   was never made, or its row was lost.)
+3. **Row exists with `completed_at IS NOT NULL`** → idempotent
+   success. Return without raising and without re-allocating
+   `completion_seq`. Supports retry-after-lost-ack from
+   `CompletionMarkerFailedError`.
+4. **Row exists with `completed_at IS NULL`** →
+   - Allocate `next_seq = (SELECT COALESCE(MAX(completion_seq), 0)
+     + 1 FROM cubepi_runs WHERE thread_id=? AND completion_seq IS
+     NOT NULL)` (per-thread monotonic, §3.2).
+   - `UPDATE cubepi_runs SET completed_at = now(),
+     completion_seq = $next_seq WHERE thread_id=? AND run_id=?`.
+
+`mark_run_complete()` **never raises `RunAlreadyCompletedError`** —
+that error is reserved for `claim_run()` collisions only (see §3.6.1).
 
 `mark_run_complete()` is called by the agent loop AFTER the run's
 final `append()` and BEFORE `Agent.prompt()` returns.
@@ -414,10 +445,12 @@ spec enumerates each loop outcome:
 | Loop outcome | Detection signal | `mark_run_complete()` called? |
 |---|---|---|
 | **Clean success** | Final `AssistantMessage` has `stop_reason in {"end_turn", "stop", "tool_use", …}` (any non-error / non-aborted stop_reason) AND `error_message is None` AND no pending HITL on the thread | **YES** |
-| **HITL suspended** | `pending_request` row written this run; `prompt()` returns with the agent in suspended state | NO — `respond()` writes the marker on resume's clean exit |
+| **HITL suspended** (normal pause) | `pending_request` row written this run; `prompt()` returns with the agent in suspended state | NO — `respond()` writes the marker on resume's clean exit |
+| **HITL detached** (`HitlDetached` caught in `loop.py:196` / `loop.py:418`) | Exception caught internally; loop returns silently, NO `AgentEndEvent` emitted. `pending_request` may still be set so `respond()` can resume later. | NO — same as normal HITL pause; resume handles completion |
+| **HITL aborted** (`HitlAborted`, via `Agent.abort_pending()`) | Exception caught internally; loop returns silently, NO `AgentEndEvent` emitted. The synthetic deny + terminal aborted assistant are appended by `abort_pending()` itself (see `agent.py:582-595`). | NO — claim row remains; the run is terminally abandoned; future `delete_run()` cleans up |
 | **Provider / tool error** | Final assistant message has `stop_reason="error"` OR `error_message is not None` (set on the message by the loop's exception handler) | NO — claim row remains; future `delete_run()` cleans up |
-| **Abort** (`agent.abort()` or `agent.abort_pending()`) | Final assistant message has `stop_reason="aborted"` | NO — claim row remains |
-| **Cancellation** (`asyncio.CancelledError`, `HitlDetached`, `HitlAborted`) | Exception propagates out of `prompt()`; no `AgentEndEvent` emitted | NO — claim row remains; `active_run_id` left set (§3.7) |
+| **Abort during streaming** (`agent.abort()`) | Final assistant message has `stop_reason="aborted"` | NO — claim row remains |
+| **Cancellation** (`asyncio.CancelledError` propagates out — i.e. the caller's task is cancelled and no internal catch swallowed it) | Exception propagates out of `prompt()`; no `AgentEndEvent` emitted; `active_run_id` left set (§3.7) | NO — claim row remains |
 
 The agent loop's existing `if message.stop_reason in ("error",
 "aborted"): … return early` branch (`loop.py:485`) is the natural
@@ -462,20 +495,46 @@ pauses for HITL. This pre-dates the spec and is preserved.
 
 The spec **adds a constraint** to make the channel's bound run_id
 agree with the agent's active run_id, so HITL recovery on resume
-finds the right value:
+finds the right value. For the constraint to be checkable,
+HITL-bearing tools/middleware must EXPOSE their bound run_id —
+`requires_hitl=True` alone tells Agent "HITL exists" but not "which
+run_id is bound to the channel". This spec therefore adds:
 
-- When the agent has both a `checkpointer` AND any tool/middleware
-  with `requires_hitl=True` (§3.8.2) bound that holds a
-  `CheckpointedChannel`, `Agent.prompt(run_id=...)` MUST be
-  host-supplied (NOT generate-mode) and MUST equal the channel's
-  `_run_id`. Mismatch / `None` raises `ValueError` at the start of
-  `prompt()`, before `claim_run()`.
+- New attribute `bound_hitl_run_id: str | None = None` on
+  `cubepi.agent.types.AgentTool` and `cubepi.middleware.base.Middleware`.
+- `cubepi.hitl.ask_user_tool(channel)` factory MUST set
+  `tool.bound_hitl_run_id = channel._run_id` on the returned
+  `AgentTool` (the channel is in the factory's closure; reading
+  `_run_id` is straightforward).
+- `cubepi.hitl.middleware.ApprovalPolicyMiddleware.__init__` MUST set
+  `self.bound_hitl_run_id = channel._run_id` from its channel
+  argument; `ConfirmToolCallMiddleware` inherits.
+- Third-party HITL tools / middleware that set `requires_hitl=True`
+  MUST also set `bound_hitl_run_id` if they bind a channel; documented
+  in the user guide.
 
-- This is the existing cubebox pattern: `RunManager` generates a
-  `uuid7()` run_id per request, constructs
-  `CheckpointedChannel(checkpointer=cp, thread_id=conv_id,
-  run_id=run_id)`, then calls `Agent.prompt(run_id=run_id)`. Same
-  value in both places, no change needed at the host.
+**Enforcement at `Agent.prompt()` start, before `claim_run()`:**
+
+```
+bound = {
+    t.bound_hitl_run_id for t in self.tools if t.requires_hitl
+} | {
+    m.bound_hitl_run_id for m in self.middleware if m.requires_hitl
+}
+bound.discard(None)   # tolerate unbound HITL elements (none expected
+                      # in practice, but defensive)
+if bound:
+    if run_id is None:
+        raise ValueError(
+            "Agent has HITL-bound tools/middleware; "
+            "prompt(run_id=...) must be explicitly supplied"
+        )
+    if any(b != run_id for b in bound):
+        raise ValueError(
+            f"prompt(run_id={run_id!r}) does not match "
+            f"HITL-bound run_ids {bound!r}"
+        )
+```
 
 - For non-HITL agents (no `requires_hitl=True` element), `Agent.prompt`
   accepts `run_id=None` and generates; no channel binding to worry
@@ -484,7 +543,7 @@ finds the right value:
 This avoids the alternative of refactoring `CheckpointedChannel` to
 take run_id at call time (a backward-incompatible HITL API change
 beyond this spec's scope) while still making the binding semantics
-unambiguous.
+unambiguous AND mechanically checkable.
 
 **Protocol change required to support this.** Today,
 `Checkpointer.load_pending_request(thread_id) -> HitlRequest | None`
@@ -1199,9 +1258,10 @@ No `forked_at_seq` field — Memory has no seq.
   fail **ordinary `Agent.prompt()` calls** once `claim_run()` is
   invoked at the start of every run — not just fork API calls.
 
-  Mitigation: `Agent.prompt()` checks `hasattr(self.checkpointer,
-  "claim_run")` at the start. If the method is absent, `prompt()`
-  runs in **legacy degraded mode**:
+  Mitigation: `Agent.prompt()` checks both `hasattr(self.checkpointer,
+  "claim_run")` AND `hasattr(self.checkpointer, "mark_run_complete")`
+  at the start. If EITHER is absent, `prompt()` runs in **legacy
+  degraded mode**:
 
   - No `claim_run()` / `mark_run_complete()` call.
   - `Message.run_id` is still stamped on appended messages (purely
@@ -1351,27 +1411,40 @@ No `forked_at_seq` field — Memory has no seq.
     HIGH #3): call mark_run_complete twice on the same
     `(thread_id, run_id)`; second call returns success (no raise),
     `completion_seq` unchanged from the first call.
-  - **HITL channel run_id binding** (regression test for v2 R7 HIGH
-    #2): construct Agent with a `requires_hitl=True` tool whose
-    `CheckpointedChannel(run_id="R1")` is bound at construction.
-    Then call `Agent.prompt(message, run_id=None)` → raises
-    `ValueError` (generate-mode rejected). Then call
+  - **HITL channel run_id binding** (regression test for v2 R7
+    HIGH #2 + v2 R8 HIGH #2): construct Agent with
+    `ask_user_tool(CheckpointedChannel(checkpointer=cp,
+    thread_id=t, run_id="R1"))`. Assert the returned tool has
+    `tool.bound_hitl_run_id == "R1"` (the factory MUST set this).
+    Then `Agent.prompt(message, run_id=None)` → raises `ValueError`
+    (generate-mode rejected, error message names the bound run_id).
     `Agent.prompt(message, run_id="R2")` (mismatch) → raises
-    `ValueError`. Then `Agent.prompt(message, run_id="R1")` →
-    succeeds. Non-HITL agents accept `run_id=None` unchanged.
+    `ValueError`. `Agent.prompt(message, run_id="R1")` → succeeds.
+    Same with `ApprovalPolicyMiddleware` instead of the tool. Non-HITL
+    agents accept `run_id=None` unchanged.
   - **Loop-outcome completion enumeration** (regression test for v2
     R7 HIGH #5): exercise each row of the §3.6.2 table — clean
-    success, HITL pause, provider exception, tool exception, abort,
-    cancellation, HitlDetached — and assert
+    success, HITL suspended (normal pause), HITL detached
+    (HitlDetached caught in loop), HITL aborted (abort_pending),
+    provider exception, tool exception, abort during streaming,
+    propagating cancellation — and assert
     `cubepi_runs.completed_at IS NULL` for every non-success outcome
-    and `IS NOT NULL` for the success outcome.
-  - **Legacy-degraded mode** (regression test for v2 R7 HIGH #4):
-    construct an Agent with a checkpointer that implements only the
-    v3 surface (no `claim_run` / `mark_run_complete`). Vanilla
-    `Agent.prompt(msg)` succeeds (no claim attempted; messages
-    stamped with run_id but no marker written). Calling
-    `Agent.fork(...)` or `Agent.fork_once(...)` raises
-    `CheckpointerError` explaining the missing methods.
+    and `IS NOT NULL` for the clean-success outcome. HITL
+    suspended → respond() resume → assert marker now NOT NULL.
+  - **Legacy-degraded mode** (regression test for v2 R7 HIGH #4 +
+    v2 R8 HIGH #3): construct an Agent with a checkpointer that
+    implements only the v3 surface (no `claim_run` /
+    `mark_run_complete`). Vanilla `Agent.prompt(msg)` succeeds (no
+    claim attempted; messages stamped with run_id but no marker
+    written). Calling `Agent.fork(...)` or `Agent.fork_once(...)`
+    raises `CheckpointerError`.
+
+    Partial-implementation variant: checkpointer has `claim_run`
+    but NOT `mark_run_complete` (or the inverse). Agent.prompt()
+    treats it the same as fully-missing: no claim attempted, no
+    marker attempted. This protects against the
+    "claim-but-can't-complete" hazard where vanilla prompt() would
+    leave orphan claim rows on every call.
   - SQLite cross-connection: two `SQLiteCheckpointer` instances on
     the same DB file, one `fork()` and one `mark_run_complete()`
     from different processes serialize via `BEGIN IMMEDIATE`
