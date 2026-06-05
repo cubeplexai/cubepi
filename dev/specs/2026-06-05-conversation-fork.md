@@ -286,10 +286,18 @@ about to be appended. **`Checkpointer.append()` signature does not
 change** — the run_id rides on the messages themselves
 (`Message.run_id` field, §3.6.5).
 
-Before any append happens, `Agent.prompt()` calls
-`Checkpointer.claim_run(thread_id, run_id)` which atomically inserts
-a row into `cubepi_runs` with `claimed_at = now()` and
-`completed_at = NULL`. The insert is the synchronization point:
+When the agent has both `self.checkpointer` and `self.thread_id`
+bound, `Agent.prompt()` calls
+`self.checkpointer.claim_run(self.thread_id, run_id)` before any
+append. **When `self.checkpointer` is None OR `self.thread_id` is
+None** (e.g., the transient agent inside `fork_once()` —
+see §3.8), `prompt()` skips the claim entirely; it still stamps
+`run_id` on every in-memory Message but no `cubepi_runs` row is
+written. `mark_run_complete()` is similarly skipped in that case.
+
+The claim INSERT atomically inserts a row into `cubepi_runs` with
+`claimed_at = now()` and `completed_at = NULL`. The insert is the
+synchronization point:
 
 - PK conflict where the existing row has `completed_at IS NULL` →
   `RunAlreadyClaimedError` (another process is currently running
@@ -397,6 +405,15 @@ A run that pauses for HITL keeps its `run_id` across the suspension.
   agent loop, continues the same run, stamps every subsequent
   appended message with `run_id=R`, and calls `mark_run_complete()`
   on terminal exit.
+
+**`respond()` does NOT call `claim_run()`.** The run was already
+claimed by the original `prompt()` call; the `cubepi_runs` row
+exists with `completed_at IS NULL`. Calling `claim_run(R)` again
+would (correctly) raise `RunAlreadyClaimedError`. The agent loop
+distinguishes "fresh prompt" (claim required) from "resume"
+(claim skipped) by which entry point was called. A single end-to-end
+HITL-bearing run calls `claim_run()` exactly once across all
+`prompt()` + N × `respond()` invocations.
 
 `Agent.respond()` signature does **not** change.
 
@@ -893,9 +910,13 @@ with defaults.**
   `RunAlreadyClaimedError`; else `RunAlreadyCompletedError`.
 - Commit.
 
-(MySQL equivalent: `INSERT IGNORE INTO cubepi_threads`. The same
-lazy-create lives in `append()` today; spec just promotes the
-pattern to `claim_run()`.)
+MySQL equivalent: `INSERT INTO cubepi_threads (thread_id) VALUES (?)
+ON DUPLICATE KEY UPDATE thread_id = thread_id` — a no-op update on
+duplicate that traps ONLY the dup-key case. **Do NOT use `INSERT
+IGNORE`**: it silently swallows non-duplicate errors (type
+coercion, FK violation if any) and would hide real bugs in the
+lazy-create path. This matches the existing `append()` lazy-create
+idiom in `cubepi/checkpointer/mysql/checkpointer.py`.
 
 `mark_run_complete()`:
 
@@ -1187,7 +1208,19 @@ No `forked_at_seq` field — Memory has no seq.
     `load_pending()` (single read), continues, every appended message
     post-resume carries `run_id=R`, `mark_run_complete()` writes R's
     marker on terminal exit. Second-pause variant: respond() pauses
-    again with same R, third respond() resumes again with same R
+    again with same R, third respond() resumes again with same R.
+    **Single-claim invariant** (regression test for v2 R4 HIGH #2):
+    `claim_run()` is called exactly once across the whole
+    prompt + N × respond chain (assert via a checkpointer spy).
+    `respond()` calling `claim_run()` would raise
+    `RunAlreadyClaimedError` — if the test ever sees that, regression
+    triggered.
+  - **fork_once no checkpointer side effects** (regression test for
+    v2 R4 HIGH #1): the transient agent inside `fork_once()` runs
+    `prompt(message, run_id=<fresh>)` with `checkpointer=None`. No
+    `claim_run()` or `mark_run_complete()` call is made (assert via
+    spying on a checkpointer instance that would have been used by
+    the parent — and observe no calls from the transient agent).
   - SQLite cross-connection: two `SQLiteCheckpointer` instances on
     the same DB file, one `fork()` and one `mark_run_complete()`
     from different processes serialize via `BEGIN IMMEDIATE`
