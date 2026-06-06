@@ -61,6 +61,15 @@ async def clean_db(pg_dsn: str, _pg_available: bool):
         await admin.close()
 
 
+@pytest_asyncio.fixture
+async def pg_v4_dsn(clean_db: str):
+    """Fresh Postgres DB with the v4 cubepi schema fully built."""
+    from tests.checkpointer.test_postgres import _setup_schema as _setup_pg_schema
+
+    await _setup_pg_schema(clean_db)
+    yield clean_db
+
+
 # ---------------------------------------------------------------------------
 # MySQL fixtures
 # ---------------------------------------------------------------------------

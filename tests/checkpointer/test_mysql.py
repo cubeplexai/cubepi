@@ -36,7 +36,7 @@ def test_models_import() -> None:
         cubepi_metadata,
     )
 
-    assert EXPECTED_SCHEMA_VERSION == 3
+    assert EXPECTED_SCHEMA_VERSION == 4
     assert PARTITION_COUNT == 64
     assert CubepiThread.__tablename__ == "cubepi_threads"
     assert CubepiMessage.__tablename__ == "cubepi_messages"
