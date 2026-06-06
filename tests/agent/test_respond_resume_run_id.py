@@ -175,6 +175,73 @@ async def test_respond_resume_with_legacy_pending_does_not_crash() -> None:
 
 
 @pytest.mark.asyncio
+async def test_respond_leaves_active_run_id_set_on_resume_raise() -> None:
+    """Spec §3.7 parity: if the HITL resume body raises, respond() must
+    NOT clear active_run_id. Callers can observe which run failed."""
+    cp = MemoryCheckpointer()
+    p = _pause_then_finish_provider()
+
+    def _model():
+        return p.model("faux-model")
+
+    await _drive_pause(cp, _model)
+
+    ch2 = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
+    tool2 = ask_user_tool(ch2)
+    a2 = Agent(
+        model=_model(),
+        tools=[tool2],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch2,
+    )
+
+    class _Boom(Exception):
+        pass
+
+    async def _explode():
+        raise _Boom("simulated resume failure")
+
+    # Patch the resume body to raise.
+    a2._run_hitl_resume = _explode  # type: ignore[method-assign]
+
+    loaded = await cp.load_pending("t")
+    assert loaded is not None
+    qid = loaded[0].question_id
+
+    with pytest.raises(_Boom):
+        await a2.respond(question_id=qid, answer="yes")
+    # active_run_id stays SET on raise (no else: clear ran).
+    assert a2.state.active_run_id == "R1"
+
+
+@pytest.mark.asyncio
+async def test_respond_defaults_question_id_to_pending() -> None:
+    """respond() without an explicit question_id picks it up from the
+    persisted pending row."""
+    cp = MemoryCheckpointer()
+    p = _pause_then_finish_provider()
+
+    def _model():
+        return p.model("faux-model")
+
+    await _drive_pause(cp, _model)
+
+    ch2 = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
+    tool2 = ask_user_tool(ch2)
+    a2 = Agent(
+        model=_model(),
+        tools=[tool2],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch2,
+    )
+    # Don't pass question_id — respond() must default to pending's id.
+    await a2.respond(answer="yes")
+    assert cp._runs["t"]["R1"].completed_at is not None
+
+
+@pytest.mark.asyncio
 async def test_respond_rejects_mismatched_channel_run_id() -> None:
     """Regression for codex R2 P2: respond() must reject a CheckpointedChannel
     whose run_id disagrees with the recovered pending row's run_id.
