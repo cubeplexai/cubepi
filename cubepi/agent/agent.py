@@ -376,14 +376,9 @@ class Agent(Generic[TMessage]):
                 )
         effective_run_id = run_id or uuid.uuid4().hex
         # Reject mismatched caller-supplied Message.run_id BEFORE any state
-        # mutation so the supplied run_id remains reusable (Task 25 will add
-        # claim_run, which must not be called for a rejected prompt).
+        # mutation so the supplied run_id remains reusable (claim_run must
+        # not be called for a rejected prompt).
         self._validate_input_run_ids(message, effective_run_id)
-        if self._run_aware and self.thread_id is not None:
-            assert self.checkpointer is not None  # narrowed by _run_aware
-            await self.checkpointer.claim_run(self.thread_id, effective_run_id)
-        self._state.active_run_id = effective_run_id
-        self._state.last_outcome = None
         try:
             async with self._run_lock:
                 # Re-check under the lock in case streaming flipped during acquire.
@@ -392,6 +387,16 @@ class Agent(Generic[TMessage]):
                         "Agent is already processing a prompt. "
                         "Use steer() or follow_up() to queue messages."
                     )
+                # Claim the run UNDER the lock: this serializes concurrent cold
+                # prompt() calls against the checkpointer. With the fail-fast
+                # `.locked()` guard above, the second concurrent caller raises
+                # immediately instead of awaiting claim_run + queueing on the
+                # lock.
+                if self._run_aware and self.thread_id is not None:
+                    assert self.checkpointer is not None  # narrowed by _run_aware
+                    await self.checkpointer.claim_run(self.thread_id, effective_run_id)
+                self._state.active_run_id = effective_run_id
+                self._state.last_outcome = None
 
                 if isinstance(message, str):
                     messages: list[Message] = [
@@ -485,13 +490,30 @@ class Agent(Generic[TMessage]):
         snapshot = await self.checkpointer.snapshot(
             src_thread_id, after_run_id=after_run_id
         )
-        # Build transient agent
+        # Build transient agent. Forward the parent's resolved execution
+        # options + middleware-composed hooks so the probe behaves like the
+        # parent would (tool_execution, thinking, transform/response hooks,
+        # on_payload/on_response, queue modes). Passing the resolved hooks
+        # as explicit args means we pass middleware=[] to avoid composing
+        # middleware twice — the parent's composed result already lives on
+        # self.transform_context etc.
         child: Agent = Agent(
             model=self._model,
             system_prompt=self._state.system_prompt,
             tools=list(self._state.tools),
-            middleware=list(self._middleware),
+            thinking=self._state.thinking,
             convert_to_llm=self.convert_to_llm,
+            transform_context=self.transform_context,
+            transform_system_prompt=self.transform_system_prompt,
+            after_model_response=self.after_model_response,
+            before_tool_call=self.before_tool_call,
+            after_tool_call=self.after_tool_call,
+            should_stop_after_turn=self.should_stop_after_turn,
+            on_run_end=self.on_run_end,
+            on_payload=self.on_payload,
+            on_response=self.on_response,
+            tool_execution=self.tool_execution,
+            middleware=[],
             messages=snapshot,
         )
         pre_len = len(child.state.messages)

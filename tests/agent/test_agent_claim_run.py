@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from cubepi.agent.agent import Agent
@@ -81,3 +83,37 @@ async def test_degraded_mode_v3_only_checkpointer():
     # Vanilla prompt works (degraded mode skips claim).
     got = await a.prompt("hi")
     assert isinstance(got, str)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_cold_prompts_second_raises_fast():
+    """Two concurrent cold prompt() calls — the second must raise immediately
+    instead of serializing on the run-lock behind the first's claim_run I/O.
+
+    Regression for codex P1: claim_run used to run BEFORE the lock was
+    acquired, so two callers could both pass the fail-fast `.locked()` check
+    while the first was awaiting claim_run.
+    """
+
+    class _SlowClaimCheckpointer(MemoryCheckpointer):
+        async def claim_run(self, thread_id, run_id):  # type: ignore[override]
+            await asyncio.sleep(0.05)
+            return await super().claim_run(thread_id, run_id)
+
+    cp = _SlowClaimCheckpointer()
+    a = _agent(checkpointer=cp, thread_id="t")
+
+    results = await asyncio.gather(
+        a.prompt("first", run_id="R1"),
+        a.prompt("second", run_id="R2"),
+        return_exceptions=True,
+    )
+    # Exactly one succeeded; the other raised "already processing".
+    runtime_errs = [r for r in results if isinstance(r, RuntimeError)]
+    successes = [r for r in results if isinstance(r, str)]
+    assert len(runtime_errs) == 1
+    assert len(successes) == 1
+    assert "already processing" in str(runtime_errs[0]).lower()
+    # The loser's run_id was NOT claimed (claim_run only runs inside the lock).
+    claimed = set(cp._runs.get("t", {}).keys())
+    assert claimed == {successes[0]}

@@ -147,6 +147,45 @@ cubepi_schema_version
 
 `save_extra` 执行浅层顶级合并，而非替换——与 Postgres 和 SQLite 的行为相同。先写入 `{"foo": 1}` 再写入 `{"bar": 2}` 后，结果为 `{"foo": 1, "bar": 2}`。（内部实现是在行锁保护下读取当前 `extra`，然后写入合并后的字典，而非使用 `JSON_MERGE_PATCH`——后者的 null 删除和深度合并语义与 `dict.update` 不同。）
 
+## Forks
+
+`MySQLCheckpointer` 实现了 v4 的 `snapshot` / `fork` /
+`claim_run` / `mark_run_complete` / `load_pending` 协议方法，
+因此同时支持 `Agent.fork(...)` 和 `Agent.fork_once(...)`。
+`cubepi_threads` 上的 `parent_thread_id` / `forked_at_seq` 列
+用于记录 fork 谱系；v4 新增的 `cubepi_runs` 表用于追踪每个 run
+的 claim/completion 状态。
+
+用户层 API 与语义详见
+[会话 Fork 指南](./forking)。
+
+## Schema v3 → v4 migration {#schema-v3--v4-migration}
+
+Fork 功能将 `EXPECTED_SCHEMA_VERSION` 从 3 升到 4。升级会向
+`cubepi_messages` 添加 `run_id` 列 + 复合索引，并创建
+`cubepi_runs` 表。使用提供的 alembic helper —— MySQL/pymysql
+每次调用只执行一条语句，因此需要先拆分再执行：
+
+```python
+# 在迁移的 upgrade() 中：
+from cubepi.checkpointer.mysql.alembic_helpers import (
+    upgrade_v3_to_v4_op,
+    write_schema_version_op,
+)
+
+def upgrade():
+    for stmt in upgrade_v3_to_v4_op().split(";"):
+        if stmt.strip():
+            op.execute(stmt)
+    for stmt in write_schema_version_op().split(";"):
+        if stmt.strip():
+            op.execute(stmt)
+```
+
+`upgrade_v3_to_v4_op()` 在重复执行下是幂等的。升级前的旧消息
+保留 `run_id = NULL`，仍然可读；关于混合数据的 fork 资格规则，
+请参阅 [旧数据行为](./forking#legacy-data-behaviour)。
+
 ## 常见陷阱
 
 - **`CubepiSchemaUninitialized`** —— 数据库为空、迁移未执行，或 `cubepi_schema_version` 表结构有误。请先应用宿主的 alembic upgrade。
