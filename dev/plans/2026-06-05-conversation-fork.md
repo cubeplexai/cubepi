@@ -53,6 +53,28 @@ uv run pytest tests/ -x -q
 ```
 Expected: all green (existing tests, no impl changes yet).
 
+### Fixture conventions for the rest of the plan
+
+These names appear in test snippets throughout the plan. They map to
+existing fixtures in `tests/checkpointer/conftest.py`:
+
+| Plan name | Real fixture | Returns |
+|---|---|---|
+| Postgres DB | `clean_db` | DSN string |
+| MySQL DB | `clean_mysql_db` | DSN string |
+| In-memory tracing exporter | (none — see Task 34) | spec adds one |
+| MemoryCheckpointer | (no fixture — instantiate inline `MemoryCheckpointer()`) | — |
+
+Both SQL checkpointers' constructors take a DSN string (PG signature:
+`PostgresCheckpointer(dsn, *, min_pool_size=1, max_pool_size=10)` at
+`cubepi/checkpointer/postgres/checkpointer.py:62`; MySQL similar).
+Test snippets MUST construct them via `async with
+PostgresCheckpointer(clean_db) as cp:` — NOT by passing a pool object.
+
+Task 34 (tracing) is responsible for creating the `in_memory_exporter`
+fixture in `tests/tracing/conftest.py` if it doesn't already exist
+there (verify with `ls tests/tracing/` at task start).
+
 ---
 
 ## Phase 1 — Foundation types
@@ -1790,9 +1812,9 @@ def test_expected_schema_version_is_4():
 
 
 @pytest.mark.asyncio
-async def test_cubepi_runs_table_present(pg_pool):
-    async with pg_pool.acquire() as conn:
-        rows = await conn.fetch(
+async def test_cubepi_runs_table_present(clean_db):
+    async with PostgresCheckpointer(clean_db) as cp:
+        rows = await cp._pool.fetch(
             "SELECT column_name, data_type FROM information_schema.columns "
             "WHERE table_name = 'cubepi_runs' ORDER BY ordinal_position"
         )
@@ -1807,17 +1829,17 @@ async def test_cubepi_runs_table_present(pg_pool):
 
 
 @pytest.mark.asyncio
-async def test_cubepi_messages_has_run_id_column(pg_pool):
-    async with pg_pool.acquire() as conn:
-        row = await conn.fetchrow(
+async def test_cubepi_messages_has_run_id_column(clean_db):
+    async with PostgresCheckpointer(clean_db) as cp:
+        row = await cp._pool.fetchrow(
             "SELECT data_type FROM information_schema.columns "
             "WHERE table_name = 'cubepi_messages' AND column_name = 'run_id'"
         )
         assert row is not None
 ```
 
-(The `pg_pool` fixture is the existing one in
-`tests/checkpointer/conftest.py`.)
+(`clean_db` fixture from `tests/checkpointer/conftest.py` yields a DSN
+string; `PostgresCheckpointer(dsn)` opens its own pool on `__aenter__`.)
 
 - [ ] **Step 2: Run → expect failure**
 
@@ -1893,26 +1915,65 @@ git commit -m "feat(postgres): schema v3→v4 — add run_id column + cubepi_run
 
 ---
 
-### Task 15: Postgres — `claim_run` (with lazy threads-row create)
+### Task 15: Postgres — `claim_run` + persist `Message.run_id` in `append()`
 
 **Files:**
 - Modify: `cubepi/checkpointer/postgres/checkpointer.py`
 - Test: `tests/checkpointer/test_postgres_runs.py` (new)
 
-- [ ] **Step 1: Failing tests (mirror SQLite run tests)**
+**CRITICAL:** Task 14 added the `run_id` column to `cubepi_messages`,
+but the existing `PostgresCheckpointer.append()` SQL
+(`postgres/checkpointer.py:201`) writes only `(thread_id, seq, role,
+metadata, payload)` — it must be extended to write `run_id` too, or
+fork's set-based selection will treat every new message as legacy
+(`run_id IS NULL`).
+
+- [ ] **Step 1: Failing tests (mirror SQLite run tests) + run_id persistence**
 
 Create `tests/checkpointer/test_postgres_runs.py` with the same
-scenarios as `tests/checkpointer/test_sqlite_runs.py`, plus one extra:
+scenarios as `tests/checkpointer/test_sqlite_runs.py`, plus these
+Postgres-specific tests:
 
 ```python
 @pytest.mark.asyncio
-async def test_claim_run_creates_threads_row_lazily(pg_pool):
+async def test_append_persists_run_id_into_column(clean_db):
+    """Regression for plan-review CRITICAL: append() MUST write
+    Message.run_id into cubepi_messages.run_id."""
+    from cubepi.providers.base import TextContent, UserMessage
     from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
 
-    async with PostgresCheckpointer(pg_pool) as cp:
+    async with PostgresCheckpointer(clean_db) as cp:
+        await cp.claim_run("t", "R1")
+        msg = UserMessage(content=[TextContent(text="hi")], run_id="R1")
+        await cp.append("t", [msg])
+        row = await cp._pool.fetchrow(
+            "SELECT run_id FROM cubepi_messages WHERE thread_id = $1",
+            "t",
+        )
+        assert row["run_id"] == "R1"
+
+
+@pytest.mark.asyncio
+async def test_append_rejects_completed_run_id(clean_db):
+    from cubepi.checkpointer.exceptions import RunAlreadyCompletedError
+    from cubepi.providers.base import TextContent, UserMessage
+    from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
+
+    async with PostgresCheckpointer(clean_db) as cp:
+        await cp.claim_run("t", "R1")
+        await cp.mark_run_complete("t", "R1")
+        msg = UserMessage(content=[TextContent(text="late")], run_id="R1")
+        with pytest.raises(RunAlreadyCompletedError):
+            await cp.append("t", [msg])
+
+
+@pytest.mark.asyncio
+async def test_claim_run_creates_threads_row_lazily(clean_db):
+    from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
+
+    async with PostgresCheckpointer(clean_db) as cp:
         await cp.claim_run("new_thread", "R1")
-    async with pg_pool.acquire() as conn:
-        row = await conn.fetchrow(
+        row = await cp._pool.fetchrow(
             "SELECT thread_id FROM cubepi_threads WHERE thread_id = $1",
             "new_thread",
         )
@@ -1924,7 +1985,45 @@ async def test_claim_run_creates_threads_row_lazily(pg_pool):
 Run: `uv run pytest tests/checkpointer/test_postgres_runs.py -v`
 Expected: method missing.
 
-- [ ] **Step 3: Implement `claim_run` with lazy threads create**
+- [ ] **Step 3a: Update `append()` to write `run_id` and reject completed run_ids**
+
+In `cubepi/checkpointer/postgres/checkpointer.py:201` (the existing
+`INSERT INTO cubepi_messages` statement inside `append()`), extend the
+column list and parameter tuple:
+
+```python
+# Before any insert, defend against append-on-completed.
+run_ids = {m.run_id for m in messages if m.run_id is not None}
+if run_ids:
+    completed = await conn.fetch(
+        "SELECT run_id FROM cubepi_runs WHERE thread_id = $1 "
+        "AND run_id = ANY($2::text[]) AND completed_at IS NOT NULL",
+        thread_id, list(run_ids),
+    )
+    if completed:
+        bad = ", ".join(r["run_id"] for r in completed)
+        raise RunAlreadyCompletedError(
+            f"append on completed run thread={thread_id} runs={bad}"
+        )
+
+for i, msg in enumerate(messages):
+    seq = last_seq + i + 1
+    await conn.execute(
+        "INSERT INTO cubepi_messages "
+        "(thread_id, seq, role, run_id, metadata, payload) "
+        "VALUES ($1, $2, $3, $4, $5, $6)",
+        thread_id, seq, _role_of(msg),
+        getattr(msg, "run_id", None),
+        json.dumps(msg.metadata),
+        msgpack.packb(msg.model_dump(), use_bin_type=True),
+    )
+```
+
+Both `tests/checkpointer/test_postgres_runs.py::
+test_append_persists_run_id_into_column` and
+`::test_append_rejects_completed_run_id` exercise this.
+
+- [ ] **Step 3b: Implement `claim_run` with lazy threads create**
 
 Add to `PostgresCheckpointer`:
 ```python
@@ -2069,7 +2168,7 @@ Create `tests/checkpointer/test_postgres_fork.py` covering the same
 scenarios; add one Postgres-specific concurrency test:
 ```python
 @pytest.mark.asyncio
-async def test_fork_blocks_concurrent_appends_on_src(pg_pool):
+async def test_fork_blocks_concurrent_appends_on_src(clean_db):
     """Two coroutines: fork holds advisory lock; concurrent append
     on src serializes after fork commits. No half-copied messages."""
     # ... use asyncio.gather to interleave; assert ordering ...
@@ -2087,6 +2186,14 @@ async def snapshot(
     self, thread_id: str, *, after_run_id: str
 ) -> list[Message]:
     async with self._pool.acquire() as conn:
+        # Spec §3.10: ThreadNotFoundError takes precedence over
+        # RunNotCompletedError. Validate the source thread first.
+        thread_exists = await conn.fetchval(
+            "SELECT 1 FROM cubepi_threads WHERE thread_id = $1",
+            thread_id,
+        )
+        if not thread_exists:
+            raise ThreadNotFoundError(f"thread={thread_id}")
         cutoff = await conn.fetchval(
             "SELECT completion_seq FROM cubepi_runs "
             "WHERE thread_id = $1 AND run_id = $2",
@@ -2106,7 +2213,15 @@ async def snapshot(
             ") ORDER BY seq",
             thread_id, cutoff,
         )
-        return [self._row_to_message(r) for r in rows]
+        # Decode using the existing pattern from load() in this file
+        # (msgpack unpack + role-to-class). Inline here rather than
+        # invent a `_row_to_message` helper that doesn't exist.
+        result: list[Message] = []
+        for r in rows:
+            cls = _ROLE_TO_CLS[r["role"]]
+            data = msgpack.unpackb(r["payload"], raw=False)
+            result.append(cls.model_validate(data))
+        return result
 
 async def fork(
     self,
@@ -2120,6 +2235,13 @@ async def fork(
         await conn.execute(
             "SELECT pg_advisory_xact_lock(hashtext($1))", src_thread_id
         )
+        # Source existence FIRST (spec §3.10 error precedence).
+        src_extra = await conn.fetchval(
+            "SELECT extra FROM cubepi_threads WHERE thread_id = $1",
+            src_thread_id,
+        )
+        if src_extra is None:
+            raise ThreadNotFoundError(f"thread={src_thread_id}")
         # Cutoff + RunNotCompletedError.
         cutoff = await conn.fetchval(
             "SELECT completion_seq FROM cubepi_runs "
@@ -2130,13 +2252,6 @@ async def fork(
             raise RunNotCompletedError(
                 f"thread={src_thread_id} run={after_run_id} not completed"
             )
-        # Source extra (deep copy + merge metadata).
-        src_extra = await conn.fetchval(
-            "SELECT extra FROM cubepi_threads WHERE thread_id = $1",
-            src_thread_id,
-        )
-        if src_extra is None:
-            raise ThreadNotFoundError(f"thread={src_thread_id}")
         merged = json.loads(json.dumps(src_extra))
         if metadata is not None:
             merged["fork"] = json.loads(json.dumps(metadata))
@@ -2226,11 +2341,19 @@ Commit: `feat(mysql): schema v3→v4 — add run_id column + cubepi_runs table`.
 
 ---
 
-### Task 19: MySQL — `claim_run`, `mark_run_complete`, `load_pending`
+### Task 19: MySQL — `claim_run`, `mark_run_complete`, `load_pending` + persist `Message.run_id`
 
 **Files:**
 - Modify: `cubepi/checkpointer/mysql/checkpointer.py`
 - Test: `tests/checkpointer/test_mysql_runs.py` (new)
+
+**CRITICAL — same as Task 15:** Existing
+`MySQLCheckpointer.append()` SQL at
+`mysql/checkpointer.py:241` writes `(thread_id, seq, role, metadata,
+payload)` without `run_id`. Extend it. Add corresponding test
+asserting `cubepi_messages.run_id` is populated, mirroring the
+Postgres Task 15 Step 1 tests (`test_append_persists_run_id_into_column`,
+`test_append_rejects_completed_run_id`).
 
 Mirror Tasks 15–16 with MySQL syntax. Key differences:
 
@@ -2381,12 +2504,18 @@ def test_messages_kw_deep_copies_all_three_variants():
 Run: `uv run pytest tests/agent/test_agent_messages_kw.py -v`
 Expected: `TypeError: __init__() got an unexpected keyword argument 'messages'`.
 
-- [ ] **Step 3: Add the constructor arg**
+- [ ] **Step 3: Add the constructor arg + retain the model reference**
 
 In `cubepi/agent/agent.py`, locate `Agent.__init__`. Add the keyword-only
-parameter `messages: Sequence[Message] | None = None` at the end. Inside:
+parameter `messages: Sequence[Message] | None = None` at the end. Inside,
+add the messages-handling block AND a one-line retention of the original
+`model` argument (needed by `fork_once()` in Task 31):
 
 ```python
+# Retain the original `model` argument so fork_once() can construct
+# a transient Agent reusing the same model.
+self._model = model
+
 if messages is not None:
     if thread_id is not None and checkpointer is not None:
         raise ValueError(
@@ -2396,11 +2525,18 @@ if messages is not None:
             "fork_once-style usage."
         )
     seeded = [m.model_copy(deep=True) for m in messages]
-    self._state._messages = list(seeded)
+    # AgentState exposes `messages` as a property — use the public
+    # setter (which delegates to `_messages`); don't poke `_messages`
+    # directly. The setter is at agent.py:117 today.
+    self._state.messages = list(seeded)
 ```
 
 (Make sure to import `Sequence` from `collections.abc` if not already
 imported, and `Message` from `cubepi.providers.base` likewise.)
+
+**Note:** the spec §3.7a forbids touching private attributes from
+fork_once. Going through the public `messages` setter on AgentState is
+the supported path; do not reach into `_messages` directly.
 
 - [ ] **Step 4: Run tests → expect pass**
 
@@ -2453,11 +2589,21 @@ async def test_prompt_generates_run_id_when_none():
 
 
 @pytest.mark.asyncio
-async def test_prompt_sets_then_clears_active_run_id():
+async def test_prompt_sets_then_clears_active_run_id_on_clean_return():
     a = _agent()
     assert a.state.active_run_id is None
-    got = await a.prompt("hello", run_id="R1")
+    await a.prompt("hello", run_id="R1")
     assert a.state.active_run_id is None  # cleared on clean return
+
+
+@pytest.mark.asyncio
+async def test_prompt_leaves_active_run_id_set_on_raise():
+    # Use a provider that will raise inside the loop.
+    a = Agent(model=FauxProvider(error="RuntimeError").model("faux-model"))
+    with pytest.raises(Exception):
+        await a.prompt("hello", run_id="R1")
+    # Spec §3.7: left set so except-block readers can recover it.
+    assert a.state.active_run_id == "R1"
 ```
 
 - [ ] **Step 2: Run → expect failure**
@@ -2481,18 +2627,28 @@ async def prompt(
     self._state.active_run_id = effective_run_id
     try:
         async with self._run_lock:
-            # ... existing body using `effective_run_id` for stamping ...
+            # ... existing body, with run_id threaded through ...
             await self._run_prompt(message, run_id=effective_run_id)
-        return effective_run_id
-    finally:
+    except BaseException:
+        # Spec §3.7: leave active_run_id SET on failure so except-block
+        # readers can recover it. CompletionMarkerFailedError.run_id is
+        # still the recommended source in handlers (see Task 26).
+        raise
+    else:
         self._state.active_run_id = None
+        return effective_run_id
 ```
 
 (Note: the actual edit shape depends on the existing prompt() body —
 preserve everything that's there; only thread the run_id through and
-add the active_run_id set/clear in a `try/finally`. Internal helpers
-that perform `append()` will pass run_id into the Message construction
-in subsequent tasks.)
+add the active_run_id set + try/except/else clear pattern. Internal
+helpers that perform `append()` will pass run_id into the Message
+construction in subsequent tasks.)
+
+**Per spec §3.7 — do NOT clear `active_run_id` in `finally`.** Clearing
+in `finally` would wipe the value before `except` handlers can read
+it, defeating the recovery contract for `CompletionMarkerFailedError`
+and any other post-claim failure mode.
 
 Also import `uuid` at the top of the file.
 
@@ -2512,12 +2668,21 @@ git commit -m "feat(agent): prompt accepts run_id, returns it, exposes via activ
 
 ---
 
-### Task 23: Stamp `run_id` on every appended Message
+### Task 23: Stamp `run_id` on every appended Message via `Agent._process_event`
 
 **Files:**
-- Modify: `cubepi/agent/loop.py`
-- Modify: `cubepi/agent/agent.py` (helper signatures)
+- Modify: `cubepi/agent/agent.py` (central stamping point)
 - Test: extend `tests/agent/test_agent_run_id.py`
+
+**Why `_process_event` is the right location.** `cubepi/agent/loop.py`
+does NOT directly construct most of the Message objects that get
+persisted — the loop emits events, and `Agent._process_event`
+(`cubepi/agent/agent.py:~329`) is the single dispatch site where
+`MessageEndEvent` triggers the actual `checkpointer.append([msg])`
+call. The same `_process_event` is also called by `abort_pending()`
+when it injects synthetic deny + terminal aborted messages, and by
+`respond()` resume path. Stamping at this single chokepoint covers
+every append.
 
 - [ ] **Step 1: Failing test asserts persisted messages carry the run_id**
 
@@ -2544,20 +2709,45 @@ async def test_appended_messages_carry_run_id():
 Run: `uv run pytest tests/agent/test_agent_run_id.py::test_appended_messages_carry_run_id -v`
 Expected: `m.run_id` is None.
 
-- [ ] **Step 3: Thread run_id through the loop**
+- [ ] **Step 3: Stamp in `Agent._process_event` (single chokepoint)**
 
-In `cubepi/agent/loop.py`, locate every Message construction (`UserMessage(...)`, `AssistantMessage(...)`, `ToolResultMessage(...)`). For each one that represents a message produced THIS run, set `run_id=ctx.active_run_id` (or whatever the active variable is in that scope). The agent loop needs to plumb the active run_id from `Agent.prompt()` down to the inner loop. The cleanest way:
+In `cubepi/agent/agent.py`, locate `_process_event(self, event)` and
+the `MessageEndEvent` branch. Stamp `run_id` from
+`self._state.active_run_id` onto the message BEFORE it's appended /
+mirrored into state:
 
-- Add a `run_id: str` parameter to `_run_loop` / `_run_loop_inner` (and any helper that constructs Messages).
-- In `Agent.prompt()`, pass `effective_run_id` through to `_run_prompt`.
+```python
+elif isinstance(event, MessageEndEvent):
+    msg = event.message
+    if self._state.active_run_id is not None and msg.run_id is None:
+        msg = msg.model_copy(update={"run_id": self._state.active_run_id})
+        event = event.model_copy(update={"message": msg})
+    # ... existing append + state-mirror code, now operating on the
+    # stamped `msg` / `event` ...
+```
 
-Update every `UserMessage(...)`, `AssistantMessage(...)`,
-`ToolResultMessage(...)` construction site in `loop.py` to pass
-`run_id=run_id`.
+This is the single dispatch site every appended message flows through
+(loop streaming, abort_pending's synthetic deny + terminal aborted at
+`agent.py:582-595`, respond resume). One edit covers all paths.
 
-Also update `Agent.respond()` and `Agent.abort_pending()` paths that
-construct synthetic messages — those should also stamp the recovered
-run_id.
+Also stamp the input message constructed from a `str` argument inside
+`Agent.prompt()` before passing to `_run_prompt` (locate the
+`UserMessage(content=[TextContent(text=message)])` construction):
+
+```python
+if isinstance(message, str):
+    message = UserMessage(
+        content=[TextContent(text=message)],
+        run_id=effective_run_id,
+    )
+```
+
+If `message` is already a `Message` / `list[Message]`, leave caller's
+value alone — `_process_event` will stamp at append time as a
+backstop.
+
+Loop.py and tools.py: NO changes required for this task — they emit
+events that flow through `_process_event` and inherit the stamping.
 
 - [ ] **Step 4: Run tests → expect pass**
 
@@ -2666,10 +2856,14 @@ Expected: ValueError not raised.
 
 - [ ] **Step 3: Add the enforcement to `Agent.prompt()` start**
 
+The real `Agent` attribute names are `self._state.tools` (a public
+property over `_tools`) and `self._middleware` (raw list saved at
+`agent.py:169`). Use those, not `self.tools` / `self.middleware`.
+
 Just before the `try:` block that sets `active_run_id`, add:
 ```python
 bound: set[str] = set()
-for elem in (*self.tools, *self.middleware):
+for elem in (*self._state.tools, *self._middleware):
     binding = getattr(elem, "hitl", None)
     if binding is None or not binding.checkpointed:
         continue
@@ -2823,9 +3017,19 @@ git commit -m "feat(agent): claim_run pre-flight + legacy degraded-mode fallback
 ### Task 26: `mark_run_complete` after terminal success + outcome enumeration
 
 **Files:**
-- Modify: `cubepi/agent/loop.py`
-- Modify: `cubepi/agent/agent.py`
+- Create: `cubepi/agent/_outcome.py` (the `RunOutcome` literal + helpers)
+- Modify: `cubepi/agent/loop.py` — `run_agent_loop`, `_run_loop`,
+  `_run_loop_inner` to RETURN a `RunOutcome` instead of `None`
+- Modify: `cubepi/agent/agent.py` — `_run_prompt` and `_run_hitl_resume`
+  to propagate the outcome; `prompt()` and `respond()` dispatch on it
 - Test: `tests/agent/test_agent_completion.py` (new)
+
+**Why this is a deliberate refactor, not a drop-in change.** The current
+`run_agent_loop`, `_run_loop`, and `_run_loop_inner` return `None` (or
+a `list[Message]`). The loop catches `HitlDetached` / `HitlAborted`
+silently (`loop.py:196` and `loop.py:418`) and returns normally. There
+is no first-class "what happened" return value today. This task
+introduces one.
 
 - [ ] **Step 1: Failing tests covering every row of spec §3.6.2 table**
 
@@ -2872,8 +3076,84 @@ async def test_provider_error_does_not_mark():
     assert rs.completed_at is None
 
 
-# Add similar tests for abort, cancellation, etc., per spec table.
+@pytest.mark.asyncio
+async def test_tool_exception_does_not_mark():
+    a, cp = _agent(FauxProvider(tool_error="RuntimeError"))
+    with pytest.raises(Exception):
+        await a.prompt("hi", run_id="R1")
+    rs = cp._runs["t"]["R1"]
+    assert rs.completed_at is None
+
+
+@pytest.mark.asyncio
+async def test_abort_during_streaming_does_not_mark():
+    a, cp = _agent(FauxProvider(text="ok", abort_mid_stream=True))
+    # Caller cancels mid-stream via agent.abort().
+    task = asyncio.create_task(a.prompt("hi", run_id="R1"))
+    await asyncio.sleep(0)  # let the streaming start
+    a.abort()
+    with contextlib.suppress(Exception):
+        await task
+    rs = cp._runs["t"]["R1"]
+    assert rs.completed_at is None
+
+
+@pytest.mark.asyncio
+async def test_abort_pending_does_not_mark():
+    """abort_pending injects synthetic deny + terminal aborted assistant
+    (agent.py:582-595). Outcome is "abandoned", marker not written."""
+    # Setup an agent suspended at HITL, then call abort_pending.
+    # ... use cubepi.hitl.testing scaffolding ...
+    rs = cp._runs["t"]["R1"]
+    assert rs.completed_at is None
+
+
+@pytest.mark.asyncio
+async def test_incomplete_tool_cycle_does_not_mark():
+    """after_model_response(decision='stop') on a tool-use response
+    triggers Task 27's invariant. Outcome 'incomplete', no marker."""
+    # ... see Task 27 fixture; reuse it here ...
+    rs = cp._runs["t"]["R1"]
+    assert rs.completed_at is None
+
+
+@pytest.mark.asyncio
+async def test_propagating_cancel_does_not_mark():
+    a, cp = _agent(FauxProvider(text="ok", sleep_seconds=10))
+    task = asyncio.create_task(a.prompt("hi", run_id="R1"))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    rs = cp._runs["t"]["R1"]
+    assert rs.completed_at is None
+
+
+@pytest.mark.asyncio
+async def test_completion_marker_failed_carries_run_id_when_generated():
+    """When prompt(run_id=None) generates a run_id and mark_run_complete
+    fails, the exception carries the generated run_id and
+    active_run_id is left set."""
+    class _BrokenMark(MemoryCheckpointer):
+        async def mark_run_complete(self, thread_id, run_id):
+            raise RuntimeError("db down")
+
+    cp = _BrokenMark()
+    a = Agent(
+        model=FauxProvider(text="ok").model("faux-model"),
+        checkpointer=cp,
+        thread_id="t",
+    )
+    with pytest.raises(CompletionMarkerFailedError) as exc_info:
+        await a.prompt("hi")  # run_id=None → generate
+    assert exc_info.value.run_id == a.state.active_run_id
+    assert exc_info.value.run_id is not None
 ```
+
+(`FauxProvider`'s `tool_error` / `abort_mid_stream` / `sleep_seconds`
+keyword args are illustrative — use whatever the test suite's
+FauxProvider already supports; if it doesn't expose the needed knob,
+add a tiny subclass inside this test file.)
 
 (The exact FauxProvider injection API may differ; use whatever mechanism
 the test suite already uses to inject errors / stop_reasons. The
@@ -2884,36 +3164,83 @@ assertion shape — "mark called" vs "mark not called" — is what matters.)
 Run: `uv run pytest tests/agent/test_agent_completion.py -v`
 Expected: mark not called even on clean success.
 
-- [ ] **Step 3: Call `mark_run_complete` only on terminal clean exit**
+- [ ] **Step 3: Introduce `RunOutcome` and propagate it**
 
-In `Agent.prompt()` (or wherever the loop returns cleanly), add:
+Create `cubepi/agent/_outcome.py`:
 ```python
-async with self._run_lock:
-    outcome = await self._run_prompt(message, run_id=effective_run_id)
-# `outcome` reports whether mark should fire. Possible values:
-#   "complete"       — clean success
-#   "suspended"      — HITL pause; respond() handles completion
-#   "incomplete"     — pre-completion invariant failed (Task 27)
-#   "abandoned"      — provider/tool error / abort / cancellation
-if outcome == "complete" and self._run_aware and self.thread_id:
-    try:
-        await self.checkpointer.mark_run_complete(
-            self.thread_id, effective_run_id
-        )
-    except Exception as exc:
-        raise CompletionMarkerFailedError(
-            thread_id=self.thread_id,
-            run_id=effective_run_id,
-            cause=exc,
-        ) from exc
+from __future__ import annotations
+from typing import Literal
+
+RunOutcome = Literal["complete", "suspended", "incomplete", "abandoned"]
 ```
 
-In the agent loop, set the outcome explicitly per the spec table:
-- After clean terminal stop_reason + no pending HITL → `complete`
-- HitlDetached/HitlAborted silent catch → `suspended` (resume handles)
-- Provider/tool error → `abandoned`
-- abort_pending injected — terminal aborted → `abandoned`
-- Propagating CancelledError — re-raises, no return value
+Modify `cubepi/agent/loop.py`:
+- Change `run_agent_loop`, `_run_loop`, `_run_loop_inner` return type
+  from `None` (or `list[Message]`) to `RunOutcome`. Each existing exit
+  path returns the appropriate literal:
+  - After clean `AgentEndEvent` with terminal stop_reason and no
+    pending HITL → `return "complete"`
+  - After the `HitlDetached` / `HitlAborted` `except` blocks at
+    `loop.py:196` and `loop.py:418` (which currently `return` silently)
+    → `return "suspended"`
+  - After the early-exit branch on `stop_reason in ("error", "aborted")`
+    at `loop.py:485` → `return "abandoned"`
+  - When `check_tool_cycle(...)` (from Task 27) raises
+    `ToolCycleViolation` immediately before declaring `complete`,
+    catch it and `return "incomplete"` instead
+  - On propagating `asyncio.CancelledError` → DO NOT catch; the
+    function never returns; `prompt()`'s outer try/except handles it
+- Run `_run_loop_inner`'s `_run_with_lifecycle` (if it wraps anything)
+  must also forward the outcome.
+
+Modify `cubepi/agent/agent.py`:
+- `_run_prompt` and `_run_hitl_resume` return `RunOutcome`.
+- In `Agent.prompt()` (replacing the placeholder line `await
+  self._run_prompt(...)`):
+  ```python
+  outcome: RunOutcome = await self._run_prompt(
+      message, run_id=effective_run_id
+  )
+  await self._dispatch_outcome(outcome, effective_run_id)
+  ```
+- In `Agent.respond()`:
+  ```python
+  outcome: RunOutcome = await self._run_hitl_resume(...)
+  await self._dispatch_outcome(outcome, recovered_run_id)
+  ```
+- New private helper `_dispatch_outcome`:
+  ```python
+  async def _dispatch_outcome(
+      self, outcome: RunOutcome, run_id: str
+  ) -> None:
+      if outcome != "complete":
+          return
+      if not (self._run_aware and self.thread_id):
+          return
+      try:
+          await self.checkpointer.mark_run_complete(
+              self.thread_id, run_id
+          )
+      except Exception as exc:
+          raise CompletionMarkerFailedError(
+              thread_id=self.thread_id,
+              run_id=run_id,
+              cause=exc,
+          ) from exc
+  ```
+
+Mapping from spec §3.6.2 outcome table to literal:
+
+| §3.6.2 row | Returned outcome | Marker called? |
+|---|---|---|
+| Clean success | `"complete"` | yes |
+| HITL suspended (normal pause) | `"suspended"` | no |
+| HITL detached (silent catch) | `"suspended"` | no — respond() resumes |
+| HITL aborted (abort_pending) | `"abandoned"` | no |
+| Incomplete tool cycle (Task 27) | `"incomplete"` | no |
+| Provider / tool error | `"abandoned"` | no |
+| Abort during streaming | `"abandoned"` | no |
+| Propagating cancellation | (raises, no return) | no |
 
 - [ ] **Step 4: Run tests → expect pass**
 
@@ -3025,6 +3352,17 @@ def test_duplicate_ids_across_turns_violation():
     except ToolCycleViolation:
         return
     assert False
+
+
+def test_extra_results_with_same_id_violation():
+    """Multiset check: assistant emits one c1; window has two
+    tool_results both with c1. Set-equality would pass; multiset
+    correctly rejects."""
+    try:
+        check_tool_cycle([_asst(["c1"]), _res("c1"), _res("c1")])
+    except ToolCycleViolation:
+        return
+    assert False
 ```
 
 - [ ] **Step 2: Run → expect failure**
@@ -3038,20 +3376,22 @@ Create `cubepi/agent/_tool_cycle.py`:
 ```python
 """Pre-completion tool-cycle invariant — spec §3.6.2.
 
-For each AssistantMessage with ToolCall blocks {c1..cK}, the
-K-message window immediately following MUST be all ToolResultMessages
-with tool_call_id set-equal to {c1..cK} — no other AssistantMessage
-or UserMessage may appear in that window.
+For each AssistantMessage with ToolCall blocks {c1..cK}, the K-message
+window immediately following MUST be all ToolResultMessages whose
+tool_call_id MULTISET equals {c1..cK} — no extras, no missing, no
+duplicates beyond what the assistant emitted, and no other
+AssistantMessage or UserMessage may appear in that window.
 """
 
 from __future__ import annotations
+
+from collections import Counter
 
 from cubepi.providers.base import (
     AssistantMessage,
     Message,
     ToolCall,
     ToolResultMessage,
-    UserMessage,
 )
 
 
@@ -3061,12 +3401,13 @@ class ToolCycleViolation(ValueError):
         *,
         kind: str,
         assistant_index: int,
-        expected: set[str],
-        got: set[str],
+        expected: Counter,
+        got: Counter,
     ) -> None:
         super().__init__(
             f"tool-cycle violation [{kind}] at assistant index "
-            f"{assistant_index}: expected {expected}, got {got}"
+            f"{assistant_index}: expected {dict(expected)}, "
+            f"got {dict(got)}"
         )
         self.kind = kind
         self.assistant_index = assistant_index
@@ -3075,39 +3416,38 @@ class ToolCycleViolation(ValueError):
 
 
 def check_tool_cycle(messages: list[Message]) -> None:
-    n = len(messages)
     for i, m in enumerate(messages):
         if not isinstance(m, AssistantMessage):
             continue
-        call_ids = {
-            c.id for c in m.content if isinstance(c, ToolCall)
-        }
+        call_ids = [c.id for c in m.content if isinstance(c, ToolCall)]
         if not call_ids:
             continue
+        expected = Counter(call_ids)
         k = len(call_ids)
         window = messages[i + 1 : i + 1 + k]
         if len(window) < k:
             raise ToolCycleViolation(
                 kind="incomplete-window",
                 assistant_index=i,
-                expected=call_ids,
-                got=set(),
+                expected=expected,
+                got=Counter(),
             )
         for w in window:
             if not isinstance(w, ToolResultMessage):
                 raise ToolCycleViolation(
                     kind="non-tool-result-in-window",
                     assistant_index=i,
-                    expected=call_ids,
-                    got=set(),
+                    expected=expected,
+                    got=Counter(),
                 )
-        got_ids = {w.tool_call_id for w in window}
-        if got_ids != call_ids:
+        got = Counter(w.tool_call_id for w in window)
+        # Multiset equality — catches duplicates the spec rejects.
+        if got != expected:
             raise ToolCycleViolation(
-                kind="set-mismatch",
+                kind="multiset-mismatch",
                 assistant_index=i,
-                expected=call_ids,
-                got=got_ids,
+                expected=expected,
+                got=got,
             )
 ```
 
@@ -3347,9 +3687,9 @@ async def fork_once(
 ) -> ForkOnceResult:
     if self.checkpointer is None:
         raise RuntimeError("fork_once requires a checkpointer")
-    # HITL pre-flight.
+    # HITL pre-flight. Real attributes: self._state.tools, self._middleware.
     hitl_offenders = [
-        elem for elem in (*self.tools, *self.middleware)
+        elem for elem in (*self._state.tools, *self._middleware)
         if getattr(elem, "hitl", None) is not None
     ]
     if hitl_offenders:
@@ -3364,12 +3704,17 @@ async def fork_once(
     snapshot = await self.checkpointer.snapshot(
         src_thread_id, after_run_id=after_run_id
     )
-    # Build transient agent.
+    # Build transient agent. The constructor takes the original `model`
+    # arg (a BoundModel-like with `.provider` + `.spec`). Task 22 must
+    # also have stored the constructor's `model` argument on
+    # `self._model` (or equivalent retention) so fork_once can reuse it.
+    # If that retention isn't already present, add it as a one-line
+    # `self._model = model` in __init__ as part of this task.
     child = Agent(
-        model=self.model,
-        system_prompt=self.system_prompt,
-        tools=list(self.tools),
-        middleware=list(self.middleware),
+        model=self._model,
+        system_prompt=self._state.system_prompt,
+        tools=list(self._state.tools),
+        middleware=list(self._middleware),
         convert_to_llm=self.convert_to_llm,
         messages=snapshot,
         # checkpointer=None, thread_id=None — disable persistence.
@@ -3516,15 +3861,49 @@ Commit: `feat(hitl): ApprovalPolicyMiddleware populates self.hitl`.
 - Modify: `cubepi/tracing/schema.py` (add span name constant)
 - Test: `tests/tracing/test_fork_once_span.py` (new)
 
-- [ ] **Step 1: Failing test using the existing in-memory exporter**
+- [ ] **Step 1: Create `tests/tracing/conftest.py` with an in-memory exporter fixture if missing**
+
+First check: `ls tests/tracing/`. If `conftest.py` exists with an
+`in_memory_exporter` fixture already, skip. Otherwise create:
 
 ```python
+# tests/tracing/conftest.py
+from __future__ import annotations
+
+import pytest
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
+from opentelemetry import trace
+
+
+@pytest.fixture
+def in_memory_exporter():
+    """Configure the global tracer provider with an in-memory exporter
+    for the duration of one test. Returns the exporter so tests can
+    call get_finished_spans()."""
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+    yield exporter
+    exporter.clear()
+```
+
+If `tests/tracing/` doesn't exist as a directory yet, create it with an
+empty `__init__.py` first.
+
+- [ ] **Step 2: Failing test using the in-memory exporter**
+
+```python
+# tests/tracing/test_fork_once_span.py
 import pytest
 
 from cubepi.agent.agent import Agent
 from cubepi.checkpointer.memory import MemoryCheckpointer
 from cubepi.providers.faux import FauxProvider
-from tests.tracing.conftest import InMemoryExporter  # existing helper
 
 
 @pytest.mark.asyncio
@@ -3546,15 +3925,12 @@ async def test_fork_once_emits_named_span(in_memory_exporter):
     assert attrs["cubepi.fork.after_run_id"] == "R1"
 ```
 
-(The existing in-memory exporter fixture lives in
-`tests/tracing/conftest.py`; if it doesn't, add it as a small helper
-following the OTel `InMemorySpanExporter` pattern.)
+- [ ] **Step 3: Run → expect failure**
 
-- [ ] **Step 2: Run → expect failure**
-
+Run: `uv run pytest tests/tracing/test_fork_once_span.py -v`
 Expected: no span named `cubepi.agent.fork_once`.
 
-- [ ] **Step 3: Replace `_fork_once_span` placeholder with a real span**
+- [ ] **Step 4: Replace `_fork_once_span` placeholder with a real span**
 
 ```python
 def _fork_once_span(self, *, src_thread_id, after_run_id):
@@ -3573,15 +3949,15 @@ def _fork_once_span(self, *, src_thread_id, after_run_id):
     )
 ```
 
-- [ ] **Step 4: Run tests → expect pass**
+- [ ] **Step 5: Run tests → expect pass**
 
 Run: `uv run pytest tests/tracing/test_fork_once_span.py -v`
 Expected: green.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```
-git add cubepi/agent/agent.py tests/tracing/test_fork_once_span.py
+git add cubepi/agent/agent.py tests/tracing/conftest.py tests/tracing/__init__.py tests/tracing/test_fork_once_span.py
 git commit -m "feat(tracing): emit cubepi.agent.fork_once span"
 ```
 
@@ -3687,9 +4063,25 @@ BACKENDS = ["memory", "sqlite", "postgres", "mysql"]
 
 
 @pytest.fixture(params=BACKENDS)
-async def checkpointer(request, tmp_path, pg_pool, mysql_pool):
-    # Build the appropriate checkpointer per param.
-    ...
+async def checkpointer(request, tmp_path, clean_db, clean_mysql_db):
+    # Build the appropriate checkpointer per param. clean_db /
+    # clean_mysql_db are DSN strings; PG and MySQL constructors open
+    # their own pools on __aenter__.
+    if request.param == "memory":
+        from cubepi.checkpointer.memory import MemoryCheckpointer
+        yield MemoryCheckpointer()
+    elif request.param == "sqlite":
+        from cubepi.checkpointer.sqlite import SQLiteCheckpointer
+        async with SQLiteCheckpointer(str(tmp_path / "x.db")) as cp:
+            yield cp
+    elif request.param == "postgres":
+        from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
+        async with PostgresCheckpointer(clean_db) as cp:
+            yield cp
+    elif request.param == "mysql":
+        from cubepi.checkpointer.mysql.checkpointer import MySQLCheckpointer
+        async with MySQLCheckpointer(clean_mysql_db) as cp:
+            yield cp
 
 
 @pytest.mark.asyncio
@@ -3737,7 +4129,9 @@ git commit -m "test(e2e): cross-backend fork happy path"
 
 ```python
 @pytest.mark.asyncio
-async def test_fork_after_hitl_resume(memory_checkpointer):
+async def test_fork_after_hitl_resume():
+    from cubepi.checkpointer.memory import MemoryCheckpointer
+    cp = MemoryCheckpointer()
     """prompt pauses for HITL → respond resumes → marker written →
     fork succeeds and copies the resumed run."""
     ...
