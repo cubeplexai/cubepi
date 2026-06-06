@@ -357,7 +357,7 @@ class Agent(Generic[TMessage]):
                 return
             raise ValueError(
                 f"Agent has checkpointed HITL elements bound to "
-                f"run_ids {sorted(bound)!r}; prompt(run_id=...) "
+                f"run_ids {sorted(bound)!r}; {caller}(run_id=...) "
                 "must be explicitly supplied (generate-mode rejected)"
             )
         if any(b != run_id for b in bound):
@@ -587,37 +587,65 @@ class Agent(Generic[TMessage]):
             },
         )
 
-    async def resume(self) -> None:
+    async def resume(self, *, run_id: str | None = None) -> str:
         # Same fail-fast pattern as prompt(): lock.locked() is the atomic gate.
         if self._run_lock.locked() or self._state.is_streaming:
             raise RuntimeError(
                 "Agent is already processing. Wait for completion before continuing."
             )
-        async with self._run_lock:
-            if self._state.is_streaming:  # pragma: no cover — defensive re-check
-                raise RuntimeError(
-                    "Agent is already processing. Wait for completion before continuing."
-                )
+        self._validate_hitl_bindings(run_id, caller="resume")
+        effective_run_id = run_id or uuid.uuid4().hex
+        try:
+            async with self._run_lock:
+                if self._state.is_streaming:  # pragma: no cover — defensive re-check
+                    raise RuntimeError(
+                        "Agent is already processing. "
+                        "Wait for completion before continuing."
+                    )
 
-            if not self._state._messages:
-                raise RuntimeError("No messages to continue from")
+                if not self._state._messages:
+                    raise RuntimeError("No messages to continue from")
 
-            last = self._state._messages[-1]
-            if isinstance(last, AssistantMessage):
-                # Check for queued messages
-                steering = self._steering_queue.drain()
-                if steering:
-                    await self._run_prompt(steering)
-                    return
+                last = self._state._messages[-1]
+                # Validate preconditions BEFORE claim_run so a precondition
+                # failure does not leave a claimed run dangling on the
+                # checkpointer.
+                if isinstance(last, AssistantMessage) and not (
+                    self._steering_queue.has_items()
+                    or self._follow_up_queue.has_items()
+                ):
+                    raise RuntimeError("Cannot continue from message role: assistant")
 
-                follow_ups = self._follow_up_queue.drain()
-                if follow_ups:
-                    await self._run_prompt(follow_ups)
-                    return
+                # Claim + stamp under the lock (same invariants as prompt()):
+                # without this, messages emitted by the resumed turn would
+                # land with run_id=None and fork queries (which treat NULL
+                # as legacy / always-copy) would happily copy them into a
+                # later fork even if this resumed work is still in flight or
+                # later abandoned.
+                if self._run_aware and self.thread_id is not None:
+                    assert self.checkpointer is not None  # narrowed by _run_aware
+                    await self.checkpointer.claim_run(self.thread_id, effective_run_id)
+                self._state.active_run_id = effective_run_id
+                self._state.last_outcome = None
 
-                raise RuntimeError("Cannot continue from message role: assistant")
-
-            await self._run_continuation()
+                if isinstance(last, AssistantMessage):
+                    steering = self._steering_queue.drain()
+                    if steering:
+                        await self._run_prompt(steering)
+                    else:
+                        follow_ups = self._follow_up_queue.drain()
+                        await self._run_prompt(follow_ups)
+                else:
+                    await self._run_continuation()
+        except BaseException:
+            # Spec §3.7 parity: leave active_run_id SET on failure so callers
+            # can observe which run failed.
+            raise
+        else:
+            outcome: RunOutcome = self._state.last_outcome or "abandoned"
+            await self._dispatch_outcome(outcome, effective_run_id)
+            self._state.active_run_id = None
+            return effective_run_id
 
     def _build_stream_options(self, signal: asyncio.Event) -> StreamOptions:
         return StreamOptions(
