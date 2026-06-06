@@ -4109,7 +4109,15 @@ Add a regression test mirroring the legacy case:
 @pytest.mark.asyncio
 async def test_respond_resume_with_legacy_pending_does_not_crash():
     """A pre-spec pending row was written without run_id. respond()
-    must resume cleanly: no claim, no mark, no crash."""
+    must resume cleanly: dispatch is skipped (no mark), no crash.
+
+    Setup nuance: the initial prompt DOES claim R1 (Task 25's
+    pre-flight). The legacy-ness we're simulating is on the
+    pending row only — `save_pending_request(run_id=None)`. The
+    assertion is therefore "completed_at remains None" for R1 (the
+    resume saw a None recovered_run_id and skipped dispatch),
+    NOT "no R1 row at all".
+    """
     cp = MemoryCheckpointer()
     p = _pause_then_finish_provider()
     a, task = await _drive_pause(cp, lambda: p.model("faux-model"))
@@ -4133,9 +4141,10 @@ async def test_respond_resume_with_legacy_pending_does_not_crash():
     qid = pending[0].question_id
     # Must not raise.
     await a2.respond(question_id=qid, answer="yes")
-    # No marker (run_id was None on resume) — but the messages are
-    # persisted and the thread is in a coherent state.
-    assert "R1" not in cp._runs.get("t", {})
+    # R1's claim row still exists from the initial prompt, but no
+    # marker was written because dispatch was skipped on the
+    # None-run_id resume.
+    assert cp._runs["t"]["R1"].completed_at is None
 ```
 
 **Do not call `claim_run` here.** All subsequent append calls use
