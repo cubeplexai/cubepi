@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import time
 from dataclasses import dataclass
 
@@ -9,6 +10,9 @@ from cubepi.checkpointer.exceptions import (
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
     RunNotClaimedError,
+    RunNotCompletedError,
+    ThreadAlreadyExistsError,
+    ThreadNotFoundError,
 )
 from cubepi.hitl.types import HitlRequest
 from cubepi.providers.base import Message
@@ -20,6 +24,10 @@ class _RunState:
     claimed_at: float
     completed_at: float | None = None
     completion_seq: int | None = None
+
+
+def _legible_message_copy(m: Message) -> Message:
+    return m.model_copy(deep=True)
 
 
 class MemoryCheckpointer:
@@ -112,3 +120,81 @@ class MemoryCheckpointer:
             next_seq = max(existing_seqs, default=0) + 1
             state.completed_at = time.time()
             state.completion_seq = next_seq
+
+    async def snapshot(self, thread_id: str, *, after_run_id: str) -> list[Message]:
+        async with self._lock:
+            data = self._store.get(thread_id)
+            if data is None and thread_id not in self._runs:
+                raise ThreadNotFoundError(f"thread={thread_id}")
+            runs = self._runs.get(thread_id, {})
+            cutoff_state = runs.get(after_run_id)
+            if cutoff_state is None or cutoff_state.completion_seq is None:
+                raise RunNotCompletedError(
+                    f"thread={thread_id} run={after_run_id} not completed"
+                )
+            cutoff = cutoff_state.completion_seq
+            selected: list[Message] = []
+            for m in data.messages if data else []:
+                if m.run_id is None:
+                    selected.append(_legible_message_copy(m))
+                    continue
+                rs = runs.get(m.run_id)
+                if rs is None or rs.completion_seq is None:
+                    continue
+                if rs.completion_seq <= cutoff:
+                    selected.append(_legible_message_copy(m))
+            return selected
+
+    async def fork(
+        self,
+        src_thread_id: str,
+        new_thread_id: str,
+        *,
+        after_run_id: str,
+        metadata: JsonObject | None = None,
+    ) -> None:
+        async with self._lock:
+            if new_thread_id in self._store or new_thread_id in self._runs:
+                raise ThreadAlreadyExistsError(f"thread={new_thread_id}")
+            src_data = self._store.get(src_thread_id)
+            src_runs = self._runs.get(src_thread_id, {})
+            if src_data is None and not src_runs:
+                raise ThreadNotFoundError(f"thread={src_thread_id}")
+            cutoff_state = src_runs.get(after_run_id)
+            if cutoff_state is None or cutoff_state.completion_seq is None:
+                raise RunNotCompletedError(
+                    f"thread={src_thread_id} run={after_run_id} not completed"
+                )
+            cutoff = cutoff_state.completion_seq
+            # Select messages.
+            new_messages: list[Message] = []
+            for m in src_data.messages if src_data else []:
+                if m.run_id is None:
+                    new_messages.append(_legible_message_copy(m))
+                    continue
+                rs = src_runs.get(m.run_id)
+                if rs is None or rs.completion_seq is None:
+                    continue
+                if rs.completion_seq <= cutoff:
+                    new_messages.append(_legible_message_copy(m))
+            # Deep copy extra and merge metadata.
+            base_extra = copy.deepcopy(src_data.extra if src_data else {})
+            if metadata is not None:
+                base_extra["fork"] = copy.deepcopy(metadata)
+            # Carry completed runs satisfying cutoff.
+            new_runs: dict[str, _RunState] = {}
+            for rid, state in src_runs.items():
+                if state.completion_seq is None:
+                    continue
+                if state.completion_seq <= cutoff:
+                    new_runs[rid] = _RunState(
+                        claimed_at=state.claimed_at,
+                        completed_at=state.completed_at,
+                        completion_seq=state.completion_seq,
+                    )
+            self._store[new_thread_id] = CheckpointData(
+                messages=new_messages,
+                extra=base_extra,
+                parent_thread_id=src_thread_id,
+            )
+            self._runs[new_thread_id] = new_runs
