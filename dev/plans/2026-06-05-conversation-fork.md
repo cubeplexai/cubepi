@@ -55,25 +55,71 @@ Expected: all green (existing tests, no impl changes yet).
 
 ### Fixture conventions for the rest of the plan
 
-These names appear in test snippets throughout the plan. They map to
-existing fixtures in `tests/checkpointer/conftest.py`:
+These names appear in test snippets throughout the plan.
 
-| Plan name | Real fixture | Returns |
+| Plan name | Maps to | Returns |
 |---|---|---|
-| Postgres DB | `clean_db` | DSN string |
-| MySQL DB | `clean_mysql_db` | DSN string |
-| In-memory tracing exporter | (none — see Task 34) | spec adds one |
+| Postgres DSN (raw, empty DB) | `clean_db` (existing) | DSN string |
+| MySQL DSN (raw, empty DB) | `clean_mysql_db` (existing) | DSN string |
+| Postgres DSN with v4 schema | `pg_v4_dsn` (NEW — Task 14) | DSN string |
+| MySQL DSN with v4 schema | `mysql_v4_dsn` (NEW — Task 18) | DSN string |
+| In-memory tracing exporter | `in_memory_exporter` (NEW — Task 34) | OTel exporter |
 | MemoryCheckpointer | (no fixture — instantiate inline `MemoryCheckpointer()`) | — |
+
+**Schema setup matters.** `clean_db` / `clean_mysql_db` create empty
+databases. `PostgresCheckpointer.__aenter__` runs schema-version
+verification and raises `CubepiSchemaUninitialized` against an empty
+DB. Tests that exercise a real checkpointer instance MUST use the
+v4-applied fixtures (`pg_v4_dsn` / `mysql_v4_dsn`), which Tasks 14 and
+18 create by extending the existing `_setup_schema(dsn)` helper at
+`tests/checkpointer/test_postgres.py:177` (PG) and the equivalent
+pattern in `test_mysql.py` (MySQL).
 
 Both SQL checkpointers' constructors take a DSN string (PG signature:
 `PostgresCheckpointer(dsn, *, min_pool_size=1, max_pool_size=10)` at
 `cubepi/checkpointer/postgres/checkpointer.py:62`; MySQL similar).
 Test snippets MUST construct them via `async with
-PostgresCheckpointer(clean_db) as cp:` — NOT by passing a pool object.
+PostgresCheckpointer(pg_v4_dsn) as cp:` — NOT by passing a pool object,
+and NOT by passing raw `clean_db` if exercising the checkpointer.
 
-Task 34 (tracing) is responsible for creating the `in_memory_exporter`
-fixture in `tests/tracing/conftest.py` if it doesn't already exist
-there (verify with `ls tests/tracing/` at task start).
+### FauxProvider construction
+
+`cubepi/providers/faux.py:156` defines:
+```python
+class FauxProvider(BaseProvider):
+    def __init__(self, *, tokens_per_second=None, ..., provider_id=""): ...
+    def set_responses(self, responses: list[AssistantMessage | FauxResponseFactory]): ...
+```
+
+It has **no `text=` / `error=` / `tool_error=` / `abort_mid_stream=` /
+`sleep_seconds=` kwargs**. To produce a single "ok" reply, every test
+file uses this helper:
+
+```python
+from cubepi.providers.base import AssistantMessage, TextContent
+from cubepi.providers.faux import FauxProvider
+
+
+def _ok_faux() -> FauxProvider:
+    p = FauxProvider()
+    p.set_responses([
+        AssistantMessage(content=[TextContent(text="ok")], stop_reason="end_turn")
+    ])
+    return p
+```
+
+Plan snippets that say `_ok_faux()` rely on this local helper —
+define it at the top of each test file (or share via
+`tests/agent/_helpers.py`).
+
+To inject provider-side errors / slow streams, subclass
+`FauxProvider` and override `stream_message`:
+
+```python
+class _RaisingProvider(FauxProvider):
+    async def stream_message(self, *args, **kwargs):
+        raise RuntimeError("provider down")
+```
 
 ---
 
@@ -1812,8 +1858,8 @@ def test_expected_schema_version_is_4():
 
 
 @pytest.mark.asyncio
-async def test_cubepi_runs_table_present(clean_db):
-    async with PostgresCheckpointer(clean_db) as cp:
+async def test_cubepi_runs_table_present(pg_v4_dsn):
+    async with PostgresCheckpointer(pg_v4_dsn) as cp:
         rows = await cp._pool.fetch(
             "SELECT column_name, data_type FROM information_schema.columns "
             "WHERE table_name = 'cubepi_runs' ORDER BY ordinal_position"
@@ -1829,8 +1875,8 @@ async def test_cubepi_runs_table_present(clean_db):
 
 
 @pytest.mark.asyncio
-async def test_cubepi_messages_has_run_id_column(clean_db):
-    async with PostgresCheckpointer(clean_db) as cp:
+async def test_cubepi_messages_has_run_id_column(pg_v4_dsn):
+    async with PostgresCheckpointer(pg_v4_dsn) as cp:
         row = await cp._pool.fetchrow(
             "SELECT data_type FROM information_schema.columns "
             "WHERE table_name = 'cubepi_messages' AND column_name = 'run_id'"
@@ -1894,12 +1940,52 @@ In `cubepi/checkpointer/postgres/alembic_helpers.py`, add a function
 
 Provide a downgrade that drops the table + column.
 
-- [ ] **Step 5: Update `tests/checkpointer/conftest.py` to apply v4**
+- [ ] **Step 5: Extend `_setup_schema` to v4 + add `pg_v4_dsn` fixture**
 
-The existing fixture creates tables via alembic / direct DDL. Wire the
-new v4 migration into the fresh-DB path so tests pick up the new
-schema. (Exact patch: find the schema-setup block and call
-`alembic_helpers.upgrade_v3_to_v4(op)` after v3.)
+In `tests/checkpointer/test_postgres.py`, the existing `_setup_schema`
+helper (`test_postgres.py:177`) builds the v3 schema. Extend it to
+also apply the v4 changes from Task 14:
+- `ALTER TABLE cubepi_messages ADD COLUMN run_id TEXT NULL`
+- `CREATE INDEX ix_cubepi_messages_thread_run ON cubepi_messages (thread_id, run_id)`
+- Create the partitioned `cubepi_runs` table + partitions (mirror
+  `create_message_partitions_op` from `alembic_helpers.py`)
+- Bump `cubepi_schema_version` from 3 to 4
+
+Move `_setup_schema` from `test_postgres.py` into
+`tests/checkpointer/conftest.py` so other test modules can reuse it.
+Add a fixture there:
+```python
+@pytest_asyncio.fixture
+async def pg_v4_dsn(clean_db: str):
+    await _setup_schema(clean_db)
+    yield clean_db
+```
+
+PG tests that exercise a PostgresCheckpointer instance MUST use
+`pg_v4_dsn` instead of raw `clean_db`. Tests that only assert
+information_schema shape can also use `pg_v4_dsn` (the schema is
+already applied; opening the checkpointer is optional).
+
+Update the table-shape tests at the top of Task 14 to use
+`pg_v4_dsn`:
+```python
+async def test_cubepi_runs_table_present(pg_v4_dsn):
+    conn = await asyncpg.connect(pg_v4_dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'cubepi_runs'"
+        )
+        cols = {r["column_name"] for r in rows}
+        assert {
+            "thread_id", "run_id", "claimed_at",
+            "completed_at", "completion_seq",
+        } <= cols
+    finally:
+        await conn.close()
+```
+
+(No `PostgresCheckpointer` needed here — we're only inspecting schema.)
 
 - [ ] **Step 6: Run tests → expect pass**
 
@@ -1936,13 +2022,13 @@ Postgres-specific tests:
 
 ```python
 @pytest.mark.asyncio
-async def test_append_persists_run_id_into_column(clean_db):
+async def test_append_persists_run_id_into_column(pg_v4_dsn):
     """Regression for plan-review CRITICAL: append() MUST write
     Message.run_id into cubepi_messages.run_id."""
     from cubepi.providers.base import TextContent, UserMessage
     from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
 
-    async with PostgresCheckpointer(clean_db) as cp:
+    async with PostgresCheckpointer(pg_v4_dsn) as cp:
         await cp.claim_run("t", "R1")
         msg = UserMessage(content=[TextContent(text="hi")], run_id="R1")
         await cp.append("t", [msg])
@@ -1954,12 +2040,12 @@ async def test_append_persists_run_id_into_column(clean_db):
 
 
 @pytest.mark.asyncio
-async def test_append_rejects_completed_run_id(clean_db):
+async def test_append_rejects_completed_run_id(pg_v4_dsn):
     from cubepi.checkpointer.exceptions import RunAlreadyCompletedError
     from cubepi.providers.base import TextContent, UserMessage
     from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
 
-    async with PostgresCheckpointer(clean_db) as cp:
+    async with PostgresCheckpointer(pg_v4_dsn) as cp:
         await cp.claim_run("t", "R1")
         await cp.mark_run_complete("t", "R1")
         msg = UserMessage(content=[TextContent(text="late")], run_id="R1")
@@ -1968,10 +2054,10 @@ async def test_append_rejects_completed_run_id(clean_db):
 
 
 @pytest.mark.asyncio
-async def test_claim_run_creates_threads_row_lazily(clean_db):
+async def test_claim_run_creates_threads_row_lazily(pg_v4_dsn):
     from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
 
-    async with PostgresCheckpointer(clean_db) as cp:
+    async with PostgresCheckpointer(pg_v4_dsn) as cp:
         await cp.claim_run("new_thread", "R1")
         row = await cp._pool.fetchrow(
             "SELECT thread_id FROM cubepi_threads WHERE thread_id = $1",
@@ -2168,7 +2254,7 @@ Create `tests/checkpointer/test_postgres_fork.py` covering the same
 scenarios; add one Postgres-specific concurrency test:
 ```python
 @pytest.mark.asyncio
-async def test_fork_blocks_concurrent_appends_on_src(clean_db):
+async def test_fork_blocks_concurrent_appends_on_src(pg_v4_dsn):
     """Two coroutines: fork holds advisory lock; concurrent append
     on src serializes after fork commits. No half-copied messages."""
     # ... use asyncio.gather to interleave; assert ordering ...
@@ -2327,15 +2413,28 @@ MySQL mirrors Postgres with:
 **Files:**
 - Modify: `cubepi/checkpointer/mysql/models.py`
 - Modify: `cubepi/checkpointer/mysql/alembic_helpers.py`
+- Modify: `tests/checkpointer/conftest.py` (add `mysql_v4_dsn` fixture)
 - Test: `tests/checkpointer/test_mysql_schema.py` (new)
 
 Steps parallel Task 14 with MySQL syntax:
 - Bump `EXPECTED_SCHEMA_VERSION = 4`.
-- Add `run_id VARCHAR(255) NULL` to `CubepiMessage`.
-- Add `CubepiRun` model (KEY-partitioned, no FK).
-- Provide v3→v4 alembic helper template.
+- Add `run_id VARCHAR(255) NULL` to `CubepiMessage` + composite index.
+- Add `CubepiRun` model (KEY-partitioned by thread_id, no FK).
+- Extend `_setup_schema(dsn)` in `test_mysql.py` (mirror of the
+  Postgres helper at `test_postgres.py:177`) to apply the v4 DDL.
+  Move it to `conftest.py` and expose a `mysql_v4_dsn` fixture:
+  ```python
+  @pytest_asyncio.fixture
+  async def mysql_v4_dsn(clean_mysql_db: str):
+      await _setup_mysql_schema(clean_mysql_db)
+      yield clean_mysql_db
+  ```
+- Provide v3→v4 alembic helper template (no PARTITION BY in
+  SQLAlchemy declarative; emit raw DDL).
 
-- [ ] Steps 1–7 follow Task 14 pattern. Run `tests/checkpointer/test_mysql_*` for green.
+- [ ] Steps 1–7 follow Task 14 pattern. All test snippets use
+  `mysql_v4_dsn` (not raw `clean_mysql_db`) when constructing a
+  `MySQLCheckpointer`. Run `tests/checkpointer/test_mysql_*` for green.
 
 Commit: `feat(mysql): schema v3→v4 — add run_id column + cubepi_runs table`.
 
@@ -2571,7 +2670,7 @@ from cubepi.providers.faux import FauxProvider
 
 
 def _agent(**kw):
-    return Agent(model=FauxProvider(text="hi").model("faux-model"), **kw)
+    return Agent(model=_ok_faux().model("faux-model"), **kw)
 
 
 @pytest.mark.asyncio
@@ -2598,8 +2697,11 @@ async def test_prompt_sets_then_clears_active_run_id_on_clean_return():
 
 @pytest.mark.asyncio
 async def test_prompt_leaves_active_run_id_set_on_raise():
-    # Use a provider that will raise inside the loop.
-    a = Agent(model=FauxProvider(error="RuntimeError").model("faux-model"))
+    # FauxProvider has no `error=` kwarg — subclass to raise inside the loop.
+    class _RaisingProvider(FauxProvider):
+        async def stream_message(self, *args, **kwargs):
+            raise RuntimeError("provider down")
+    a = Agent(model=_RaisingProvider().model("faux-model"))
     with pytest.raises(Exception):
         await a.prompt("hello", run_id="R1")
     # Spec §3.7: left set so except-block readers can recover it.
@@ -2694,7 +2796,7 @@ async def test_appended_messages_carry_run_id():
 
     cp = MemoryCheckpointer()
     a = Agent(
-        model=FauxProvider(text="hi").model("faux-model"),
+        model=_ok_faux().model("faux-model"),
         checkpointer=cp,
         thread_id="t",
     )
@@ -2702,6 +2804,26 @@ async def test_appended_messages_carry_run_id():
     data = await cp.load("t")
     for m in data.messages:
         assert m.run_id == "R1"
+
+
+@pytest.mark.asyncio
+async def test_appending_message_with_mismatched_run_id_raises():
+    """Caller pre-stamps a Message with a different run_id than the
+    active one. _process_event must reject rather than silently stamp."""
+    from cubepi.checkpointer.memory import MemoryCheckpointer
+    from cubepi.providers.base import TextContent, UserMessage
+
+    cp = MemoryCheckpointer()
+    a = Agent(
+        model=_ok_faux().model("faux-model"),
+        checkpointer=cp,
+        thread_id="t",
+    )
+    bad_msg = UserMessage(
+        content=[TextContent(text="hi")], run_id="WRONG"
+    )
+    with pytest.raises(ValueError, match="does not match active run_id"):
+        await a.prompt(bad_msg, run_id="R1")
 ```
 
 - [ ] **Step 2: Run → expect failure**
@@ -2714,14 +2836,23 @@ Expected: `m.run_id` is None.
 In `cubepi/agent/agent.py`, locate `_process_event(self, event)` and
 the `MessageEndEvent` branch. Stamp `run_id` from
 `self._state.active_run_id` onto the message BEFORE it's appended /
-mirrored into state:
+mirrored into state. **Validate any caller-supplied `run_id` matches**
+the active run — silent mismatch would split a run's identity in two
+and corrupt fork selection:
 
 ```python
 elif isinstance(event, MessageEndEvent):
     msg = event.message
-    if self._state.active_run_id is not None and msg.run_id is None:
-        msg = msg.model_copy(update={"run_id": self._state.active_run_id})
-        event = event.model_copy(update={"message": msg})
+    active = self._state.active_run_id
+    if active is not None:
+        if msg.run_id is None:
+            msg = msg.model_copy(update={"run_id": active})
+            event = event.model_copy(update={"message": msg})
+        elif msg.run_id != active:
+            raise ValueError(
+                f"message.run_id={msg.run_id!r} does not match "
+                f"active run_id={active!r}"
+            )
     # ... existing append + state-mirror code, now operating on the
     # stamped `msg` / `event` ...
 ```
@@ -2803,7 +2934,7 @@ def _tool_with_hitl(binding):
 
 def _agent(tools=None, middleware=None):
     return Agent(
-        model=FauxProvider(text="hi").model("faux-model"),
+        model=_ok_faux().model("faux-model"),
         tools=tools or [],
         middleware=middleware or [],
     )
@@ -2924,7 +3055,7 @@ from cubepi.providers.faux import FauxProvider
 
 
 def _agent(**kw):
-    return Agent(model=FauxProvider(text="hi").model("faux-model"), **kw)
+    return Agent(model=_ok_faux().model("faux-model"), **kw)
 
 
 @pytest.mark.asyncio
@@ -3042,6 +3173,28 @@ from cubepi.checkpointer.memory import MemoryCheckpointer
 from cubepi.providers.faux import FauxProvider
 
 
+**FauxProvider API.** `FauxProvider` (`cubepi/providers/faux.py:156`)
+has no `text=` / `error=` / `tool_error=` / `abort_mid_stream=` /
+`sleep_seconds=` kwargs. Its real API: construct empty, then call
+`set_responses([...])` with a list of `AssistantMessage` instances
+(or `FauxResponseFactory` callables). To simulate provider failures
+or sleep behavior, subclass `FauxProvider` inside this test file.
+
+```python
+from cubepi.checkpointer.exceptions import CompletionMarkerFailedError
+from cubepi.checkpointer.memory import MemoryCheckpointer
+from cubepi.providers.base import AssistantMessage, TextContent
+from cubepi.providers.faux import FauxProvider
+
+
+def _ok_provider() -> FauxProvider:
+    p = FauxProvider()
+    p.set_responses([
+        AssistantMessage(content=[TextContent(text="ok")], stop_reason="end_turn")
+    ])
+    return p
+
+
 def _agent(provider, **kw):
     cp = MemoryCheckpointer()
     a = Agent(model=provider.model("faux-model"), checkpointer=cp, thread_id="t", **kw)
@@ -3050,7 +3203,7 @@ def _agent(provider, **kw):
 
 @pytest.mark.asyncio
 async def test_clean_success_marks_complete():
-    a, cp = _agent(FauxProvider(text="ok"))
+    a, cp = _agent(_ok_provider())
     await a.prompt("hi", run_id="R1")
     rs = cp._runs["t"]["R1"]
     assert rs.completed_at is not None
@@ -3058,18 +3211,11 @@ async def test_clean_success_marks_complete():
 
 
 @pytest.mark.asyncio
-async def test_hitl_suspend_does_not_mark():
-    """Provider raises HitlDetached mid-stream → loop catches → no mark."""
-    a, cp = _agent(FauxProvider(error="HitlDetached"))
-    with pytest.raises(Exception):
-        await a.prompt("hi", run_id="R1")
-    rs = cp._runs["t"]["R1"]
-    assert rs.completed_at is None
-
-
-@pytest.mark.asyncio
 async def test_provider_error_does_not_mark():
-    a, cp = _agent(FauxProvider(error="RuntimeError"))
+    class _RaisingProvider(FauxProvider):
+        async def stream_message(self, *args, **kwargs):
+            raise RuntimeError("provider down")
+    a, cp = _agent(_RaisingProvider())
     with pytest.raises(Exception):
         await a.prompt("hi", run_id="R1")
     rs = cp._runs["t"]["R1"]
@@ -3077,49 +3223,62 @@ async def test_provider_error_does_not_mark():
 
 
 @pytest.mark.asyncio
-async def test_tool_exception_does_not_mark():
-    a, cp = _agent(FauxProvider(tool_error="RuntimeError"))
-    with pytest.raises(Exception):
-        await a.prompt("hi", run_id="R1")
-    rs = cp._runs["t"]["R1"]
-    assert rs.completed_at is None
+async def test_hitl_detached_outcome_suspended_no_mark():
+    """HitlDetached raised inside the loop → caught at loop.py:196 →
+    outcome 'suspended', no mark. respond() resume completes."""
+    from cubepi.hitl.testing import ScriptedHitlChannel
+    # Drive HITL via cubepi.hitl.testing.ScriptedHitlChannel which
+    # supports detach + reconnect; assert cp._runs[...].completed_at
+    # IS None after the detach, then after respond() IS NOT None.
+    # ... full setup mirrors tests/hitl/test_detach.py existing
+    # pattern (read that file before writing the test) ...
 
 
 @pytest.mark.asyncio
-async def test_abort_during_streaming_does_not_mark():
-    a, cp = _agent(FauxProvider(text="ok", abort_mid_stream=True))
-    # Caller cancels mid-stream via agent.abort().
-    task = asyncio.create_task(a.prompt("hi", run_id="R1"))
-    await asyncio.sleep(0)  # let the streaming start
-    a.abort()
-    with contextlib.suppress(Exception):
-        await task
-    rs = cp._runs["t"]["R1"]
-    assert rs.completed_at is None
-
-
-@pytest.mark.asyncio
-async def test_abort_pending_does_not_mark():
-    """abort_pending injects synthetic deny + terminal aborted assistant
-    (agent.py:582-595). Outcome is "abandoned", marker not written."""
-    # Setup an agent suspended at HITL, then call abort_pending.
-    # ... use cubepi.hitl.testing scaffolding ...
-    rs = cp._runs["t"]["R1"]
-    assert rs.completed_at is None
+async def test_hitl_aborted_via_abort_pending_does_not_mark():
+    """abort_pending raises HitlAborted in the loop → caught at
+    loop.py:418 → outcome 'abandoned' (NOT 'suspended'). The
+    synthetic deny + terminal aborted assistant are appended by
+    agent.py:582-595 — assert they're present and that
+    cp._runs[...].completed_at is None."""
+    # ... setup pauses on HITL, then awaits agent.abort_pending(reason="x") ...
 
 
 @pytest.mark.asyncio
 async def test_incomplete_tool_cycle_does_not_mark():
     """after_model_response(decision='stop') on a tool-use response
     triggers Task 27's invariant. Outcome 'incomplete', no marker."""
-    # ... see Task 27 fixture; reuse it here ...
+    from cubepi.providers.base import ToolCall
+    from cubepi.agent.types import TurnAction
+
+    p = FauxProvider()
+    p.set_responses([
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="t", arguments={})],
+            stop_reason="tool_use",
+        ),
+    ])
+    async def _stop_after(ctx):
+        return TurnAction(decision="stop")
+    cp = MemoryCheckpointer()
+    a = Agent(
+        model=p.model("faux-model"),
+        checkpointer=cp,
+        thread_id="t",
+        after_model_response=_stop_after,
+    )
+    await a.prompt("hi", run_id="R1")
     rs = cp._runs["t"]["R1"]
     assert rs.completed_at is None
 
 
 @pytest.mark.asyncio
 async def test_propagating_cancel_does_not_mark():
-    a, cp = _agent(FauxProvider(text="ok", sleep_seconds=10))
+    class _SlowProvider(FauxProvider):
+        async def stream_message(self, *args, **kwargs):
+            await asyncio.sleep(10)
+            return  # unreachable
+    a, cp = _agent(_SlowProvider())
     task = asyncio.create_task(a.prompt("hi", run_id="R1"))
     await asyncio.sleep(0.01)
     task.cancel()
@@ -3131,29 +3290,23 @@ async def test_propagating_cancel_does_not_mark():
 
 @pytest.mark.asyncio
 async def test_completion_marker_failed_carries_run_id_when_generated():
-    """When prompt(run_id=None) generates a run_id and mark_run_complete
-    fails, the exception carries the generated run_id and
-    active_run_id is left set."""
+    """prompt(run_id=None) generates; mark_run_complete fails;
+    exception carries the generated run_id; active_run_id is left set."""
     class _BrokenMark(MemoryCheckpointer):
         async def mark_run_complete(self, thread_id, run_id):
             raise RuntimeError("db down")
 
     cp = _BrokenMark()
     a = Agent(
-        model=FauxProvider(text="ok").model("faux-model"),
+        model=_ok_provider().model("faux-model"),
         checkpointer=cp,
         thread_id="t",
     )
     with pytest.raises(CompletionMarkerFailedError) as exc_info:
         await a.prompt("hi")  # run_id=None → generate
-    assert exc_info.value.run_id == a.state.active_run_id
     assert exc_info.value.run_id is not None
+    assert exc_info.value.run_id == a.state.active_run_id
 ```
-
-(`FauxProvider`'s `tool_error` / `abort_mid_stream` / `sleep_seconds`
-keyword args are illustrative — use whatever the test suite's
-FauxProvider already supports; if it doesn't expose the needed knob,
-add a tiny subclass inside this test file.)
 
 (The exact FauxProvider injection API may differ; use whatever mechanism
 the test suite already uses to inject errors / stop_reasons. The
@@ -3174,17 +3327,35 @@ from typing import Literal
 RunOutcome = Literal["complete", "suspended", "incomplete", "abandoned"]
 ```
 
-Modify `cubepi/agent/loop.py`:
-- Change `run_agent_loop`, `_run_loop`, `_run_loop_inner` return type
-  from `None` (or `list[Message]`) to `RunOutcome`. Each existing exit
-  path returns the appropriate literal:
+Modify `cubepi/agent/loop.py`. **The existing public helpers
+`run_agent_loop`, `run_agent_loop_continue`, and `run_agent_loop_resume`
+return `list[Message]` and have callers in `tests/agent/test_loop.py`
+that assert on the list.** To avoid breaking them, change the return
+type to `tuple[list[Message], RunOutcome]` rather than replacing it.
+
+- `run_agent_loop`, `run_agent_loop_continue`, `run_agent_loop_resume`,
+  `_run_loop`, `_run_loop_inner` return
+  `tuple[list[Message], RunOutcome]`. Existing exit paths
+  (currently `return new_messages`) become
+  `return new_messages, <outcome>`. The literals:
   - After clean `AgentEndEvent` with terminal stop_reason and no
-    pending HITL → `return "complete"`
-  - After the `HitlDetached` / `HitlAborted` `except` blocks at
-    `loop.py:196` and `loop.py:418` (which currently `return` silently)
-    → `return "suspended"`
+    pending HITL → `return new_messages, "complete"`
+  - The existing combined `except (HitlDetached, HitlAborted)` blocks
+    at `loop.py:196` and `loop.py:418` must be **split by exception
+    type**:
+    ```python
+    except HitlDetached:
+        return new_messages, "suspended"
+    except HitlAborted:
+        return new_messages, "abandoned"
+    ```
+    `HitlDetached` means "channel detached, the run can still be
+    resumed via respond()" — completion deferred to resume.
+    `HitlAborted` means "abort_pending was called; the synthetic deny
+    and terminal aborted assistant have already been appended by
+    `agent.py:582-595`" — terminal abandonment, no marker.
   - After the early-exit branch on `stop_reason in ("error", "aborted")`
-    at `loop.py:485` → `return "abandoned"`
+    at `loop.py:485` → `return new_messages, "abandoned"`
   - When `check_tool_cycle(...)` (from Task 27) raises
     `ToolCycleViolation` immediately before declaring `complete`,
     catch it and `return "incomplete"` instead
@@ -3194,20 +3365,26 @@ Modify `cubepi/agent/loop.py`:
   must also forward the outcome.
 
 Modify `cubepi/agent/agent.py`:
-- `_run_prompt` and `_run_hitl_resume` return `RunOutcome`.
+- `_run_prompt` and `_run_hitl_resume` return
+  `tuple[list[Message], RunOutcome]`.
 - In `Agent.prompt()` (replacing the placeholder line `await
   self._run_prompt(...)`):
   ```python
-  outcome: RunOutcome = await self._run_prompt(
+  _new_messages, outcome = await self._run_prompt(
       message, run_id=effective_run_id
   )
   await self._dispatch_outcome(outcome, effective_run_id)
   ```
 - In `Agent.respond()`:
   ```python
-  outcome: RunOutcome = await self._run_hitl_resume(...)
+  _new_messages, outcome = await self._run_hitl_resume(...)
   await self._dispatch_outcome(outcome, recovered_run_id)
   ```
+
+**Update `tests/agent/test_loop.py`** to expect tuples. Existing
+assertions of the form `result = await run_agent_loop(...)` become
+`messages, _outcome = await run_agent_loop(...)`. Mention this
+explicitly in the task body so the implementer doesn't skip it.
 - New private helper `_dispatch_outcome`:
   ```python
   async def _dispatch_outcome(
@@ -3354,12 +3531,19 @@ def test_duplicate_ids_across_turns_violation():
     assert False
 
 
-def test_extra_results_with_same_id_violation():
-    """Multiset check: assistant emits one c1; window has two
-    tool_results both with c1. Set-equality would pass; multiset
-    correctly rejects."""
+def test_multiset_mismatch_within_window_violation():
+    """Assistant emits {c1, c2}; window has [c1, c1] — set-equality
+    would have failed, but the bug is multiset-specific: window length
+    matches K=2, and only the multiset check catches that c2 is missing
+    while c1 is duplicated. (A trailing extra tool_result AFTER the
+    K-window is a separate concern handled by the NEXT assistant turn's
+    adjacency check; it's not what this test covers.)"""
     try:
-        check_tool_cycle([_asst(["c1"]), _res("c1"), _res("c1")])
+        check_tool_cycle([
+            _asst(["c1", "c2"]),
+            _res("c1"),
+            _res("c1"),  # duplicate of c1; c2 missing
+        ])
     except ToolCycleViolation:
         return
     assert False
@@ -3498,7 +3682,11 @@ Expected: `respond()` either reclaims or doesn't propagate run_id.
 
 - [ ] **Step 3: Modify `Agent.respond()`**
 
-At the start of `respond()`:
+At the start of `respond()` (after the existing locking / state
+guards), recover the run_id from pending state and apply the same
+lifecycle pattern as `prompt()` — set on entry, clear on clean return,
+leave set on raise:
+
 ```python
 pending = await self.checkpointer.load_pending(self.thread_id)
 if pending is None:
@@ -3506,11 +3694,32 @@ if pending is None:
 _req, recovered_run_id = pending
 if recovered_run_id is not None:
     self._state.active_run_id = recovered_run_id
+try:
+    # ... existing respond() body, which will:
+    # - re-enter the agent loop
+    # - eventually call _dispatch_outcome (Task 26) which writes the
+    #   marker on outcome == "complete"
+    ...
+except BaseException:
+    # Leave active_run_id SET on raise (spec §3.7).
+    raise
+else:
+    # Clear on successful resume completion.
+    self._state.active_run_id = None
 ```
 
-Then continue the existing flow. **Do not call `claim_run` here.** All
-subsequent append calls use `self._state.active_run_id`. At terminal
-clean exit, the same `mark_run_complete` block from Task 26 fires.
+**Do not call `claim_run` here.** All subsequent append calls use
+`self._state.active_run_id` (the same chokepoint as prompt — see
+Task 23). At terminal clean exit, `_dispatch_outcome` from Task 26
+fires `mark_run_complete`.
+
+Add a test asserting:
+```python
+@pytest.mark.asyncio
+async def test_respond_clears_active_run_id_on_clean_resume():
+    # ... drive a HITL pause then resume to clean completion ...
+    assert agent.state.active_run_id is None
+```
 
 - [ ] **Step 4: Run tests → expect pass**
 
@@ -3548,7 +3757,7 @@ from cubepi.providers.faux import FauxProvider
 async def test_agent_fork_delegates_to_checkpointer():
     cp = MemoryCheckpointer()
     a = Agent(
-        model=FauxProvider(text="hi").model("faux-model"),
+        model=_ok_faux().model("faux-model"),
         checkpointer=cp,
         thread_id="src",
     )
@@ -3560,7 +3769,7 @@ async def test_agent_fork_delegates_to_checkpointer():
 
 @pytest.mark.asyncio
 async def test_agent_fork_no_checkpointer_raises():
-    a = Agent(model=FauxProvider(text="hi").model("faux-model"))
+    a = Agent(model=_ok_faux().model("faux-model"))
     with pytest.raises(RuntimeError, match="checkpointer"):
         await a.fork("src", "dst", after_run_id="R1")
 
@@ -3569,7 +3778,7 @@ async def test_agent_fork_no_checkpointer_raises():
 async def test_agent_fork_does_not_mutate_self_thread_id():
     cp = MemoryCheckpointer()
     a = Agent(
-        model=FauxProvider(text="hi").model("faux-model"),
+        model=_ok_faux().model("faux-model"),
         checkpointer=cp,
         thread_id="src",
     )
@@ -3663,6 +3872,9 @@ Create `tests/agent/test_agent_fork_once.py` testing:
 - Simple text-only follow-up returns expected final text; source thread
   unchanged
 - `RuntimeError` when no checkpointer
+- `CheckpointerError` when checkpointer is a v3-only stub lacking
+  `snapshot` / `claim_run` / `mark_run_complete` (degraded-mode test
+  mirroring Task 25's coverage but for fork_once)
 - `RuntimeError` when any `tool.hitl is not None` (checkpointed OR
   in-memory)
 - `RuntimeError` when middleware has `hitl is not None`
@@ -3687,6 +3899,13 @@ async def fork_once(
 ) -> ForkOnceResult:
     if self.checkpointer is None:
         raise RuntimeError("fork_once requires a checkpointer")
+    # Degraded-mode guard — same shape as Agent.fork (Task 29).
+    if not self._run_aware or not hasattr(self.checkpointer, "snapshot"):
+        from cubepi.checkpointer.exceptions import CheckpointerError
+        raise CheckpointerError(
+            "backend does not support fork_once; missing snapshot / "
+            "claim_run / mark_run_complete"
+        )
     # HITL pre-flight. Real attributes: self._state.tools, self._middleware.
     hitl_offenders = [
         elem for elem in (*self._state.tools, *self._middleware)
@@ -3910,7 +4129,7 @@ from cubepi.providers.faux import FauxProvider
 async def test_fork_once_emits_named_span(in_memory_exporter):
     cp = MemoryCheckpointer()
     a = Agent(
-        model=FauxProvider(text="hi").model("faux-model"),
+        model=_ok_faux().model("faux-model"),
         checkpointer=cp,
         thread_id="src",
     )
@@ -4063,10 +4282,8 @@ BACKENDS = ["memory", "sqlite", "postgres", "mysql"]
 
 
 @pytest.fixture(params=BACKENDS)
-async def checkpointer(request, tmp_path, clean_db, clean_mysql_db):
-    # Build the appropriate checkpointer per param. clean_db /
-    # clean_mysql_db are DSN strings; PG and MySQL constructors open
-    # their own pools on __aenter__.
+async def checkpointer(request, tmp_path, pg_v4_dsn, mysql_v4_dsn):
+    # Use v4-applied DSN fixtures; constructors open their own pools.
     if request.param == "memory":
         from cubepi.checkpointer.memory import MemoryCheckpointer
         yield MemoryCheckpointer()
@@ -4076,11 +4293,11 @@ async def checkpointer(request, tmp_path, clean_db, clean_mysql_db):
             yield cp
     elif request.param == "postgres":
         from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
-        async with PostgresCheckpointer(clean_db) as cp:
+        async with PostgresCheckpointer(pg_v4_dsn) as cp:
             yield cp
     elif request.param == "mysql":
         from cubepi.checkpointer.mysql.checkpointer import MySQLCheckpointer
-        async with MySQLCheckpointer(clean_mysql_db) as cp:
+        async with MySQLCheckpointer(mysql_v4_dsn) as cp:
             yield cp
 
 
@@ -4088,7 +4305,7 @@ async def checkpointer(request, tmp_path, clean_db, clean_mysql_db):
 async def test_fork_e2e_happy_path(checkpointer):
     cp = checkpointer
     a = Agent(
-        model=FauxProvider(text="ok").model("faux-model"),
+        model=_ok_faux().model("faux-model"),
         checkpointer=cp,
         thread_id="src",
     )
