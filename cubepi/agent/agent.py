@@ -277,6 +277,24 @@ class Agent(Generic[TMessage]):
         self._steering_queue.clear()
         self._follow_up_queue.clear()
 
+    def _validate_input_run_ids(
+        self,
+        message: str | Message | list[Message],
+        effective_run_id: str,
+    ) -> None:
+        if isinstance(message, str):
+            return
+        if isinstance(message, list):
+            candidates: list[Message] = message
+        else:
+            candidates = [message]
+        for m in candidates:
+            if getattr(m, "run_id", None) is not None and m.run_id != effective_run_id:
+                raise ValueError(
+                    f"message.run_id={m.run_id!r} does not match "
+                    f"prompt(run_id={effective_run_id!r})"
+                )
+
     async def prompt(
         self,
         message: str | Message | list[Message],
@@ -294,6 +312,10 @@ class Agent(Generic[TMessage]):
                 "Use steer() or follow_up() to queue messages."
             )
         effective_run_id = run_id or uuid.uuid4().hex
+        # Reject mismatched caller-supplied Message.run_id BEFORE any state
+        # mutation so the supplied run_id remains reusable (Task 25 will add
+        # claim_run, which must not be called for a rejected prompt).
+        self._validate_input_run_ids(message, effective_run_id)
         self._state.active_run_id = effective_run_id
         try:
             async with self._run_lock:
@@ -307,7 +329,9 @@ class Agent(Generic[TMessage]):
                 if isinstance(message, str):
                     messages: list[Message] = [
                         UserMessage(
-                            content=[TextContent(text=message)], timestamp=time.time()
+                            content=[TextContent(text=message)],
+                            timestamp=time.time(),
+                            run_id=effective_run_id,
                         )
                     ]
                 elif isinstance(message, list):
@@ -757,10 +781,21 @@ class Agent(Generic[TMessage]):
         elif event.type == "message_update":
             self._state.streaming_message = event.message
         elif event.type == "message_end":
+            msg = event.message
+            active = self._state.active_run_id
+            if active is not None:
+                if msg.run_id is None:
+                    msg = msg.model_copy(update={"run_id": active})
+                    event = event.model_copy(update={"message": msg})
+                elif msg.run_id != active:
+                    raise ValueError(
+                        f"message.run_id={msg.run_id!r} does not match "
+                        f"active run_id={active!r}"
+                    )
             self._state.streaming_message = None
-            self._state._messages.append(event.message)
+            self._state._messages.append(msg)
             if self.checkpointer and self.thread_id:
-                await self.checkpointer.append(self.thread_id, [event.message])
+                await self.checkpointer.append(self.thread_id, [msg])
         elif event.type == "tool_execution_start":
             self._state._pending_tool_calls = self._state._pending_tool_calls | {
                 event.tool_call_id
