@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Generic, TypeVar
 
 from cubepi.agent._outcome import RunOutcome
+from cubepi.agent._tool_cycle import ToolCycleViolation, check_tool_cycle
 from cubepi.agent.loop import (
     run_agent_loop,
     run_agent_loop_continue,
@@ -294,6 +295,12 @@ class Agent(Generic[TMessage]):
         return _sink
 
     async def _dispatch_outcome(self, outcome: RunOutcome | None, run_id: str) -> None:
+        if outcome == "complete":
+            run_messages = [m for m in self._state.messages if m.run_id == run_id]
+            try:
+                check_tool_cycle(run_messages)
+            except ToolCycleViolation:
+                outcome = "incomplete"
         if outcome != "complete":
             return
         if not (self._run_aware and self.thread_id):
