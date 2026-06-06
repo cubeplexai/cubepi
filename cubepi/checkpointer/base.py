@@ -42,3 +42,53 @@ class Checkpointer(Protocol):
         Returns a ``HitlRequest`` instance or ``None``.
         """
         ...
+
+    async def snapshot(
+        self, thread_id: str, *, after_run_id: str
+    ) -> list[Message]:
+        """Return messages of completed runs of `thread_id` up through
+        and including `after_run_id`, in source seq order. Raises
+        ThreadNotFoundError or RunNotCompletedError."""
+        ...
+
+    async def fork(
+        self,
+        src_thread_id: str,
+        new_thread_id: str,
+        *,
+        after_run_id: str,
+        metadata: JsonObject | None = None,
+    ) -> None:
+        """Atomically physical-copy messages of completed runs up
+        through `after_run_id` from src to new. See spec §3.2 / §3.4."""
+        ...
+
+    async def claim_run(
+        self,
+        thread_id: str,
+        run_id: str,
+    ) -> None:
+        """Insert cubepi_runs row with claimed_at=now, completed_at=NULL.
+        Lazily creates the threads row if needed. Raises
+        RunAlreadyClaimedError or RunAlreadyCompletedError on PK
+        conflict (distinguished by completed_at IS NULL/NOT NULL)."""
+        ...
+
+    async def mark_run_complete(
+        self,
+        thread_id: str,
+        run_id: str,
+    ) -> None:
+        """Allocate next per-thread completion_seq; UPDATE the run row.
+        Idempotent on already-completed rows (does NOT raise
+        RunAlreadyCompletedError). Raises RunNotClaimedError when no
+        row exists."""
+        ...
+
+    async def load_pending(
+        self,
+        thread_id: str,
+    ) -> tuple[HitlRequest, str | None] | None:
+        """Read (HitlRequest, run_id) atomically from the pending row,
+        or None when no pending request exists."""
+        ...
