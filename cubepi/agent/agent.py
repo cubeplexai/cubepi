@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Callable, Generic, TypeVar
@@ -276,7 +277,12 @@ class Agent(Generic[TMessage]):
         self._steering_queue.clear()
         self._follow_up_queue.clear()
 
-    async def prompt(self, message: str | Message | list[Message]) -> None:
+    async def prompt(
+        self,
+        message: str | Message | list[Message],
+        *,
+        run_id: str | None = None,
+    ) -> str:
         # Fail-fast guard: if the run-lock is already held OR a stream is in
         # progress, raise immediately instead of queueing on the lock. This
         # makes two concurrent cold prompt() calls fail-fast deterministically
@@ -287,34 +293,43 @@ class Agent(Generic[TMessage]):
                 "Agent is already processing a prompt. "
                 "Use steer() or follow_up() to queue messages."
             )
-        async with self._run_lock:
-            # Re-check under the lock in case streaming flipped during acquire.
-            if self._state.is_streaming:  # pragma: no cover — defensive re-check
-                raise RuntimeError(
-                    "Agent is already processing a prompt. "
-                    "Use steer() or follow_up() to queue messages."
-                )
-
-            if isinstance(message, str):
-                messages: list[Message] = [
-                    UserMessage(
-                        content=[TextContent(text=message)], timestamp=time.time()
+        effective_run_id = run_id or uuid.uuid4().hex
+        self._state.active_run_id = effective_run_id
+        try:
+            async with self._run_lock:
+                # Re-check under the lock in case streaming flipped during acquire.
+                if self._state.is_streaming:  # pragma: no cover — defensive re-check
+                    raise RuntimeError(
+                        "Agent is already processing a prompt. "
+                        "Use steer() or follow_up() to queue messages."
                     )
-                ]
-            elif isinstance(message, list):
-                messages = message
-            else:
-                messages = [message]
 
-            # Restore history and extra from checkpointer if this is first prompt
-            if self.checkpointer and self.thread_id and not self._state._messages:
-                data = await self.checkpointer.load(self.thread_id)
-                if data:
-                    if data.messages:
-                        self._state._messages = list(data.messages)
-                    self._extra = dict(data.extra)
+                if isinstance(message, str):
+                    messages: list[Message] = [
+                        UserMessage(
+                            content=[TextContent(text=message)], timestamp=time.time()
+                        )
+                    ]
+                elif isinstance(message, list):
+                    messages = message
+                else:
+                    messages = [message]
 
-            await self._run_prompt(messages)
+                # Restore history and extra from checkpointer if this is first prompt
+                if self.checkpointer and self.thread_id and not self._state._messages:
+                    data = await self.checkpointer.load(self.thread_id)
+                    if data:
+                        if data.messages:
+                            self._state._messages = list(data.messages)
+                        self._extra = dict(data.extra)
+
+                await self._run_prompt(messages)
+        except BaseException:
+            # Spec §3.7: leave active_run_id SET on failure.
+            raise
+        else:
+            self._state.active_run_id = None
+            return effective_run_id
 
     async def resume(self) -> None:
         # Same fail-fast pattern as prompt(): lock.locked() is the atomic gate.
