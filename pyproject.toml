@@ -21,6 +21,13 @@ dependencies = [
     "pydantic>=2.13.4",
 ]
 
+[project.urls]
+Homepage = "https://cubepi.ai"
+Documentation = "https://cubepi.ai/docs"
+Repository = "https://github.com/cubeplexai/cubepi"
+Changelog = "https://cubepi.ai/changelog"
+Issues = "https://github.com/cubeplexai/cubepi/issues"
+
 [project.optional-dependencies]
 sqlite = [
     "aiosqlite>=0.22.1",
