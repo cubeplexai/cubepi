@@ -6,7 +6,8 @@ from typing import Awaitable, Callable, Iterable, Protocol, Union, cast
 from pydantic import BaseModel
 
 from cubepi.agent.types import BeforeToolCallContext, BeforeToolCallResult
-from cubepi.hitl.channel import HitlChannel
+from cubepi.hitl.binding import HitlBinding
+from cubepi.hitl.channel import CheckpointedChannel, HitlChannel
 from cubepi.hitl.exceptions import HitlCancelled, HitlTimedOut
 from cubepi.hitl.policy import Approve, ApprovalDecision, AskUser, Deny
 from cubepi.middleware.base import Middleware
@@ -36,6 +37,11 @@ class ApprovalPolicyMiddleware(Middleware):
     ):
         self._channel = channel
         self._policy = policy
+        checkpointed = isinstance(channel, CheckpointedChannel)
+        self.hitl = HitlBinding(
+            checkpointed=checkpointed,
+            run_id=getattr(channel, "_run_id", None) if checkpointed else None,
+        )
 
     async def before_tool_call(
         self, ctx: BeforeToolCallContext, *, signal=None

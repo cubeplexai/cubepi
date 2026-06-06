@@ -39,7 +39,7 @@ def _bash_tool() -> AgentTool:
 
 async def test_abort_pending_closes_conversation():
     cp = MemoryCheckpointer()
-    ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1", run_id="R1")
     provider = FauxProvider(provider_id="faux")
     provider.set_responses(
         [
@@ -57,7 +57,7 @@ async def test_abort_pending_closes_conversation():
         checkpointer=cp,
         thread_id="t-1",
     )
-    task = asyncio.create_task(agent.prompt("hi"))
+    task = asyncio.create_task(agent.prompt("hi", run_id="R1"))
     for _ in range(200):
         if ch.pending is not None:
             break

@@ -49,7 +49,7 @@ def _two_turn_bash_responses():
 
 
 async def _suspend_resume_and_capture(checkpointer):
-    ch = CheckpointedChannel(checkpointer=checkpointer, thread_id="t-1")
+    ch = CheckpointedChannel(checkpointer=checkpointer, thread_id="t-1", run_id="R1")
     provider = FauxProvider(provider_id="faux")
     provider.set_responses(_two_turn_bash_responses())
 
@@ -64,7 +64,7 @@ async def _suspend_resume_and_capture(checkpointer):
         checkpointer=checkpointer,
         thread_id="t-1",
     )
-    task = asyncio.create_task(agent.prompt("hi"))
+    task = asyncio.create_task(agent.prompt("hi", run_id="R1"))
     for _ in range(200):
         if ch.pending is not None:
             break

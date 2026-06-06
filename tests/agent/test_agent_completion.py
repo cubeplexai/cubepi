@@ -115,7 +115,7 @@ def _two_turn_bash_responses():
 @pytest.mark.asyncio
 async def test_hitl_detached_outcome_suspended_no_mark():
     cp = MemoryCheckpointer()
-    ch = CheckpointedChannel(checkpointer=cp, thread_id="t")
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
     provider = FauxProvider(provider_id="faux")
     provider.set_responses(_two_turn_bash_responses())
     a = Agent(
@@ -155,7 +155,7 @@ async def test_hitl_detached_outcome_suspended_no_mark():
 @pytest.mark.asyncio
 async def test_hitl_aborted_via_abort_pending_does_not_mark():
     cp = MemoryCheckpointer()
-    ch = CheckpointedChannel(checkpointer=cp, thread_id="t")
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
     provider = FauxProvider(provider_id="faux")
     provider.set_responses(_two_turn_bash_responses())
     a = Agent(
@@ -194,7 +194,7 @@ async def test_hitl_aborted_via_abort_pending_does_not_mark():
 @pytest.mark.asyncio
 async def test_propagating_cancel_does_not_mark():
     cp = MemoryCheckpointer()
-    ch = CheckpointedChannel(checkpointer=cp, thread_id="t")
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
     provider = FauxProvider(provider_id="faux")
     provider.set_responses(_two_turn_bash_responses())
     a = Agent(
