@@ -426,6 +426,29 @@ class Agent(Generic[TMessage]):
             self._state.active_run_id = None
             return effective_run_id
 
+    async def fork(
+        self,
+        src_thread_id: str,
+        new_thread_id: str,
+        *,
+        after_run_id: str,
+        metadata: JsonObject | None = None,
+    ) -> None:
+        if self.checkpointer is None:
+            raise RuntimeError("fork requires a checkpointer")
+        if not self._run_aware:
+            from cubepi.checkpointer.exceptions import CheckpointerError
+
+            raise CheckpointerError(
+                "backend does not support fork; missing claim_run / mark_run_complete"
+            )
+        await self.checkpointer.fork(
+            src_thread_id,
+            new_thread_id,
+            after_run_id=after_run_id,
+            metadata=metadata,
+        )
+
     async def resume(self) -> None:
         # Same fail-fast pattern as prompt(): lock.locked() is the atomic gate.
         if self._run_lock.locked() or self._state.is_streaming:
