@@ -187,6 +187,32 @@ per-run claim/completion state.
 See the [Conversation Forking](./forking) guide for the user-facing
 API and semantics.
 
+## Schema v3 → v4 migration
+
+The fork feature bumps `EXPECTED_SCHEMA_VERSION` from 3 to 4. The
+upgrade adds the `run_id` column + index to `cubepi_messages` and
+creates a partitioned `cubepi_runs` parent table with its child
+partitions. Use the provided alembic helper:
+
+```python
+# In a migration's upgrade():
+from cubepi.checkpointer.postgres.alembic_helpers import (
+    upgrade_v3_to_v4_op,
+    write_schema_version_op,
+)
+
+def upgrade():
+    op.execute(upgrade_v3_to_v4_op())
+    op.execute(write_schema_version_op())  # bumps cubepi_schema_version to 4
+```
+
+`upgrade_v3_to_v4_op()` is idempotent under repeated execution
+(`IF NOT EXISTS` guards on every DDL statement).
+
+Pre-feature messages keep `run_id = NULL` and remain readable; see
+[Legacy data behaviour](./forking#legacy-data-behaviour) for the
+fork-eligibility rules on mixed threads.
+
 ## Common pitfalls
 
 - **`CubepiSchemaUninitialized`** — Your DB is empty or your

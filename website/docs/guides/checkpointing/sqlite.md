@@ -146,6 +146,18 @@ If you need multi-process writers on shared threads, jump to
 so it supports both `Agent.fork(...)` and `Agent.fork_once(...)`. See
 the [Conversation Forking](./forking) guide for the user-facing API.
 
+## Schema v3 → v4 migration
+
+Unlike Postgres and MySQL, SQLite's schema is managed by CubePi
+itself: the v3→v4 upgrade (adding `run_id` to `messages` and
+creating a `cubepi_runs` table) runs automatically on `__aenter__`
+the first time a v4 CubePi connects to a v3 file. No host action is
+required.
+
+Pre-feature messages keep `run_id = NULL` and remain readable; see
+[Legacy data behaviour](./forking#legacy-data-behaviour) for the
+fork-eligibility rules on mixed threads.
+
 ## Where the file lives
 
 Use an absolute path in production:

@@ -195,6 +195,35 @@ claim/completion state.
 See the [Conversation Forking](./forking) guide for the user-facing
 API and semantics.
 
+## Schema v3 → v4 migration
+
+The fork feature bumps `EXPECTED_SCHEMA_VERSION` from 3 to 4. The
+upgrade adds the `run_id` column + composite index to
+`cubepi_messages` and creates the `cubepi_runs` table. Use the
+provided alembic helper — MySQL/pymysql executes one statement per
+call, so split before executing:
+
+```python
+# In a migration's upgrade():
+from cubepi.checkpointer.mysql.alembic_helpers import (
+    upgrade_v3_to_v4_op,
+    write_schema_version_op,
+)
+
+def upgrade():
+    for stmt in upgrade_v3_to_v4_op().split(";"):
+        if stmt.strip():
+            op.execute(stmt)
+    for stmt in write_schema_version_op().split(";"):
+        if stmt.strip():
+            op.execute(stmt)
+```
+
+`upgrade_v3_to_v4_op()` is idempotent under repeated execution.
+Pre-feature messages keep `run_id = NULL` and remain readable; see
+[Legacy data behaviour](./forking#legacy-data-behaviour) for the
+fork-eligibility rules on mixed threads.
+
 ## Common pitfalls
 
 - **`CubepiSchemaUninitialized`** — Your DB is empty, your migrations
