@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, cast
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, cast
 
 import aiosqlite
 
 from cubepi.checkpointer.base import CheckpointData
+from cubepi.checkpointer.exceptions import CheckpointerLockTimeoutError
 from cubepi.hitl.types import HitlRequest
 from cubepi.providers.base import (
     AssistantMessage,
@@ -15,6 +17,25 @@ from cubepi.providers.base import (
     UserMessage,
 )
 from cubepi.types import JsonObject
+
+
+@asynccontextmanager
+async def _writer_txn(db: aiosqlite.Connection) -> AsyncIterator[None]:
+    """Wrap a writer transaction in BEGIN IMMEDIATE and surface
+    SQLITE_BUSY as CheckpointerLockTimeoutError."""
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+    except aiosqlite.OperationalError as exc:
+        if "lock" in str(exc).lower() or "busy" in str(exc).lower():
+            raise CheckpointerLockTimeoutError(str(exc)) from exc
+        raise
+    try:
+        yield
+    except BaseException:
+        await db.rollback()
+        raise
+    else:
+        await db.commit()
 
 
 class SQLiteCheckpointer:
@@ -121,18 +142,18 @@ class SQLiteCheckpointer:
 
     async def append(self, thread_id: str, messages: list[Message]) -> None:
         assert self._db is not None
-        async with self._lock:
+        async with self._lock, _writer_txn(self._db):
             for msg in messages:
                 msg_json = _serialize_message(msg)
                 await self._db.execute(
-                    "INSERT INTO messages (thread_id, message_json) VALUES (?, ?)",
-                    (thread_id, msg_json),
+                    "INSERT INTO messages (thread_id, message_json, run_id) "
+                    "VALUES (?, ?, ?)",
+                    (thread_id, msg_json, getattr(msg, "run_id", None)),
                 )
-            await self._db.commit()
 
     async def save_extra(self, thread_id: str, extra: JsonObject) -> None:
         assert self._db is not None
-        async with self._lock:
+        async with self._lock, _writer_txn(self._db):
             existing_cursor = await self._db.execute(
                 "SELECT extra_json FROM thread_extra WHERE thread_id = ?",
                 (thread_id,),
@@ -150,7 +171,6 @@ class SQLiteCheckpointer:
                     "INSERT INTO thread_extra (thread_id, extra_json) VALUES (?, ?)",
                     (thread_id, json.dumps(extra)),
                 )
-            await self._db.commit()
 
     async def save_pending_request(
         self,
@@ -160,7 +180,7 @@ class SQLiteCheckpointer:
         run_id: str | None = None,
     ) -> None:
         assert self._db is not None
-        async with self._lock:
+        async with self._lock, _writer_txn(self._db):
             if request is None:
                 # Clearing pending implicitly clears the associated run_id.
                 await self._db.execute(
@@ -175,7 +195,6 @@ class SQLiteCheckpointer:
                     "(thread_id, request_json, run_id) VALUES (?, ?, ?)",
                     (thread_id, payload, run_id),
                 )
-            await self._db.commit()
 
     async def load_pending_request(self, thread_id: str) -> HitlRequest | None:
         assert self._db is not None
