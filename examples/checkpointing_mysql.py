@@ -32,7 +32,9 @@ from cubepi.agent.agent import Agent
 from cubepi.checkpointer.mysql import MySQLCheckpointer
 from cubepi.checkpointer.mysql.alembic_helpers import (
     add_pending_request_column_op,
+    add_run_id_column_op,
     messages_partition_clause,
+    upgrade_v3_to_v4_op,
     write_schema_version_op,
 )
 from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
@@ -70,6 +72,7 @@ async def bootstrap_schema(dsn: str) -> None:
                 ) ENGINE=InnoDB
             """)
             await cur.execute(add_pending_request_column_op())  # v1 -> v2 column
+            await cur.execute(add_run_id_column_op())  # v2 -> v3 column
             await cur.execute(
                 """
                 CREATE TABLE cubepi_messages (
@@ -87,6 +90,12 @@ async def bootstrap_schema(dsn: str) -> None:
                 "CREATE TABLE cubepi_schema_version (version INT PRIMARY KEY) "
                 "ENGINE=InnoDB"
             )
+            # v3 -> v4: run_id on cubepi_messages + cubepi_runs partitioned table.
+            # upgrade_v3_to_v4_op() returns multiple ';'-separated statements;
+            # MySQL runs one per call, so split before executing.
+            for stmt in upgrade_v3_to_v4_op().split(";"):
+                if stmt.strip():
+                    await cur.execute(stmt)
             # write_schema_version_op() returns two ';'-separated statements;
             # MySQL runs one per call, so split before executing.
             for stmt in write_schema_version_op().split(";"):
