@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only when declared. Tools may return a `str`, a `Content`, a `list` of
   content, or a full `AgentToolResult`. The longhand `AgentTool(...)` remains
   fully supported.
+- **Conversation fork** — fork a thread at a completed-run boundary, or run
+  a one-shot ephemeral continuation against a snapshot:
+  - `Agent.fork(src, new, *, after_run_id, metadata=None)` — physical-copy
+    fork at a completed-run boundary.
+  - `Agent.fork_once(src, message, *, after_run_id) -> ForkOnceResult` —
+    single-turn ephemeral continuation, no checkpointer writes.
+  - `Agent.prompt(message, *, run_id=None) -> str` now accept-or-generates
+    the `run_id` and returns it.
+  - `Agent.state.active_run_id` exposes the in-flight `run_id`.
+  - `Agent(messages=...)` constructor arg for ephemeral pre-seeded history.
+  - `Checkpointer.snapshot`, `fork`, `claim_run`, `mark_run_complete`,
+    `load_pending` Protocol methods.
+  - `cubepi_runs` table per backend (Postgres / MySQL schema v3 → v4).
+  - `Message.run_id: str | None` field on all three Message variants.
+  - `HitlBinding` attribute on `AgentTool` / `Middleware`; `ask_user_tool`
+    and `ApprovalPolicyMiddleware` populate it.
 
 ### Fixed
 
@@ -23,6 +39,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   body that returned `AgentToolResult(is_error=True)` without raising was
   surfaced to the model as a successful result; the flag is now honored on the
   execution path (affects both `@tool` and longhand `AgentTool` tools).
+
+### Breaking
+
+- `Agent.prompt()` return type changed from `None` to `str`. Callers ignoring
+  the return value keep working.
+- `Checkpointer` Protocol gained 5 new methods. Third-party v3-only
+  checkpointers continue to work for vanilla `prompt()` via degraded mode;
+  fork APIs raise `CheckpointerError` on such backends.
+
+### Migration
+
+- Postgres / MySQL: run the new alembic helper (see backend guides).
+- SQLite: auto-migration at connect time.
+- Legacy `run_id=NULL` messages remain readable; threads with only such
+  messages are not forkable.
 
 ## [0.7.0] - 2026-06-05
 
