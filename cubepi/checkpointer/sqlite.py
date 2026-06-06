@@ -13,6 +13,9 @@ from cubepi.checkpointer.exceptions import (
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
     RunNotClaimedError,
+    RunNotCompletedError,
+    ThreadAlreadyExistsError,
+    ThreadNotFoundError,
 )
 from cubepi.hitl.types import HitlRequest
 from cubepi.providers.base import (
@@ -129,7 +132,8 @@ class SQLiteCheckpointer:
             rows = await cursor.fetchall()
 
             extra_cursor = await self._db.execute(
-                "SELECT extra_json FROM thread_extra WHERE thread_id = ?",
+                "SELECT extra_json, parent_thread_id FROM thread_extra "
+                "WHERE thread_id = ?",
                 (thread_id,),
             )
             extra_row = await extra_cursor.fetchone()
@@ -143,14 +147,15 @@ class SQLiteCheckpointer:
                 messages.append(_deserialize_message(msg_data))
 
             extra = json.loads(extra_row[0]) if extra_row else {}
-            return CheckpointData(messages=messages, extra=extra)
+            parent = extra_row[1] if extra_row else None
+            return CheckpointData(
+                messages=messages, extra=extra, parent_thread_id=parent
+            )
 
     async def append(self, thread_id: str, messages: list[Message]) -> None:
         assert self._db is not None
         run_ids = {
-            rid
-            for m in messages
-            if (rid := getattr(m, "run_id", None)) is not None
+            rid for m in messages if (rid := getattr(m, "run_id", None)) is not None
         }
         async with self._lock, _writer_txn(self._db):
             if run_ids:
@@ -224,8 +229,7 @@ class SQLiteCheckpointer:
         assert self._db is not None
         async with self._lock, _writer_txn(self._db):
             cur = await self._db.execute(
-                "SELECT completed_at FROM runs "
-                "WHERE thread_id = ? AND run_id = ?",
+                "SELECT completed_at FROM runs WHERE thread_id = ? AND run_id = ?",
                 (thread_id, run_id),
             )
             row = await cur.fetchone()
@@ -247,8 +251,7 @@ class SQLiteCheckpointer:
         assert self._db is not None
         async with self._lock, _writer_txn(self._db):
             cur = await self._db.execute(
-                "SELECT completed_at FROM runs "
-                "WHERE thread_id = ? AND run_id = ?",
+                "SELECT completed_at FROM runs WHERE thread_id = ? AND run_id = ?",
                 (thread_id, run_id),
             )
             row = await cur.fetchone()
@@ -263,7 +266,9 @@ class SQLiteCheckpointer:
                 "WHERE thread_id = ? AND completion_seq IS NOT NULL",
                 (thread_id,),
             )
-            (next_seq,) = await cur.fetchone()
+            seq_row = await cur.fetchone()
+            assert seq_row is not None
+            next_seq = seq_row[0]
             await self._db.execute(
                 "UPDATE runs SET completed_at = julianday('now'), "
                 "completion_seq = ? WHERE thread_id = ? AND run_id = ?",
@@ -304,6 +309,126 @@ class SQLiteCheckpointer:
             )
             row = await cursor.fetchone()
         return row[0] if row else None
+
+    async def snapshot(self, thread_id: str, *, after_run_id: str) -> list[Message]:
+        assert self._db is not None
+        async with self._lock:
+            cur = await self._db.execute(
+                "SELECT completion_seq FROM runs WHERE thread_id = ? AND run_id = ?",
+                (thread_id, after_run_id),
+            )
+            row = await cur.fetchone()
+            if row is None or row[0] is None:
+                raise RunNotCompletedError(
+                    f"thread={thread_id} run={after_run_id} not completed"
+                )
+            cutoff = row[0]
+            cur = await self._db.execute(
+                "SELECT message_json FROM messages WHERE thread_id = ? "
+                "AND (run_id IS NULL OR run_id IN ("
+                "  SELECT run_id FROM runs WHERE thread_id = ? "
+                "  AND completion_seq IS NOT NULL "
+                "  AND completion_seq <= ?"
+                ")) ORDER BY id",
+                (thread_id, thread_id, cutoff),
+            )
+            rows = await cur.fetchall()
+            return [_deserialize_message(json.loads(r[0])) for r in rows]
+
+    async def fork(
+        self,
+        src_thread_id: str,
+        new_thread_id: str,
+        *,
+        after_run_id: str,
+        metadata: JsonObject | None = None,
+    ) -> None:
+        assert self._db is not None
+        async with self._lock, _writer_txn(self._db):
+            # Source existence: messages OR thread_extra OR runs.
+            cur = await self._db.execute(
+                "SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1",
+                (src_thread_id,),
+            )
+            src_has_msg = await cur.fetchone() is not None
+            cur = await self._db.execute(
+                "SELECT 1 FROM thread_extra WHERE thread_id = ?",
+                (src_thread_id,),
+            )
+            src_has_extra = await cur.fetchone() is not None
+            cur = await self._db.execute(
+                "SELECT 1 FROM runs WHERE thread_id = ? LIMIT 1",
+                (src_thread_id,),
+            )
+            src_has_runs = await cur.fetchone() is not None
+            if not (src_has_msg or src_has_extra or src_has_runs):
+                raise ThreadNotFoundError(f"thread={src_thread_id}")
+            # Destination collision.
+            cur = await self._db.execute(
+                "SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1",
+                (new_thread_id,),
+            )
+            if await cur.fetchone():
+                raise ThreadAlreadyExistsError(f"thread={new_thread_id}")
+            cur = await self._db.execute(
+                "SELECT 1 FROM thread_extra WHERE thread_id = ?",
+                (new_thread_id,),
+            )
+            if await cur.fetchone():
+                raise ThreadAlreadyExistsError(f"thread={new_thread_id}")
+            cur = await self._db.execute(
+                "SELECT 1 FROM runs WHERE thread_id = ? LIMIT 1",
+                (new_thread_id,),
+            )
+            if await cur.fetchone():
+                raise ThreadAlreadyExistsError(f"thread={new_thread_id}")
+            # Cutoff.
+            cur = await self._db.execute(
+                "SELECT completion_seq FROM runs WHERE thread_id = ? AND run_id = ?",
+                (src_thread_id, after_run_id),
+            )
+            row = await cur.fetchone()
+            if row is None or row[0] is None:
+                raise RunNotCompletedError(
+                    f"thread={src_thread_id} run={after_run_id} not completed"
+                )
+            cutoff = row[0]
+            # Copy messages.
+            await self._db.execute(
+                "INSERT INTO messages (thread_id, run_id, message_json) "
+                "SELECT ?, run_id, message_json FROM messages "
+                "WHERE thread_id = ? AND ("
+                "  run_id IS NULL OR run_id IN ("
+                "    SELECT run_id FROM runs WHERE thread_id = ? "
+                "    AND completion_seq IS NOT NULL "
+                "    AND completion_seq <= ?"
+                "  )"
+                ") ORDER BY id",
+                (new_thread_id, src_thread_id, src_thread_id, cutoff),
+            )
+            # Copy runs.
+            await self._db.execute(
+                "INSERT INTO runs (thread_id, run_id, claimed_at, "
+                "completed_at, completion_seq) "
+                "SELECT ?, run_id, claimed_at, completed_at, completion_seq "
+                "FROM runs WHERE thread_id = ? "
+                "AND completion_seq IS NOT NULL AND completion_seq <= ?",
+                (new_thread_id, src_thread_id, cutoff),
+            )
+            # Build merged extra.
+            cur = await self._db.execute(
+                "SELECT extra_json FROM thread_extra WHERE thread_id = ?",
+                (src_thread_id,),
+            )
+            row = await cur.fetchone()
+            merged_extra = json.loads(row[0]) if row else {}
+            if metadata is not None:
+                merged_extra["fork"] = json.loads(json.dumps(metadata))
+            await self._db.execute(
+                "INSERT INTO thread_extra (thread_id, extra_json, "
+                "parent_thread_id) VALUES (?, ?, ?)",
+                (new_thread_id, json.dumps(merged_extra), src_thread_id),
+            )
 
 
 def _serialize_message(msg: Any) -> str:
