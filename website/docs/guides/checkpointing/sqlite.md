@@ -139,6 +139,13 @@ have multiple processes writing the same `agent.db`:
 If you need multi-process writers on shared threads, jump to
 [Postgres](./postgres) which uses an advisory lock per thread.
 
+## Forks
+
+`SQLiteCheckpointer` implements the v4 `snapshot` / `fork` /
+`claim_run` / `mark_run_complete` / `load_pending` Protocol methods,
+so it supports both `Agent.fork(...)` and `Agent.fork_once(...)`. See
+the [Conversation Forking](./forking) guide for the user-facing API.
+
 ## Where the file lives
 
 Use an absolute path in production:
