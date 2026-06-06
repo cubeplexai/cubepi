@@ -66,10 +66,16 @@ def test_messages_has_no_foreign_keys() -> None:
 
 
 def test_messages_has_no_metadata_index() -> None:
+    """Only the v4 (thread_id, run_id) composite index is allowed.
+
+    The MySQL backend never indexes the JSON ``metadata`` column (Postgres
+    has a GIN index there; MySQL has no equivalent for the host-app cost).
+    """
     from cubepi.checkpointer.mysql.models import cubepi_metadata
 
     msgs = cubepi_metadata.tables["cubepi_messages"]
-    assert msgs.indexes == set()
+    idx_names = {idx.name for idx in msgs.indexes}
+    assert idx_names == {"ix_cubepi_messages_thread_run"}
 
 
 def test_messages_partition_clause() -> None:
@@ -225,6 +231,7 @@ async def _setup_schema(dsn: str) -> None:
             from cubepi.checkpointer.mysql.alembic_helpers import (
                 add_pending_request_column_op,
                 add_run_id_column_op,
+                upgrade_v3_to_v4_op,
             )
 
             await cur.execute(add_pending_request_column_op())
@@ -247,6 +254,10 @@ async def _setup_schema(dsn: str) -> None:
                     version INT PRIMARY KEY
                 ) ENGINE=InnoDB
             """)
+            # v3 → v4: run_id on cubepi_messages + cubepi_runs partitioned table.
+            for stmt in upgrade_v3_to_v4_op().split(";"):
+                if stmt.strip():
+                    await cur.execute(stmt)
             for stmt in write_schema_version_op().split(";"):
                 if stmt.strip():
                     await cur.execute(stmt)
@@ -378,7 +389,7 @@ async def test_version_mismatch_raises(clean_mysql_db) -> None:
     with pytest.raises(CubepiSchemaMismatch) as exc_info:
         async with MySQLCheckpointer(clean_mysql_db):
             pass
-    assert exc_info.value.expected == 3
+    assert exc_info.value.expected == 4
     assert exc_info.value.actual == 999
 
 
