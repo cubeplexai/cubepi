@@ -8,7 +8,12 @@ from typing import Any, AsyncIterator, cast
 import aiosqlite
 
 from cubepi.checkpointer.base import CheckpointData
-from cubepi.checkpointer.exceptions import CheckpointerLockTimeoutError
+from cubepi.checkpointer.exceptions import (
+    CheckpointerLockTimeoutError,
+    RunAlreadyClaimedError,
+    RunAlreadyCompletedError,
+    RunNotClaimedError,
+)
 from cubepi.hitl.types import HitlRequest
 from cubepi.providers.base import (
     AssistantMessage,
@@ -142,7 +147,26 @@ class SQLiteCheckpointer:
 
     async def append(self, thread_id: str, messages: list[Message]) -> None:
         assert self._db is not None
+        run_ids = {
+            rid
+            for m in messages
+            if (rid := getattr(m, "run_id", None)) is not None
+        }
         async with self._lock, _writer_txn(self._db):
+            if run_ids:
+                placeholders = ",".join("?" for _ in run_ids)
+                cur = await self._db.execute(
+                    f"SELECT run_id FROM runs WHERE thread_id = ? "
+                    f"AND run_id IN ({placeholders}) "
+                    f"AND completed_at IS NOT NULL",
+                    (thread_id, *run_ids),
+                )
+                done = await cur.fetchall()
+                if done:
+                    bad = ", ".join(r[0] for r in done)
+                    raise RunAlreadyCompletedError(
+                        f"append on completed run thread={thread_id} runs={bad}"
+                    )
             for msg in messages:
                 msg_json = _serialize_message(msg)
                 await self._db.execute(
@@ -195,6 +219,71 @@ class SQLiteCheckpointer:
                     "(thread_id, request_json, run_id) VALUES (?, ?, ?)",
                     (thread_id, payload, run_id),
                 )
+
+    async def claim_run(self, thread_id: str, run_id: str) -> None:
+        assert self._db is not None
+        async with self._lock, _writer_txn(self._db):
+            cur = await self._db.execute(
+                "SELECT completed_at FROM runs "
+                "WHERE thread_id = ? AND run_id = ?",
+                (thread_id, run_id),
+            )
+            row = await cur.fetchone()
+            if row is not None:
+                completed_at = row[0]
+                if completed_at is None:
+                    raise RunAlreadyClaimedError(
+                        f"thread={thread_id} run={run_id} in flight"
+                    )
+                raise RunAlreadyCompletedError(
+                    f"thread={thread_id} run={run_id} already completed"
+                )
+            await self._db.execute(
+                "INSERT INTO runs (thread_id, run_id) VALUES (?, ?)",
+                (thread_id, run_id),
+            )
+
+    async def mark_run_complete(self, thread_id: str, run_id: str) -> None:
+        assert self._db is not None
+        async with self._lock, _writer_txn(self._db):
+            cur = await self._db.execute(
+                "SELECT completed_at FROM runs "
+                "WHERE thread_id = ? AND run_id = ?",
+                (thread_id, run_id),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                raise RunNotClaimedError(
+                    f"thread={thread_id} run={run_id} has no claim row"
+                )
+            if row[0] is not None:
+                return  # idempotent success
+            cur = await self._db.execute(
+                "SELECT COALESCE(MAX(completion_seq), 0) + 1 FROM runs "
+                "WHERE thread_id = ? AND completion_seq IS NOT NULL",
+                (thread_id,),
+            )
+            (next_seq,) = await cur.fetchone()
+            await self._db.execute(
+                "UPDATE runs SET completed_at = julianday('now'), "
+                "completion_seq = ? WHERE thread_id = ? AND run_id = ?",
+                (next_seq, thread_id, run_id),
+            )
+
+    async def load_pending(
+        self, thread_id: str
+    ) -> tuple[HitlRequest, str | None] | None:
+        assert self._db is not None
+        async with self._lock:
+            cur = await self._db.execute(
+                "SELECT request_json, run_id FROM thread_pending_request "
+                "WHERE thread_id = ?",
+                (thread_id,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                return None
+            return HitlRequest.model_validate_json(row[0]), row[1]
 
     async def load_pending_request(self, thread_id: str) -> HitlRequest | None:
         assert self._db is not None
