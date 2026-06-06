@@ -13,6 +13,10 @@ import asyncpg
 import msgpack
 
 from cubepi.checkpointer.base import CheckpointData
+from cubepi.checkpointer.exceptions import (
+    RunAlreadyClaimedError,
+    RunAlreadyCompletedError,
+)
 from cubepi.checkpointer.postgres.exceptions import (
     CubepiSchemaMismatch,
     CubepiSchemaUninitialized,
@@ -160,6 +164,9 @@ class PostgresCheckpointer:
         if not messages:
             return
         assert self._pool is not None
+        run_ids = {
+            rid for m in messages if (rid := getattr(m, "run_id", None)) is not None
+        }
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 # Per-thread advisory lock for monotonic seq allocation
@@ -173,6 +180,20 @@ class PostgresCheckpointer:
                     "VALUES ($1) ON CONFLICT DO NOTHING",
                     thread_id,
                 )
+                # Pre-flight: reject append on any completed run_id.
+                if run_ids:
+                    done_rows = await conn.fetch(
+                        "SELECT run_id FROM cubepi_runs "
+                        "WHERE thread_id = $1 AND run_id = ANY($2::text[]) "
+                        "AND completed_at IS NOT NULL",
+                        thread_id,
+                        list(run_ids),
+                    )
+                    if done_rows:
+                        bad = ", ".join(r["run_id"] for r in done_rows)
+                        raise RunAlreadyCompletedError(
+                            f"append on completed run thread={thread_id} runs={bad}"
+                        )
                 last_seq = (
                     await conn.fetchval(
                         "SELECT COALESCE(MAX(seq), 0) FROM cubepi_messages "
@@ -195,13 +216,52 @@ class PostgresCheckpointer:
                             _role_of(m),
                             json.dumps(m.metadata),
                             payload,
+                            getattr(m, "run_id", None),
                         )
                     )
                 await conn.executemany(
                     "INSERT INTO cubepi_messages "
-                    "(thread_id, seq, role, metadata, payload) "
-                    "VALUES ($1, $2, $3, $4, $5)",
+                    "(thread_id, seq, role, metadata, payload, run_id) "
+                    "VALUES ($1, $2, $3, $4, $5, $6)",
                     rows,
+                )
+
+    async def claim_run(self, thread_id: str, run_id: str) -> None:
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))",
+                    thread_id,
+                )
+                # Lazy thread row creation (claim may precede any append).
+                await conn.execute(
+                    "INSERT INTO cubepi_threads (thread_id) "
+                    "VALUES ($1) ON CONFLICT (thread_id) DO NOTHING",
+                    thread_id,
+                )
+                # Pre-check under the advisory lock so a duplicate doesn't
+                # raise UniqueViolation (which would abort the txn before
+                # we could distinguish in-flight vs completed).
+                row = await conn.fetchrow(
+                    "SELECT completed_at FROM cubepi_runs "
+                    "WHERE thread_id = $1 AND run_id = $2",
+                    thread_id,
+                    run_id,
+                )
+                if row is not None:
+                    if row["completed_at"] is not None:
+                        raise RunAlreadyCompletedError(
+                            f"thread={thread_id} run={run_id} already completed"
+                        )
+                    raise RunAlreadyClaimedError(
+                        f"thread={thread_id} run={run_id} in flight"
+                    )
+                await conn.execute(
+                    "INSERT INTO cubepi_runs (thread_id, run_id) "
+                    "VALUES ($1, $2)",
+                    thread_id,
+                    run_id,
                 )
 
     async def save_extra(self, thread_id: str, extra: JsonObject) -> None:
