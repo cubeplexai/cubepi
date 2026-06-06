@@ -558,7 +558,7 @@ class Agent(Generic[TMessage]):
 
     async def respond(
         self, *, question_id: str | None = None, answer: StructuredValue
-    ) -> None:  # pragma: no cover — E2E tested
+    ) -> None:
         from cubepi.hitl.exceptions import (
             HitlNoPendingRequest,
             HitlStaleAnswer,
@@ -569,11 +569,11 @@ class Agent(Generic[TMessage]):
         if not (self.thread_id and self.checkpointer):
             raise RuntimeError("respond() requires thread_id + checkpointer")
 
-        load_pending = getattr(self.checkpointer, "load_pending_request", None)
+        load_pending = getattr(self.checkpointer, "load_pending", None)
         if load_pending is None:
             raise HitlError(
                 "respond() requires a checkpointer that implements "
-                "load_pending_request (and save_pending_request)"
+                "load_pending (added in checkpointer v4)"
             )
 
         async with self._run_lock:
@@ -583,9 +583,10 @@ class Agent(Generic[TMessage]):
                     self._state._messages = list(data.messages or [])
                     self._extra = dict(data.extra or {})
 
-            pending = await load_pending(self.thread_id)
-            if pending is None:
+            loaded = await load_pending(self.thread_id)
+            if loaded is None:
                 raise HitlNoPendingRequest("no pending request on this thread")
+            pending, recovered_run_id = loaded
             if question_id is None:
                 question_id = pending.question_id
             if question_id != pending.question_id:
@@ -593,8 +594,27 @@ class Agent(Generic[TMessage]):
                     f"answer for {question_id}, pending is {pending.question_id}"
                 )
 
+            # Thread the recovered run_id into agent state so the resume loop
+            # stamps appended messages and _dispatch_outcome can mark the
+            # run complete. respond() does NOT call claim_run — the original
+            # prompt() already claimed it (single-claim invariant per spec).
+            if recovered_run_id is not None:
+                self._state.active_run_id = recovered_run_id
+            self._state.last_outcome = None
+
             self._channel.attach_resume_answer(question_id, answer)
-            await self._run_hitl_resume()
+            try:
+                await self._run_hitl_resume()
+            except BaseException:
+                # Spec §3.7: leave active_run_id SET on raise.
+                raise
+            else:
+                # Legacy guard: pending persisted without run_id (older
+                # save_pending_request callers) cannot drive dispatch.
+                if recovered_run_id is not None:
+                    outcome: RunOutcome = self._state.last_outcome or "abandoned"
+                    await self._dispatch_outcome(outcome, recovered_run_id)
+                self._state.active_run_id = None
 
     async def abort_pending(
         self, reason: str = "aborted by host"
@@ -728,6 +748,7 @@ class Agent(Generic[TMessage]):
             await self._process_event(AgentAbortedEvent(reason=reason))
 
     async def _run_hitl_resume(self) -> None:
+        sink = self._outcome_sink()
         await self._run_with_lifecycle(
             lambda signal: run_agent_loop_resume(
                 context=self._create_context_snapshot(),
@@ -748,6 +769,7 @@ class Agent(Generic[TMessage]):
                 emit=lambda e: self._process_event(e),
                 checkpointer=self.checkpointer,
                 thread_id=self.thread_id,
+                set_outcome=sink,
             )
         )
 
