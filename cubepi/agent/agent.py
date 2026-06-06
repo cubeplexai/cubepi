@@ -517,10 +517,26 @@ class Agent(Generic[TMessage]):
         )
 
     def _fork_once_span(self, *, src_thread_id: str, after_run_id: str):
-        """Replaced by a real OTel span in Task 34. Placeholder no-op."""
-        from contextlib import nullcontext
+        """Emit a `cubepi.agent.fork_once` OTel span around the probe run.
 
-        return nullcontext()
+        The opentelemetry dependency is part of the optional `tracing` extra;
+        when it isn't installed we fall back to a no-op nullcontext so the
+        agent still works.
+        """
+        try:
+            from opentelemetry import trace
+        except ImportError:
+            from contextlib import nullcontext
+
+            return nullcontext()
+        tracer = trace.get_tracer("cubepi.agent")
+        return tracer.start_as_current_span(
+            "cubepi.agent.fork_once",
+            attributes={
+                "cubepi.fork.src_thread_id": src_thread_id,
+                "cubepi.fork.after_run_id": after_run_id,
+            },
+        )
 
     async def resume(self) -> None:
         # Same fail-fast pattern as prompt(): lock.locked() is the atomic gate.
