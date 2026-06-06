@@ -16,6 +16,7 @@ from cubepi.checkpointer.base import CheckpointData
 from cubepi.checkpointer.exceptions import (
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
+    RunNotClaimedError,
 )
 from cubepi.checkpointer.postgres.exceptions import (
     CubepiSchemaMismatch,
@@ -263,6 +264,60 @@ class PostgresCheckpointer:
                     thread_id,
                     run_id,
                 )
+
+    async def mark_run_complete(self, thread_id: str, run_id: str) -> None:
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))",
+                    thread_id,
+                )
+                row = await conn.fetchrow(
+                    "SELECT completed_at FROM cubepi_runs "
+                    "WHERE thread_id = $1 AND run_id = $2",
+                    thread_id,
+                    run_id,
+                )
+                if row is None:
+                    raise RunNotClaimedError(
+                        f"thread={thread_id} run={run_id} has no claim row"
+                    )
+                if row["completed_at"] is not None:
+                    return  # idempotent success
+                next_seq = await conn.fetchval(
+                    "SELECT COALESCE(MAX(completion_seq), 0) + 1 "
+                    "FROM cubepi_runs WHERE thread_id = $1 "
+                    "AND completion_seq IS NOT NULL",
+                    thread_id,
+                )
+                await conn.execute(
+                    "UPDATE cubepi_runs SET completed_at = now(), "
+                    "completion_seq = $3 "
+                    "WHERE thread_id = $1 AND run_id = $2",
+                    thread_id,
+                    run_id,
+                    next_seq,
+                )
+
+    async def load_pending(
+        self, thread_id: str
+    ) -> tuple[HitlRequest, str | None] | None:
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT pending_request, run_id FROM cubepi_threads "
+                "WHERE thread_id = $1",
+                thread_id,
+            )
+        if row is None or row["pending_request"] is None:
+            return None
+        raw = row["pending_request"]
+        if isinstance(raw, str):  # pragma: no cover — codec-dependent
+            req = HitlRequest.model_validate_json(raw)
+        else:
+            req = HitlRequest.model_validate(raw)
+        return req, row["run_id"]
 
     async def save_extra(self, thread_id: str, extra: JsonObject) -> None:
         assert self._pool is not None
