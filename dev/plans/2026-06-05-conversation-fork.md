@@ -117,7 +117,7 @@ To inject provider-side errors / slow streams, subclass
 
 ```python
 class _RaisingProvider(FauxProvider):
-    async def stream_message(self, *args, **kwargs):
+    async def stream(self, *args, **kwargs):
         raise RuntimeError("provider down")
 ```
 
@@ -1943,23 +1943,37 @@ Provide a downgrade that drops the table + column.
 - [ ] **Step 5: Extend `_setup_schema` to v4 + add `pg_v4_dsn` fixture**
 
 In `tests/checkpointer/test_postgres.py`, the existing `_setup_schema`
-helper (`test_postgres.py:177`) builds the v3 schema. Extend it to
-also apply the v4 changes from Task 14:
+helper (`test_postgres.py:177`) builds the v3 schema. **Edit it
+in place** to ALSO apply the v4 changes from Task 14:
 - `ALTER TABLE cubepi_messages ADD COLUMN run_id TEXT NULL`
 - `CREATE INDEX ix_cubepi_messages_thread_run ON cubepi_messages (thread_id, run_id)`
 - Create the partitioned `cubepi_runs` table + partitions (mirror
   `create_message_partitions_op` from `alembic_helpers.py`)
 - Bump `cubepi_schema_version` from 3 to 4
 
-Move `_setup_schema` from `test_postgres.py` into
-`tests/checkpointer/conftest.py` so other test modules can reuse it.
-Add a fixture there:
+**Do NOT move the helper** — leaving it in `test_postgres.py` means
+all existing call sites in that file keep working. Update the
+existing `def test_expected_schema_version` assertion in that file
+from `== 3` to `== 4` (and the parallel one in `test_mysql.py`).
+
+Then add the new fixture in `tests/checkpointer/conftest.py`:
 ```python
+# tests/checkpointer/conftest.py
+import pytest_asyncio
+from tests.checkpointer.test_postgres import _setup_schema as _setup_pg_schema
+
+
 @pytest_asyncio.fixture
 async def pg_v4_dsn(clean_db: str):
-    await _setup_schema(clean_db)
+    await _setup_pg_schema(clean_db)
     yield clean_db
 ```
+
+(Importing from a sibling test module is unusual but acceptable for
+this kind of shared schema helper; the alternative — duplicating the
+~80 lines of DDL into conftest.py — is worse. If pytest complains
+about the import at collection time, move the helper to
+`tests/checkpointer/_schema.py` and import from there in both places.)
 
 PG tests that exercise a PostgresCheckpointer instance MUST use
 `pg_v4_dsn` instead of raw `clean_db`. Tests that only assert
@@ -2421,9 +2435,17 @@ Steps parallel Task 14 with MySQL syntax:
 - Add `run_id VARCHAR(255) NULL` to `CubepiMessage` + composite index.
 - Add `CubepiRun` model (KEY-partitioned by thread_id, no FK).
 - Extend `_setup_schema(dsn)` in `test_mysql.py` (mirror of the
-  Postgres helper at `test_postgres.py:177`) to apply the v4 DDL.
-  Move it to `conftest.py` and expose a `mysql_v4_dsn` fixture:
+  Postgres helper at `test_postgres.py:177`) **in place** to apply
+  the v4 DDL. Update the parallel `test_expected_schema_version`
+  assertion in that file from `== 3` to `== 4`.
+
+  Then add the `mysql_v4_dsn` fixture in
+  `tests/checkpointer/conftest.py`, importing from the existing
+  module (same pattern as `pg_v4_dsn` in Task 14):
   ```python
+  from tests.checkpointer.test_mysql import _setup_schema as _setup_mysql_schema
+
+
   @pytest_asyncio.fixture
   async def mysql_v4_dsn(clean_mysql_db: str):
       await _setup_mysql_schema(clean_mysql_db)
@@ -2699,7 +2721,7 @@ async def test_prompt_sets_then_clears_active_run_id_on_clean_return():
 async def test_prompt_leaves_active_run_id_set_on_raise():
     # FauxProvider has no `error=` kwarg — subclass to raise inside the loop.
     class _RaisingProvider(FauxProvider):
-        async def stream_message(self, *args, **kwargs):
+        async def stream(self, *args, **kwargs):
             raise RuntimeError("provider down")
     a = Agent(model=_RaisingProvider().model("faux-model"))
     with pytest.raises(Exception):
@@ -2807,9 +2829,10 @@ async def test_appended_messages_carry_run_id():
 
 
 @pytest.mark.asyncio
-async def test_appending_message_with_mismatched_run_id_raises():
+async def test_prompt_rejects_mismatched_run_id_before_claim():
     """Caller pre-stamps a Message with a different run_id than the
-    active one. _process_event must reject rather than silently stamp."""
+    one supplied to prompt(). Reject BEFORE claim_run so no row is
+    written and the run_id is still reusable."""
     from cubepi.checkpointer.memory import MemoryCheckpointer
     from cubepi.providers.base import TextContent, UserMessage
 
@@ -2822,8 +2845,13 @@ async def test_appending_message_with_mismatched_run_id_raises():
     bad_msg = UserMessage(
         content=[TextContent(text="hi")], run_id="WRONG"
     )
-    with pytest.raises(ValueError, match="does not match active run_id"):
+    with pytest.raises(ValueError, match="does not match"):
         await a.prompt(bad_msg, run_id="R1")
+    # No claim row written — "R1" still freely claimable.
+    assert "R1" not in cp._runs.get("t", {})
+    # ... and a second prompt with the same run_id succeeds:
+    await a.prompt("hi", run_id="R1")
+    assert "R1" in cp._runs["t"]
 ```
 
 - [ ] **Step 2: Run → expect failure**
@@ -2833,12 +2861,39 @@ Expected: `m.run_id` is None.
 
 - [ ] **Step 3: Stamp in `Agent._process_event` (single chokepoint)**
 
+**Pre-flight in `Agent.prompt()` (BEFORE `claim_run`).** Validating
+caller-supplied `Message.run_id` mismatches only at `_process_event`
+time is too late — by then `claim_run` has already written a row.
+Walk the prompt input first:
+
+```python
+def _validate_input_run_ids(
+    self, message, effective_run_id: str
+) -> None:
+    if isinstance(message, str):
+        return
+    if isinstance(message, list):
+        candidates = message
+    else:
+        candidates = [message]
+    for m in candidates:
+        if getattr(m, "run_id", None) is not None and m.run_id != effective_run_id:
+            raise ValueError(
+                f"message.run_id={m.run_id!r} does not match "
+                f"prompt(run_id={effective_run_id!r})"
+            )
+```
+
+Call `self._validate_input_run_ids(message, effective_run_id)`
+immediately after `effective_run_id` is decided, BEFORE the HITL
+binding check, BEFORE `claim_run`.
+
+**Defense-in-depth in `_process_event`** (still keep this — the
+agent loop's own streaming may construct Messages elsewhere):
+
 In `cubepi/agent/agent.py`, locate `_process_event(self, event)` and
 the `MessageEndEvent` branch. Stamp `run_id` from
-`self._state.active_run_id` onto the message BEFORE it's appended /
-mirrored into state. **Validate any caller-supplied `run_id` matches**
-the active run — silent mismatch would split a run's identity in two
-and corrupt fork selection:
+`self._state.active_run_id` onto the message before it's appended:
 
 ```python
 elif isinstance(event, MessageEndEvent):
@@ -2849,6 +2904,9 @@ elif isinstance(event, MessageEndEvent):
             msg = msg.model_copy(update={"run_id": active})
             event = event.model_copy(update={"message": msg})
         elif msg.run_id != active:
+            # Should be impossible after the pre-flight in prompt(),
+            # but defend against future code paths that construct
+            # Messages with stale run_ids.
             raise ValueError(
                 f"message.run_id={msg.run_id!r} does not match "
                 f"active run_id={active!r}"
@@ -3213,7 +3271,7 @@ async def test_clean_success_marks_complete():
 @pytest.mark.asyncio
 async def test_provider_error_does_not_mark():
     class _RaisingProvider(FauxProvider):
-        async def stream_message(self, *args, **kwargs):
+        async def stream(self, *args, **kwargs):
             raise RuntimeError("provider down")
     a, cp = _agent(_RaisingProvider())
     with pytest.raises(Exception):
@@ -3224,32 +3282,42 @@ async def test_provider_error_does_not_mark():
 
 @pytest.mark.asyncio
 async def test_hitl_detached_outcome_suspended_no_mark():
-    """HitlDetached raised inside the loop → caught at loop.py:196 →
-    outcome 'suspended', no mark. respond() resume completes."""
-    from cubepi.hitl.testing import ScriptedHitlChannel
-    # Drive HITL via cubepi.hitl.testing.ScriptedHitlChannel which
-    # supports detach + reconnect; assert cp._runs[...].completed_at
-    # IS None after the detach, then after respond() IS NOT None.
-    # ... full setup mirrors tests/hitl/test_detach.py existing
-    # pattern (read that file before writing the test) ...
+    """Detach the channel mid-pause → loop catch at loop.py:196 sets
+    state.last_outcome="suspended" → no mark. After respond(), marker
+    IS written.
+
+    **Read tests/hitl/test_agent_respond.py first** — it contains the
+    real pattern for HITL pause + respond plumbing using
+    cubepi.hitl.testing helpers. Implement the test mirroring that
+    pattern; assert:
+      - After the pause: cp._runs["t"]["R1"].completed_at is None
+      - After respond("answer"): cp._runs["t"]["R1"].completed_at is not None
+    Do NOT invent a ScriptedHitlChannel — use the actual exports from
+    cubepi.hitl.testing.
+    """
 
 
 @pytest.mark.asyncio
 async def test_hitl_aborted_via_abort_pending_does_not_mark():
-    """abort_pending raises HitlAborted in the loop → caught at
-    loop.py:418 → outcome 'abandoned' (NOT 'suspended'). The
-    synthetic deny + terminal aborted assistant are appended by
-    agent.py:582-595 — assert they're present and that
-    cp._runs[...].completed_at is None."""
-    # ... setup pauses on HITL, then awaits agent.abort_pending(reason="x") ...
+    """abort_pending raises HitlAborted → loop.py:418 catch sets
+    state.last_outcome="abandoned" (NOT "suspended"). agent.py:582-595
+    appends the synthetic deny + terminal aborted assistant.
+
+    **Read tests/hitl/test_agent_abort_pending.py first** for the
+    abort_pending plumbing. Assert:
+      - cp._runs["t"]["R1"].completed_at is None
+      - The persisted messages contain a terminal aborted assistant
+        (`stop_reason == "aborted"`)
+    """
 
 
 @pytest.mark.asyncio
 async def test_incomplete_tool_cycle_does_not_mark():
     """after_model_response(decision='stop') on a tool-use response
-    triggers Task 27's invariant. Outcome 'incomplete', no marker."""
+    triggers the pre-completion invariant (Task 27).
+    state.last_outcome="incomplete" → no marker."""
+    from cubepi.middleware.base import TurnAction   # real module
     from cubepi.providers.base import ToolCall
-    from cubepi.agent.types import TurnAction
 
     p = FauxProvider()
     p.set_responses([
@@ -3258,8 +3326,13 @@ async def test_incomplete_tool_cycle_does_not_mark():
             stop_reason="tool_use",
         ),
     ])
+
+    # after_model_response signature: see
+    # cubepi/middleware/base.py:82 for the real argument shape.
+    # Verify against that signature when implementing.
     async def _stop_after(ctx):
         return TurnAction(decision="stop")
+
     cp = MemoryCheckpointer()
     a = Agent(
         model=p.model("faux-model"),
@@ -3275,7 +3348,7 @@ async def test_incomplete_tool_cycle_does_not_mark():
 @pytest.mark.asyncio
 async def test_propagating_cancel_does_not_mark():
     class _SlowProvider(FauxProvider):
-        async def stream_message(self, *args, **kwargs):
+        async def stream(self, *args, **kwargs):
             await asyncio.sleep(10)
             return  # unreachable
     a, cp = _agent(_SlowProvider())
@@ -3328,34 +3401,42 @@ RunOutcome = Literal["complete", "suspended", "incomplete", "abandoned"]
 ```
 
 Modify `cubepi/agent/loop.py`. **The existing public helpers
-`run_agent_loop`, `run_agent_loop_continue`, and `run_agent_loop_resume`
-return `list[Message]` and have callers in `tests/agent/test_loop.py`
-that assert on the list.** To avoid breaking them, change the return
-type to `tuple[list[Message], RunOutcome]` rather than replacing it.
+`run_agent_loop`, `run_agent_loop_continue`, `run_agent_loop_resume`
+return `list[Message]` and are exported from `cubepi`.** Do NOT change
+their public signatures — external callers and `tests/agent/test_loop.py`
+depend on the existing shape. Communicate outcome via state instead.
 
-- `run_agent_loop`, `run_agent_loop_continue`, `run_agent_loop_resume`,
-  `_run_loop`, `_run_loop_inner` return
-  `tuple[list[Message], RunOutcome]`. Existing exit paths
-  (currently `return new_messages`) become
-  `return new_messages, <outcome>`. The literals:
+Add a new field on `AgentState` (introduced in Task 5):
+```python
+class AgentState:
+    # ... existing fields ...
+    active_run_id: str | None = None
+    last_outcome: RunOutcome | None = None   # NEW
+```
+
+In `loop.py`, set `state.last_outcome = "<literal>"` at each exit path
+**before** the existing `return new_messages`. Public return type
+remains `list[Message]`. The literals:
   - After clean `AgentEndEvent` with terminal stop_reason and no
-    pending HITL → `return new_messages, "complete"`
+    pending HITL → set `state.last_outcome = "complete"` then
+    `return new_messages`
   - The existing combined `except (HitlDetached, HitlAborted)` blocks
     at `loop.py:196` and `loop.py:418` must be **split by exception
     type**:
     ```python
     except HitlDetached:
-        return new_messages, "suspended"
+        state.last_outcome = "suspended"
+        return new_messages
     except HitlAborted:
-        return new_messages, "abandoned"
+        state.last_outcome = "abandoned"
+        return new_messages
     ```
-    `HitlDetached` means "channel detached, the run can still be
-    resumed via respond()" — completion deferred to resume.
-    `HitlAborted` means "abort_pending was called; the synthetic deny
-    and terminal aborted assistant have already been appended by
-    `agent.py:582-595`" — terminal abandonment, no marker.
+    `HitlDetached` = channel detached, resumable via respond().
+    `HitlAborted` = abort_pending called; synthetic deny + terminal
+    aborted assistant already appended by `agent.py:582-595`.
   - After the early-exit branch on `stop_reason in ("error", "aborted")`
-    at `loop.py:485` → `return new_messages, "abandoned"`
+    at `loop.py:485` → set `state.last_outcome = "abandoned"`
+    then `return new_messages`
   - When `check_tool_cycle(...)` (from Task 27) raises
     `ToolCycleViolation` immediately before declaring `complete`,
     catch it and `return "incomplete"` instead
@@ -3365,26 +3446,28 @@ type to `tuple[list[Message], RunOutcome]` rather than replacing it.
   must also forward the outcome.
 
 Modify `cubepi/agent/agent.py`:
-- `_run_prompt` and `_run_hitl_resume` return
-  `tuple[list[Message], RunOutcome]`.
+- `_run_prompt` and `_run_hitl_resume` return `list[Message]` (no
+  signature change).
 - In `Agent.prompt()` (replacing the placeholder line `await
   self._run_prompt(...)`):
   ```python
-  _new_messages, outcome = await self._run_prompt(
-      message, run_id=effective_run_id
-  )
+  self._state.last_outcome = None
+  await self._run_prompt(message, run_id=effective_run_id)
+  outcome = self._state.last_outcome or "abandoned"
   await self._dispatch_outcome(outcome, effective_run_id)
   ```
 - In `Agent.respond()`:
   ```python
-  _new_messages, outcome = await self._run_hitl_resume(...)
+  self._state.last_outcome = None
+  await self._run_hitl_resume(...)
+  outcome = self._state.last_outcome or "abandoned"
   await self._dispatch_outcome(outcome, recovered_run_id)
   ```
 
-**Update `tests/agent/test_loop.py`** to expect tuples. Existing
-assertions of the form `result = await run_agent_loop(...)` become
-`messages, _outcome = await run_agent_loop(...)`. Mention this
-explicitly in the task body so the implementer doesn't skip it.
+`tests/agent/test_loop.py` does NOT need updates — public return
+type is unchanged. The breaking surface stays limited to
+`Agent.prompt()` return type (`None` → `str`), already in the
+spec's documented breaking-changes list.
 - New private helper `_dispatch_outcome`:
   ```python
   async def _dispatch_outcome(
@@ -3635,13 +3718,63 @@ def check_tool_cycle(messages: list[Message]) -> None:
             )
 ```
 
-- [ ] **Step 4: Wire into the loop's completion path**
+- [ ] **Step 4: Wire into the Agent-layer completion dispatch**
 
-In `cubepi/agent/loop.py`, just before declaring outcome `complete` for
-a run, gather the messages tagged with this `run_id` appended since
-claim and call `check_tool_cycle(run_messages)`. On `ToolCycleViolation`,
-set the outcome to `"incomplete"` instead of `"complete"` — that flows
-into Task 26's outcome dispatcher (no mark, claim remains).
+`loop.py` has no `run_id` parameter — the active run_id lives on
+`AgentState.active_run_id` (Task 5). Apply the invariant from `Agent`,
+NOT `loop.py`:
+
+In `cubepi/agent/agent.py`, modify the `_dispatch_outcome` helper
+introduced in Task 26 Step 3. BEFORE writing the mark, when
+`outcome == "complete"`, scan the run's messages and demote on
+violation:
+
+```python
+from cubepi.agent._tool_cycle import ToolCycleViolation, check_tool_cycle
+
+
+async def _dispatch_outcome(
+    self, outcome: RunOutcome, run_id: str
+) -> None:
+    if outcome == "complete":
+        run_messages = [
+            m for m in self._state.messages if m.run_id == run_id
+        ]
+        try:
+            check_tool_cycle(run_messages)
+        except ToolCycleViolation:
+            outcome = "incomplete"
+    if outcome != "complete":
+        return
+    if not (self._run_aware and self.thread_id):
+        return
+    try:
+        await self.checkpointer.mark_run_complete(
+            self.thread_id, run_id
+        )
+    except Exception as exc:
+        raise CompletionMarkerFailedError(
+            thread_id=self.thread_id, run_id=run_id, cause=exc
+        ) from exc
+```
+
+**On HITL resume specifically.** When `respond()` resumes a run, the
+pre-suspend tool-use assistant is still in `state.messages`
+(loaded from the checkpointer at lazy-load time and carrying the same
+`run_id`). Filtering by `m.run_id == run_id` picks up the full
+cross-suspend run. The invariant therefore catches a tool-use that
+remained unresolved across the pause.
+
+Add a resume-path test to Task 26 (or as an extra in
+`tests/agent/test_tool_cycle_invariant.py`):
+```python
+@pytest.mark.asyncio
+async def test_tool_cycle_invariant_spans_hitl_resume(memory_cp):
+    """Pause mid-tool-use; resume; if resume returns without resolving
+    the tool_use, mark must NOT be written even though respond's
+    last-segment messages look 'clean'."""
+    # ... pattern from tests/hitl/test_agent_respond.py ...
+```
 
 - [ ] **Step 5: Run tests → expect pass**
 
