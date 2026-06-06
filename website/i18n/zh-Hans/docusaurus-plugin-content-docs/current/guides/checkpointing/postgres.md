@@ -157,9 +157,36 @@ extra = cubepi_threads.extra || EXCLUDED.extra
 
 ## Fork
 
-`parent_thread_id` + `forked_at_seq` 列是为将来的 fork 支持预留的。
-CubePi v0.3 尚未暴露 fork API——现在写入它们是为了保持 schema
-的前向兼容性。
+`parent_thread_id` + `forked_at_seq` 列用于支持
+[会话 Fork](./forking)：fork 会创建一个新的 thread，并在其
+`cubepi_threads` 行中写入指向源 thread 的 `parent_thread_id`，
+以及拷贝时源 thread 末尾的 `forked_at_seq`（最后一条已拷贝消息的
+`seq`）。
+
+## Schema v3 → v4 migration {#schema-v3--v4-migration}
+
+Fork 功能将 `EXPECTED_SCHEMA_VERSION` 从 3 升到 4。升级会向
+`cubepi_messages` 添加 `run_id` 列 + 索引，并创建分区父表
+`cubepi_runs` 及其子分区。使用 alembic helper：
+
+```python
+# 在迁移的 upgrade() 中：
+from cubepi.checkpointer.postgres.alembic_helpers import (
+    upgrade_v3_to_v4_op,
+    write_schema_version_op,
+)
+
+def upgrade():
+    op.execute(upgrade_v3_to_v4_op())
+    op.execute(write_schema_version_op())  # 将 cubepi_schema_version 升到 4
+```
+
+`upgrade_v3_to_v4_op()` 在重复执行下是幂等的（所有 DDL 都带
+`IF NOT EXISTS`）。
+
+升级前的旧消息保留 `run_id = NULL`，仍然可读；
+关于混合数据的 fork 资格规则，请参阅
+[旧数据行为](./forking#legacy-data-behaviour)。
 
 ## 常见坑
 

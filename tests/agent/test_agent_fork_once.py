@@ -211,3 +211,83 @@ async def test_fork_once_source_thread_byte_identical():
     assert dict(after.extra) == before_extra
     # Source thread's run state untouched.
     assert dict(cp._runs.get("src", {})) == before_runs
+
+
+@pytest.mark.asyncio
+async def test_fork_once_forwards_parent_execution_options():
+    """fork_once() child must inherit the parent's execution options
+    (tool_execution, thinking, response hook) — not silently fall back
+    to defaults.
+
+    Regression for codex P2: the child was only receiving
+    {model, system_prompt, tools, middleware, convert_to_llm, messages}.
+    """
+    cp = MemoryCheckpointer()
+    hook_calls: list[str] = []
+
+    async def _after_response(response, ctx, *, signal=None):
+        # Proves the parent's after_model_response was forwarded to the child.
+        hook_calls.append("after_response")
+        return None
+
+    seed_agent = Agent(
+        model=_ok_faux().model("faux-model"),
+        checkpointer=cp,
+        thread_id="src",
+    )
+    await seed_agent.prompt("hello", run_id="R1")
+
+    parent = Agent(
+        model=_ok_faux().model("faux-model"),
+        checkpointer=cp,
+        thread_id="src",
+        tool_execution="sequential",
+        thinking="medium",
+        after_model_response=_after_response,
+    )
+    await parent.fork_once("src", "probe", after_run_id="R1")
+
+    # The hook ran in the child (proves the parent's hook was forwarded).
+    assert hook_calls == ["after_response"]
+
+
+@pytest.mark.asyncio
+async def test_fork_once_forwards_tool_execution_and_thinking():
+    """fork_once() child must inherit tool_execution and thinking settings."""
+    cp = MemoryCheckpointer()
+    captured: dict[str, object] = {}
+
+    # Patch Agent.__init__ briefly to capture the child's kwargs.
+    real_init = Agent.__init__
+
+    def _spy_init(self, *args, **kwargs):
+        # Skip the parent constructor call: only capture the second Agent()
+        # (the child built by fork_once).
+        captured.setdefault("calls", 0)
+        captured["calls"] = captured["calls"] + 1  # type: ignore[operator]
+        if captured["calls"] >= 3:  # 1=seed, 2=parent, 3=child
+            captured["thinking"] = kwargs.get("thinking")
+            captured["tool_execution"] = kwargs.get("tool_execution")
+        return real_init(self, *args, **kwargs)
+
+    Agent.__init__ = _spy_init  # type: ignore[method-assign]
+    try:
+        seed_agent = Agent(
+            model=_ok_faux().model("faux-model"),
+            checkpointer=cp,
+            thread_id="src",
+        )
+        await seed_agent.prompt("hello", run_id="R1")
+        parent = Agent(
+            model=_ok_faux().model("faux-model"),
+            checkpointer=cp,
+            thread_id="src",
+            tool_execution="sequential",
+            thinking="medium",
+        )
+        await parent.fork_once("src", "probe", after_run_id="R1")
+    finally:
+        Agent.__init__ = real_init  # type: ignore[method-assign]
+
+    assert captured["thinking"] == "medium"
+    assert captured["tool_execution"] == "sequential"
