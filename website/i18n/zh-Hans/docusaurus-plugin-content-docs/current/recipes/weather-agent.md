@@ -18,32 +18,34 @@ import asyncio
 import os
 
 import httpx
-from pydantic import BaseModel, Field
+from typing import Annotated
+from pydantic import Field
 
-from cubepi import Agent, AgentTool, AgentToolResult, TextContent
+from cubepi import Agent, AgentToolResult, TextContent, tool
 from cubepi.providers.anthropic import AnthropicProvider
 
 
 # --- 工具 -----------------------------------------------------------------
 
-class GetWeatherParams(BaseModel):
-    city: str = Field(..., description="The city to look up weather for")
-    units: str = Field("metric", pattern="^(metric|imperial)$")
-
-
-async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
+@tool
+async def get_weather(
+    city: Annotated[str, Field(description="The city to look up weather for")],
+    units: Annotated[str, Field(pattern="^(metric|imperial)$")] = "metric",
+) -> str | AgentToolResult:
+    "Get current weather for a city. Returns a short text summary."
     # 免费的 Open-Meteo 地理编码 + 预报。无需 API key。
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             geo = await client.get(
                 "https://geocoding-api.open-meteo.com/v1/search",
-                params={"name": params.city, "count": 1, "language": "en"},
+                params={"name": city, "count": 1, "language": "en"},
             )
             geo.raise_for_status()
             results = geo.json().get("results")
             if not results:
+                # 返回 is_error=True 告诉模型这次调用失败了。
                 return AgentToolResult(
-                    content=[TextContent(text=f"Couldn't find a city named {params.city!r}.")],
+                    content=[TextContent(text=f"Couldn't find a city named {city!r}.")],
                     is_error=True,
                 )
             lat, lon = results[0]["latitude"], results[0]["longitude"]
@@ -54,28 +56,19 @@ async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on
                     "latitude": lat,
                     "longitude": lon,
                     "current_weather": True,
-                    "temperature_unit": "celsius" if params.units == "metric" else "fahrenheit",
+                    "temperature_unit": "celsius" if units == "metric" else "fahrenheit",
                 },
             )
             wx.raise_for_status()
             cw = wx.json()["current_weather"]
-            unit = "°C" if params.units == "metric" else "°F"
-            return AgentToolResult(
-                content=[TextContent(text=f"{cw['temperature']}{unit}, wind {cw['windspeed']} km/h in {params.city}.")],
-            )
+            unit = "°C" if units == "metric" else "°F"
+            # 普通 str 会被包装成一次成功的文本结果。
+            return f"{cw['temperature']}{unit}, wind {cw['windspeed']} km/h in {city}."
         except httpx.HTTPError as e:
             return AgentToolResult(
                 content=[TextContent(text=f"Weather API error: {e}")],
                 is_error=True,
             )
-
-
-weather_tool = AgentTool(
-    name="get_weather",
-    description="Get current weather for a city. Returns a short text summary.",
-    parameters=GetWeatherParams,
-    execute=get_weather,
-)
 
 
 # --- Agent ----------------------------------------------------------------
@@ -85,7 +78,7 @@ async def main():
     agent = Agent(
         model=provider.model("claude-sonnet-4-5-20250929"),
         system_prompt="You are a concise weather assistant. Always use the tool; don't guess.",
-        tools=[weather_tool],
+        tools=[get_weather],
     )
 
     def on_event(event, signal=None):

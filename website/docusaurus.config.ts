@@ -107,11 +107,13 @@ const config: Config = {
   clientModules: [require.resolve('./src/clientModules/posthog.ts')],
 
   markdown: {
-    // Strip empty ## [Unreleased] sections before MDX compilation so the
-    // /changelog page doesn't open with a heading that has no content and
-    // makes the first release look unreleased.
+    // Strip the ## [Unreleased] heading only when the section is empty — i.e.
+    // immediately followed by the next release heading (`## [x.y.z]`). The
+    // lookahead requires "## " with a trailing space so a populated section
+    // whose first child is a "### Added" subsection is NOT stripped (### also
+    // starts with ##), which would otherwise drop the heading but keep its body.
     preprocessor: ({fileContent}) =>
-      fileContent.replace(/^## \[Unreleased\]\n+(?=##)/m, ''),
+      fileContent.replace(/^## \[Unreleased\]\n+(?=## )/m, ''),
   },
 
   presets: [['classic', classicOptions]],

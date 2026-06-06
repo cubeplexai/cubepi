@@ -34,34 +34,26 @@ sync or async.
 
 ## Tool
 
-An `AgentTool` is a name + description + Pydantic parameter model +
-async `execute` function:
+A tool is an async function the model can call. Decorate it with
+`@tool` and CubePi generates the input schema from the parameters:
 
 ```python
-from pydantic import BaseModel
-from cubepi import AgentTool, AgentToolResult, TextContent
+from cubepi import tool
 
-class SearchParams(BaseModel):
-    query: str
-    limit: int = 10
-
-async def execute(tool_call_id, params: SearchParams, *, signal=None, on_update=None):
-    # do work; respect `signal` if you can be aborted
-    return AgentToolResult(content=[TextContent(text=f"…")])
-
-search = AgentTool(
-    name="search",
-    description="Search the corpus",
-    parameters=SearchParams,
-    execute=execute,
-)
+@tool
+async def search(query: str, limit: int = 10) -> str:
+    "Search the corpus"
+    # do work; declare `signal` / `on_update` in the signature if you need them
+    return "…"
 ```
 
-The Pydantic schema is auto-converted to JSON Schema and passed to the
-model. Arg parsing, error wrapping, and parallel execution are
-handled by the framework. See [Tool Use](../guides/agents/tool-use)
-for `execution_mode`, `on_update` (incremental progress), and
-`terminate` (end the turn from a tool).
+`@tool` builds an `AgentTool` (name + description + Pydantic parameter
+model + async `execute`); the schema is auto-converted to JSON Schema
+and passed to the model. Arg parsing, error wrapping, and parallel
+execution are handled by the framework. See
+[Tool Use](../guides/agents/tool-use) for the longhand `AgentTool(...)`,
+`execution_mode`, `on_update` (incremental progress), and `terminate`
+(end the turn from a tool).
 
 ## Provider
 

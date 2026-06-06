@@ -41,8 +41,7 @@ import os
 import json
 from pathlib import Path
 
-from pydantic import BaseModel
-from cubepi import AgentTool, AgentToolResult, TextContent
+from cubepi import AgentToolResult, TextContent, tool
 
 
 # Simple file-backed job store; replace with Redis / Postgres in prod.
@@ -50,13 +49,12 @@ JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/cubepi-jobs"))
 JOB_DIR.mkdir(parents=True, exist_ok=True)
 
 
-class TranscodeParams(BaseModel):
-    source_path: str
-    output_path: str
-
-
-async def transcode_video(tool_call_id, params: TranscodeParams, *, signal=None, on_update=None):
-    job_key = f"transcode:{params.source_path}->{params.output_path}"
+# execution_mode="sequential" → one transcode at a time. Only `signal` is
+# declared, so that's the only loop-supplied arg injected.
+@tool(execution_mode="sequential")
+async def transcode_video(source_path: str, output_path: str, *, signal=None) -> AgentToolResult:
+    "Transcode a video file. Idempotent — safe to retry."
+    job_key = f"transcode:{source_path}->{output_path}"
     job_file = JOB_DIR / f"{job_key.replace('/', '_')}.json"
 
     if job_file.exists():
@@ -69,7 +67,7 @@ async def transcode_video(tool_call_id, params: TranscodeParams, *, signal=None,
 
     # Do the actual work (long-running, expensive).
     # Use signal to abort cleanly if cancelled.
-    output = await run_ffmpeg(params.source_path, params.output_path, signal=signal)
+    output = await run_ffmpeg(source_path, output_path, signal=signal)
 
     # Commit the job-done marker AFTER the work succeeds.
     job_file.write_text(json.dumps({"output_path": output}))
@@ -78,15 +76,6 @@ async def transcode_video(tool_call_id, params: TranscodeParams, *, signal=None,
         content=[TextContent(text=f"Transcoded to {output}.")],
         details={"output_path": output},
     )
-
-
-transcode_tool = AgentTool(
-    name="transcode_video",
-    description="Transcode a video file. Idempotent — safe to retry.",
-    parameters=TranscodeParams,
-    execute=transcode_video,
-    execution_mode="sequential",  # one transcode at a time
-)
 ```
 
 Now if the process dies during `run_ffmpeg`, the next agent run sees
@@ -106,7 +95,7 @@ from cubepi import Agent
 from cubepi.checkpointer import SQLiteCheckpointer
 from cubepi.providers.anthropic import AnthropicProvider
 
-from tools import transcode_tool   # the wrapped AgentTool from above
+from tools import transcode_video   # the @tool-decorated AgentTool from above
 
 
 async def main(thread_id: str, initial_prompt: str | None):
@@ -114,7 +103,7 @@ async def main(thread_id: str, initial_prompt: str | None):
         agent = Agent(
             model=AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"]).model("claude-sonnet-4-5-20250929"),
             system_prompt="You orchestrate video transcoding jobs.",
-            tools=[transcode_tool],
+            tools=[transcode_video],
             checkpointer=cp,
             thread_id=thread_id,
         )
