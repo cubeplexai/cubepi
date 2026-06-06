@@ -127,6 +127,7 @@ class UserMessage(BaseModel):
     content: list[Content]
     timestamp: float | None = None
     metadata: JsonObject = Field(default_factory=dict)
+    run_id: str | None = None
 
 
 class AssistantMessage(BaseModel):
@@ -140,6 +141,7 @@ class AssistantMessage(BaseModel):
     model_id: str = ""
     response_id: str | None = None
     metadata: JsonObject = Field(default_factory=dict)
+    run_id: str | None = None
 
 
 class ToolResultMessage(BaseModel):
@@ -151,6 +153,7 @@ class ToolResultMessage(BaseModel):
     is_error: bool = False
     timestamp: float | None = None
     metadata: JsonObject = Field(default_factory=dict)
+    run_id: str | None = None
 
 
 Message = UserMessage | AssistantMessage | ToolResultMessage
