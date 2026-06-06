@@ -24,8 +24,7 @@ async def test_claim_run_creates_threads_row_lazily(pg_v4_dsn):
         )
         assert row is not None
         run = await conn.fetchrow(
-            "SELECT completed_at FROM cubepi_runs "
-            "WHERE thread_id = $1 AND run_id = $2",
+            "SELECT completed_at FROM cubepi_runs WHERE thread_id = $1 AND run_id = $2",
             "t-lazy",
             "r1",
         )

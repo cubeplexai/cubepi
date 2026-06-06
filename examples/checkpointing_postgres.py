@@ -32,7 +32,9 @@ from cubepi.agent.agent import Agent
 from cubepi.checkpointer.postgres import PostgresCheckpointer
 from cubepi.checkpointer.postgres.alembic_helpers import (
     add_pending_request_column_op,
+    add_run_id_column_op,
     create_message_partitions_op,
+    upgrade_v3_to_v4_op,
     write_schema_version_op,
 )
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
@@ -65,6 +67,7 @@ async def bootstrap_schema(dsn: str) -> None:
             );
         """)
         await conn.execute(add_pending_request_column_op())  # v1 -> v2 column
+        await conn.execute(add_run_id_column_op())  # v2 -> v3 column
         await conn.execute("""
             CREATE TABLE cubepi_messages (
                 thread_id TEXT NOT NULL
@@ -85,6 +88,8 @@ async def bootstrap_schema(dsn: str) -> None:
         await conn.execute(
             "CREATE TABLE cubepi_schema_version (version INTEGER PRIMARY KEY);"
         )
+        # v3 -> v4: run_id on cubepi_messages + cubepi_runs partitioned table.
+        await conn.execute(upgrade_v3_to_v4_op())
         await conn.execute(write_schema_version_op())  # record EXPECTED_SCHEMA_VERSION
     finally:
         await conn.close()

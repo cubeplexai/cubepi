@@ -126,9 +126,7 @@ class CubepiRun(CubepiBase):
     completed_at: Mapped[_dt.datetime | None] = mapped_column(
         sa.TIMESTAMP(timezone=True), nullable=True
     )
-    completion_seq: Mapped[int | None] = mapped_column(
-        sa.BigInteger, nullable=True
-    )
+    completion_seq: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)
 
 
 class CubepiSchemaVersion(CubepiBase):

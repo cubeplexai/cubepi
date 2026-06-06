@@ -17,6 +17,9 @@ from cubepi.checkpointer.exceptions import (
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
     RunNotClaimedError,
+    RunNotCompletedError,
+    ThreadAlreadyExistsError,
+    ThreadNotFoundError,
 )
 from cubepi.checkpointer.postgres.exceptions import (
     CubepiSchemaMismatch,
@@ -128,7 +131,8 @@ class PostgresCheckpointer:
                 thread_id,
             )
             extra_row = await conn.fetchrow(
-                "SELECT extra FROM cubepi_threads WHERE thread_id = $1",
+                "SELECT extra, parent_thread_id FROM cubepi_threads "
+                "WHERE thread_id = $1",
                 thread_id,
             )
 
@@ -149,6 +153,7 @@ class PostgresCheckpointer:
             )
             messages.append(cls.model_validate(data))
 
+        parent_thread_id: str | None = None
         if extra_row is not None:
             raw_extra = extra_row["extra"]
             extra = (
@@ -156,10 +161,13 @@ class PostgresCheckpointer:
                 if isinstance(raw_extra, str)
                 else (raw_extra or {})
             )
+            parent_thread_id = extra_row["parent_thread_id"]
         else:
             extra = {}
 
-        return CheckpointData(messages=messages, extra=extra)
+        return CheckpointData(
+            messages=messages, extra=extra, parent_thread_id=parent_thread_id
+        )
 
     async def append(self, thread_id: str, messages: list[Message]) -> None:
         if not messages:
@@ -259,8 +267,7 @@ class PostgresCheckpointer:
                         f"thread={thread_id} run={run_id} in flight"
                     )
                 await conn.execute(
-                    "INSERT INTO cubepi_runs (thread_id, run_id) "
-                    "VALUES ($1, $2)",
+                    "INSERT INTO cubepi_runs (thread_id, run_id) VALUES ($1, $2)",
                     thread_id,
                     run_id,
                 )
@@ -318,6 +325,154 @@ class PostgresCheckpointer:
         else:
             req = HitlRequest.model_validate(raw)
         return req, row["run_id"]
+
+    async def snapshot(self, thread_id: str, *, after_run_id: str) -> list[Message]:
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            # Source thread must exist.
+            t_row = await conn.fetchrow(
+                "SELECT 1 FROM cubepi_threads WHERE thread_id = $1",
+                thread_id,
+            )
+            if t_row is None:
+                raise ThreadNotFoundError(f"thread={thread_id}")
+            cutoff = await conn.fetchval(
+                "SELECT completion_seq FROM cubepi_runs "
+                "WHERE thread_id = $1 AND run_id = $2",
+                thread_id,
+                after_run_id,
+            )
+            if cutoff is None:
+                raise RunNotCompletedError(
+                    f"thread={thread_id} run={after_run_id} not completed"
+                )
+            rows = await conn.fetch(
+                "SELECT seq, role, metadata, payload FROM cubepi_messages "
+                "WHERE thread_id = $1 AND ("
+                "  run_id IS NULL OR run_id IN ("
+                "    SELECT run_id FROM cubepi_runs "
+                "    WHERE thread_id = $1 "
+                "    AND completion_seq IS NOT NULL "
+                "    AND completion_seq <= $2"
+                "  )"
+                ") ORDER BY seq",
+                thread_id,
+                cutoff,
+            )
+        messages: list[Message] = []
+        for r in rows:
+            cls = _ROLE_TO_CLS.get(r["role"])
+            if cls is None:
+                raise ValueError(f"unknown role in DB: {r['role']!r}")
+            data = msgpack.unpackb(bytes(r["payload"]), raw=False)
+            raw_meta = r["metadata"]
+            data["metadata"] = (
+                json.loads(raw_meta) if isinstance(raw_meta, str) else (raw_meta or {})
+            )
+            messages.append(cls.model_validate(data))
+        return messages
+
+    async def fork(
+        self,
+        src_thread_id: str,
+        new_thread_id: str,
+        *,
+        after_run_id: str,
+        metadata: JsonObject | None = None,
+    ) -> None:
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                # Serialize concurrent forks/appends on src by taking the
+                # src thread's per-thread advisory lock.
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))",
+                    src_thread_id,
+                )
+                # Source must exist (threads row is created lazily by append
+                # / claim_run / save_extra / save_pending_request — so its
+                # presence is the canonical "thread exists" gate).
+                t_row = await conn.fetchrow(
+                    "SELECT 1 FROM cubepi_threads WHERE thread_id = $1",
+                    src_thread_id,
+                )
+                if t_row is None:
+                    raise ThreadNotFoundError(f"thread={src_thread_id}")
+                # Destination must not exist.
+                dst_row = await conn.fetchrow(
+                    "SELECT 1 FROM cubepi_threads WHERE thread_id = $1",
+                    new_thread_id,
+                )
+                if dst_row is not None:
+                    raise ThreadAlreadyExistsError(f"thread={new_thread_id}")
+                # Cutoff: after_run_id must be completed on src.
+                cutoff = await conn.fetchval(
+                    "SELECT completion_seq FROM cubepi_runs "
+                    "WHERE thread_id = $1 AND run_id = $2",
+                    src_thread_id,
+                    after_run_id,
+                )
+                if cutoff is None:
+                    raise RunNotCompletedError(
+                        f"thread={src_thread_id} run={after_run_id} not completed"
+                    )
+                # Build merged extra (carry parent's extra + fork metadata).
+                src_extra_row = await conn.fetchrow(
+                    "SELECT extra FROM cubepi_threads WHERE thread_id = $1",
+                    src_thread_id,
+                )
+                raw_extra = (
+                    src_extra_row["extra"] if src_extra_row is not None else None
+                )
+                if isinstance(raw_extra, str):
+                    base_extra = json.loads(raw_extra)
+                else:
+                    base_extra = dict(raw_extra) if raw_extra else {}
+                if metadata is not None:
+                    base_extra["fork"] = json.loads(json.dumps(metadata))
+                # INSERT destination threads row first to satisfy the
+                # cubepi_messages / cubepi_runs FKs on subsequent copies.
+                await conn.execute(
+                    "INSERT INTO cubepi_threads "
+                    "(thread_id, parent_thread_id, forked_at_seq, extra) "
+                    "VALUES ($1, $2, $3, $4::jsonb)",
+                    new_thread_id,
+                    src_thread_id,
+                    cutoff,
+                    json.dumps(base_extra),
+                )
+                # Copy messages whose run is NULL (legacy prefix) or completed
+                # at or before cutoff. Preserve seq from the source.
+                await conn.execute(
+                    "INSERT INTO cubepi_messages "
+                    "(thread_id, seq, role, metadata, payload, run_id) "
+                    "SELECT $1, seq, role, metadata, payload, run_id "
+                    "FROM cubepi_messages "
+                    "WHERE thread_id = $2 AND ("
+                    "  run_id IS NULL OR run_id IN ("
+                    "    SELECT run_id FROM cubepi_runs "
+                    "    WHERE thread_id = $2 "
+                    "    AND completion_seq IS NOT NULL "
+                    "    AND completion_seq <= $3"
+                    "  )"
+                    ") ORDER BY seq",
+                    new_thread_id,
+                    src_thread_id,
+                    cutoff,
+                )
+                # Copy completed runs satisfying the cutoff.
+                await conn.execute(
+                    "INSERT INTO cubepi_runs "
+                    "(thread_id, run_id, claimed_at, completed_at, completion_seq) "
+                    "SELECT $1, run_id, claimed_at, completed_at, completion_seq "
+                    "FROM cubepi_runs "
+                    "WHERE thread_id = $2 "
+                    "AND completion_seq IS NOT NULL "
+                    "AND completion_seq <= $3",
+                    new_thread_id,
+                    src_thread_id,
+                    cutoff,
+                )
 
     async def save_extra(self, thread_id: str, extra: JsonObject) -> None:
         assert self._pool is not None
