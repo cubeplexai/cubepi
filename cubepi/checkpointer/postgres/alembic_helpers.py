@@ -41,6 +41,58 @@ def add_run_id_column_op() -> str:
     return "ALTER TABLE cubepi_threads ADD COLUMN IF NOT EXISTS run_id TEXT"
 
 
+def create_runs_partitions_op() -> str:
+    """Return SQL DDL creating all child partitions of cubepi_runs.
+
+    Call inside an alembic upgrade() via op.execute(), AFTER the parent
+    cubepi_runs partitioned table has been created. Uses the same
+    PARTITION_COUNT as cubepi_messages.
+    """
+    return "\n".join(
+        f"CREATE TABLE cubepi_runs_p{i:02d} "
+        f"PARTITION OF cubepi_runs "
+        f"FOR VALUES WITH (modulus {PARTITION_COUNT}, remainder {i});"
+        for i in range(PARTITION_COUNT)
+    )
+
+
+def upgrade_v3_to_v4_op() -> str:
+    """Return SQL applying the v3→v4 schema changes.
+
+    Adds the `run_id` column + index to `cubepi_messages` and creates
+    the partitioned `cubepi_runs` parent table with its child
+    partitions. Hosts must also bump `cubepi_schema_version` via
+    write_schema_version_op() (EXPECTED_SCHEMA_VERSION is now 4).
+
+    Call inside the host's alembic v3→v4 upgrade() via op.execute().
+    Idempotent under repeated execution via IF NOT EXISTS guards.
+    """
+    parts = [
+        "ALTER TABLE cubepi_messages ADD COLUMN IF NOT EXISTS run_id TEXT;",
+        (
+            "CREATE INDEX IF NOT EXISTS ix_cubepi_messages_thread_run "
+            "ON cubepi_messages (thread_id, run_id);"
+        ),
+        (
+            "CREATE TABLE IF NOT EXISTS cubepi_runs ("
+            "  thread_id TEXT NOT NULL REFERENCES cubepi_threads(thread_id) "
+            "ON DELETE CASCADE,"
+            "  run_id TEXT NOT NULL,"
+            "  claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
+            "  completed_at TIMESTAMPTZ,"
+            "  completion_seq BIGINT,"
+            "  PRIMARY KEY (thread_id, run_id)"
+            ") PARTITION BY HASH (thread_id);"
+        ),
+        (
+            "CREATE INDEX IF NOT EXISTS ix_cubepi_runs_thread_seq "
+            "ON cubepi_runs (thread_id, completion_seq);"
+        ),
+        create_runs_partitions_op(),
+    ]
+    return "\n".join(parts)
+
+
 def write_schema_version_op() -> str:
     """Return SQL setting cubepi_schema_version to the current version.
 

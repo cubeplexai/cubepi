@@ -17,7 +17,7 @@ def test_models_import() -> None:
         cubepi_metadata,
     )
 
-    assert EXPECTED_SCHEMA_VERSION == 3
+    assert EXPECTED_SCHEMA_VERSION == 4
     assert PARTITION_COUNT == 64
     # All three model classes are reachable via the public model module
     assert CubepiThread.__tablename__ == "cubepi_threads"
@@ -203,6 +203,7 @@ async def _setup_schema(dsn: str) -> None:
             add_pending_request_column_op,
             add_run_id_column_op,
             create_message_partitions_op,
+            upgrade_v3_to_v4_op,
             write_schema_version_op,
         )
 
@@ -219,6 +220,8 @@ async def _setup_schema(dsn: str) -> None:
                 version INTEGER PRIMARY KEY
             );
         """)
+        # Apply v3→v4 (run_id on messages + cubepi_runs partitioned table).
+        await conn.execute(upgrade_v3_to_v4_op())
         await conn.execute(write_schema_version_op())
     finally:
         await conn.close()
@@ -327,7 +330,7 @@ async def test_version_mismatch_raises(clean_db) -> None:
     with pytest.raises(CubepiSchemaMismatch) as exc_info:
         async with PostgresCheckpointer(clean_db):
             pass
-    assert exc_info.value.expected == 3
+    assert exc_info.value.expected == 4
     assert exc_info.value.actual == 999
 
 
