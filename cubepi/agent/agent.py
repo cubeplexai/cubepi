@@ -98,6 +98,7 @@ class AgentState:
     is_streaming: bool = False
     streaming_message: Message | None = None
     error_message: str | None = None
+    active_run_id: str | None = None
     _tools: list[AgentTool] = field(default_factory=list)
     _messages: list[Message] = field(default_factory=list)
     _pending_tool_calls: set[str] = field(default_factory=set)
