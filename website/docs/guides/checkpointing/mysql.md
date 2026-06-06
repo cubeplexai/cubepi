@@ -183,6 +183,18 @@ under a row lock and writes the merged dict, rather than using
 `JSON_MERGE_PATCH`, whose null-deletion and deep-merge semantics differ
 from `dict.update`.)
 
+## Forks
+
+`MySQLCheckpointer` implements the v4 `snapshot` / `fork` /
+`claim_run` / `mark_run_complete` / `load_pending` Protocol methods,
+so it supports both `Agent.fork(...)` and `Agent.fork_once(...)`. The
+`parent_thread_id` / `forked_at_seq` columns on `cubepi_threads`
+record fork lineage; `cubepi_runs` (added in v4) tracks per-run
+claim/completion state.
+
+See the [Conversation Forking](./forking) guide for the user-facing
+API and semantics.
+
 ## Common pitfalls
 
 - **`CubepiSchemaUninitialized`** — Your DB is empty, your migrations

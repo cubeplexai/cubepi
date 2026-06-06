@@ -177,9 +177,15 @@ keys.
 
 ## Forks
 
-The `parent_thread_id` + `forked_at_seq` columns exist for future fork
-support. CubePi v0.3 doesn't expose a fork API yet — they're written
-to so the schema is forward-compatible.
+`PostgresCheckpointer` implements the v4 `snapshot` / `fork` /
+`claim_run` / `mark_run_complete` / `load_pending` Protocol methods,
+so it supports both `Agent.fork(...)` and `Agent.fork_once(...)`. The
+`parent_thread_id` and `forked_at_seq` columns on `cubepi_threads`
+record fork lineage; `cubepi_runs` (the v4 partitioned table) tracks
+per-run claim/completion state.
+
+See the [Conversation Forking](./forking) guide for the user-facing
+API and semantics.
 
 ## Common pitfalls
 
