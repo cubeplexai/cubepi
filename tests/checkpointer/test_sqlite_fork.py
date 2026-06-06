@@ -102,3 +102,15 @@ async def test_snapshot_matches_fork_messages():
             await cp.mark_run_complete("src", "A")
             msgs = await cp.snapshot("src", after_run_id="A")
             assert [m.content[0].text for m in msgs] == ["a1"]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_uncompleted_run_raises_not_completed():
+    """Snapshot must mirror fork's "RunNotCompleted" behavior."""
+    with tempfile.TemporaryDirectory() as d:
+        async with SQLiteCheckpointer(str(Path(d) / "x.db")) as cp:
+            await cp.claim_run("src", "A")
+            await cp.append("src", [_msg("A", "a1")])
+            # NOT marking complete.
+            with pytest.raises(RunNotCompletedError):
+                await cp.snapshot("src", after_run_id="A")

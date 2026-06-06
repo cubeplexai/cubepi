@@ -95,3 +95,44 @@ async def test_snapshot_matches_fork_messages():
     await cp.mark_run_complete("src", "A")
     msgs = await cp.snapshot("src", after_run_id="A")
     assert [m.content[0].text for m in msgs] == ["a1"]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_unknown_thread_raises_thread_not_found():
+    cp = MemoryCheckpointer()
+    with pytest.raises(ThreadNotFoundError):
+        await cp.snapshot("missing", after_run_id="A")
+
+
+@pytest.mark.asyncio
+async def test_snapshot_uncompleted_run_raises_not_completed():
+    cp = MemoryCheckpointer()
+    await cp.claim_run("src", "A")
+    await cp.append("src", [_msg("A", "a1")])
+    # NOT calling mark_run_complete — run is claimed but uncompleted.
+    with pytest.raises(RunNotCompletedError):
+        await cp.snapshot("src", after_run_id="A")
+
+
+@pytest.mark.asyncio
+async def test_snapshot_includes_legacy_null_run_id_and_skips_uncompleted():
+    """Snapshot must:
+    - copy messages with run_id=None as legacy (pre-v4) history
+    - skip messages whose run_id belongs to an uncompleted later run
+    """
+    cp = MemoryCheckpointer()
+    # Pre-v4 legacy message (no run_id).
+    await cp.append("src", [_msg(None, "legacy")])
+    # Completed run A.
+    await cp.claim_run("src", "A")
+    await cp.append("src", [_msg("A", "a1")])
+    await cp.mark_run_complete("src", "A")
+    # Later uncompleted run B (claimed but not completed).
+    await cp.claim_run("src", "B")
+    await cp.append("src", [_msg("B", "b1-in-flight")])
+    # Snapshot after A should include legacy + A but NOT B.
+    msgs = await cp.snapshot("src", after_run_id="A")
+    texts = [m.content[0].text for m in msgs]
+    assert "legacy" in texts
+    assert "a1" in texts
+    assert "b1-in-flight" not in texts

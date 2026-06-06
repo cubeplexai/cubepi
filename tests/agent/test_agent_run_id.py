@@ -94,3 +94,27 @@ async def test_prompt_rejects_mismatched_run_id_before_claim():
     assert "R1" not in cp._runs.get("t", {})
     # ... and a second prompt with the same run_id succeeds:
     await a.prompt("hi", run_id="R1")
+
+
+@pytest.mark.asyncio
+async def test_process_event_rejects_mismatched_message_run_id():
+    """`_process_event` for MessageEndEvent stamps msg.run_id with
+    state.active_run_id when msg.run_id is None, but raises if the
+    message already carries a DIFFERENT run_id (defensive — a provider
+    or middleware bug that produced the wrong stamp must not silently
+    write to the persisted history)."""
+    from cubepi.agent.types import MessageEndEvent
+    from cubepi.providers.base import (
+        AssistantMessage,
+        TextContent,
+    )
+
+    a = Agent(model=_ok_faux().model("faux-model"))
+    a._state.active_run_id = "R_active"
+    bad_msg = AssistantMessage(
+        content=[TextContent(text="bad")],
+        stop_reason="end_turn",
+        run_id="R_OTHER",
+    )
+    with pytest.raises(ValueError, match="does not match"):
+        await a._process_event(MessageEndEvent(message=bad_msg))
