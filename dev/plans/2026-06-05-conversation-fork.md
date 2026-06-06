@@ -2719,30 +2719,23 @@ async def test_prompt_sets_then_clears_active_run_id_on_clean_return():
 
 @pytest.mark.asyncio
 async def test_prompt_leaves_active_run_id_set_on_raise(monkeypatch):
-    """Spec §3.7 + Task 22 require active_run_id to be LEFT SET on any
-    failure post-claim. Use a propagating failure mode — provider
-    exceptions are CAUGHT by Agent._run_with_lifecycle (agent.py:645)
-    and converted to a synthetic error message, so they do NOT
-    propagate. The cleanest synthesized-after-the-fact path is a
-    CompletionMarkerFailedError raised by _dispatch_outcome (Task 26).
-    """
-    from cubepi.checkpointer.exceptions import CompletionMarkerFailedError
-    from cubepi.checkpointer.memory import MemoryCheckpointer
+    """Spec §3.7 + Task 22: active_run_id must be LEFT SET on any
+    propagating failure after claim. Provider exceptions are caught
+    by Agent._run_with_lifecycle and synthesized into error messages
+    — they do NOT propagate. To exercise the propagation path at
+    THIS task (before Task 26 introduces CompletionMarkerFailedError),
+    monkeypatch self._run_prompt to raise after entry."""
+    a = Agent(model=_ok_faux().model("faux-model"))
 
-    class _BrokenMark(MemoryCheckpointer):
-        async def mark_run_complete(self, thread_id, run_id):
-            raise RuntimeError("db down")
+    async def _boom(*args, **kwargs):
+        # Raises AFTER prompt() sets active_run_id and BEFORE the
+        # `else:` clear runs.
+        raise RuntimeError("boom")
 
-    cp = _BrokenMark()
-    a = Agent(
-        model=_ok_faux().model("faux-model"),
-        checkpointer=cp,
-        thread_id="t",
-    )
-    with pytest.raises(CompletionMarkerFailedError):
+    monkeypatch.setattr(a, "_run_prompt", _boom)
+    with pytest.raises(RuntimeError, match="boom"):
         await a.prompt("hello", run_id="R1")
-    # Spec §3.7: active_run_id stays set so the except-block reader
-    # can still recover it (exc.run_id is the recommended source).
+    # Spec §3.7: left set so except-block readers can recover it.
     assert a.state.active_run_id == "R1"
 ```
 
@@ -3238,23 +3231,23 @@ introduces one.
 
 - [ ] **Step 1: Failing tests covering every row of spec §3.6.2 table**
 
+**FauxProvider API reminder.** `FauxProvider`
+(`cubepi/providers/faux.py:156`) has no `text=` / `error=` /
+`tool_error=` / `abort_mid_stream=` / `sleep_seconds=` kwargs. Its
+real API: construct empty, then call `set_responses([...])` with a
+list of `AssistantMessage` instances (or `FauxResponseFactory`
+callables). To simulate provider failures, subclass `FauxProvider`
+inside the test file.
+
 Create `tests/agent/test_agent_completion.py`:
+
 ```python
+import asyncio
+import contextlib
+
 import pytest
 
 from cubepi.agent.agent import Agent
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.providers.faux import FauxProvider
-
-
-**FauxProvider API.** `FauxProvider` (`cubepi/providers/faux.py:156`)
-has no `text=` / `error=` / `tool_error=` / `abort_mid_stream=` /
-`sleep_seconds=` kwargs. Its real API: construct empty, then call
-`set_responses([...])` with a list of `AssistantMessage` instances
-(or `FauxResponseFactory` callables). To simulate provider failures
-or sleep behavior, subclass `FauxProvider` inside this test file.
-
-```python
 from cubepi.checkpointer.exceptions import CompletionMarkerFailedError
 from cubepi.checkpointer.memory import MemoryCheckpointer
 from cubepi.providers.base import AssistantMessage, TextContent
@@ -3323,7 +3316,7 @@ async def test_hitl_detached_outcome_suspended_no_mark():
         # Turn 1: ask_user tool_call.
         AssistantMessage(
             content=[ToolCall(id="tc-1", name="ask_user",
-                              arguments={"question": "?"})],
+                              arguments={"questions": [{"key": "ans", "prompt": "?"}]})],
             stop_reason="tool_use",
         ),
         # Turn 2 (after respond appends the answer as tool_result):
@@ -3349,7 +3342,9 @@ async def test_hitl_detached_outcome_suspended_no_mark():
         if (await cp.load_pending("t")) is not None:
             break
         await asyncio.sleep(0.01)
-    ch.detach()
+    # CheckpointedChannel has no .detach(); the Agent does
+    # (agent.py:405). a.detach() raises HitlDetached in the loop.
+    await a.detach()
     await task  # returns normally; state.last_outcome == "suspended"
     assert cp._runs["t"]["R1"].completed_at is None
 
@@ -3387,7 +3382,7 @@ async def test_hitl_aborted_via_abort_pending_does_not_mark():
     p.set_responses([
         AssistantMessage(
             content=[ToolCall(id="tc-1", name="ask_user",
-                              arguments={"question": "?"})],
+                              arguments={"questions": [{"key": "ans", "prompt": "?"}]})],
             stop_reason="tool_use",
         ),
     ])
@@ -3933,7 +3928,7 @@ async def test_tool_cycle_invariant_spans_hitl_resume():
         # Turn 1: ask_user → pause.
         AssistantMessage(
             content=[ToolCall(id="ask-1", name="ask_user",
-                              arguments={"question": "?"})],
+                              arguments={"questions": [{"key": "ans", "prompt": "?"}]})],
             stop_reason="tool_use",
         ),
         # Turn 2 (resume): assistant with an unresolved tool_call
@@ -3972,7 +3967,10 @@ async def test_tool_cycle_invariant_spans_hitl_resume():
     task = asyncio.create_task(a.prompt("hi", run_id="R1"))
     while (await cp.load_pending("t")) is None:
         await asyncio.sleep(0.01)
-    await task  # detach not needed; first prompt() returns suspended
+    # prompt() blocks until detach / abort / answer. Detach to
+    # surface HitlDetached → loop returns with last_outcome="suspended".
+    await a.detach()
+    await task
 
     # Resume with a fresh Agent. The second turn emits orphan-1;
     # the after_model_response hook stops the loop. Pre-completion
