@@ -311,6 +311,30 @@ class Agent(Generic[TMessage]):
                 "Agent is already processing a prompt. "
                 "Use steer() or follow_up() to queue messages."
             )
+        bound: set[str] = set()
+        for elem in (*self._state.tools, *self._middleware):
+            binding = getattr(elem, "hitl", None)
+            if binding is None or not binding.checkpointed:
+                continue
+            if binding.run_id is None:
+                raise ValueError(
+                    f"Checkpointed HITL element {elem!r} has no run_id bound; "
+                    "construct CheckpointedChannel(run_id=...) before passing "
+                    "it to ask_user_tool/HITL middleware"
+                )
+            bound.add(binding.run_id)
+        if bound:
+            if run_id is None:
+                raise ValueError(
+                    f"Agent has checkpointed HITL elements bound to "
+                    f"run_ids {sorted(bound)!r}; prompt(run_id=...) "
+                    "must be explicitly supplied (generate-mode rejected)"
+                )
+            if any(b != run_id for b in bound):
+                raise ValueError(
+                    f"prompt(run_id={run_id!r}) does not match "
+                    f"HITL-bound run_ids {sorted(bound)!r}"
+                )
         effective_run_id = run_id or uuid.uuid4().hex
         # Reject mismatched caller-supplied Message.run_id BEFORE any state
         # mutation so the supplied run_id remains reusable (Task 25 will add
