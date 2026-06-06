@@ -61,7 +61,7 @@ def _faux_with(responses) -> FauxProvider:
 
 async def test_respond_completes_a_suspended_run():
     cp = MemoryCheckpointer()
-    ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1", run_id="R1")
     provider = FauxProvider(provider_id="faux")
     provider.set_responses(_two_turn_bash_responses())
     agent = Agent(
@@ -77,7 +77,7 @@ async def test_respond_completes_a_suspended_run():
 
     # Start the agent — it will suspend on channel.approve.
     async def run():
-        await agent.prompt("hi")
+        await agent.prompt("hi", run_id="R1")
 
     task = asyncio.create_task(run())
 
