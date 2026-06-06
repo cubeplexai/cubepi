@@ -34,6 +34,7 @@ const sidebars: SidebarsConfig = {
           'guides/checkpointing/sqlite',
           'guides/checkpointing/postgres',
           'guides/checkpointing/mysql',
+          'guides/checkpointing/forking',
           'guides/checkpointing/custom',
         ]},
         { type: 'category', label: 'Middleware', items: [
