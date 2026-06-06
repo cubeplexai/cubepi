@@ -25,6 +25,7 @@ from cubepi.agent.types import (
     AgentEndEvent,
     AgentEvent,
     AgentTool,
+    ForkOnceResult,
     MessageEndEvent,
     MessageStartEvent,
     TurnEndEvent,
@@ -448,6 +449,78 @@ class Agent(Generic[TMessage]):
             after_run_id=after_run_id,
             metadata=metadata,
         )
+
+    async def fork_once(
+        self,
+        src_thread_id: str,
+        message: str | Message | list[Message],
+        *,
+        after_run_id: str,
+    ) -> ForkOnceResult:
+        if self.checkpointer is None:
+            raise RuntimeError("fork_once requires a checkpointer")
+        # Degraded-mode guard
+        if not self._run_aware or not hasattr(self.checkpointer, "snapshot"):
+            from cubepi.checkpointer.exceptions import CheckpointerError
+
+            raise CheckpointerError(
+                "backend does not support fork_once; missing snapshot / "
+                "claim_run / mark_run_complete"
+            )
+        # HITL pre-flight
+        hitl_offenders = [
+            elem
+            for elem in (*self._state.tools, *self._middleware)
+            if getattr(elem, "hitl", None) is not None
+        ]
+        if hitl_offenders:
+            names = ", ".join(
+                getattr(e, "name", type(e).__name__) for e in hitl_offenders
+            )
+            raise RuntimeError(
+                f"fork_once() does not support HITL. Found HITL-bearing "
+                f"tools/middleware: {names}. Construct a different Agent "
+                "without these for ephemeral probes."
+            )
+        snapshot = await self.checkpointer.snapshot(
+            src_thread_id, after_run_id=after_run_id
+        )
+        # Build transient agent
+        child: Agent = Agent(
+            model=self._model,
+            system_prompt=self._state.system_prompt,
+            tools=list(self._state.tools),
+            middleware=list(self._middleware),
+            convert_to_llm=self.convert_to_llm,
+            messages=snapshot,
+        )
+        pre_len = len(child.state.messages)
+        fresh_run_id = uuid.uuid4().hex
+        # Tracing placeholder — replaced by real OTel span in Task 34
+        with self._fork_once_span(
+            src_thread_id=src_thread_id, after_run_id=after_run_id
+        ):
+            await child.prompt(message, run_id=fresh_run_id)
+        new_messages = child.state.messages[pre_len:]
+        # Extract final assistant text and stop_reason
+        final_text = ""
+        stop_reason = "stop"
+        for m in reversed(new_messages):
+            if isinstance(m, AssistantMessage):
+                final_text = "".join(
+                    c.text for c in m.content if isinstance(c, TextContent)
+                )
+                stop_reason = m.stop_reason
+                break
+        return ForkOnceResult(
+            text=final_text, messages=new_messages, stop_reason=stop_reason
+        )
+
+    def _fork_once_span(self, *, src_thread_id: str, after_run_id: str):
+        """Replaced by a real OTel span in Task 34. Placeholder no-op."""
+        from contextlib import nullcontext
+
+        return nullcontext()
 
     async def resume(self) -> None:
         # Same fail-fast pattern as prompt(): lock.locked() is the atomic gate.
