@@ -6,6 +6,7 @@ from typing import Awaitable, Callable, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
+from cubepi.hitl.binding import HitlBinding
 from cubepi.hitl.types import HitlRequest
 from cubepi.providers.base import (
     AssistantMessage,
@@ -38,6 +39,7 @@ class AgentTool(Generic[TParams]):
     label: str = ""
     execution_mode: Literal["sequential", "parallel"] | None = None
     hitl_builtin: bool = False
+    hitl: HitlBinding | None = None
 
     def to_definition(self) -> ToolDefinition:
         schema = self.parameters.model_json_schema()

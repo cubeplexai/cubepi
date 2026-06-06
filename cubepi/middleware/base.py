@@ -12,6 +12,7 @@ from cubepi.agent.types import (
     BeforeToolCallContext,
     BeforeToolCallResult,
 )
+from cubepi.hitl.binding import HitlBinding
 from cubepi.providers.base import AssistantMessage, Message, Model, Provider
 from cubepi.types import JsonObject, StructuredObject
 
@@ -31,6 +32,8 @@ class TurnAction:
 
 
 class Middleware:
+    hitl: HitlBinding | None = None
+
     async def transform_context(
         self,
         messages: list[Message],
