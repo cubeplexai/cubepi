@@ -316,6 +316,56 @@ class Agent(Generic[TMessage]):
                 cause=exc,
             ) from exc
 
+    def _validate_hitl_bindings(self, run_id: str | None, *, caller: str) -> None:
+        """Reject HITL-bound tools/middleware that disagree with `run_id`.
+
+        Called from both `prompt(run_id=...)` and `respond()` (where the
+        run_id comes from the recovered pending row). This guarantees that
+        any checkpointed HITL channel/middleware on the Agent is bound to
+        the same run_id as the run that's about to drive the loop —
+        otherwise a second HITL pause would persist its pending row under
+        the wrong run_id and the next resume would stamp messages or try
+        to complete an unclaimed run.
+
+        Two callers, two None-semantics:
+        - `prompt(run_id=None)` with bindings → "generate-mode rejected":
+          the caller explicitly asked for an unbound run; the bindings
+          already carry one, so we must reject.
+        - `respond()` with `recovered_run_id=None` → legacy pending row
+          (pre-v4 save_pending_request, or forged). Skip the binding
+          check; the legacy fallback in respond() will skip dispatch
+          anyway, and the host's channel binding may correctly identify
+          the original run.
+        """
+        bound: set[str] = set()
+        for elem in (*self._state.tools, *self._middleware):
+            binding = getattr(elem, "hitl", None)
+            if binding is None or not binding.checkpointed:
+                continue
+            if binding.run_id is None:
+                raise ValueError(
+                    f"Checkpointed HITL element {elem!r} has no run_id bound; "
+                    "construct CheckpointedChannel(run_id=...) before passing "
+                    "it to ask_user_tool/HITL middleware"
+                )
+            bound.add(binding.run_id)
+        if not bound:
+            return
+        if run_id is None:
+            if caller == "respond":
+                # Legacy pending — no run_id to validate against.
+                return
+            raise ValueError(
+                f"Agent has checkpointed HITL elements bound to "
+                f"run_ids {sorted(bound)!r}; prompt(run_id=...) "
+                "must be explicitly supplied (generate-mode rejected)"
+            )
+        if any(b != run_id for b in bound):
+            raise ValueError(
+                f"{caller}() run_id={run_id!r} does not match "
+                f"HITL-bound run_ids {sorted(bound)!r}"
+            )
+
     def _validate_input_run_ids(
         self,
         message: str | Message | list[Message],
@@ -350,30 +400,7 @@ class Agent(Generic[TMessage]):
                 "Agent is already processing a prompt. "
                 "Use steer() or follow_up() to queue messages."
             )
-        bound: set[str] = set()
-        for elem in (*self._state.tools, *self._middleware):
-            binding = getattr(elem, "hitl", None)
-            if binding is None or not binding.checkpointed:
-                continue
-            if binding.run_id is None:
-                raise ValueError(
-                    f"Checkpointed HITL element {elem!r} has no run_id bound; "
-                    "construct CheckpointedChannel(run_id=...) before passing "
-                    "it to ask_user_tool/HITL middleware"
-                )
-            bound.add(binding.run_id)
-        if bound:
-            if run_id is None:
-                raise ValueError(
-                    f"Agent has checkpointed HITL elements bound to "
-                    f"run_ids {sorted(bound)!r}; prompt(run_id=...) "
-                    "must be explicitly supplied (generate-mode rejected)"
-                )
-            if any(b != run_id for b in bound):
-                raise ValueError(
-                    f"prompt(run_id={run_id!r}) does not match "
-                    f"HITL-bound run_ids {sorted(bound)!r}"
-                )
+        self._validate_hitl_bindings(run_id, caller="prompt")
         effective_run_id = run_id or uuid.uuid4().hex
         # Reject mismatched caller-supplied Message.run_id BEFORE any state
         # mutation so the supplied run_id remains reusable (claim_run must
@@ -728,6 +755,13 @@ class Agent(Generic[TMessage]):
                     f"answer for {question_id}, pending is {pending.question_id}"
                 )
 
+            # Validate HITL bindings on this Agent against the recovered
+            # run_id. Without this, a host that built CheckpointedChannel
+            # with a different run_id would persist a second pending row
+            # under the wrong run, then the next resume would stamp
+            # messages / try to complete an unclaimed run.
+            self._validate_hitl_bindings(recovered_run_id, caller="respond")
+
             # Thread the recovered run_id into agent state so the resume loop
             # stamps appended messages and _dispatch_outcome can mark the
             # run complete. respond() does NOT call claim_run — the original
@@ -848,6 +882,12 @@ class Agent(Generic[TMessage]):
                 tc_id for tc_id in tool_call_ids if tc_id not in already_resolved
             ]
 
+            # Stamp synthetic cleanup messages with the originating
+            # assistant's run_id so a later fork after an EARLIER completed
+            # run cannot copy aborted-run artifacts as "legacy" history
+            # (fork queries treat run_id IS NULL as always-copy).
+            owning_run_id = last.run_id
+
             # Synthesize deny tool_result for each unresolved tool_call.
             for tc_id in unresolved:
                 tc = next(
@@ -860,6 +900,7 @@ class Agent(Generic[TMessage]):
                     details={"hitl": {"decision": "aborted", "reason": reason}},
                     is_error=True,
                     timestamp=time.time(),
+                    run_id=owning_run_id,
                 )
                 self._state._messages.append(synthetic)
                 await self.checkpointer.append(self.thread_id, [synthetic])
@@ -872,6 +913,7 @@ class Agent(Generic[TMessage]):
                     stop_reason="aborted",
                     usage=Usage(),
                     timestamp=time.time(),
+                    run_id=owning_run_id,
                 )
                 self._state._messages.append(term)
                 await self.checkpointer.append(self.thread_id, [term])
@@ -980,6 +1022,12 @@ class Agent(Generic[TMessage]):
                 for m in self._state._messages[last_idx + 1 :]
                 if isinstance(m, ToolResultMessage)
             }
+            # Stamp synthetic results with the originating assistant's
+            # run_id so a fork after an earlier completed run cannot copy
+            # them as "legacy" history (fork treats run_id IS NULL as
+            # always-copy; an uncompleted run's tool_results would be
+            # orphaned in the forked transcript).
+            owning_run_id = last_assistant.run_id
             synthetic: list[Message] = []
             for block in last_assistant.content:
                 if not isinstance(block, ToolCall) or block.id in answered:
@@ -993,6 +1041,7 @@ class Agent(Generic[TMessage]):
                         ],
                         is_error=True,
                         timestamp=time.time(),
+                        run_id=owning_run_id,
                     )
                 )
 

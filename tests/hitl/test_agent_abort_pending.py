@@ -77,3 +77,9 @@ async def test_abort_pending_closes_conversation():
     assert msgs[-1].stop_reason == "aborted"
     # pending is cleared
     assert await cp.load_pending_request("t-1") is None
+    # Regression for codex R2 P1: synthetic deny + terminal abort must
+    # carry the originating assistant's run_id so a later fork query
+    # (which treats run_id IS NULL as legacy / always-copy) cannot copy
+    # these aborted-run artifacts as if they were pre-v4 history.
+    assert msgs[-2].run_id == "R1"
+    assert msgs[-1].run_id == "R1"

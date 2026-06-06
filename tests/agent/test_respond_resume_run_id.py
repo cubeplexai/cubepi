@@ -172,3 +172,40 @@ async def test_respond_resume_with_legacy_pending_does_not_crash() -> None:
 
     # Legacy guard skipped dispatch — marker remains unwritten.
     assert cp._runs["t"]["R1"].completed_at is None
+
+
+@pytest.mark.asyncio
+async def test_respond_rejects_mismatched_channel_run_id() -> None:
+    """Regression for codex R2 P2: respond() must reject a CheckpointedChannel
+    whose run_id disagrees with the recovered pending row's run_id.
+
+    Otherwise a second HITL pause during resume would persist a new pending
+    row under the channel's (wrong) run_id, then the next resume would
+    stamp messages or try to complete an unclaimed run.
+    """
+    cp = MemoryCheckpointer()
+    p = _pause_then_finish_provider()
+
+    def _model():
+        return p.model("faux-model")
+
+    await _drive_pause(cp, _model)
+
+    loaded = await cp.load_pending("t")
+    assert loaded is not None
+    pending_req, recovered_run_id = loaded
+    assert recovered_run_id == "R1"
+
+    # Host accidentally builds the channel with a DIFFERENT run_id.
+    ch_wrong = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R_WRONG")
+    tool_wrong = ask_user_tool(ch_wrong)
+    a_wrong = Agent(
+        model=_model(),
+        tools=[tool_wrong],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch_wrong,
+    )
+    qid = pending_req.question_id
+    with pytest.raises(ValueError, match="does not match"):
+        await a_wrong.respond(question_id=qid, answer="yes")
