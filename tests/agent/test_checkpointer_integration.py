@@ -358,3 +358,30 @@ class TestCheckpointerIntegration:
         ]
         await agent._complete_cancelled_tool_calls()
         assert len(agent._state._messages) == 3
+
+    async def test_cancel_backfill_stamps_synthetic_with_owning_run_id(self):
+        """Regression for codex R2 P1: synthetic ToolResultMessages produced
+        during cancel cleanup must carry the originating assistant's run_id.
+
+        Without it, fork-snapshot queries (which treat run_id IS NULL as
+        legacy / always-copy) would copy these orphans into a later fork
+        after an EARLIER completed run, even though the cancelled run was
+        never marked complete.
+        """
+        agent = Agent(model=FauxProvider(provider_id="faux").model("faux-1"))
+        agent._state._messages = [
+            UserMessage(content=[TextContent(text="go")], run_id="R_cancel"),
+            AssistantMessage(
+                content=[
+                    ToolCall(id="orphan", name="b", arguments={}),
+                ],
+                stop_reason="tool_use",
+                run_id="R_cancel",
+            ),
+        ]
+        await agent._complete_cancelled_tool_calls()
+        backfilled = [
+            m for m in agent._state._messages if isinstance(m, ToolResultMessage)
+        ]
+        assert len(backfilled) == 1
+        assert backfilled[0].run_id == "R_cancel"
