@@ -4039,11 +4039,12 @@ if recovered_run_id is not None:
     self._state.active_run_id = recovered_run_id
 self._state.last_outcome = None
 try:
-    # ... existing respond() body — re-enter the agent loop via
-    # _run_hitl_resume(...) (which receives set_outcome=
-    # self._outcome_sink() from Task 26's plumbing, so the loop's
-    # exit-path catches populate state.last_outcome) ...
-    await self._run_hitl_resume(...)
+    # `_run_hitl_resume(self)` (no args; takes everything from
+    # self._state) re-enters the agent loop. It calls
+    # run_agent_loop_resume(set_outcome=self._outcome_sink(), …)
+    # internally — the loop's exit-path catches populate
+    # self._state.last_outcome.
+    await self._run_hitl_resume()
 except BaseException:
     # Leave active_run_id SET on raise (spec §3.7).
     raise
@@ -4059,28 +4060,108 @@ else:
 Task 23). At terminal clean exit, `_dispatch_outcome` (from Task 26)
 fires `mark_run_complete`.
 
-Add tests asserting:
+Add tests in `tests/agent/test_respond_resume_run_id.py`:
 
 ```python
+import asyncio
+
+import pytest
+
+from cubepi.agent.agent import Agent
+from cubepi.checkpointer.memory import MemoryCheckpointer
+from cubepi.hitl.ask_user import ask_user_tool
+from cubepi.hitl.channel import CheckpointedChannel
+from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
+from cubepi.providers.faux import FauxProvider
+
+
+def _pause_then_finish_provider() -> FauxProvider:
+    p = FauxProvider()
+    p.set_responses([
+        # Turn 1: ask_user → pause.
+        AssistantMessage(
+            content=[ToolCall(
+                id="tc-1", name="ask_user",
+                arguments={"questions": [{"key": "ans", "prompt": "?"}]},
+            )],
+            stop_reason="tool_use",
+        ),
+        # Turn 2 (resume): final assistant.
+        AssistantMessage(
+            content=[TextContent(text="done")],
+            stop_reason="end_turn",
+        ),
+    ])
+    return p
+
+
+async def _drive_pause(cp, model_factory):
+    """Helper: start a prompt that pauses for ask_user. Returns
+    (agent, task) — caller awaits task after detach/abort/respond."""
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
+    tool = ask_user_tool(ch)
+    a = Agent(
+        model=model_factory(),
+        tools=[tool],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch,
+    )
+    task = asyncio.create_task(a.prompt("hi", run_id="R1"))
+    while (await cp.load_pending("t")) is None:
+        await asyncio.sleep(0.01)
+    return a, task
+
+
 @pytest.mark.asyncio
 async def test_respond_clears_active_run_id_on_clean_resume():
-    # Mirror tests/hitl/test_agent_respond.py setup: provider script
-    # ask_user → final assistant; CheckpointedChannel; pause; resume
-    # via respond(question_id=qid, answer="yes").
-    ...
-    assert agent.state.active_run_id is None
+    cp = MemoryCheckpointer()
+    p = _pause_then_finish_provider()
+    a, task = await _drive_pause(cp, lambda: p.model("faux-model"))
+    await a.detach()
+    await task
+    # Resume with a fresh Agent on a fresh channel.
+    ch2 = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
+    tool2 = ask_user_tool(ch2)
+    a2 = Agent(
+        model=p.model("faux-model"),
+        tools=[tool2],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch2,
+    )
+    pending = await cp.load_pending("t")
+    qid = pending[0].question_id
+    await a2.respond(question_id=qid, answer="yes")
+    assert a2.state.active_run_id is None
 
 
 @pytest.mark.asyncio
 async def test_respond_resume_writes_marker():
     """Cross-reference: Task 26's
     test_hitl_detached_outcome_suspended_no_mark stops at the
-    suspended assertion. This test reaches the resume path and
-    asserts cp._runs[t][R1].completed_at IS NOT None after
-    respond()."""
-    # Same setup as test_hitl_detached_outcome_suspended_no_mark
-    # from Task 26, then continue with respond and assert the marker.
-    ...
+    suspended-state assertion. This test continues to the resume
+    path and asserts cp._runs[t][R1].completed_at IS NOT None
+    after respond()."""
+    cp = MemoryCheckpointer()
+    p = _pause_then_finish_provider()
+    a, task = await _drive_pause(cp, lambda: p.model("faux-model"))
+    await a.detach()
+    await task
+    assert cp._runs["t"]["R1"].completed_at is None  # not yet marked
+
+    ch2 = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
+    tool2 = ask_user_tool(ch2)
+    a2 = Agent(
+        model=p.model("faux-model"),
+        tools=[tool2],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch2,
+    )
+    pending = await cp.load_pending("t")
+    qid = pending[0].question_id
+    await a2.respond(question_id=qid, answer="yes")
     assert cp._runs["t"]["R1"].completed_at is not None
 ```
 
