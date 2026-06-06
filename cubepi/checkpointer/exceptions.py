@@ -1,8 +1,12 @@
-"""Backend-agnostic schema exceptions for SQL checkpointers.
+"""Checkpointer exceptions — schema errors and runtime operation errors.
 
-Shared by the Postgres and MySQL checkpointers so that ``except
-CubepiSchemaError`` works across backends and neither backend's package
-(and its driver) needs to be imported to obtain them.
+*Schema errors* (``CubepiSchemaError`` hierarchy): shared by the Postgres
+and MySQL checkpointers so that ``except CubepiSchemaError`` works across
+backends without importing either driver.
+
+*Runtime errors* (``CheckpointerError`` hierarchy): backend-agnostic
+operation outcomes — missing thread, run-state conflicts, lock timeout,
+completion-marker failure.
 """
 
 
@@ -44,11 +48,11 @@ class CheckpointerError(Exception):
 
 
 class ThreadNotFoundError(CheckpointerError):
-    pass
+    """No cubepi thread row exists for the given thread_id."""
 
 
 class ThreadAlreadyExistsError(CheckpointerError):
-    pass
+    """A cubepi thread row already exists for thread_id."""
 
 
 class RunNotCompletedError(CheckpointerError):
@@ -99,3 +103,4 @@ class CompletionMarkerFailedError(CheckpointerError):
         self.thread_id = thread_id
         self.run_id = run_id
         self.__cause__ = cause
+        self.__suppress_context__ = True
