@@ -17,6 +17,11 @@ import msgpack
 import pymysql
 
 from cubepi.checkpointer.base import CheckpointData
+from cubepi.checkpointer.exceptions import (
+    RunAlreadyClaimedError,
+    RunAlreadyCompletedError,
+    RunNotClaimedError,
+)
 from cubepi.checkpointer.mysql.exceptions import (
     CubepiSchemaMismatch,
     CubepiSchemaUninitialized,
@@ -198,6 +203,9 @@ class MySQLCheckpointer:
         if not messages:
             return
         assert self._pool is not None
+        run_ids = {
+            rid for m in messages if (rid := getattr(m, "run_id", None)) is not None
+        }
         async with self._pool.acquire() as conn:
             await conn.begin()
             try:
@@ -216,6 +224,22 @@ class MySQLCheckpointer:
                         "WHERE thread_id = %s FOR UPDATE",
                         (thread_id,),
                     )
+                    # Pre-flight: reject append on any completed run_id.
+                    if run_ids:
+                        placeholders = ", ".join(["%s"] * len(run_ids))
+                        await cur.execute(
+                            f"SELECT run_id FROM cubepi_runs "
+                            f"WHERE thread_id = %s "
+                            f"AND run_id IN ({placeholders}) "
+                            f"AND completed_at IS NOT NULL",
+                            (thread_id, *run_ids),
+                        )
+                        done_rows = await cur.fetchall()
+                        if done_rows:
+                            bad = ", ".join(r[0] for r in done_rows)
+                            raise RunAlreadyCompletedError(
+                                f"append on completed run thread={thread_id} runs={bad}"
+                            )
                     await cur.execute(
                         "SELECT COALESCE(MAX(seq), 0) FROM cubepi_messages "
                         "WHERE thread_id = %s",
@@ -235,18 +259,147 @@ class MySQLCheckpointer:
                                 _role_of(m),
                                 json.dumps(m.metadata),
                                 payload,
+                                getattr(m, "run_id", None),
                             )
                         )
                     await cur.executemany(
                         "INSERT INTO cubepi_messages "
-                        "(thread_id, seq, role, metadata, payload) "
-                        "VALUES (%s, %s, %s, %s, %s)",
+                        "(thread_id, seq, role, metadata, payload, run_id) "
+                        "VALUES (%s, %s, %s, %s, %s, %s)",
                         rows,
                     )
                 await conn.commit()
-            except BaseException:  # pragma: no cover - defensive txn rollback
+            except BaseException:
                 await conn.rollback()
                 raise
+
+    async def claim_run(self, thread_id: str, run_id: str) -> None:
+        """Atomically claim a run_id on a thread.
+
+        Lazy-creates the cubepi_threads row, takes a per-thread FOR UPDATE
+        lock to serialize concurrent claims for the same thread, then
+        checks cubepi_runs for an existing row before inserting. The
+        pre-check matches the Postgres approach — using INSERT + catching
+        IntegrityError would also work, but a pre-SELECT lets us
+        distinguish in-flight vs completed cleanly without relying on the
+        error-class taxonomy.
+        """
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cur:
+                    # Lazy thread row creation (claim may precede any append).
+                    await cur.execute(
+                        "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
+                        "ON DUPLICATE KEY UPDATE thread_id = thread_id",
+                        (thread_id,),
+                    )
+                    # Per-thread fence: serializes claim_run/append/fork on
+                    # the same thread (matches Postgres's pg_advisory_xact_lock).
+                    await cur.execute(
+                        "SELECT thread_id FROM cubepi_threads "
+                        "WHERE thread_id = %s FOR UPDATE",
+                        (thread_id,),
+                    )
+                    await cur.execute(
+                        "SELECT completed_at FROM cubepi_runs "
+                        "WHERE thread_id = %s AND run_id = %s",
+                        (thread_id, run_id),
+                    )
+                    row = await cur.fetchone()
+                    if row is not None:
+                        if row[0] is not None:
+                            raise RunAlreadyCompletedError(
+                                f"thread={thread_id} run={run_id} already completed"
+                            )
+                        raise RunAlreadyClaimedError(
+                            f"thread={thread_id} run={run_id} in flight"
+                        )
+                    await cur.execute(
+                        "INSERT INTO cubepi_runs (thread_id, run_id) VALUES (%s, %s)",
+                        (thread_id, run_id),
+                    )
+                await conn.commit()
+            except BaseException:
+                await conn.rollback()
+                raise
+
+    async def mark_run_complete(self, thread_id: str, run_id: str) -> None:
+        """Mark (thread_id, run_id) complete with a monotonic completion_seq.
+
+        Idempotent: a second call on an already-completed row is a no-op.
+        Raises ``RunNotClaimedError`` if no claim row exists. The
+        completion_seq is the per-thread MAX(completion_seq) + 1, allocated
+        under the same per-thread FOR UPDATE fence as claim_run/append.
+        """
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT thread_id FROM cubepi_threads "
+                        "WHERE thread_id = %s FOR UPDATE",
+                        (thread_id,),
+                    )
+                    await cur.execute(
+                        "SELECT completed_at FROM cubepi_runs "
+                        "WHERE thread_id = %s AND run_id = %s",
+                        (thread_id, run_id),
+                    )
+                    row = await cur.fetchone()
+                    if row is None:
+                        raise RunNotClaimedError(
+                            f"thread={thread_id} run={run_id} has no claim row"
+                        )
+                    if row[0] is not None:
+                        await conn.commit()
+                        return  # idempotent success
+                    await cur.execute(
+                        "SELECT COALESCE(MAX(completion_seq), 0) + 1 "
+                        "FROM cubepi_runs WHERE thread_id = %s "
+                        "AND completion_seq IS NOT NULL",
+                        (thread_id,),
+                    )
+                    (next_seq,) = await cur.fetchone()
+                    await cur.execute(
+                        "UPDATE cubepi_runs SET completed_at = CURRENT_TIMESTAMP, "
+                        "completion_seq = %s "
+                        "WHERE thread_id = %s AND run_id = %s",
+                        (next_seq, thread_id, run_id),
+                    )
+                await conn.commit()
+            except BaseException:
+                await conn.rollback()
+                raise
+
+    async def load_pending(
+        self, thread_id: str
+    ) -> tuple[HitlRequest, str | None] | None:
+        """Return the thread's pending HITL request + the owning run_id.
+
+        Single SELECT covers both columns (vs. ``load_pending_request`` +
+        ``load_pending_run_id``, which incur two round trips and can race
+        across a clear/set window). Returns None when no pending exists.
+        """
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT pending_request, run_id FROM cubepi_threads "
+                    "WHERE thread_id = %s",
+                    (thread_id,),
+                )
+                row = await cur.fetchone()
+        if row is None or row[0] is None:
+            return None
+        raw = row[0]
+        if isinstance(raw, str):
+            req = HitlRequest.model_validate_json(raw)
+        else:
+            req = HitlRequest.model_validate(raw)
+        return req, row[1]
 
     async def save_extra(self, thread_id: str, extra: JsonObject) -> None:
         assert self._pool is not None
