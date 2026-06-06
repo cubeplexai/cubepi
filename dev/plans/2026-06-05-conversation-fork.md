@@ -3623,10 +3623,19 @@ git commit -m "feat(agent): mark_run_complete only on clean terminal outcome"
 
 Create `tests/agent/test_tool_cycle_invariant.py`:
 ```python
+import asyncio
+
+import pytest
+
 from cubepi.agent._tool_cycle import (
     ToolCycleViolation,
     check_tool_cycle,
 )
+from cubepi.agent.agent import Agent
+from cubepi.checkpointer.memory import MemoryCheckpointer
+from cubepi.hitl.ask_user import ask_user_tool
+from cubepi.hitl.channel import CheckpointedChannel
+from cubepi.middleware.base import TurnAction
 from cubepi.providers.base import (
     AssistantMessage,
     TextContent,
@@ -3634,6 +3643,7 @@ from cubepi.providers.base import (
     ToolResultMessage,
     UserMessage,
 )
+from cubepi.providers.faux import FauxProvider
 
 
 def _asst(call_ids, run_id="R"):
@@ -3873,13 +3883,6 @@ async def test_incomplete_tool_cycle_does_not_mark():
     leaves an unresolved tool_call. _dispatch_outcome filters
     state.messages by run_id and demotes 'complete' to 'incomplete'
     via check_tool_cycle. Marker not written."""
-    from cubepi.checkpointer.memory import MemoryCheckpointer
-    from cubepi.middleware.base import TurnAction
-    from cubepi.providers.base import (
-        AssistantMessage, ToolCall,
-    )
-    from cubepi.providers.faux import FauxProvider
-
     p = FauxProvider()
     p.set_responses([
         AssistantMessage(
@@ -3910,15 +3913,6 @@ async def test_tool_cycle_invariant_spans_hitl_resume():
     state.messages by m.run_id == 'R1' — sees the unresolved c1 →
     outcome demoted from 'complete' to 'incomplete' → marker NOT
     written."""
-    import asyncio
-
-    from cubepi.checkpointer.memory import MemoryCheckpointer
-    from cubepi.hitl.ask_user import ask_user_tool
-    from cubepi.hitl.channel import CheckpointedChannel
-    from cubepi.providers.base import (
-        AssistantMessage, TextContent, ToolCall,
-    )
-
     cp = MemoryCheckpointer()
     p = FauxProvider()
     p.set_responses([
@@ -3939,8 +3933,6 @@ async def test_tool_cycle_invariant_spans_hitl_resume():
             stop_reason="tool_use",
         ),
     ])
-
-    from cubepi.middleware.base import TurnAction
 
     async def _stop_after(response, ctx, *, signal=None):
         # Stop after the second assistant turn so the orphan tool_call
