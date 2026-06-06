@@ -129,3 +129,12 @@ async def clean_mysql_db(mysql_dsn: str, _mysql_available: bool):
             await cur.execute(f"DROP DATABASE IF EXISTS `{db_name}`")
     finally:
         await admin.ensure_closed()
+
+
+@pytest_asyncio.fixture
+async def mysql_v4_dsn(clean_mysql_db: str):
+    """Fresh MySQL DB with the v4 cubepi schema fully built."""
+    from tests.checkpointer.test_mysql import _setup_schema as _setup_mysql_schema
+
+    await _setup_mysql_schema(clean_mysql_db)
+    yield clean_mysql_db

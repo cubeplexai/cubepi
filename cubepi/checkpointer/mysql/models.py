@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.mysql import JSON, LONGBLOB, VARCHAR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-EXPECTED_SCHEMA_VERSION = 3
+EXPECTED_SCHEMA_VERSION = 4
 PARTITION_COUNT = 64
 
 cubepi_metadata = sa.MetaData()
@@ -73,7 +73,10 @@ class CubepiThread(CubepiBase):
 
 class CubepiMessage(CubepiBase):
     __tablename__ = "cubepi_messages"
-    __table_args__ = {"mysql_engine": "InnoDB"}
+    __table_args__ = (
+        sa.Index("ix_cubepi_messages_thread_run", "thread_id", "run_id"),
+        {"mysql_engine": "InnoDB"},
+    )
 
     thread_id: Mapped[str] = mapped_column(_TID, primary_key=True)
     seq: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True)
@@ -87,11 +90,49 @@ class CubepiMessage(CubepiBase):
         server_default=sa.text("(JSON_OBJECT())"),
     )
     payload: Mapped[bytes] = mapped_column(LONGBLOB, nullable=False)
+    # v4: opaque host-side run identifier stamped on each message. Lets
+    # fork/snapshot include only messages from completed runs. VARCHAR(255)
+    # to match the cubepi_messages indexing convention (thread_id is also
+    # VARCHAR(255) — keeps the composite index cardinality consistent).
+    run_id: Mapped[str | None] = mapped_column(
+        VARCHAR(255),
+        nullable=True,
+    )
     created_at: Mapped[_dt.datetime] = mapped_column(
         sa.TIMESTAMP,
         nullable=False,
         server_default=sa.text("CURRENT_TIMESTAMP"),
     )
+
+
+class CubepiRun(CubepiBase):
+    """v4 per-run lifecycle row.
+
+    Primary key (thread_id, run_id). KEY-partitioned by thread_id to match
+    cubepi_messages. NO FK to cubepi_threads — MySQL forbids FKs on
+    partitioned tables. The partition clause cannot be expressed in
+    SQLAlchemy declarative and lives in
+    ``alembic_helpers.runs_partition_clause()``.
+    """
+
+    __tablename__ = "cubepi_runs"
+    __table_args__ = (
+        sa.Index("ix_cubepi_runs_thread_seq", "thread_id", "completion_seq"),
+        {"mysql_engine": "InnoDB"},
+    )
+
+    thread_id: Mapped[str] = mapped_column(_TID, primary_key=True)
+    run_id: Mapped[str] = mapped_column(VARCHAR(255), primary_key=True)
+    claimed_at: Mapped[_dt.datetime] = mapped_column(
+        sa.TIMESTAMP,
+        nullable=False,
+        server_default=sa.text("CURRENT_TIMESTAMP"),
+    )
+    completed_at: Mapped[_dt.datetime | None] = mapped_column(
+        sa.TIMESTAMP,
+        nullable=True,
+    )
+    completion_seq: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)
 
 
 class CubepiSchemaVersion(CubepiBase):
