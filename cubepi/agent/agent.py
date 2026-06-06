@@ -210,6 +210,11 @@ class Agent(Generic[TMessage]):
         self.tool_execution = tool_execution
         self.checkpointer = checkpointer
         self.thread_id = thread_id
+        self._run_aware = (
+            self.checkpointer is not None
+            and hasattr(self.checkpointer, "claim_run")
+            and hasattr(self.checkpointer, "mark_run_complete")
+        )
         self._channel = channel
         # _bind_emit is a _BaseChannel internal, not part of the HitlChannel
         # protocol. Third-party channels that only implement the public
@@ -340,6 +345,9 @@ class Agent(Generic[TMessage]):
         # mutation so the supplied run_id remains reusable (Task 25 will add
         # claim_run, which must not be called for a rejected prompt).
         self._validate_input_run_ids(message, effective_run_id)
+        if self._run_aware and self.thread_id is not None:
+            assert self.checkpointer is not None  # narrowed by _run_aware
+            await self.checkpointer.claim_run(self.thread_id, effective_run_id)
         self._state.active_run_id = effective_run_id
         try:
             async with self._run_lock:
