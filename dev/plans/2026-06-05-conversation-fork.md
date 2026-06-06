@@ -3348,21 +3348,10 @@ async def test_hitl_detached_outcome_suspended_no_mark():
     await task  # returns normally; state.last_outcome == "suspended"
     assert cp._runs["t"]["R1"].completed_at is None
 
-    # Resume with a fresh Agent on a fresh channel; provide answer.
-    ch2 = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
-    tool2 = ask_user_tool(ch2)
-    a2 = Agent(
-        model=p.model("faux-model"),
-        tools=[tool2],
-        checkpointer=cp,
-        thread_id="t",
-        channel=ch2,
-    )
-    pending = await cp.load_pending("t")
-    qid = pending[0].question_id
-    # respond() is keyword-only — see agent.py:431.
-    await a2.respond(question_id=qid, answer="yes")
-    assert cp._runs["t"]["R1"].completed_at is not None
+    # NOTE: The resume-writes-marker assertion lives in Task 28
+    # (test_respond_resume_writes_marker), because run_id recovery
+    # via load_pending() is implemented there. At Task 26 we only
+    # assert the suspended-state-no-marker portion.
 
 
 @pytest.mark.asyncio
@@ -3410,41 +3399,11 @@ async def test_hitl_aborted_via_abort_pending_does_not_mark():
     )
 
 
-@pytest.mark.asyncio
-async def test_incomplete_tool_cycle_does_not_mark():
-    """after_model_response(decision='stop') on a tool-use response
-    triggers the pre-completion invariant (Task 27).
-    state.last_outcome="incomplete" → no marker."""
-    from cubepi.middleware.base import TurnAction   # real module
-    from cubepi.providers.base import ToolCall
-
-    p = FauxProvider()
-    p.set_responses([
-        AssistantMessage(
-            content=[ToolCall(id="c1", name="t", arguments={})],
-            stop_reason="tool_use",
-        ),
-    ])
-
-    # after_model_response signature per cubepi/middleware/base.py:76:
-    #   async def after_model_response(
-    #       self, response: AssistantMessage, ctx: AgentContext,
-    #       *, signal: asyncio.Event | None = None,
-    #   ) -> TurnAction | None
-    # As a callable hook passed to Agent, drop `self`:
-    async def _stop_after(response, ctx, *, signal=None):
-        return TurnAction(decision="stop")
-
-    cp = MemoryCheckpointer()
-    a = Agent(
-        model=p.model("faux-model"),
-        checkpointer=cp,
-        thread_id="t",
-        after_model_response=_stop_after,
-    )
-    await a.prompt("hi", run_id="R1")
-    rs = cp._runs["t"]["R1"]
-    assert rs.completed_at is None
+# Note: test_incomplete_tool_cycle_does_not_mark is implemented in
+# Task 27 alongside the _tool_cycle.py helper that demotes
+# "complete" → "incomplete". The outcome table row above is covered
+# by that task's tests; we do not stub it here at Task 26 because
+# the check_tool_cycle helper doesn't exist yet.
 
 
 @pytest.mark.asyncio
@@ -3902,9 +3861,47 @@ pre-suspend tool-use assistant is still in `state.messages`
 cross-suspend run. The invariant therefore catches a tool-use that
 remained unresolved across the pause.
 
-Add a resume-path test to Task 26 (or as an extra in
-`tests/agent/test_tool_cycle_invariant.py`):
+Add TWO tests to `tests/agent/test_tool_cycle_invariant.py`. The
+first is the straight `after_model_response(decision="stop")` case
+that was moved out of Task 26 because the helper this task
+introduces is what catches it:
+
 ```python
+@pytest.mark.asyncio
+async def test_incomplete_tool_cycle_does_not_mark():
+    """after_model_response(decision='stop') on a tool-use response
+    leaves an unresolved tool_call. _dispatch_outcome filters
+    state.messages by run_id and demotes 'complete' to 'incomplete'
+    via check_tool_cycle. Marker not written."""
+    from cubepi.checkpointer.memory import MemoryCheckpointer
+    from cubepi.middleware.base import TurnAction
+    from cubepi.providers.base import (
+        AssistantMessage, ToolCall,
+    )
+    from cubepi.providers.faux import FauxProvider
+
+    p = FauxProvider()
+    p.set_responses([
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="t", arguments={})],
+            stop_reason="tool_use",
+        ),
+    ])
+
+    async def _stop_after(response, ctx, *, signal=None):
+        return TurnAction(decision="stop")
+
+    cp = MemoryCheckpointer()
+    a = Agent(
+        model=p.model("faux-model"),
+        checkpointer=cp,
+        thread_id="t",
+        after_model_response=_stop_after,
+    )
+    await a.prompt("hi", run_id="R1")
+    assert cp._runs["t"]["R1"].completed_at is None
+
+
 @pytest.mark.asyncio
 async def test_tool_cycle_invariant_spans_hitl_resume():
     """Pause mid-tool-use (ask_user). Resume; provider then emits an
