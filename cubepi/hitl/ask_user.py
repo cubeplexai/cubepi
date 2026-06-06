@@ -8,7 +8,8 @@ from typing import cast
 from pydantic import BaseModel
 
 from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.hitl.channel import HitlChannel
+from cubepi.hitl.binding import HitlBinding
+from cubepi.hitl.channel import CheckpointedChannel, HitlChannel
 from cubepi.hitl.types import Option, Question
 from cubepi.providers.base import TextContent
 from cubepi.types import StructuredObject, StructuredValue
@@ -106,12 +107,18 @@ def ask_user_tool(channel: HitlChannel) -> AgentTool[AskUserParams]:
             ),
         )
 
+    checkpointed = isinstance(channel, CheckpointedChannel)
+    binding = HitlBinding(
+        checkpointed=checkpointed,
+        run_id=getattr(channel, "_run_id", None) if checkpointed else None,
+    )
     tool = AgentTool(
         name="ask_user",
         description=_DESCRIPTION,
         parameters=AskUserParams,
         execute=execute,
         execution_mode="sequential",
+        hitl=binding,
     )
     # Signal to _execute_prepared that this is a built-in HITL tool so the
     # ContextVar durability guard is NOT set on entry — only custom tool
