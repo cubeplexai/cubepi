@@ -25,6 +25,9 @@ class SQLiteCheckpointer:
 
     async def __aenter__(self) -> SQLiteCheckpointer:
         self._db = await aiosqlite.connect(self._db_path)
+        # Set busy_timeout to 5s — gives writer contention a chance to wait
+        # rather than immediately failing with SQLITE_BUSY.
+        await self._db.execute("PRAGMA busy_timeout = 5000")
         await self._db.execute(
             "CREATE TABLE IF NOT EXISTS messages ("
             "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -47,6 +50,20 @@ class SQLiteCheckpointer:
             "  created_at REAL NOT NULL DEFAULT (julianday('now'))"
             ")"
         )
+        await self._db.execute(
+            "CREATE TABLE IF NOT EXISTS runs ("
+            "  thread_id TEXT NOT NULL,"
+            "  run_id TEXT NOT NULL,"
+            "  claimed_at REAL NOT NULL DEFAULT (julianday('now')),"
+            "  completed_at REAL,"
+            "  completion_seq INTEGER,"
+            "  PRIMARY KEY (thread_id, run_id)"
+            ")"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS ix_runs_thread_completion "
+            "ON runs (thread_id, completion_seq)"
+        )
         # One-shot migration: older DBs (created before run_id existed) have
         # the table without the run_id column. SQLite has no schema_version
         # gate, so we ALTER inline when it's missing.
@@ -55,6 +72,18 @@ class SQLiteCheckpointer:
         if "run_id" not in cols:
             await self._db.execute(
                 "ALTER TABLE thread_pending_request ADD COLUMN run_id TEXT"
+            )
+        # Same one-shot ALTER pattern for the new run_id column on messages.
+        cur = await self._db.execute("PRAGMA table_info(messages)")
+        cols = {row[1] for row in await cur.fetchall()}
+        if "run_id" not in cols:
+            await self._db.execute("ALTER TABLE messages ADD COLUMN run_id TEXT")
+        # And for parent_thread_id on thread_extra.
+        cur = await self._db.execute("PRAGMA table_info(thread_extra)")
+        cols = {row[1] for row in await cur.fetchall()}
+        if "parent_thread_id" not in cols:
+            await self._db.execute(
+                "ALTER TABLE thread_extra ADD COLUMN parent_thread_id TEXT"
             )
         await self._db.commit()
         return self
