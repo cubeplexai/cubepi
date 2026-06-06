@@ -151,10 +151,6 @@ async def test_incomplete_tool_cycle_does_not_mark():
     assert cp._runs["t"]["R1"].completed_at is None
 
 
-@pytest.mark.xfail(
-    reason="needs Task 28 load_pending recovery for run_id propagation",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_tool_cycle_invariant_spans_hitl_resume():
     """Pause mid-tool-use (ask_user). Resume; provider then emits an

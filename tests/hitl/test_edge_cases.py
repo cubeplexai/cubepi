@@ -108,7 +108,7 @@ def test_respond_raises_when_checkpointer_lacks_hitl():
         checkpointer=_BareCP(),
         thread_id="t-1",
     )
-    with pytest.raises(HitlError, match="load_pending_request"):
+    with pytest.raises(HitlError, match="load_pending"):
         asyncio.get_event_loop().run_until_complete(
             agent.respond(answer=ApproveAnswer(decision="approve"))
         )
