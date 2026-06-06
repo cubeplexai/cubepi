@@ -3243,7 +3243,6 @@ Create `tests/agent/test_agent_completion.py`:
 
 ```python
 import asyncio
-import contextlib
 
 import pytest
 
@@ -4094,10 +4093,49 @@ async def respond(
             # Spec §3.7: leave active_run_id SET on raise.
             raise
         else:
-            outcome = self._state.last_outcome or "abandoned"
-            await self._dispatch_outcome(outcome, recovered_run_id)
-            # Clear on successful resume completion.
+            # Legacy guard: pending rows written by pre-spec code
+            # may carry run_id=None. Skip dispatch entirely — the
+            # caller didn't opt into run tracking for this run.
+            if recovered_run_id is not None:
+                outcome = self._state.last_outcome or "abandoned"
+                await self._dispatch_outcome(outcome, recovered_run_id)
+            # Clear on successful resume completion (legacy or not).
             self._state.active_run_id = None
+```
+
+Add a regression test mirroring the legacy case:
+
+```python
+@pytest.mark.asyncio
+async def test_respond_resume_with_legacy_pending_does_not_crash():
+    """A pre-spec pending row was written without run_id. respond()
+    must resume cleanly: no claim, no mark, no crash."""
+    cp = MemoryCheckpointer()
+    p = _pause_then_finish_provider()
+    a, task = await _drive_pause(cp, lambda: p.model("faux-model"))
+    await a.detach()
+    await task
+    # Forge legacy state: clear the pending row's run_id (simulating
+    # the pre-spec on-disk shape).
+    pending_req = (await cp.load_pending("t"))[0]
+    await cp.save_pending_request("t", pending_req, run_id=None)
+
+    ch2 = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id=None)
+    tool2 = ask_user_tool(ch2)
+    a2 = Agent(
+        model=p.model("faux-model"),
+        tools=[tool2],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch2,
+    )
+    pending = await cp.load_pending("t")
+    qid = pending[0].question_id
+    # Must not raise.
+    await a2.respond(question_id=qid, answer="yes")
+    # No marker (run_id was None on resume) — but the messages are
+    # persisted and the thread is in a coherent state.
+    assert "R1" not in cp._runs.get("t", {})
 ```
 
 **Do not call `claim_run` here.** All subsequent append calls use
