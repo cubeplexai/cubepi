@@ -3270,45 +3270,96 @@ async def test_clean_success_marks_complete():
 
 @pytest.mark.asyncio
 async def test_provider_error_does_not_mark():
+    """A provider exception is caught by the agent lifecycle, which
+    appends a synthetic assistant with stop_reason='error' and
+    RETURNS NORMALLY (does not re-raise). state.last_outcome is set
+    to "abandoned" via the loop.py:485 branch, dispatch sees
+    not-complete, mark_run_complete is not called."""
     class _RaisingProvider(FauxProvider):
         async def stream(self, *args, **kwargs):
             raise RuntimeError("provider down")
     a, cp = _agent(_RaisingProvider())
-    with pytest.raises(Exception):
-        await a.prompt("hi", run_id="R1")
+    await a.prompt("hi", run_id="R1")  # returns normally, no raise
     rs = cp._runs["t"]["R1"]
     assert rs.completed_at is None
+    # The synthetic error assistant is persisted.
+    data = await cp.load("t")
+    assert any(
+        getattr(m, "stop_reason", None) == "error"
+        for m in data.messages
+    )
 
 
 @pytest.mark.asyncio
 async def test_hitl_detached_outcome_suspended_no_mark():
-    """Detach the channel mid-pause → loop catch at loop.py:196 sets
+    """Detach the channel mid-pause → loop catch sets
     state.last_outcome="suspended" → no mark. After respond(), marker
     IS written.
 
-    **Read tests/hitl/test_agent_respond.py first** — it contains the
-    real pattern for HITL pause + respond plumbing using
-    cubepi.hitl.testing helpers. Implement the test mirroring that
-    pattern; assert:
-      - After the pause: cp._runs["t"]["R1"].completed_at is None
-      - After respond("answer"): cp._runs["t"]["R1"].completed_at is not None
-    Do NOT invent a ScriptedHitlChannel — use the actual exports from
-    cubepi.hitl.testing.
+    Implementation note: BEFORE writing this test, open
+    `tests/hitl/test_agent_respond.py` and mirror its full setup —
+    Provider that emits an ask_user tool_call, CheckpointedChannel
+    construction, `Agent.prompt()` awaited inside an asyncio.Task
+    that detaches the channel mid-flight, then `Agent.respond()`
+    on a fresh Agent constructed from the same checkpointer/thread_id.
     """
+    from cubepi.checkpointer.memory import MemoryCheckpointer
+    from cubepi.hitl.ask_user import ask_user_tool
+    from cubepi.hitl.channel import CheckpointedChannel
+
+    cp = MemoryCheckpointer()
+    # ... mirror tests/hitl/test_agent_respond.py setup ...
+    # Step 1: scripted FauxProvider that returns an ask_user tool_call
+    #         on first stream() invocation, then a final assistant on
+    #         the second (after the answer is appended).
+    # Step 2: ch = CheckpointedChannel(checkpointer=cp, thread_id="t",
+    #                                  run_id="R1")
+    #         tool = ask_user_tool(ch)
+    #         a = Agent(model=..., tools=[tool], checkpointer=cp,
+    #                   thread_id="t")
+    # Step 3: task = asyncio.create_task(a.prompt("hi", run_id="R1"))
+    # Step 4: await pending = wait for pending_request row
+    # Step 5: ch.detach() / channel HitlDetached path
+    # Step 6: await task  # returns; state.last_outcome == "suspended"
+
+    assert cp._runs["t"]["R1"].completed_at is None
+
+    # Resume with a fresh Agent + answer.
+    ch2 = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
+    tool2 = ask_user_tool(ch2)
+    a2 = Agent(model=..., tools=[tool2], checkpointer=cp, thread_id="t")
+    # Find the pending question_id from cp.load_pending("t")
+    pending = await cp.load_pending("t")
+    qid = pending[0].question_id
+    await a2.respond(qid, "yes")
+    assert cp._runs["t"]["R1"].completed_at is not None
 
 
 @pytest.mark.asyncio
 async def test_hitl_aborted_via_abort_pending_does_not_mark():
-    """abort_pending raises HitlAborted → loop.py:418 catch sets
+    """abort_pending raises HitlAborted → loop catch sets
     state.last_outcome="abandoned" (NOT "suspended"). agent.py:582-595
     appends the synthetic deny + terminal aborted assistant.
 
-    **Read tests/hitl/test_agent_abort_pending.py first** for the
-    abort_pending plumbing. Assert:
-      - cp._runs["t"]["R1"].completed_at is None
-      - The persisted messages contain a terminal aborted assistant
-        (`stop_reason == "aborted"`)
+    Mirror tests/hitl/test_agent_abort_pending.py for the
+    abort_pending plumbing.
     """
+    from cubepi.checkpointer.memory import MemoryCheckpointer
+    from cubepi.hitl.ask_user import ask_user_tool
+    from cubepi.hitl.channel import CheckpointedChannel
+
+    cp = MemoryCheckpointer()
+    # ... mirror tests/hitl/test_agent_abort_pending.py setup ...
+    # Construct as in the detached test, then instead of detach +
+    # respond, call await a.abort_pending(reason="user cancelled").
+
+    rs = cp._runs["t"]["R1"]
+    assert rs.completed_at is None
+    data = await cp.load("t")
+    assert any(
+        getattr(m, "stop_reason", None) == "aborted"
+        for m in data.messages
+    )
 
 
 @pytest.mark.asyncio
@@ -3327,10 +3378,13 @@ async def test_incomplete_tool_cycle_does_not_mark():
         ),
     ])
 
-    # after_model_response signature: see
-    # cubepi/middleware/base.py:82 for the real argument shape.
-    # Verify against that signature when implementing.
-    async def _stop_after(ctx):
+    # after_model_response signature per cubepi/middleware/base.py:76:
+    #   async def after_model_response(
+    #       self, response: AssistantMessage, ctx: AgentContext,
+    #       *, signal: asyncio.Event | None = None,
+    #   ) -> TurnAction | None
+    # As a callable hook passed to Agent, drop `self`:
+    async def _stop_after(response, ctx, *, signal=None):
         return TurnAction(decision="stop")
 
     cp = MemoryCheckpointer()
@@ -3403,10 +3457,12 @@ RunOutcome = Literal["complete", "suspended", "incomplete", "abandoned"]
 Modify `cubepi/agent/loop.py`. **The existing public helpers
 `run_agent_loop`, `run_agent_loop_continue`, `run_agent_loop_resume`
 return `list[Message]` and are exported from `cubepi`.** Do NOT change
-their public signatures — external callers and `tests/agent/test_loop.py`
-depend on the existing shape. Communicate outcome via state instead.
+their public return type. But `loop.py` has no `AgentState` reference
+(it receives an `AgentContext` snapshot), so the outcome can't be
+written to state from inside the loop. Use an **outcome sink callback**.
 
-Add a new field on `AgentState` (introduced in Task 5):
+Add a new field on `AgentState` (Task 5 introduced `active_run_id`;
+this adds the sibling):
 ```python
 class AgentState:
     # ... existing fields ...
@@ -3414,28 +3470,51 @@ class AgentState:
     last_outcome: RunOutcome | None = None   # NEW
 ```
 
-In `loop.py`, set `state.last_outcome = "<literal>"` at each exit path
-**before** the existing `return new_messages`. Public return type
-remains `list[Message]`. The literals:
+Add an optional callback parameter to each public loop helper
+(`run_agent_loop`, `run_agent_loop_continue`, `run_agent_loop_resume`)
+AND the private `_run_loop` / `_run_loop_inner`:
+
+```python
+async def run_agent_loop(
+    *,
+    # ... all existing params unchanged ...
+    set_outcome: Callable[[str], None] | None = None,
+) -> list[Message]:
+    ...
+```
+
+External callers omit `set_outcome` (default `None`) — completely
+non-breaking. Tests in `tests/agent/test_loop.py` keep working without
+changes.
+
+Inside the loop helpers, at each exit path call
+`set_outcome("<literal>")` BEFORE the existing `return new_messages`
+(guarded by `set_outcome is not None`). Pass `set_outcome` down through
+`_run_loop` / `_run_loop_inner` the same way other callables are
+threaded today.
+
+The literals:
   - After clean `AgentEndEvent` with terminal stop_reason and no
-    pending HITL → set `state.last_outcome = "complete"` then
+    pending HITL → `if set_outcome: set_outcome("complete")` then
     `return new_messages`
   - The existing combined `except (HitlDetached, HitlAborted)` blocks
     at `loop.py:196` and `loop.py:418` must be **split by exception
     type**:
     ```python
     except HitlDetached:
-        state.last_outcome = "suspended"
+        if set_outcome is not None:
+            set_outcome("suspended")
         return new_messages
     except HitlAborted:
-        state.last_outcome = "abandoned"
+        if set_outcome is not None:
+            set_outcome("abandoned")
         return new_messages
     ```
     `HitlDetached` = channel detached, resumable via respond().
     `HitlAborted` = abort_pending called; synthetic deny + terminal
     aborted assistant already appended by `agent.py:582-595`.
   - After the early-exit branch on `stop_reason in ("error", "aborted")`
-    at `loop.py:485` → set `state.last_outcome = "abandoned"`
+    at `loop.py:485` → `if set_outcome: set_outcome("abandoned")`
     then `return new_messages`
   - When `check_tool_cycle(...)` (from Task 27) raises
     `ToolCycleViolation` immediately before declaring `complete`,
@@ -3447,7 +3526,16 @@ remains `list[Message]`. The literals:
 
 Modify `cubepi/agent/agent.py`:
 - `_run_prompt` and `_run_hitl_resume` return `list[Message]` (no
-  signature change).
+  signature change) and internally pass `set_outcome=` to
+  `run_agent_loop` / `run_agent_loop_resume`. The sink writes into
+  `self._state.last_outcome`:
+  ```python
+  def _outcome_sink(self):
+      def _sink(value: str) -> None:
+          self._state.last_outcome = value
+      return _sink
+  ```
+  Each call site passes `set_outcome=self._outcome_sink()`.
 - In `Agent.prompt()` (replacing the placeholder line `await
   self._run_prompt(...)`):
   ```python
@@ -3465,9 +3553,10 @@ Modify `cubepi/agent/agent.py`:
   ```
 
 `tests/agent/test_loop.py` does NOT need updates — public return
-type is unchanged. The breaking surface stays limited to
-`Agent.prompt()` return type (`None` → `str`), already in the
-spec's documented breaking-changes list.
+type AND default behavior are unchanged (sink is optional). The
+breaking surface stays limited to `Agent.prompt()` return type
+(`None` → `str`), already in the spec's documented breaking-changes
+list.
 - New private helper `_dispatch_outcome`:
   ```python
   async def _dispatch_outcome(
@@ -3769,11 +3858,26 @@ Add a resume-path test to Task 26 (or as an extra in
 `tests/agent/test_tool_cycle_invariant.py`):
 ```python
 @pytest.mark.asyncio
-async def test_tool_cycle_invariant_spans_hitl_resume(memory_cp):
-    """Pause mid-tool-use; resume; if resume returns without resolving
-    the tool_use, mark must NOT be written even though respond's
-    last-segment messages look 'clean'."""
-    # ... pattern from tests/hitl/test_agent_respond.py ...
+async def test_tool_cycle_invariant_spans_hitl_resume():
+    """Pause mid-tool-use; resume; if resume returns without
+    resolving the tool_use (e.g., an after_model_response middleware
+    rewrites the assistant to drop the unresolved tool_use), mark
+    must NOT be written even though respond's last-segment messages
+    look 'clean' on their own.
+
+    Setup mirror: tests/hitl/test_agent_respond.py for the pause +
+    respond plumbing. Provider script: turn 1 = assistant with
+    ask_user tool_call → pause. Resume: turn 2 = assistant with an
+    unrelated unresolved tool_call (e.g., name='lookup', id='c1', no
+    matching ToolResultMessage). The invariant filters state.messages
+    by m.run_id=='R1' — sees the unresolved c1 → outcome demoted to
+    'incomplete' → marker NOT written.
+    """
+    from cubepi.checkpointer.memory import MemoryCheckpointer
+    cp = MemoryCheckpointer()
+    # ... full setup omitted; pattern is identical to
+    # test_hitl_detached_outcome_suspended_no_mark in Task 26 ...
+    assert cp._runs["t"]["R1"].completed_at is None
 ```
 
 - [ ] **Step 5: Run tests → expect pass**
