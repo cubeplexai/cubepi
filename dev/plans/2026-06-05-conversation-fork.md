@@ -3551,13 +3551,17 @@ Modify `cubepi/agent/agent.py`:
   outcome = self._state.last_outcome or "abandoned"
   await self._dispatch_outcome(outcome, effective_run_id)
   ```
-- In `Agent.respond()`:
+- `Agent.respond()` dispatch wiring is **not** part of Task 26 —
+  it needs the `recovered_run_id` from `load_pending()` which is
+  introduced in Task 28 (Step 3). Task 28 adds the matching
   ```python
   self._state.last_outcome = None
   await self._run_hitl_resume(...)
   outcome = self._state.last_outcome or "abandoned"
   await self._dispatch_outcome(outcome, recovered_run_id)
   ```
+  block. Tests for respond's marker-on-clean-resume therefore live
+  in Task 28.
 
 `tests/agent/test_loop.py` does NOT need updates — public return
 type AND default behavior are unchanged (sink is optional). The
@@ -4033,31 +4037,51 @@ if pending is None:
 _req, recovered_run_id = pending
 if recovered_run_id is not None:
     self._state.active_run_id = recovered_run_id
+self._state.last_outcome = None
 try:
-    # ... existing respond() body, which will:
-    # - re-enter the agent loop
-    # - eventually call _dispatch_outcome (Task 26) which writes the
-    #   marker on outcome == "complete"
-    ...
+    # ... existing respond() body — re-enter the agent loop via
+    # _run_hitl_resume(...) (which receives set_outcome=
+    # self._outcome_sink() from Task 26's plumbing, so the loop's
+    # exit-path catches populate state.last_outcome) ...
+    await self._run_hitl_resume(...)
 except BaseException:
     # Leave active_run_id SET on raise (spec §3.7).
     raise
 else:
+    outcome = self._state.last_outcome or "abandoned"
+    await self._dispatch_outcome(outcome, recovered_run_id)
     # Clear on successful resume completion.
     self._state.active_run_id = None
 ```
 
 **Do not call `claim_run` here.** All subsequent append calls use
 `self._state.active_run_id` (the same chokepoint as prompt — see
-Task 23). At terminal clean exit, `_dispatch_outcome` from Task 26
+Task 23). At terminal clean exit, `_dispatch_outcome` (from Task 26)
 fires `mark_run_complete`.
 
-Add a test asserting:
+Add tests asserting:
+
 ```python
 @pytest.mark.asyncio
 async def test_respond_clears_active_run_id_on_clean_resume():
-    # ... drive a HITL pause then resume to clean completion ...
+    # Mirror tests/hitl/test_agent_respond.py setup: provider script
+    # ask_user → final assistant; CheckpointedChannel; pause; resume
+    # via respond(question_id=qid, answer="yes").
+    ...
     assert agent.state.active_run_id is None
+
+
+@pytest.mark.asyncio
+async def test_respond_resume_writes_marker():
+    """Cross-reference: Task 26's
+    test_hitl_detached_outcome_suspended_no_mark stops at the
+    suspended assertion. This test reaches the resume path and
+    asserts cp._runs[t][R1].completed_at IS NOT None after
+    respond()."""
+    # Same setup as test_hitl_detached_outcome_suspended_no_mark
+    # from Task 26, then continue with respond and assert the marker.
+    ...
+    assert cp._runs["t"]["R1"].completed_at is not None
 ```
 
 - [ ] **Step 4: Run tests → expect pass**
