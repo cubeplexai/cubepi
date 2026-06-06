@@ -4025,34 +4025,79 @@ Expected: `respond()` either reclaims or doesn't propagate run_id.
 
 - [ ] **Step 3: Modify `Agent.respond()`**
 
-At the start of `respond()` (after the existing locking / state
-guards), recover the run_id from pending state and apply the same
-lifecycle pattern as `prompt()` — set on entry, clear on clean return,
-leave set on raise:
+**Edit the existing `respond()` body — DO NOT replace it.** Preserve
+the existing `HitlNoPendingRequest` / `HitlStaleAnswer` raises, the
+lazy history reload, and the `attach_resume_answer` call. The
+respond body today is at `agent.py:431-469`. Make these three
+changes:
+
+1. Replace `load_pending = getattr(self.checkpointer,
+   "load_pending_request", None)` (and the matching `await
+   load_pending(self.thread_id)` call) with the new
+   `load_pending()` Protocol method (Task 6) that returns
+   `(HitlRequest, run_id | None)`. Keep the same fallback error
+   when the method is missing.
+2. Set `self._state.active_run_id` from the recovered run_id.
+3. Wrap the `_run_hitl_resume()` call in try/except/else for
+   outcome dispatch, mirroring `prompt()` (Task 26).
+
+Concretely, the new `respond()` body looks like:
 
 ```python
-pending = await self.checkpointer.load_pending(self.thread_id)
-if pending is None:
-    raise HitlError("no pending request")
-_req, recovered_run_id = pending
-if recovered_run_id is not None:
-    self._state.active_run_id = recovered_run_id
-self._state.last_outcome = None
-try:
-    # `_run_hitl_resume(self)` (no args; takes everything from
-    # self._state) re-enters the agent loop. It calls
-    # run_agent_loop_resume(set_outcome=self._outcome_sink(), …)
-    # internally — the loop's exit-path catches populate
-    # self._state.last_outcome.
-    await self._run_hitl_resume()
-except BaseException:
-    # Leave active_run_id SET on raise (spec §3.7).
-    raise
-else:
-    outcome = self._state.last_outcome or "abandoned"
-    await self._dispatch_outcome(outcome, recovered_run_id)
-    # Clear on successful resume completion.
-    self._state.active_run_id = None
+async def respond(
+    self, *, question_id: str | None = None, answer: StructuredValue
+) -> None:
+    from cubepi.hitl.exceptions import (
+        HitlNoPendingRequest,
+        HitlStaleAnswer,
+    )
+
+    if self._channel is None:
+        raise HitlError("agent has no channel bound")
+    if not (self.thread_id and self.checkpointer):
+        raise RuntimeError("respond() requires thread_id + checkpointer")
+
+    load_pending = getattr(self.checkpointer, "load_pending", None)
+    if load_pending is None:
+        raise HitlError(
+            "respond() requires a checkpointer that implements "
+            "load_pending (added in checkpointer v4)"
+        )
+
+    async with self._run_lock:
+        if not self._state._messages:
+            data = await self.checkpointer.load(self.thread_id)
+            if data:
+                self._state._messages = list(data.messages or [])
+                self._extra = dict(data.extra or {})
+
+        loaded = await load_pending(self.thread_id)
+        if loaded is None:
+            raise HitlNoPendingRequest("no pending request on this thread")
+        pending, recovered_run_id = loaded
+        if question_id is None:
+            question_id = pending.question_id
+        if question_id != pending.question_id:
+            raise HitlStaleAnswer(
+                f"answer for {question_id}, pending is {pending.question_id}"
+            )
+
+        # NEW: thread the recovered run_id into agent state.
+        if recovered_run_id is not None:
+            self._state.active_run_id = recovered_run_id
+        self._state.last_outcome = None
+
+        self._channel.attach_resume_answer(question_id, answer)
+        try:
+            await self._run_hitl_resume()
+        except BaseException:
+            # Spec §3.7: leave active_run_id SET on raise.
+            raise
+        else:
+            outcome = self._state.last_outcome or "abandoned"
+            await self._dispatch_outcome(outcome, recovered_run_id)
+            # Clear on successful resume completion.
+            self._state.active_run_id = None
 ```
 
 **Do not call `claim_run` here.** All subsequent append calls use
