@@ -7,12 +7,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Callable, Generic, TypeVar
 
+from cubepi.agent._outcome import RunOutcome
 from cubepi.agent.loop import (
     run_agent_loop,
     run_agent_loop_continue,
     run_agent_loop_resume,
 )
 from cubepi.checkpointer.base import Checkpointer
+from cubepi.checkpointer.exceptions import CompletionMarkerFailedError
 from cubepi.hitl import HitlError, HitlRequest
 from cubepi.hitl.channel import HitlChannel
 from cubepi.hitl.exceptions import HitlDetached
@@ -101,6 +103,7 @@ class AgentState:
     streaming_message: Message | None = None
     error_message: str | None = None
     active_run_id: str | None = None
+    last_outcome: RunOutcome | None = None
     _tools: list[AgentTool] = field(default_factory=list)
     _messages: list[Message] = field(default_factory=list)
     _pending_tool_calls: set[str] = field(default_factory=set)
@@ -282,6 +285,29 @@ class Agent(Generic[TMessage]):
         self._steering_queue.clear()
         self._follow_up_queue.clear()
 
+    def _outcome_sink(self) -> Callable[[str], None]:
+        def _sink(value: str) -> None:
+            # Cast through Any: loop callsites pass plain str literals from the
+            # RunOutcome alphabet ("complete" / "suspended" / "abandoned").
+            self._state.last_outcome = value  # type: ignore[assignment]
+
+        return _sink
+
+    async def _dispatch_outcome(self, outcome: RunOutcome | None, run_id: str) -> None:
+        if outcome != "complete":
+            return
+        if not (self._run_aware and self.thread_id):
+            return
+        assert self.checkpointer is not None  # narrowed by _run_aware
+        try:
+            await self.checkpointer.mark_run_complete(self.thread_id, run_id)
+        except Exception as exc:
+            raise CompletionMarkerFailedError(
+                thread_id=self.thread_id,
+                run_id=run_id,
+                cause=exc,
+            ) from exc
+
     def _validate_input_run_ids(
         self,
         message: str | Message | list[Message],
@@ -349,6 +375,7 @@ class Agent(Generic[TMessage]):
             assert self.checkpointer is not None  # narrowed by _run_aware
             await self.checkpointer.claim_run(self.thread_id, effective_run_id)
         self._state.active_run_id = effective_run_id
+        self._state.last_outcome = None
         try:
             async with self._run_lock:
                 # Re-check under the lock in case streaming flipped during acquire.
@@ -384,6 +411,11 @@ class Agent(Generic[TMessage]):
             # Spec §3.7: leave active_run_id SET on failure.
             raise
         else:
+            outcome: RunOutcome = self._state.last_outcome or "abandoned"
+            # If _dispatch_outcome raises (CompletionMarkerFailedError),
+            # propagate UP through this else: — active_run_id stays SET because
+            # the clear line below is unreachable on the exception path.
+            await self._dispatch_outcome(outcome, effective_run_id)
             self._state.active_run_id = None
             return effective_run_id
 
@@ -428,6 +460,7 @@ class Agent(Generic[TMessage]):
         )
 
     async def _run_prompt(self, messages: list[Message]) -> None:
+        sink = self._outcome_sink()
         await self._run_with_lifecycle(
             lambda signal: run_agent_loop(
                 prompts=messages,
@@ -447,10 +480,12 @@ class Agent(Generic[TMessage]):
                 stream_options=self._build_stream_options(signal),
                 tool_execution=self.tool_execution,
                 emit=lambda e: self._process_event(e),
+                set_outcome=sink,
             )
         )
 
     async def _run_continuation(self) -> None:
+        sink = self._outcome_sink()
         await self._run_with_lifecycle(
             lambda signal: run_agent_loop_continue(
                 context=self._create_context_snapshot(),
@@ -469,6 +504,7 @@ class Agent(Generic[TMessage]):
                 stream_options=self._build_stream_options(signal),
                 tool_execution=self.tool_execution,
                 emit=lambda e: self._process_event(e),
+                set_outcome=sink,
             )
         )
 

@@ -49,6 +49,7 @@ async def run_agent_loop(
     stream_options: StreamOptions | None = None,
     tool_execution: str = "parallel",
     system_prompt: str | None = None,
+    set_outcome: Callable[[str], None] | None = None,
 ) -> list[Message]:
     new_messages: list[Message] = list(prompts)
     current_context = AgentContext(
@@ -84,6 +85,7 @@ async def run_agent_loop(
         stream_options=stream_options,
         tool_execution=tool_execution,
         emit=emit,
+        set_outcome=set_outcome,
     )
     return new_messages
 
@@ -107,6 +109,7 @@ async def run_agent_loop_continue(
     stream_options: StreamOptions | None = None,
     tool_execution: str = "parallel",
     system_prompt: str | None = None,
+    set_outcome: Callable[[str], None] | None = None,
 ) -> list[Message]:
     if not context.messages:
         raise ValueError("Cannot continue: no messages in context")
@@ -142,6 +145,7 @@ async def run_agent_loop_continue(
         stream_options=stream_options,
         tool_execution=tool_execution,
         emit=emit,
+        set_outcome=set_outcome,
     )
     return new_messages
 
@@ -167,6 +171,7 @@ async def run_agent_loop_resume(
     system_prompt: str | None = None,
     checkpointer: Checkpointer | None = None,
     thread_id: str | None = None,
+    set_outcome: Callable[[str], None] | None = None,
 ) -> list[Message]:
     new_messages: list[Message] = []
 
@@ -192,15 +197,21 @@ async def run_agent_loop_resume(
             checkpointer=checkpointer,
             thread_id=thread_id,
             new_messages=new_messages,
+            set_outcome=set_outcome,
         )
-    except (HitlDetached, HitlAborted):  # pragma: no cover — E2E tested
-        # Same as _run_loop's outer catch: the Agent caller (Agent.detach /
-        # Agent.abort_pending) emitted the corresponding event already.
+    except HitlDetached:  # pragma: no cover — E2E tested
+        # The Agent caller (Agent.detach) emitted AgentSuspendedEvent already.
         # Loop exits silently — assistant message and pending state remain
-        # intact for the next respond() call. This catch covers the prelude
-        # (execute_tool_calls of the resumed tool batch) AND the fall-through
-        # to _run_loop, so a second HITL pause/abort during respond() also
-        # unwinds cleanly instead of escaping.
+        # intact for the next respond() call.
+        if set_outcome is not None:
+            set_outcome("suspended")
+        return new_messages
+    except HitlAborted:  # pragma: no cover — E2E tested
+        # The Agent caller (Agent.abort_pending) emitted AgentAbortedEvent
+        # already. Loop exits silently — synthetic deny + terminal aborted
+        # assistant message already appended by abort_pending.
+        if set_outcome is not None:
+            set_outcome("abandoned")
         return new_messages
 
 
@@ -226,6 +237,7 @@ async def _run_agent_loop_resume_body(  # pragma: no cover — E2E tested
     checkpointer,
     thread_id,
     new_messages: list,
+    set_outcome: Callable[[str], None] | None = None,
 ) -> list[Message]:
     from cubepi.hitl.exceptions import HitlInconsistentState
 
@@ -345,11 +357,15 @@ async def _run_agent_loop_resume_body(  # pragma: no cover — E2E tested
         )
         if await should_stop_after_turn(stop_ctx):
             await emit_event(emit, AgentEndEvent(messages=new_messages))
+            if set_outcome is not None:
+                set_outcome("complete")
             return new_messages
 
     # Terminate-by-tool semantics (codex BLOCKING: previous draft ignored).
     if terminated_by_tool:
         await emit_event(emit, AgentEndEvent(messages=new_messages))
+        if set_outcome is not None:
+            set_outcome("complete")
         return new_messages
 
     # Fall through to the normal loop for the next model turn.
@@ -371,6 +387,7 @@ async def _run_agent_loop_resume_body(  # pragma: no cover — E2E tested
         stream_options=stream_options,
         tool_execution=tool_execution,
         emit=emit,
+        set_outcome=set_outcome,
     )
     return new_messages
 
@@ -394,6 +411,7 @@ async def _run_loop(
     stream_options: StreamOptions | None,
     tool_execution: str,
     emit: Callable,
+    set_outcome: Callable[[str], None] | None = None,
 ) -> None:
     try:
         await _run_loop_inner(
@@ -414,16 +432,21 @@ async def _run_loop(
             stream_options=stream_options,
             tool_execution=tool_execution,
             emit=emit,
+            set_outcome=set_outcome,
         )
-    except (HitlDetached, HitlAborted):
-        # Per the spec design, HITL terminal events (AgentSuspendedEvent /
-        # AgentAbortedEvent) are emitted by the Agent layer (Agent.detach()
-        # / Agent.abort_pending()) BEFORE these exceptions are raised — they
-        # are mutually exclusive with AgentEndEvent. The loop intentionally
-        # exits silently here: emitting AgentEndEvent would double-signal
-        # termination to event-stream consumers who already saw the HITL
-        # event. Assistant message and pending state remain intact for the
-        # next respond() call.
+    except HitlDetached:
+        # AgentSuspendedEvent already emitted by Agent.detach() — exit silently
+        # so AgentEndEvent doesn't double-signal termination. Assistant message
+        # and pending state remain intact for the next respond() call.
+        if set_outcome is not None:
+            set_outcome("suspended")
+        return
+    except HitlAborted:
+        # AgentAbortedEvent already emitted by Agent.abort_pending() — exit
+        # silently. Synthetic deny + terminal aborted assistant message are
+        # already appended; conversation is closed.
+        if set_outcome is not None:
+            set_outcome("abandoned")
         return
 
 
@@ -446,6 +469,7 @@ async def _run_loop_inner(
     stream_options: StreamOptions | None,
     tool_execution: str,
     emit: Callable,
+    set_outcome: Callable[[str], None] | None = None,
 ) -> None:
     opts = stream_options or StreamOptions()
     first_turn = True
@@ -487,6 +511,8 @@ async def _run_loop_inner(
                 await emit_event(emit, MessageEndEvent(message=message))
                 await emit_event(emit, TurnEndEvent(message=message, tool_results=[]))
                 await emit_event(emit, AgentEndEvent(messages=new_messages))
+                if set_outcome is not None:
+                    set_outcome("abandoned")
                 return
 
             # Apply after_model_response hook if configured.
@@ -664,6 +690,8 @@ async def _run_loop_inner(
         break
 
     await emit_event(emit, AgentEndEvent(messages=new_messages))
+    if set_outcome is not None:
+        set_outcome("complete")
 
 
 async def _stream_assistant_response(
