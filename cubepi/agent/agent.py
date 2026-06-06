@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Callable, Generic, TypeVar
 
@@ -153,13 +154,25 @@ class Agent(Generic[TMessage]):
         thread_id: str | None = None,
         middleware: list[Middleware] | None = None,
         channel: HitlChannel | None = None,
+        messages: Sequence[Message] | None = None,
     ) -> None:
         self._provider: Provider = model.provider
+        self._model = model
         self._state = AgentState(
             system_prompt=system_prompt,
             model=model.spec,
             thinking=thinking,
         )
+        if messages is not None:
+            if thread_id is not None and checkpointer is not None:
+                raise ValueError(
+                    "Agent(messages=...) cannot be combined with "
+                    "thread_id + checkpointer (pre-seed conflicts with lazy "
+                    "load). Construct an ephemeral Agent without those for "
+                    "fork_once-style usage."
+                )
+            seeded = [m.model_copy(deep=True) for m in messages]
+            self._state.messages = list(seeded)
         if tools:
             self._state.tools = tools
         middleware = middleware or []
