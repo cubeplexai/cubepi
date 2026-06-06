@@ -70,7 +70,7 @@ Don't touch the `current: { label: 'Next 🚧', path: 'next', banner:
 
 ## Gotchas (the meat)
 
-These are the things that have actually bitten us during 0.5 → 0.7 cuts. Read
+These are the things that have actually bitten us during 0.5 → 0.8 cuts. Read
 them before running the cut, not after the build fails.
 
 ### 1. Run `pnpm apiref` **before** `docusaurus docs:version`
@@ -84,7 +84,7 @@ mdx files into `versioned_docs/version-X.Y/api/` after the fact. The 0.6
 cut hit this — see commit `ee1056d` (`fix(docs): add generated API reference
 to version-0.6 snapshot`).
 
-### 2. The snapshot freezes `sidebars.ts` too
+### 2. The snapshot freezes `sidebars.ts` too — new pages must be wired before the cut
 
 `docusaurus docs:version` writes the **current** sidebar into
 `versioned_sidebars/version-X.Y-sidebars.json`. Any sidebar entry you add
@@ -92,6 +92,14 @@ to `sidebars.ts` after the cut shows up only on `current/` (Next 🚧), not
 on `X.Y`. If you forgot a page, the fix is either (a) re-cut by deleting
 `versioned_docs/version-X.Y/` and `versioned_sidebars/version-X.Y-sidebars.json`
 and rerunning, or (b) hand-edit the versioned sidebar JSON.
+
+**Pre-cut check:** every new guide page in `website/docs/` for this release
+must already be listed in `sidebars.ts`. A page that is in the file tree but
+not in the sidebar is silently unreachable from navigation on both `current/`
+and the new versioned snapshot. The 0.8 cut discovered that `forking.md` was
+missing from `sidebars.ts` entirely (the fork PR forgot to add it) — caught
+only by the codex review after the snapshot was already committed, requiring a
+hand-edit of both `sidebars.ts` and `versioned_sidebars/version-0.8-sidebars.json`.
 
 ### 3. `current/` and `version-X.Y/` must be byte-identical at cut time
 
@@ -110,7 +118,8 @@ happens silently when:
 
 After cutting, run `diff -r website/docs website/versioned_docs/version-X.Y`
 and the zh-Hans equivalent. The only expected difference is `intro.mdx`
-status blurb (Next vs. Released).
+status blurb: `current/` has the "Next 🚧" copy, the snapshot has the
+hardcoded Released copy (see gotcha #8 and #9).
 
 ### 4. zh-Hans parity is your problem
 
@@ -164,6 +173,57 @@ preserves whatever was in `current/` at cut time, so write the Released
 copy in `current/` **before** the cut and then revert `current/`'s blurb
 to the Next 🚧 copy after the cut so unreleased work isn't advertised as
 shipped.
+
+### 9. Hardcode the version number in the snapshot's `intro.mdx`
+
+The pre-cut "Released" copy of `intro.mdx` (see gotcha #8) must **not**
+use `<PackageVersion />` in the versioned snapshot. `<PackageVersion />`
+reads `pyproject.toml` at build time — after the next release bumps the
+version, the frozen 0.8 snapshot would render "CubePi v0.9.0 is the latest
+release" instead of remaining a 0.8 page.
+
+Replace any `<PackageVersion />` in the snapshot's status blurb with a
+hardcoded version string:
+
+```mdx
+<!-- ❌ wrong — reads pyproject.toml at build time -->
+**CubePi v<PackageVersion /> is the latest release.**
+
+<!-- ✅ correct — frozen in the snapshot -->
+You are reading the **CubePi X.Y** release docs. This is the latest stable
+documentation set for installing CubePi and building against the published
+X.Y API.
+```
+
+The pattern from `versioned_docs/version-0.7/intro.mdx` is the canonical
+reference. Apply the same fix to the zh-Hans snapshot
+(`i18n/zh-Hans/.../version-X.Y/intro.mdx`). The `current/` copy may
+continue to use `<PackageVersion />` — it always tracks the real latest.
+
+### 10. Fix the zh-Hans `version-X.Y.json` label after the cut
+
+`docusaurus docs:version` creates
+`i18n/zh-Hans/docusaurus-plugin-content-docs/version-X.Y.json` by copying
+the `current` locale metadata verbatim. That means `version.label` starts
+as `"Next 🚧"` with a description of `"The label for version current"`.
+Chinese readers will see the released X.Y entry in the version picker
+labelled "Next 🚧", making the released and unreleased channels
+indistinguishable.
+
+After the snapshot, open the new `version-X.Y.json` and update:
+
+```json
+{
+  "version.label": {
+    "message": "X.Y（最新）",
+    "description": "The label for version X.Y"
+  },
+  ...
+}
+```
+
+Once this version is later demoted (at X+1.Y), change the message to just
+`"X.Y"` (drop "（最新）") to match the EN config pattern.
 
 ## Post-cut verification
 
