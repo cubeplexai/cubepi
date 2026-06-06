@@ -218,3 +218,10 @@ AgentEvent = (
 AgentEventSink = Callable[[AgentEvent], Awaitable[None]]
 
 AgentListener = Callable[[AgentEvent, asyncio.Event | None], Awaitable[None] | None]
+
+
+@dataclass(frozen=True)
+class ForkOnceResult:
+    text: str
+    messages: list[Message]
+    stop_reason: str
