@@ -86,6 +86,80 @@ async def test_degraded_mode_v3_only_checkpointer():
 
 
 @pytest.mark.asyncio
+async def test_resume_claims_run_and_stamps_messages():
+    """Regression for codex R3 P1: `resume()` must claim a run, set
+    `active_run_id`, and dispatch completion — otherwise messages emitted
+    by the resumed turn land with `run_id=None` and fork queries (which
+    treat NULL as legacy / always-copy) would copy them into forks even
+    if the resumed work is still in flight or later abandoned.
+    """
+    from cubepi.providers.base import TextContent, UserMessage
+
+    cp = MemoryCheckpointer()
+    a = _agent(checkpointer=cp, thread_id="t")
+    # Hydrate state from a persisted UserMessage (the documented
+    # checkpointed-resume pattern: host reloads from checkpointer, then
+    # calls resume()).
+    a._state._messages = [
+        UserMessage(content=[TextContent(text="hi")], run_id="R_seed"),
+    ]
+
+    effective = await a.resume(run_id="R_resume")
+    assert effective == "R_resume"
+    # The run was claimed AND completed.
+    assert "R_resume" in cp._runs["t"]
+    assert cp._runs["t"]["R_resume"].completed_at is not None
+    # Messages emitted by the resumed turn carry the resume run_id.
+    appended = a.state.messages[1:]
+    assert appended  # the faux provider yielded an assistant message
+    for m in appended:
+        assert m.run_id == "R_resume", (
+            f"message emitted by resume() left with run_id={m.run_id!r} "
+            "(would be treated as legacy by fork queries)"
+        )
+
+
+@pytest.mark.asyncio
+async def test_resume_auto_generates_run_id_when_not_supplied():
+    """resume() without an explicit run_id auto-generates one."""
+    from cubepi.providers.base import TextContent, UserMessage
+
+    cp = MemoryCheckpointer()
+    a = _agent(checkpointer=cp, thread_id="t")
+    a._state._messages = [
+        UserMessage(content=[TextContent(text="hi")], run_id="R_seed"),
+    ]
+    effective = await a.resume()
+    assert isinstance(effective, str) and len(effective) > 0
+    assert effective in cp._runs["t"]
+    assert cp._runs["t"][effective].completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_resume_precondition_failure_does_not_claim():
+    """Precondition failure ('Cannot continue from message role: assistant')
+    must NOT call claim_run — otherwise a dangling claimed run would
+    block re-resume with the same run_id.
+    """
+    from cubepi.providers.base import AssistantMessage, TextContent
+
+    cp = MemoryCheckpointer()
+    a = _agent(checkpointer=cp, thread_id="t")
+    # Last message is AssistantMessage with no queued steering/follow-up.
+    a._state._messages = [
+        AssistantMessage(
+            content=[TextContent(text="done")],
+            stop_reason="end_turn",
+            run_id="R_prev",
+        ),
+    ]
+    with pytest.raises(RuntimeError, match="Cannot continue"):
+        await a.resume(run_id="R_new")
+    # R_new was NOT claimed — the precondition raised before the claim.
+    assert "R_new" not in cp._runs.get("t", {})
+
+
+@pytest.mark.asyncio
 async def test_concurrent_cold_prompts_second_raises_fast():
     """Two concurrent cold prompt() calls — the second must raise immediately
     instead of serializing on the run-lock behind the first's claim_run I/O.
