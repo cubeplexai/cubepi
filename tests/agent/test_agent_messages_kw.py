@@ -45,8 +45,10 @@ def test_messages_kw_deep_copies_all_three_variants():
         metadata={},
     )
     tool = ToolResultMessage(
-        tool_call_id="c1", tool_name="t",
-        content=[TextContent(text="r")], metadata={"x": 1},
+        tool_call_id="c1",
+        tool_name="t",
+        content=[TextContent(text="r")],
+        metadata={"x": 1},
     )
     a = _agent(messages=[user, assistant, tool])
     # Mutate originals.

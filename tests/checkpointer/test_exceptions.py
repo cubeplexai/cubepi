@@ -38,9 +38,7 @@ def test_checkpointer_error_separate_from_schema_error():
 
 def test_completion_marker_failed_error_carries_run_id():
     cause = RuntimeError("db timeout")
-    exc = CompletionMarkerFailedError(
-        thread_id="t1", run_id="r1", cause=cause
-    )
+    exc = CompletionMarkerFailedError(thread_id="t1", run_id="r1", cause=cause)
     assert exc.thread_id == "t1"
     assert exc.run_id == "r1"
     assert exc.__cause__ is cause

@@ -17,9 +17,7 @@ def test_assistant_message_run_id_default_none():
 
 
 def test_tool_result_message_run_id_default_none():
-    m = ToolResultMessage(
-        tool_call_id="tc1", tool_name="foo", content=[]
-    )
+    m = ToolResultMessage(tool_call_id="tc1", tool_name="foo", content=[])
     assert m.run_id is None
 
 

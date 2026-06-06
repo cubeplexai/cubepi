@@ -43,9 +43,7 @@ class Checkpointer(Protocol):
         """
         ...
 
-    async def snapshot(
-        self, thread_id: str, *, after_run_id: str
-    ) -> list[Message]:
+    async def snapshot(self, thread_id: str, *, after_run_id: str) -> list[Message]:
         """Return messages of completed runs of `thread_id` up through
         and including `after_run_id`, in source seq order. Raises
         ThreadNotFoundError or RunNotCompletedError."""
