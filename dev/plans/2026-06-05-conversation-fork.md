@@ -2718,15 +2718,31 @@ async def test_prompt_sets_then_clears_active_run_id_on_clean_return():
 
 
 @pytest.mark.asyncio
-async def test_prompt_leaves_active_run_id_set_on_raise():
-    # FauxProvider has no `error=` kwarg — subclass to raise inside the loop.
-    class _RaisingProvider(FauxProvider):
-        async def stream(self, *args, **kwargs):
-            raise RuntimeError("provider down")
-    a = Agent(model=_RaisingProvider().model("faux-model"))
-    with pytest.raises(Exception):
+async def test_prompt_leaves_active_run_id_set_on_raise(monkeypatch):
+    """Spec §3.7 + Task 22 require active_run_id to be LEFT SET on any
+    failure post-claim. Use a propagating failure mode — provider
+    exceptions are CAUGHT by Agent._run_with_lifecycle (agent.py:645)
+    and converted to a synthetic error message, so they do NOT
+    propagate. The cleanest synthesized-after-the-fact path is a
+    CompletionMarkerFailedError raised by _dispatch_outcome (Task 26).
+    """
+    from cubepi.checkpointer.exceptions import CompletionMarkerFailedError
+    from cubepi.checkpointer.memory import MemoryCheckpointer
+
+    class _BrokenMark(MemoryCheckpointer):
+        async def mark_run_complete(self, thread_id, run_id):
+            raise RuntimeError("db down")
+
+    cp = _BrokenMark()
+    a = Agent(
+        model=_ok_faux().model("faux-model"),
+        checkpointer=cp,
+        thread_id="t",
+    )
+    with pytest.raises(CompletionMarkerFailedError):
         await a.prompt("hello", run_id="R1")
-    # Spec §3.7: left set so except-block readers can recover it.
+    # Spec §3.7: active_run_id stays set so the except-block reader
+    # can still recover it (exc.run_id is the recommended source).
     assert a.state.active_run_id == "R1"
 ```
 
@@ -3292,66 +3308,103 @@ async def test_provider_error_does_not_mark():
 
 @pytest.mark.asyncio
 async def test_hitl_detached_outcome_suspended_no_mark():
-    """Detach the channel mid-pause → loop catch sets
-    state.last_outcome="suspended" → no mark. After respond(), marker
-    IS written.
-
-    Implementation note: BEFORE writing this test, open
-    `tests/hitl/test_agent_respond.py` and mirror its full setup —
-    Provider that emits an ask_user tool_call, CheckpointedChannel
-    construction, `Agent.prompt()` awaited inside an asyncio.Task
-    that detaches the channel mid-flight, then `Agent.respond()`
-    on a fresh Agent constructed from the same checkpointer/thread_id.
+    """Provider returns an ask_user tool_call → loop pauses → channel
+    detach → loop catch sets state.last_outcome="suspended" → no mark.
+    Then respond() resumes; provider finishes; marker IS written.
     """
     from cubepi.checkpointer.memory import MemoryCheckpointer
     from cubepi.hitl.ask_user import ask_user_tool
     from cubepi.hitl.channel import CheckpointedChannel
+    from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
 
     cp = MemoryCheckpointer()
-    # ... mirror tests/hitl/test_agent_respond.py setup ...
-    # Step 1: scripted FauxProvider that returns an ask_user tool_call
-    #         on first stream() invocation, then a final assistant on
-    #         the second (after the answer is appended).
-    # Step 2: ch = CheckpointedChannel(checkpointer=cp, thread_id="t",
-    #                                  run_id="R1")
-    #         tool = ask_user_tool(ch)
-    #         a = Agent(model=..., tools=[tool], checkpointer=cp,
-    #                   thread_id="t")
-    # Step 3: task = asyncio.create_task(a.prompt("hi", run_id="R1"))
-    # Step 4: await pending = wait for pending_request row
-    # Step 5: ch.detach() / channel HitlDetached path
-    # Step 6: await task  # returns; state.last_outcome == "suspended"
-
+    p = FauxProvider()
+    p.set_responses([
+        # Turn 1: ask_user tool_call.
+        AssistantMessage(
+            content=[ToolCall(id="tc-1", name="ask_user",
+                              arguments={"question": "?"})],
+            stop_reason="tool_use",
+        ),
+        # Turn 2 (after respond appends the answer as tool_result):
+        # final assistant.
+        AssistantMessage(
+            content=[TextContent(text="done")], stop_reason="end_turn"
+        ),
+    ])
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
+    tool = ask_user_tool(ch)
+    a = Agent(
+        model=p.model("faux-model"),
+        tools=[tool],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch,
+    )
+    # Drive the run inside a Task so we can detach mid-pause.
+    task = asyncio.create_task(a.prompt("hi", run_id="R1"))
+    # Wait until pending_request row exists (loop has reached the
+    # ask_user pause).
+    while True:
+        if (await cp.load_pending("t")) is not None:
+            break
+        await asyncio.sleep(0.01)
+    ch.detach()
+    await task  # returns normally; state.last_outcome == "suspended"
     assert cp._runs["t"]["R1"].completed_at is None
 
-    # Resume with a fresh Agent + answer.
+    # Resume with a fresh Agent on a fresh channel; provide answer.
     ch2 = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
     tool2 = ask_user_tool(ch2)
-    a2 = Agent(model=..., tools=[tool2], checkpointer=cp, thread_id="t")
-    # Find the pending question_id from cp.load_pending("t")
+    a2 = Agent(
+        model=p.model("faux-model"),
+        tools=[tool2],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch2,
+    )
     pending = await cp.load_pending("t")
     qid = pending[0].question_id
-    await a2.respond(qid, "yes")
+    # respond() is keyword-only — see agent.py:431.
+    await a2.respond(question_id=qid, answer="yes")
     assert cp._runs["t"]["R1"].completed_at is not None
 
 
 @pytest.mark.asyncio
 async def test_hitl_aborted_via_abort_pending_does_not_mark():
-    """abort_pending raises HitlAborted → loop catch sets
+    """Provider returns an ask_user tool_call → loop pauses →
+    abort_pending raises HitlAborted in the loop → catch sets
     state.last_outcome="abandoned" (NOT "suspended"). agent.py:582-595
     appends the synthetic deny + terminal aborted assistant.
-
-    Mirror tests/hitl/test_agent_abort_pending.py for the
-    abort_pending plumbing.
     """
     from cubepi.checkpointer.memory import MemoryCheckpointer
     from cubepi.hitl.ask_user import ask_user_tool
     from cubepi.hitl.channel import CheckpointedChannel
+    from cubepi.providers.base import AssistantMessage, ToolCall
 
     cp = MemoryCheckpointer()
-    # ... mirror tests/hitl/test_agent_abort_pending.py setup ...
-    # Construct as in the detached test, then instead of detach +
-    # respond, call await a.abort_pending(reason="user cancelled").
+    p = FauxProvider()
+    p.set_responses([
+        AssistantMessage(
+            content=[ToolCall(id="tc-1", name="ask_user",
+                              arguments={"question": "?"})],
+            stop_reason="tool_use",
+        ),
+    ])
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
+    tool = ask_user_tool(ch)
+    a = Agent(
+        model=p.model("faux-model"),
+        tools=[tool],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch,
+    )
+    task = asyncio.create_task(a.prompt("hi", run_id="R1"))
+    while (await cp.load_pending("t")) is None:
+        await asyncio.sleep(0.01)
+    await a.abort_pending(reason="user cancelled")
+    await task
 
     rs = cp._runs["t"]["R1"]
     assert rs.completed_at is None
@@ -3859,24 +3912,86 @@ Add a resume-path test to Task 26 (or as an extra in
 ```python
 @pytest.mark.asyncio
 async def test_tool_cycle_invariant_spans_hitl_resume():
-    """Pause mid-tool-use; resume; if resume returns without
-    resolving the tool_use (e.g., an after_model_response middleware
-    rewrites the assistant to drop the unresolved tool_use), mark
-    must NOT be written even though respond's last-segment messages
-    look 'clean' on their own.
+    """Pause mid-tool-use (ask_user). Resume; provider then emits an
+    assistant carrying an UNRELATED unresolved tool_call (no matching
+    ToolResultMessage will follow). The invariant filters
+    state.messages by m.run_id == 'R1' — sees the unresolved c1 →
+    outcome demoted from 'complete' to 'incomplete' → marker NOT
+    written."""
+    import asyncio
 
-    Setup mirror: tests/hitl/test_agent_respond.py for the pause +
-    respond plumbing. Provider script: turn 1 = assistant with
-    ask_user tool_call → pause. Resume: turn 2 = assistant with an
-    unrelated unresolved tool_call (e.g., name='lookup', id='c1', no
-    matching ToolResultMessage). The invariant filters state.messages
-    by m.run_id=='R1' — sees the unresolved c1 → outcome demoted to
-    'incomplete' → marker NOT written.
-    """
     from cubepi.checkpointer.memory import MemoryCheckpointer
+    from cubepi.hitl.ask_user import ask_user_tool
+    from cubepi.hitl.channel import CheckpointedChannel
+    from cubepi.providers.base import (
+        AssistantMessage, TextContent, ToolCall,
+    )
+
     cp = MemoryCheckpointer()
-    # ... full setup omitted; pattern is identical to
-    # test_hitl_detached_outcome_suspended_no_mark in Task 26 ...
+    p = FauxProvider()
+    p.set_responses([
+        # Turn 1: ask_user → pause.
+        AssistantMessage(
+            content=[ToolCall(id="ask-1", name="ask_user",
+                              arguments={"question": "?"})],
+            stop_reason="tool_use",
+        ),
+        # Turn 2 (resume): assistant with an unresolved tool_call
+        # that NO ToolResultMessage will satisfy. The agent loop's
+        # after_model_response forces a stop on this turn so the
+        # call never gets executed.
+        AssistantMessage(
+            content=[
+                ToolCall(id="orphan-1", name="lookup", arguments={}),
+            ],
+            stop_reason="tool_use",
+        ),
+    ])
+
+    from cubepi.middleware.base import TurnAction
+
+    async def _stop_after(response, ctx, *, signal=None):
+        # Stop after the second assistant turn so the orphan tool_call
+        # is NEVER executed.
+        if any(
+            getattr(c, "id", None) == "orphan-1" for c in response.content
+        ):
+            return TurnAction(decision="stop")
+        return None
+
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
+    tool = ask_user_tool(ch)
+    a = Agent(
+        model=p.model("faux-model"),
+        tools=[tool],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch,
+        after_model_response=_stop_after,
+    )
+    task = asyncio.create_task(a.prompt("hi", run_id="R1"))
+    while (await cp.load_pending("t")) is None:
+        await asyncio.sleep(0.01)
+    await task  # detach not needed; first prompt() returns suspended
+
+    # Resume with a fresh Agent. The second turn emits orphan-1;
+    # the after_model_response hook stops the loop. Pre-completion
+    # invariant scans state.messages filtered by run_id=='R1' and
+    # finds the unresolved orphan-1 → outcome 'incomplete' → no mark.
+    ch2 = CheckpointedChannel(checkpointer=cp, thread_id="t", run_id="R1")
+    tool2 = ask_user_tool(ch2)
+    a2 = Agent(
+        model=p.model("faux-model"),
+        tools=[tool2],
+        checkpointer=cp,
+        thread_id="t",
+        channel=ch2,
+        after_model_response=_stop_after,
+    )
+    pending = await cp.load_pending("t")
+    qid = pending[0].question_id
+    await a2.respond(question_id=qid, answer="yes")
+
     assert cp._runs["t"]["R1"].completed_at is None
 ```
 
