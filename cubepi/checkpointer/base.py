@@ -12,6 +12,7 @@ from cubepi.types import JsonObject
 class CheckpointData:
     messages: list[Message] = field(default_factory=list)
     extra: JsonObject = field(default_factory=dict)
+    parent_thread_id: str | None = None
 
 
 @runtime_checkable
