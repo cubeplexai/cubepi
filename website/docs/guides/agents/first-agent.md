@@ -36,44 +36,32 @@ in 0.7.
 
 ## Step 2 — declare a tool
 
-Every tool is a Pydantic param model + an async `execute` function:
+A tool is an async function decorated with `@tool`:
 
 ```python
-from pydantic import BaseModel
-from cubepi import AgentTool, AgentToolResult, TextContent
+from cubepi import tool
 
 
-class GetWeatherParams(BaseModel):
-    city: str
-
-
-async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
+@tool
+async def get_weather(city: str) -> str:
+    "Get current weather for a city. Returns a short text summary."
     # do real work here — call an HTTP API, query a DB, etc.
-    return AgentToolResult(
-        content=[TextContent(text=f"72°F and sunny in {params.city}")]
-    )
-
-
-weather_tool = AgentTool(
-    name="get_weather",
-    description="Get current weather for a city. Returns a short text summary.",
-    parameters=GetWeatherParams,
-    execute=get_weather,
-)
+    return f"72°F and sunny in {city}"
 ```
 
 A few details:
 
-- The Pydantic model is auto-converted to JSON Schema and sent to the
-  model as part of the tool definition.
-- The `execute` signature is fixed:
-  `(tool_call_id, params, *, signal, on_update)`. The two
-  keyword-only args are always passed — keep them in your signature
-  even if you ignore them.
-- `signal` is an `asyncio.Event` that's set when the user cancels.
-  Check it inside long-running work and bail out early.
-- `on_update(partial)` lets you stream incremental progress (covered
-  in [Tool Use](./tool-use#streaming-tool-progress)).
+- The input schema is generated from the typed parameters and sent to
+  the model; the docstring becomes the tool description. Pydantic
+  `Field(...)` defaults and metadata are honoured.
+- Return a `str` (wrapped as text), a `Content`, a `list` of content,
+  or a full `AgentToolResult` when you need `details`/`is_error`.
+- Need cancellation or progress streaming? Declare `signal` (an
+  `asyncio.Event` set when the user cancels) and/or `on_update(partial)`
+  in the signature and CubePi injects them — see
+  [Tool Use](./tool-use#streaming-tool-progress).
+- For a shared params model or dynamic construction, the longhand
+  `AgentTool(...)` is equivalent — see [Tool Use](./tool-use).
 
 ## Step 3 — assemble the agent
 
@@ -83,7 +71,7 @@ from cubepi import Agent
 agent = Agent(
     model=model,
     system_prompt="You are a concise weather assistant.",
-    tools=[weather_tool],
+    tools=[get_weather],
 )
 ```
 

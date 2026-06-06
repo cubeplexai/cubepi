@@ -22,21 +22,16 @@ Save this as `weather_agent.py`:
 ```python title="weather_agent.py"
 import asyncio
 import os
-from pydantic import BaseModel
 
-from cubepi import Agent, AgentTool, AgentToolResult, TextContent
+from cubepi import Agent, tool
 from cubepi.providers.anthropic import AnthropicProvider
 
 
-class GetWeatherParams(BaseModel):
-    city: str
-
-
-async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
+@tool
+async def get_weather(city: str) -> str:
+    "Get current weather for a city."
     # In a real app: call an HTTP weather API. Here we hard-code a reply.
-    return AgentToolResult(
-        content=[TextContent(text=f"72°F and sunny in {params.city}")]
-    )
+    return f"72°F and sunny in {city}"
 
 
 async def main():
@@ -45,14 +40,7 @@ async def main():
     agent = Agent(
         model=provider.model("claude-sonnet-4-5-20250929"),
         system_prompt="You are a concise weather assistant.",
-        tools=[
-            AgentTool(
-                name="get_weather",
-                description="Get current weather for a city",
-                parameters=GetWeatherParams,
-                execute=get_weather,
-            ),
-        ],
+        tools=[get_weather],
     )
 
     # Subscribe BEFORE prompt() — that's how you see streaming events.
@@ -86,8 +74,9 @@ CubePi ran a loop that looks (conceptually) like this:
 1. `agent.prompt("What's the weather in Tokyo?")` enqueued a
    `UserMessage` and called the model.
 2. The model decided to invoke `get_weather(city="Tokyo")` — CubePi
-   parsed the JSON args with your Pydantic model, called your `async
-   def`, and fed the result back as a `ToolResultMessage`.
+   parsed the JSON args against the schema `@tool` generated from your
+   function signature, called your `async def`, and fed the result back
+   as a `ToolResultMessage`.
 3. The model produced a final assistant response, streamed back as
    `text_delta` events.
 4. The loop emitted `agent_end` and returned.
@@ -104,9 +93,12 @@ runtime emits: `agent_start`, `turn_start`, `message_start`,
   emitted *after* `subscribe` was called. Calling `prompt` first means
   the early events are gone.
 - **`provider.model(...)` binds the model to its provider.** The provider holds credentials and optional `provider_id` metadata; the model id must match a model that provider supports.
-- **The `execute` signature is fixed.** Keep `(tool_call_id, params,
-  *, signal, on_update)` even if you don't use the keyword-only
-  arguments. CubePi always passes them.
+- **Tools are decorated async functions.** `@tool` derives the input
+  schema from the typed parameters and uses the docstring as the
+  description; return a `str` (or an `AgentToolResult`). Need the raw
+  `(tool_call_id, params, *, signal, on_update)` form, a shared params
+  model, or `on_update` progress? See
+  [Tool Use](../guides/agents/tool-use).
 - **`agent.prompt()` can only run one prompt at a time.** While it's
   running, use [`agent.steer()`](../guides/agents/multi-turn) to
   inject a follow-up, or `agent.follow_up()` to queue one for after

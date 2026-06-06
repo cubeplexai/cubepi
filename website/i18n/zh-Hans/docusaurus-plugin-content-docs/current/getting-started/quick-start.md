@@ -22,21 +22,16 @@ description: "在几分钟内构建你的第一个 CubePi agent。"
 ```python title="weather_agent.py"
 import asyncio
 import os
-from pydantic import BaseModel
 
-from cubepi import Agent, AgentTool, AgentToolResult, TextContent
+from cubepi import Agent, tool
 from cubepi.providers.anthropic import AnthropicProvider
 
 
-class GetWeatherParams(BaseModel):
-    city: str
-
-
-async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
+@tool
+async def get_weather(city: str) -> str:
+    "获取一个城市的当前天气"
     # 真实应用里：调一个 HTTP 天气 API。这里直接返回一段假数据。
-    return AgentToolResult(
-        content=[TextContent(text=f"{params.city} 现在 72°F,晴")]
-    )
+    return f"{city} 现在 72°F,晴"
 
 
 async def main():
@@ -45,14 +40,7 @@ async def main():
     agent = Agent(
         model=provider.model("claude-sonnet-4-5-20250929"),
         system_prompt="你是一个简洁的天气助手。",
-        tools=[
-            AgentTool(
-                name="get_weather",
-                description="获取一个城市的当前天气",
-                parameters=GetWeatherParams,
-                execute=get_weather,
-            ),
-        ],
+        tools=[get_weather],
     )
 
     # 在 prompt() 之前订阅 —— 这是看到流式事件的关键。
@@ -84,8 +72,8 @@ CubePi 跑了一个概念上长这样的循环：
 
 1. `agent.prompt("东京现在天气怎么样？")` 把一条 `UserMessage` 入队,
    然后调用模型。
-2. 模型决定调用 `get_weather(city="Tokyo")`——CubePi 用你的 Pydantic
-   模型解析 JSON 参数,调用你的 `async def`,把结果作为
+2. 模型决定调用 `get_weather(city="Tokyo")`——CubePi 按 `@tool` 从函数
+   签名生成的 schema 解析 JSON 参数,调用你的 `async def`,把结果作为
    `ToolResultMessage` 反馈回去。
 3. 模型产生最终的 assistant 回复,以 `text_delta` 事件流的形式回来。
 4. 循环发出 `agent_end` 然后返回。
@@ -101,9 +89,11 @@ CubePi 跑了一个概念上长这样的循环：
 - **必须在 prompt 之前订阅。** Listener 只会收到 `subscribe` 之后发出
   的事件。先 prompt 再 subscribe,早期事件就丢了。
 - **`provider.model(...)` 会把模型绑定到 provider。** provider 保存凭证和可选的 `provider_id` 元数据；模型 id 必须是这个 provider 支持的模型名。
-- **`execute` 签名是固定的。** 哪怕你不用 keyword-only 参数,签名也得
-  保留 `(tool_call_id, params, *, signal, on_update)`。CubePi 总是
-  会传它们。
+- **工具就是被装饰的 async 函数。** `@tool` 从带类型的参数推断输入
+  schema,用 docstring 作为描述;返回 `str`(或 `AgentToolResult`)。
+  需要原始的 `(tool_call_id, params, *, signal, on_update)` 写法、共享
+  参数模型,或 `on_update` 进度?见
+  [工具使用](../guides/agents/tool-use)。
 - **`agent.prompt()` 一次只能跑一个 prompt。** 跑的过程中,用
   [`agent.steer()`](../guides/agents/multi-turn) 插入修正,或
   `agent.follow_up()` 把后续消息排队。

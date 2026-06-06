@@ -33,41 +33,30 @@ model = provider.model(
 
 ## 第 2 步 —— 声明一个工具
 
-每个工具 = Pydantic 参数模型 + 一个异步 `execute` 函数：
+工具就是一个用 `@tool` 装饰的 async 函数:
 
 ```python
-from pydantic import BaseModel
-from cubepi import AgentTool, AgentToolResult, TextContent
+from cubepi import tool
 
 
-class GetWeatherParams(BaseModel):
-    city: str
-
-
-async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
+@tool
+async def get_weather(city: str) -> str:
+    "获取一个城市的当前天气,返回简短文字。"
     # 真实工作放在这里 —— 调 HTTP API、查 DB 等。
-    return AgentToolResult(
-        content=[TextContent(text=f"{params.city} 现在 72°F,晴")]
-    )
-
-
-weather_tool = AgentTool(
-    name="get_weather",
-    description="获取一个城市的当前天气,返回简短文字。",
-    parameters=GetWeatherParams,
-    execute=get_weather,
-)
+    return f"{city} 现在 72°F,晴"
 ```
 
 注意几点：
 
-- Pydantic 模型自动转成 JSON Schema,作为工具定义发给模型。
-- `execute` 签名是固定的:`(tool_call_id, params, *, signal, on_update)`。
-  最后两个 keyword-only 参数一定会被传入 —— 哪怕你不用,也得在签名里。
-- `signal` 是用户取消时会被 set 的 `asyncio.Event`。在长时间运行的
-  代码里检查它,及时退出。
-- `on_update(partial)` 让你流式回报进度(见
-  [工具使用](./tool-use))。
+- 输入 schema 从带类型的参数生成并发给模型;docstring 作为工具描述。
+  Pydantic `Field(...)` 的默认值与元数据都会被保留。
+- 返回 `str`(自动包成文本)、`Content`、内容列表,或在需要
+  `details`/`is_error` 时返回完整的 `AgentToolResult`。
+- 需要取消或进度流?在签名里声明 `signal`(用户取消时被 set 的
+  `asyncio.Event`)和/或 `on_update(partial)`,CubePi 会注入它们 —— 见
+  [工具使用](./tool-use)。
+- 需要共享参数模型或动态构建?长写法 `AgentTool(...)` 与之等价 —— 见
+  [工具使用](./tool-use)。
 
 ## 第 3 步 —— 组装 Agent
 
@@ -77,7 +66,7 @@ from cubepi import Agent
 agent = Agent(
     model=model,
     system_prompt="你是一个简洁的天气助手。",
-    tools=[weather_tool],
+    tools=[get_weather],
 )
 ```
 

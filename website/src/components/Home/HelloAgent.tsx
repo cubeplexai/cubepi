@@ -5,31 +5,20 @@ import { useIsZhHans } from '@site/src/hooks/useIsZhHans';
 import styles from './HelloAgent.module.css';
 
 const SAMPLE = `import asyncio
-from pydantic import BaseModel
-from cubepi import Agent, AgentTool, Model
-from cubepi.agent.types import AgentToolResult
+from cubepi import Agent, Model, tool
 from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.providers.base import TextContent
 
 provider = AnthropicProvider(api_key="sk-...")
 
-class GetWeatherParams(BaseModel):
-    city: str
-
-async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on_update=None):
-    return AgentToolResult(
-        content=[TextContent(text=f"72°F and sunny in {params.city}")]
-    )
+@tool
+async def get_weather(city: str) -> str:
+    "Get current weather for a city."
+    return f"72°F and sunny in {city}"
 
 agent = Agent(
     provider=provider,
     model=Model(id="claude-sonnet-4-5-20250929", provider="anthropic"),
-    tools=[AgentTool(
-        name="get_weather",
-        description="Get current weather for a city",
-        parameters=GetWeatherParams,
-        execute=get_weather,
-    )],
+    tools=[get_weather],
     system_prompt="You are a helpful weather assistant.",
 )
 

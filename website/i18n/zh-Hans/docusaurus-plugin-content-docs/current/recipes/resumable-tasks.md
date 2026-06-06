@@ -37,8 +37,7 @@ import os
 import json
 from pathlib import Path
 
-from pydantic import BaseModel
-from cubepi import AgentTool, AgentToolResult, TextContent
+from cubepi import AgentToolResult, TextContent, tool
 
 
 # 简单的文件支撑 job store；生产中替换为 Redis / Postgres。
@@ -46,13 +45,12 @@ JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/cubepi-jobs"))
 JOB_DIR.mkdir(parents=True, exist_ok=True)
 
 
-class TranscodeParams(BaseModel):
-    source_path: str
-    output_path: str
-
-
-async def transcode_video(tool_call_id, params: TranscodeParams, *, signal=None, on_update=None):
-    job_key = f"transcode:{params.source_path}->{params.output_path}"
+# execution_mode="sequential" → 一次只转码一个。只声明了 `signal`,
+# 所以只有它这一个由循环提供的参数会被注入。
+@tool(execution_mode="sequential")
+async def transcode_video(source_path: str, output_path: str, *, signal=None) -> AgentToolResult:
+    "Transcode a video file. Idempotent — safe to retry."
+    job_key = f"transcode:{source_path}->{output_path}"
     job_file = JOB_DIR / f"{job_key.replace('/', '_')}.json"
 
     if job_file.exists():
@@ -65,7 +63,7 @@ async def transcode_video(tool_call_id, params: TranscodeParams, *, signal=None,
 
     # 执行实际工作（长时间运行，代价高昂）。
     # 使用 signal 在取消时干净地中止。
-    output = await run_ffmpeg(params.source_path, params.output_path, signal=signal)
+    output = await run_ffmpeg(source_path, output_path, signal=signal)
 
     # 在工作成功后再写入 job 完成标记。
     job_file.write_text(json.dumps({"output_path": output}))
@@ -74,15 +72,6 @@ async def transcode_video(tool_call_id, params: TranscodeParams, *, signal=None,
         content=[TextContent(text=f"Transcoded to {output}.")],
         details={"output_path": output},
     )
-
-
-transcode_tool = AgentTool(
-    name="transcode_video",
-    description="Transcode a video file. Idempotent — safe to retry.",
-    parameters=TranscodeParams,
-    execute=transcode_video,
-    execution_mode="sequential",  # 一次只转码一个
-)
 ```
 
 现在，如果进程在 `run_ffmpeg` 执行期间崩溃，下次 agent 运行时会发现
@@ -101,7 +90,7 @@ from cubepi import Agent
 from cubepi.checkpointer import SQLiteCheckpointer
 from cubepi.providers.anthropic import AnthropicProvider
 
-from tools import transcode_tool   # 上面封装好的 AgentTool
+from tools import transcode_video   # 上面用 @tool 装饰的 AgentTool
 
 
 async def main(thread_id: str, initial_prompt: str | None):
@@ -109,7 +98,7 @@ async def main(thread_id: str, initial_prompt: str | None):
         agent = Agent(
             model=AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"]).model("claude-sonnet-4-5-20250929"),
             system_prompt="You orchestrate video transcoding jobs.",
-            tools=[transcode_tool],
+            tools=[transcode_video],
             checkpointer=cp,
             thread_id=thread_id,
         )
