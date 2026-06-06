@@ -1,6 +1,6 @@
 [project]
 name = "cubepi"
-version = "0.7.0"
+version = "0.8.0"
 description = "Pythonic async-native agent framework"
 readme = "README.md"
 license = "MIT"

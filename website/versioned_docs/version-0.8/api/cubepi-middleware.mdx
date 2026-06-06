@@ -1,0 +1,293 @@
+---
+id: cubepi-middleware
+title: cubepi.middleware
+sidebar_position: 4
+hide_table_of_contents: false
+---
+
+# `cubepi.middleware`
+
+### Middleware {#middleware}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L34)
+
+
+**Attributes**
+
+- `hitl`: `HitlBinding | None`
+
+
+**Methods**
+
+#### `transform_context` {#middleware-transform-context}
+
+```python
+transform_context(messages: list[Message], *, ctx: AgentContext, signal: asyncio.Event | None = None) -> list[Message]
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L37)
+
+
+#### `convert_to_llm` {#middleware-convert-to-llm}
+
+```python
+convert_to_llm(messages: list[Message], *, ctx: AgentContext) -> list[Message]
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L46)
+
+
+#### `before_tool_call` {#middleware-before-tool-call}
+
+```python
+before_tool_call(ctx: BeforeToolCallContext, *, signal: asyncio.Event | None = None) -> BeforeToolCallResult | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L51)
+
+
+#### `after_tool_call` {#middleware-after-tool-call}
+
+```python
+after_tool_call(ctx: AfterToolCallContext, *, signal: asyncio.Event | None = None) -> AfterToolCallResult | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L59)
+
+
+#### `transform_system_prompt` {#middleware-transform-system-prompt}
+
+```python
+transform_system_prompt(system_prompt: str, *, ctx: AgentContext, signal: asyncio.Event | None = None) -> str
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L67)
+
+
+#### `should_stop_after_turn` {#middleware-should-stop-after-turn}
+
+```python
+should_stop_after_turn(ctx: AgentContext) -> bool
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L76)
+
+
+#### `after_model_response` {#middleware-after-model-response}
+
+```python
+after_model_response(response: AssistantMessage, ctx: AgentContext, *, signal: asyncio.Event | None = None) -> TurnAction | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L79)
+
+
+#### `on_run_end` {#middleware-on-run-end}
+
+```python
+on_run_end(ctx: AgentContext, *, signal: asyncio.Event | None = None) -> list[Message] | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L88)
+
+
+#### `extra_llm_calls` {#middleware-extra-llm-calls}
+
+```python
+extra_llm_calls() -> Iterable[tuple[Provider, Model]]
+```
+
+Declare LLM calls this middleware drives outside the agent's main
+provider/model.
+
+Each pair is `(provider, model)`. `cubepi.tracing.Recorder` uses
+these to:
+
+* Subscribe listeners on any provider the recorder isn't already
+  watching, so the resulting calls show up in the trace tree
+  alongside the agent's own chat spans.
+* Identify middleware-owned calls by `(model.provider, model.id)`
+  so they don't overwrite the root `invoke_agent` span's
+  attribution (provider name, system prompt hash, tool list). This
+  model-based gate is what handles the common "reuse one provider
+  client, swap the model" pattern — listener identity alone would
+  attribute the middleware's first call to the agent.
+
+Default is empty — middlewares that do not call any LLM directly
+need not override.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L96)
+
+
+
+### TurnAction {#turnaction}
+
+_class_
+
+```python
+TurnAction(self, response: AssistantMessage | None = None, inject_messages: list[Message] = list(), decision: Literal['natural', 'stop', 'loop_to_model'] = 'natural')
+```
+
+Directs the agent loop's next step after a model response.
+
+Composition (chain): each middleware sees previous middleware's
+TurnAction. Last middleware's value wins for response and decision.
+inject_messages concatenates across the chain.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L20)
+
+
+**Attributes**
+
+- `response`: `AssistantMessage | None`
+- `inject_messages`: `list[Message]`
+- `decision`: `Literal['natural', 'stop', 'loop_to_model']`
+
+
+### compose_middleware {#compose-middleware}
+
+_function_
+
+```python
+compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/base.py#L125)
+
+
+### CompactionMiddleware {#compactionmiddleware}
+
+_class_
+
+```python
+CompactionMiddleware(self, *, summary_model: BoundModel, max_tokens_before_compact: int, keep_recent_messages: int = 8, max_summary_tokens: int = 1024, min_compact_messages: int = 4)
+```
+
+Keep long histories within context by summarizing older turns.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/compaction/__init__.py#L72)
+
+
+**Methods**
+
+#### `transform_context` {#compactionmiddleware-transform-context}
+
+```python
+transform_context(messages: list[Message], *, ctx: AgentContext, signal: asyncio.Event | None = None) -> list[Message]
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/compaction/__init__.py#L91)
+
+
+#### `extra_llm_calls` {#compactionmiddleware-extra-llm-calls}
+
+```python
+extra_llm_calls() -> tuple[tuple[Provider, Model], ...]
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/compaction/__init__.py#L142)
+
+
+
+### CompactionState {#compactionstate}
+
+_class_
+
+JSON-safe summary state stored in `AgentContext.extra`.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/compaction/state.py#L11)
+
+
+**Attributes**
+
+- `summary`: `str`
+- `summarized_message_ids`: `list[str]`
+- `summarized_message_refs`: `list[str]`
+- `last_summarized_message_id`: `str | None`
+
+
+### SubagentMiddleware {#subagentmiddleware}
+
+_class_
+
+```python
+SubagentMiddleware(self, *, subagents: dict[str, SubagentSpec], default_model: BoundModel, shared_tools: Sequence[AgentTool[BaseModel]] = (), inherited_middleware: Sequence[Middleware] = (), excluded_tool_names: set[str] | None = None, event_mapper: EventMapper | None = None, event_handler: EventHandler | None = None, tracer: SubagentTracer | None = None)
+```
+
+Inject a tool that delegates one task to an ephemeral child agent.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/subagents.py#L57)
+
+
+**Attributes**
+
+- `tools`: `list[AgentTool[BaseModel]]`
+- `subagents`: `dict[str, SubagentSpec]`
+- `shared_tools`: `tuple[AgentTool[BaseModel], ...]`
+
+
+### SubagentRequest {#subagentrequest}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/subagents.py#L41)
+
+
+**Attributes**
+
+- `name`: `str`
+- `role`: `str`
+- `task`: `str`
+- `prompt`: `str`
+- `subagent_type`: `str`
+
+
+### SubagentResult {#subagentresult}
+
+_class_
+
+```python
+SubagentResult(self, agent_id: str, text: str, events: list[StructuredValue], error: str | None = None)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/subagents.py#L49)
+
+
+**Attributes**
+
+- `agent_id`: `str`
+- `text`: `str`
+- `events`: `list[StructuredValue]`
+- `error`: `str | None`
+
+
+### SubagentSpec {#subagentspec}
+
+_class_
+
+```python
+SubagentSpec(self, name: str, description: str, system_prompt: str, model: BoundModel | None = None, tools: Sequence[AgentTool[BaseModel]] = tuple(), middleware: Sequence[Middleware] = tuple())
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/subagents.py#L31)
+
+
+**Attributes**
+
+- `name`: `str`
+- `description`: `str`
+- `system_prompt`: `str`
+- `model`: `BoundModel | None`
+- `tools`: `Sequence[AgentTool[BaseModel]]`
+- `middleware`: `Sequence[Middleware]`
+
+
+
+<!-- GENERATED by build_api_reference.py — DO NOT EDIT -->
