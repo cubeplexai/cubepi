@@ -89,10 +89,14 @@ async def main(thread_id: str, start: bool) -> None:
             last_type = type(last).__name__ if last else "none"
             print(f"Resuming thread {thread_id!r} ({len(agent.state.messages)} messages, last={last_type})")
             if last_type == "AssistantMessage":
-                # Run already completed naturally — nothing to resume.
-                # In a real workflow you'd ask the user for the next prompt.
-                print("Run already completed. Nothing to resume (last turn was a model reply).")
-                return
+                from cubepi.providers.base import ToolCall
+                has_pending_tools = any(isinstance(c, ToolCall) for c in last.content)
+                if not has_pending_tools:
+                    # Run completed normally — no pending tool calls to execute.
+                    # In a real workflow you'd ask the user for the next prompt.
+                    print("Run already completed. Nothing to resume.")
+                    return
+                # Has unresolved tool calls — resume() will execute them.
             await agent.resume()
 
 
