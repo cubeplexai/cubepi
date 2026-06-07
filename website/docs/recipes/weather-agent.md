@@ -155,7 +155,7 @@ git clone https://github.com/cubeplexai/cubepi && cd cubepi
 uv sync
 
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
-uv run python examples/weather_agent.py
+uv run --with httpx python examples/weather_agent.py
 ```
 
 ## See also

@@ -254,12 +254,12 @@ A self-contained service template for this recipe is in the repository at
 ```bash
 git clone https://github.com/cubeplexai/cubepi && cd cubepi
 uv sync --extra postgres
-pip install fastapi "uvicorn[standard]" sse-starlette
 
 export DATABASE_URL=postgresql://user:pass@localhost/cubepi
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
 
-uvicorn examples.postgres_fastapi:app --reload --port 8000
+uv run --with fastapi --with "uvicorn[standard]" --with sse-starlette \
+  uvicorn examples.postgres_fastapi:app --reload --port 8000
 
 # Test with curl:
 curl -N -X POST http://localhost:8000/chat/conv1/messages \

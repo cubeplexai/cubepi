@@ -43,8 +43,7 @@ when both are set.
 ### weather_agent.py
 
 ```bash
-pip install httpx
-uv run python examples/weather_agent.py
+uv run --with httpx python examples/weather_agent.py
 ```
 
 ### persistent_chat.py
@@ -104,9 +103,10 @@ Requires: `cubepi[sqlite]`
 ### postgres_fastapi.py
 
 ```bash
-pip install "cubepi[postgres]" fastapi "uvicorn[standard]" sse-starlette
+uv sync --extra postgres
 export DATABASE_URL=postgresql://user:pass@localhost/cubepi
-uvicorn examples.postgres_fastapi:app --reload --port 8000
+uv run --with fastapi --with "uvicorn[standard]" --with sse-starlette \
+  uvicorn examples.postgres_fastapi:app --reload --port 8000
 
 curl -N -X POST http://localhost:8000/chat/conv1/messages \
   -H "content-type: application/json" \
