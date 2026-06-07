@@ -85,8 +85,9 @@ async def get_weather(tool_call_id, params: GetWeatherParams, *, signal=None, on
     return AgentToolResult(content=[TextContent(text=f"72°F and sunny in {params.city}")])
 
 
+provider = AnthropicProvider(provider_id="anthropic", api_key="…")
 agent = Agent(
-    model=AnthropicProvider(provider_id="anthropic", api_key="…").model("claude-sonnet-4-5-20250929"),
+    model=provider.model("claude-sonnet-4-5-20250929"),
     tools=[AgentTool(
         name="get_weather",
         description="Get current weather for a city.",

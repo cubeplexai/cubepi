@@ -82,8 +82,9 @@ async def get_weather(city: str) -> str:
     return f"72°F and sunny in {city}"
 
 
+provider = AnthropicProvider(provider_id="anthropic", api_key="…")
 agent = Agent(
-    model=AnthropicProvider(provider_id="anthropic", api_key="…").model("claude-sonnet-4-5-20250929"),
+    model=provider.model("claude-sonnet-4-5-20250929"),
     tools=[get_weather],
 )
 agent.subscribe(lambda e, s=None: print(e.type))
