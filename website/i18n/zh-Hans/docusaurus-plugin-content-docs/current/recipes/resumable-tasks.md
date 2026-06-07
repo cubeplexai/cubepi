@@ -96,7 +96,7 @@ from tools import transcode_video   # 上面用 @tool 装饰的 AgentTool
 async def main(thread_id: str, initial_prompt: str | None):
     async with SQLiteCheckpointer("jobs.db") as cp:
         agent = Agent(
-            model=AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"]).model("claude-sonnet-4-5-20250929"),
+            model=AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"]).model("claude-sonnet-4-6"),
             system_prompt="You orchestrate video transcoding jobs.",
             tools=[transcode_video],
             checkpointer=cp,

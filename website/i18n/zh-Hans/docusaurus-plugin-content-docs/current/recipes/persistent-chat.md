@@ -28,7 +28,7 @@ async def main(thread_id: str):
 
     async with SQLiteCheckpointer("chat.db") as cp:
         agent = Agent(
-            model=provider.model("claude-sonnet-4-5-20250929"),
+            model=provider.model("claude-sonnet-4-6"),
             system_prompt="You are a concise, friendly assistant.",
             checkpointer=cp,
             thread_id=thread_id,

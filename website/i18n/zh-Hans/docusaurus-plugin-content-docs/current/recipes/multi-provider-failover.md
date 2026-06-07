@@ -147,14 +147,14 @@ async def main():
         api_key=os.environ["OPENAI_API_KEY"],
     )
     failover = FailoverProvider(
-        anthropic.model("claude-sonnet-4-5-20250929"),
+        anthropic.model("claude-sonnet-4-6"),
         openai.model("gpt-5"),
     )
 
     # 此处传入的 model 会被 FailoverProvider 内部覆盖；可传任意占位符。
     # 我们使用主 provider 的 model，以便用量统计标签与正常路径保持一致。
     agent = Agent(
-        model=failover.model("claude-sonnet-4-5-20250929"),
+        model=failover.model("claude-sonnet-4-6"),
         system_prompt="You answer concisely.",
     )
     agent.subscribe(lambda e, s=None: None)

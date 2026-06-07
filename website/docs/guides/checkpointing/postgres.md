@@ -31,7 +31,7 @@ async def main():
     provider = AnthropicProvider(provider_id="anthropic", api_key="…")
     async with PostgresCheckpointer("postgresql://user:pass@host/dbname") as cp:
         agent = Agent(
-            model=provider.model("claude-sonnet-4-5-20250929"),
+            model=provider.model("claude-sonnet-4-6"),
             checkpointer=cp,
             thread_id="user-42",
         )

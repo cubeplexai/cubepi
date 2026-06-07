@@ -17,7 +17,7 @@ async def get_weather(city: str) -> str:
 
 agent = Agent(
     provider=provider,
-    model=Model(id="claude-sonnet-4-5-20250929", provider="anthropic"),
+    model=Model(id="claude-sonnet-4-6", provider="anthropic"),
     tools=[get_weather],
     system_prompt="You are a helpful weather assistant.",
 )

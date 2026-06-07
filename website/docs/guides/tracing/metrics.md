@@ -24,8 +24,8 @@ landed) are still groupable by what was asked for:
 
 - `gen_ai.operation.name` — `chat` / `execute_tool` / `invoke_agent`
 - `gen_ai.provider.name` — `anthropic`, `openai`, `openai_responses`, …
-- `gen_ai.request.model` — e.g. `claude-sonnet-4-5-20250929`
-- `gen_ai.response.model` — e.g. `claude-sonnet-4-5-20250929` (success only)
+- `gen_ai.request.model` — e.g. `claude-sonnet-4-6`
+- `gen_ai.response.model` — e.g. `claude-sonnet-4-6` (success only)
 - `gen_ai.token.type` — `input` or `output` (token usage only)
 
 ## Attaching a Meter

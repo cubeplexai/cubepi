@@ -121,7 +121,7 @@ async def post_message(
 
     async def event_generator() -> AsyncIterator[dict]:
         agent = Agent(
-            model=_provider.model("claude-sonnet-4-5-20250929"),
+            model=_provider.model("claude-sonnet-4-6"),
             system_prompt="You are a helpful assistant.",
             checkpointer=_checkpointer,
             thread_id=thread_id,

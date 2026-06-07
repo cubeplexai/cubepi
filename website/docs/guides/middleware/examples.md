@@ -180,7 +180,7 @@ messages. The full conversation history remains in `agent.state`.
 ```python
 from cubepi.middleware import CompactionMiddleware
 
-main_model = main_provider.model("claude-sonnet-4-5-20250929")
+main_model = main_provider.model("claude-sonnet-4-6")
 summary_model = cheap_provider.model("claude-haiku-4-5")
 
 agent = Agent(

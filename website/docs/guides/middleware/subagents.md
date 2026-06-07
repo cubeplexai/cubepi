@@ -31,7 +31,7 @@ subagents = {
     ),
 }
 
-model = provider.model("claude-sonnet-4-5-20250929")
+model = provider.model("claude-sonnet-4-6")
 
 agent = Agent(
     model=model,

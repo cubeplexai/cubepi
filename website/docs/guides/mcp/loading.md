@@ -41,7 +41,7 @@ async def main():
     )
 
     agent = Agent(
-        model=AnthropicProvider(provider_id="anthropic", api_key="…").model("claude-sonnet-4-5-20250929"),
+        model=AnthropicProvider(provider_id="anthropic", api_key="…").model("claude-sonnet-4-6"),
         tools=tools,                # all server tools, ready to use
     )
     agent.subscribe(lambda e, s=None: None)

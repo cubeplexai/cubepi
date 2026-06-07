@@ -23,8 +23,8 @@ Span 描述单次运行的形态；直方图描述整个集群的形态。
 
 - `gen_ai.operation.name` —— `chat` / `execute_tool` / `invoke_agent`
 - `gen_ai.provider.name` —— `anthropic`、`openai`、`openai_responses`……
-- `gen_ai.request.model` —— 例如 `claude-sonnet-4-5-20250929`
-- `gen_ai.response.model` —— 例如 `claude-sonnet-4-5-20250929`（仅成功时）
+- `gen_ai.request.model` —— 例如 `claude-sonnet-4-6`
+- `gen_ai.response.model` —— 例如 `claude-sonnet-4-6`（仅成功时）
 - `gen_ai.token.type` —— `input` 或 `output`（仅 token 用量）
 
 ## 挂载 Meter

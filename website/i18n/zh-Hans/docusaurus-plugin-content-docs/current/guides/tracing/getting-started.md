@@ -31,7 +31,7 @@ from cubepi.tracing.exporters import JsonlSpanExporter
 
 async def main() -> None:
     agent = Agent(
-        model=AnthropicProvider(provider_id="anthropic", api_key="…").model("claude-sonnet-4-5-20250929"),
+        model=AnthropicProvider(provider_id="anthropic", api_key="…").model("claude-sonnet-4-6"),
         system_prompt="Be helpful.",
     )
 
@@ -91,7 +91,7 @@ jq -r '"\(.name)  \(.attributes."gen_ai.operation.name" // "")"' \
    cubepi-traces/2026-05-19/*.jsonl
 # invoke_agent  invoke_agent
 # cubepi.turn
-# chat claude-sonnet-4-5-20250929  chat
+# chat claude-sonnet-4-6  chat
 ```
 
 ## Span 层级

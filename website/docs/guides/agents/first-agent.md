@@ -21,7 +21,7 @@ from cubepi.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
 model = provider.model(
-    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-6",
     max_tokens=4096,         # response cap
     context_window=200_000,  # hard model limit; defaults are usually fine
     temperature=0.7,

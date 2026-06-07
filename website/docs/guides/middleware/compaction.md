@@ -18,7 +18,7 @@ Use a cheaper model for the summary pass and your normal model for the agent:
 from cubepi import Agent
 from cubepi.middleware import CompactionMiddleware
 
-model = main_provider.model("claude-sonnet-4-5-20250929")
+model = main_provider.model("claude-sonnet-4-6")
 summary_model = cheap_provider.model("claude-haiku-4-5")
 
 agent = Agent(

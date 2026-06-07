@@ -40,7 +40,7 @@ def get_weather(city: str) -> str:
     return f"72F and sunny in {city}"
 
 
-llm = ChatAnthropic(model="claude-sonnet-4-5").bind_tools([get_weather])
+llm = ChatAnthropic(model="claude-sonnet-4-6").bind_tools([get_weather])
 
 class State(TypedDict):
     messages: list
@@ -72,7 +72,7 @@ async def get_weather(city: str) -> str:
 
 provider = AnthropicProvider(provider_id="anthropic", api_key="...")
 agent = Agent(
-    model=provider.model("claude-sonnet-4-5"),
+    model=provider.model("claude-sonnet-4-6"),
     tools=[get_weather],
 )
 await agent.prompt("Weather in Tokyo?")
@@ -143,7 +143,7 @@ def get_weather(city: str) -> str:
     return f"72F and sunny in {city}"
 
 
-llm = ChatAnthropic(model="claude-sonnet-4-5").bind_tools([get_weather])
+llm = ChatAnthropic(model="claude-sonnet-4-6").bind_tools([get_weather])
 
 class State(TypedDict):
     messages: list
@@ -175,7 +175,7 @@ async def get_weather(city: str) -> str:
 
 provider = AnthropicProvider(provider_id="anthropic", api_key="...")
 agent = Agent(
-    model=provider.model("claude-sonnet-4-5"),
+    model=provider.model("claude-sonnet-4-6"),
     tools=[get_weather],
 )
 await agent.prompt("Weather in Tokyo?")

@@ -76,7 +76,7 @@ async def get_weather(
 async def main():
     provider = AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
     agent = Agent(
-        model=provider.model("claude-sonnet-4-5-20250929"),
+        model=provider.model("claude-sonnet-4-6"),
         system_prompt="You are a concise weather assistant. Always use the tool; don't guess.",
         tools=[get_weather],
     )

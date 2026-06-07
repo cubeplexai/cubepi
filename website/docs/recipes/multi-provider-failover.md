@@ -149,7 +149,7 @@ async def main():
         api_key=os.environ["OPENAI_API_KEY"],
     )
     failover = FailoverProvider(
-        anthropic.model("claude-sonnet-4-5-20250929"),
+        anthropic.model("claude-sonnet-4-6"),
         openai.model("gpt-5"),
     )
 
@@ -157,7 +157,7 @@ async def main():
     # placeholder. We use the primary's so usage tracking labels match the
     # happy path.
     agent = Agent(
-        model=failover.model("claude-sonnet-4-5-20250929"),
+        model=failover.model("claude-sonnet-4-6"),
         system_prompt="You answer concisely.",
     )
     agent.subscribe(lambda e, s=None: None)

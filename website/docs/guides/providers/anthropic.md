@@ -29,7 +29,7 @@ the environment.
 ```python
 provider = AnthropicProvider(provider_id="anthropic")
 model = provider.model(
-    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-6",
     reasoning=True,           # enables thinking levels (see below)
     max_tokens=8192,          # response cap
     context_window=200_000,   # hard model limit

@@ -18,7 +18,7 @@ from cubepi import Agent
 from cubepi.middleware import CompactionMiddleware
 
 agent = Agent(
-    model=provider.model("claude-sonnet-4-5-20250929"),
+    model=provider.model("claude-sonnet-4-6"),
     checkpointer=checkpointer,
     thread_id="conv_123",
     middleware=[

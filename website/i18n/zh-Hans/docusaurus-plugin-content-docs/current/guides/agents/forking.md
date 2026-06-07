@@ -149,7 +149,7 @@ run_id = uuid.uuid4().hex
 channel = CheckpointedChannel(checkpointer=cp, thread_id="conv_123", run_id=run_id)
 
 agent = Agent(
-    model=provider.model("claude-sonnet-4-5-20250929"),
+    model=provider.model("claude-sonnet-4-6"),
     checkpointer=cp,
     thread_id="conv_123",
     tools=[ask_user_tool(channel)],

@@ -27,7 +27,7 @@ provider = AnthropicProvider(
 ```python
 provider = AnthropicProvider(provider_id="anthropic")
 model = provider.model(
-    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-6",
     reasoning=True,           # 启用思考等级(见下)
     max_tokens=8192,          # 回复 token 上限
     context_window=200_000,   # 模型硬上限

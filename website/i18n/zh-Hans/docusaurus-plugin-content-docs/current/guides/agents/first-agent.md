@@ -20,7 +20,7 @@ from cubepi.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
 model = provider.model(
-    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-6",
     max_tokens=4096,         # 回复 token 上限
     context_window=200_000,  # 模型硬上限；通常默认就够
     temperature=0.7,
