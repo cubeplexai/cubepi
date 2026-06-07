@@ -168,3 +168,19 @@ Postgres 适合多实例服务或大量并发用户 ——
 - [多轮对话](../guides/agents/multi-turn) —— `steer`、`follow_up`、`resume`。
 - [SQLite Checkpointing](../guides/checkpointing/sqlite) —— 后端详细说明。
 - [可恢复长任务](./resumable-tasks) —— 当崩溃发生在工具执行中途，而非轮次之间时。
+
+## 运行示例
+
+仓库中有一份完整可运行的代码，位于
+[`examples/persistent_chat.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/persistent_chat.py)。
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync --extra sqlite
+
+export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/persistent_chat.py alice
+# Ctrl-D 退出后重新运行 —— 历史记录会恢复。
+uv run python examples/persistent_chat.py bob
+# 不同的 thread_id → 全新对话。
+```

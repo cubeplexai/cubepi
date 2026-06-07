@@ -146,3 +146,16 @@ Tokyo is currently 18°C with a wind speed of 12 km/h. São Paulo is 25°C with 
 
 - [构建你的第一个 Agent](../guides/agents/first-agent) —— 使用硬编码工具的相同模式。
 - [工具使用与并行执行](../guides/agents/tool-use) —— 更多关于并行工具调用的内容。
+
+## 运行示例
+
+仓库中有一份完整可运行的代码，位于
+[`examples/weather_agent.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/weather_agent.py)。
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync
+
+export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run --with httpx python examples/weather_agent.py
+```

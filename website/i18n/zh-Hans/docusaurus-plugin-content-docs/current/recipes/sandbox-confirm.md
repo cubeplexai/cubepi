@@ -135,3 +135,17 @@ await agent.abort_pending(reason="user closed tab")
 这会干净地关闭对话：为所有未解决的 tool call 追加合成的 deny tool_result，
 持久化一个终止性的 `AssistantMessage(stop_reason="aborted")`，并触发
 `AgentAbortedEvent`。下一次 `agent.prompt(...)` 重新开始。
+
+## 运行示例
+
+仓库中有一份完整可运行的代码，位于
+[`examples/sandbox_confirm.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/sandbox_confirm.py)。
+示例接入了一个模拟的 bash 工具和一个策略函数：读操作自动允许、危险写操作硬拒绝、其他操作由 host 循环自动确认。
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync
+
+export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/sandbox_confirm.py
+```

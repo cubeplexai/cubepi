@@ -253,3 +253,17 @@ class CircuitBreaker:
 - [Providers / Anthropic](../guides/providers/anthropic) 和
   [OpenAI](../guides/providers/openai) —— provider 专属细节。
 - [编写自定义 Provider](../guides/providers/custom) —— 本封装器使用的同一 Protocol。
+
+## 运行示例
+
+仓库中有一份完整可运行的代码，位于
+[`examples/multi_provider_failover.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/multi_provider_failover.py)。
+示例故意使用错误的主 provider key 触发故障转移，再通过备用 provider 正确返回结果。
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync
+
+export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/multi_provider_failover.py
+```
