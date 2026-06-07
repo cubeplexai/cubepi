@@ -87,6 +87,10 @@ const config: Config = {
   // subpages aren't all mislabeled as the application itself.
   headTags: [
     {
+      tagName: 'meta',
+      attributes: { name: 'baidu-site-verification', content: 'codeva-fPG0VGR2p8' },
+    },
+    {
       tagName: 'script',
       attributes: { type: 'application/ld+json' },
       innerHTML: JSON.stringify({
