@@ -77,7 +77,7 @@ async def get_weather(
 async def main():
     provider = AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
     agent = Agent(
-        model=provider.model("claude-sonnet-4-5-20250929"),
+        model=provider.model("claude-sonnet-4-6"),
         system_prompt="You are a concise weather assistant. Always use the tool; don't guess.",
         tools=[get_weather],
     )
@@ -144,6 +144,19 @@ Tokyo is currently 18°C with a wind speed of 12 km/h. São Paulo is 25°C with 
 - **Persist conversations:** add a
   [`SQLiteCheckpointer`](../guides/checkpointing/sqlite) so follow-up
   questions ("and in Osaka?") have history.
+
+## Run the example
+
+A self-contained, runnable version of this recipe is in the repository at
+[`examples/weather_agent.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/weather_agent.py).
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/weather_agent.py
+```
 
 ## See also
 

@@ -182,3 +182,18 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Run the example
+
+A self-contained, runnable version of this recipe is in the repository at
+[`examples/ask_user_form.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/ask_user_form.py).
+The host loop answers all questions programmatically so you can observe the
+full round-trip without wiring up a real UI.
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/ask_user_form.py
+```

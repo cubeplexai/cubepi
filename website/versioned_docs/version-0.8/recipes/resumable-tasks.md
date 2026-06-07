@@ -101,7 +101,7 @@ from tools import transcode_video   # the @tool-decorated AgentTool from above
 async def main(thread_id: str, initial_prompt: str | None):
     async with SQLiteCheckpointer("jobs.db") as cp:
         agent = Agent(
-            model=AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"]).model("claude-sonnet-4-5-20250929"),
+            model=AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"]).model("claude-sonnet-4-6"),
             system_prompt="You orchestrate video transcoding jobs.",
             tools=[transcode_video],
             checkpointer=cp,
@@ -126,6 +126,12 @@ async def main(thread_id: str, initial_prompt: str | None):
             # Resume picks up from the last persisted message:
             #   ToolResultMessage / UserMessage → re-invokes the model
             #   AssistantMessage with no queued steer/follow_up → raises
+            last = agent.state.messages[-1]
+            if type(last).__name__ == "AssistantMessage":
+                # Job finished normally before the crash — nothing to resume.
+                # Ask the user for the next prompt instead.
+                print("Last run completed. Nothing to resume.")
+                return
             await agent.resume()
 
 
@@ -207,6 +213,24 @@ tool args. That's what `transcode_video` above does with `JOB_DIR`.
   `await asyncio.sleep(...)` or a `for ... in stream` that ignores
   `signal.is_set()` won't honour `abort`. Drop a check inside any
   hot loop.
+
+## Run the example
+
+A self-contained, runnable version of this recipe is in the repository at
+[`examples/resumable_tasks.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/resumable_tasks.py).
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync --extra sqlite
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
+
+# Start the job (kill mid-flight with Ctrl-C to test recovery):
+uv run python examples/resumable_tasks.py job-1 start
+
+# Resume from where it stopped — already-done items are skipped:
+uv run python examples/resumable_tasks.py job-1
+```
 
 ## See also
 

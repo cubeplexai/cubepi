@@ -138,3 +138,18 @@ This closes the conversation cleanly: synthetic deny tool_results are
 appended for any unresolved tool calls, a terminal
 `AssistantMessage(stop_reason="aborted")` is persisted, and
 `AgentAbortedEvent` is emitted. The next `agent.prompt(...)` starts fresh.
+
+## Run the example
+
+A self-contained, runnable version of this recipe is in the repository at
+[`examples/sandbox_confirm.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/sandbox_confirm.py).
+It wires up a simulated bash tool and a policy that auto-allows reads, denies
+destructive writes, and auto-approves everything else via the host loop.
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/sandbox_confirm.py
+```
