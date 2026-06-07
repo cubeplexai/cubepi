@@ -18,7 +18,9 @@ Set ANTHROPIC_API_KEY or OPENAI_API_KEY before running (see _provider.py).
 
 import asyncio
 import os
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Depends
@@ -28,6 +30,9 @@ from sse_starlette.sse import EventSourceResponse
 from cubepi import Agent
 from cubepi.checkpointer import PostgresCheckpointer
 
+# Works both when run as a script (python examples/postgres_fastapi.py) and
+# when loaded as a package by uvicorn (uvicorn examples.postgres_fastapi:app).
+sys.path.insert(0, str(Path(__file__).parent))
 from _provider import MODEL_ID, provider
 
 _checkpointer: PostgresCheckpointer | None = None
