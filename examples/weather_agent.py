@@ -6,7 +6,7 @@ Demonstrates HTTP-calling tools, error handling, streaming UI, and cancellation.
     uv run python examples/weather_agent.py
 
 Requires: httpx (pip install httpx)
-Uses the Ark coding endpoint by default — override via CUBEPI_* env vars (see _provider.py).
+Set ANTHROPIC_API_KEY or OPENAI_API_KEY before running (see _provider.py).
 """
 
 import asyncio

@@ -8,7 +8,7 @@ structured multi-question form before proceeding.
 The host loop answers the form programmatically (simulating a UI). In a real
 app you'd render each question to a frontend and collect the response.
 
-Uses the Ark coding endpoint by default — override via CUBEPI_* env vars (see _provider.py).
+Set ANTHROPIC_API_KEY or OPENAI_API_KEY before running (see _provider.py).
 """
 
 import asyncio

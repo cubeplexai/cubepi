@@ -13,7 +13,7 @@ streaming, a shared PostgresCheckpointer for persistence.
       -d '{"text":"hi"}'
 
 Requires: cubepi[postgres], fastapi, uvicorn[standard], sse-starlette
-Uses the Ark coding endpoint by default — override via CUBEPI_* env vars (see _provider.py).
+Set ANTHROPIC_API_KEY or OPENAI_API_KEY before running (see _provider.py).
 """
 
 import asyncio

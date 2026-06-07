@@ -11,7 +11,7 @@ skips already-completed work.
     uv run python examples/resumable_tasks.py job-1
 
 Requires: cubepi[sqlite]
-Uses the Ark coding endpoint by default — override via CUBEPI_* env vars (see _provider.py).
+Set ANTHROPIC_API_KEY or OPENAI_API_KEY before running (see _provider.py).
 """
 
 import asyncio
