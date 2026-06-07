@@ -128,10 +128,14 @@ async def main(thread_id: str, initial_prompt: str | None):
             #   AssistantMessage with no queued steer/follow_up → raises
             last = agent.state.messages[-1]
             if type(last).__name__ == "AssistantMessage":
-                # Job finished normally before the crash — nothing to resume.
-                # Ask the user for the next prompt instead.
-                print("Last run completed. Nothing to resume.")
-                return
+                from cubepi.providers.base import ToolCall
+                has_pending_tools = any(isinstance(c, ToolCall) for c in last.content)
+                if not has_pending_tools:
+                    # Job finished normally — no pending tool calls.
+                    # Ask the user for the next prompt instead.
+                    print("Last run completed. Nothing to resume.")
+                    return
+                # Has unresolved tool calls — resume() will execute them.
             await agent.resume()
 
 
