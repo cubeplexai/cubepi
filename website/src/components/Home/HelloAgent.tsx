@@ -5,7 +5,7 @@ import { useIsZhHans } from '@site/src/hooks/useIsZhHans';
 import styles from './HelloAgent.module.css';
 
 const SAMPLE = `import asyncio
-from cubepi import Agent, Model, tool
+from cubepi import Agent, tool
 from cubepi.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(api_key="sk-...")
@@ -16,8 +16,7 @@ async def get_weather(city: str) -> str:
     return f"72°F and sunny in {city}"
 
 agent = Agent(
-    provider=provider,
-    model=Model(id="claude-sonnet-4-6", provider="anthropic"),
+    model=provider.model("claude-sonnet-4-6"),
     tools=[get_weather],
     system_prompt="You are a helpful weather assistant.",
 )
