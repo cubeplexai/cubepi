@@ -28,7 +28,7 @@ async def main(thread_id: str):
 
     async with SQLiteCheckpointer("chat.db") as cp:
         agent = Agent(
-            model=provider.model("claude-sonnet-4-5-20250929"),
+            model=provider.model("claude-sonnet-4-6"),
             system_prompt="You are a concise, friendly assistant.",
             checkpointer=cp,
             thread_id=thread_id,
@@ -164,6 +164,22 @@ concurrent users — see [Postgres + FastAPI](./postgres-fastapi).
   history. One agent per thread, or move to Postgres.
 - **`chat.db` in `/tmp`** — Some OSes wipe `/tmp` on reboot. Use
   `~/.local/share/myapp/chat.db` or similar for user data.
+
+## Run the example
+
+A self-contained, runnable version of this recipe is in the repository at
+[`examples/persistent_chat.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/persistent_chat.py).
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync --extra sqlite
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/persistent_chat.py alice
+# Ctrl-D to quit, then re-run — history is restored.
+uv run python examples/persistent_chat.py bob
+# Different thread_id → clean slate.
+```
 
 ## See also
 
