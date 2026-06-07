@@ -180,3 +180,17 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## 运行示例
+
+仓库中有一份完整可运行的代码，位于
+[`examples/ask_user_form.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/ask_user_form.py)。
+Host 循环以编程方式回答所有问题，无需接入真实 UI 即可观察完整的交互过程。
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync
+
+export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/ask_user_form.py
+```

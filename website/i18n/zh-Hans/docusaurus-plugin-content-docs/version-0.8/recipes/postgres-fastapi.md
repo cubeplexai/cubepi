@@ -246,3 +246,24 @@ curl -N -X POST http://localhost:8000/chat/conv1/messages \
 - [Postgres Checkpointing](../guides/checkpointing/postgres) —— 后端深度说明。
 - [持久化聊天](./persistent-chat) —— 使用 SQLite 的相同流程。
 - [多 Provider 故障转移](./multi-provider-failover) —— 与本服务结合以提升弹性。
+
+## 运行示例
+
+仓库中有一份完整可运行的代码，位于
+[`examples/postgres_fastapi.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/postgres_fastapi.py)。
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync --extra postgres
+
+export DATABASE_URL=postgresql://user:pass@localhost/cubepi
+export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]
+
+uv run --with fastapi --with "uvicorn[standard]" --with sse-starlette \
+  uvicorn examples.postgres_fastapi:app --reload --port 8000
+
+# 用 curl 测试：
+curl -N -X POST http://localhost:8000/chat/conv1/messages \
+  -H "content-type: application/json" \
+  -d '{"text":"hi"}'
+```
