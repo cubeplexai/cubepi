@@ -246,6 +246,27 @@ If you need strict ordering, add an application-layer mutex
 - **Long requests timing out** — Tool-heavy agents can run minutes.
   Set generous proxy timeouts and uvicorn `--timeout-keep-alive 600`.
 
+## Run the example
+
+A self-contained service template for this recipe is in the repository at
+[`examples/postgres_fastapi.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/postgres_fastapi.py).
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync --extra postgres
+pip install fastapi "uvicorn[standard]" sse-starlette
+
+export DATABASE_URL=postgresql://user:pass@localhost/cubepi
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
+
+uvicorn examples.postgres_fastapi:app --reload --port 8000
+
+# Test with curl:
+curl -N -X POST http://localhost:8000/chat/conv1/messages \
+  -H "content-type: application/json" \
+  -d '{"text":"hi"}'
+```
+
 ## See also
 
 - [Postgres Checkpointing](../guides/checkpointing/postgres) — the

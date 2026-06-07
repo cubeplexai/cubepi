@@ -208,6 +208,24 @@ tool args. That's what `transcode_video` above does with `JOB_DIR`.
   `signal.is_set()` won't honour `abort`. Drop a check inside any
   hot loop.
 
+## Run the example
+
+A self-contained, runnable version of this recipe is in the repository at
+[`examples/resumable_tasks.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/resumable_tasks.py).
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync --extra sqlite
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
+
+# Start the job (kill mid-flight with Ctrl-C to test recovery):
+uv run python examples/resumable_tasks.py job-1 start
+
+# Resume from where it stopped — already-done items are skipped:
+uv run python examples/resumable_tasks.py job-1
+```
+
 ## See also
 
 - [Multi-turn → `resume()`](../guides/agents/multi-turn#resume--continue-from-the-last-message)

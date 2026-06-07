@@ -165,6 +165,22 @@ concurrent users — see [Postgres + FastAPI](./postgres-fastapi).
 - **`chat.db` in `/tmp`** — Some OSes wipe `/tmp` on reboot. Use
   `~/.local/share/myapp/chat.db` or similar for user data.
 
+## Run the example
+
+A self-contained, runnable version of this recipe is in the repository at
+[`examples/persistent_chat.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/persistent_chat.py).
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync --extra sqlite
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/persistent_chat.py alice
+# Ctrl-D to quit, then re-run — history is restored.
+uv run python examples/persistent_chat.py bob
+# Different thread_id → clean slate.
+```
+
 ## See also
 
 - [Multi-turn Conversations](../guides/agents/multi-turn) — `steer`,

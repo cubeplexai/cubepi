@@ -145,6 +145,19 @@ Tokyo is currently 18°C with a wind speed of 12 km/h. São Paulo is 25°C with 
   [`SQLiteCheckpointer`](../guides/checkpointing/sqlite) so follow-up
   questions ("and in Osaka?") have history.
 
+## Run the example
+
+A self-contained, runnable version of this recipe is in the repository at
+[`examples/weather_agent.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/weather_agent.py).
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/weather_agent.py
+```
+
 ## See also
 
 - [Building Your First Agent](../guides/agents/first-agent) — the same

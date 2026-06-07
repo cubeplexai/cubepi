@@ -256,6 +256,21 @@ for that pattern.
   halfway through a long response, the agent sees the error. Full
   mid-stream replay would require buffering — out of scope here.
 
+## Run the example
+
+A self-contained, runnable version of this recipe is in the repository at
+[`examples/multi_provider_failover.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/multi_provider_failover.py).
+It deliberately uses a bad key for the primary provider to trigger failover,
+then answers correctly via the fallback.
+
+```bash
+git clone https://github.com/cubeplexai/cubepi && cd cubepi
+uv sync
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
+uv run python examples/multi_provider_failover.py
+```
+
 ## See also
 
 - [Providers / Anthropic](../guides/providers/anthropic) and
