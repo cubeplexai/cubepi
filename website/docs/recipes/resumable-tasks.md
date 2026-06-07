@@ -126,6 +126,12 @@ async def main(thread_id: str, initial_prompt: str | None):
             # Resume picks up from the last persisted message:
             #   ToolResultMessage / UserMessage → re-invokes the model
             #   AssistantMessage with no queued steer/follow_up → raises
+            last = agent.state.messages[-1]
+            if type(last).__name__ == "AssistantMessage":
+                # Job finished normally before the crash — nothing to resume.
+                # Ask the user for the next prompt instead.
+                print("Last run completed. Nothing to resume.")
+                return
             await agent.resume()
 
 
