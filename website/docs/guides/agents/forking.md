@@ -197,8 +197,8 @@ nothing is persisted, so there's no resume contract to honour.
 The fork feature requires the v4 schema. Each backend has its own
 upgrade path:
 
-- **Postgres** — see [Postgres → Schema v3→v4](./postgres#schema-v3--v4-migration).
-- **MySQL** — see [MySQL → Schema v3→v4](./mysql#schema-v3--v4-migration).
+- **Postgres** — see [Postgres → Schema v3→v4](../checkpointing/postgres#schema-v3--v4-migration).
+- **MySQL** — see [MySQL → Schema v3→v4](../checkpointing/mysql#schema-v3--v4-migration).
 - **SQLite** — auto-migrated at `__aenter__`; no host action.
 - **Memory** — no schema; works out of the box.
 
