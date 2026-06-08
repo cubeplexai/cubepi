@@ -827,3 +827,41 @@ async def test_keep_tail_tokens_above_threshold_still_clamped() -> None:
     # Clamp let compaction fire.
     assert "compaction" in ctx.extra
     assert len(provider.calls) == 1
+
+
+async def test_under_threshold_does_not_silently_prune_tool_outputs() -> None:
+    """Codex round 5 P2: when the un-pruned history is already under the
+    compaction threshold, the middleware must return the ORIGINAL messages,
+    not the pruned view. Otherwise old tool outputs are silently replaced
+    with one-liner placeholders on every turn, with no state recording the
+    loss."""
+    from cubepi.providers.base import ToolCall, ToolResultMessage
+
+    provider = _FakeSummaryProvider()
+    # Big threshold so the un-pruned history stays under it.
+    middleware = _make_middleware(provider, max_tokens_before=100_000)
+    big_text = "important detail " * 200  # >> _PRUNE_KEEP_CHARS
+    messages: list[Message] = [
+        _user("q"),
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="read_file", arguments={"p": "x"})]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="read_file",
+            content=[TextContent(text=big_text)],
+        ),
+        _user("more"),
+        _assistant("done"),
+        _user("another"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    # No compaction happened.
+    assert provider.calls == []
+    assert "compaction" not in ctx.extra
+    # The original tool result content is intact in the returned view.
+    tool_result_msg = next(m for m in result if isinstance(m, ToolResultMessage))
+    assert tool_result_msg.content[0].text == big_text

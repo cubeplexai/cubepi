@@ -178,19 +178,25 @@ class CompactionMiddleware(Middleware):
             effective_tail_tokens = self._keep_tail_tokens
         tail_start = tail_start_by_tokens(messages, effective_tail_tokens)
 
-        # Phase 1: pre-prune old tool results (cheap, no LLM call) — skip
-        # entirely when prune_tool_outputs=False (audit-chain agents).
+        # Threshold check uses the UN-pruned view. Pre-pruning is a pre-pass
+        # for the summariser and the post-compaction tail; running it when no
+        # compaction is needed would silently hide tool outputs from the main
+        # model every turn, with no state recording the loss.
+        unpruned_compressed = _compressed_view(messages, state, boundary)
+        tokens_now = approx_tokens(unpruned_compressed)
+        if tokens_now < self._max_tokens_before:
+            return unpruned_compressed
+
+        # We are going to compact — pre-prune old tool results now so the
+        # summariser transcript and the post-compaction view shrink. Skip
+        # the pruner entirely when ``prune_tool_outputs=False`` (audit-chain
+        # agents that need full historical tool results preserved).
         pruned_messages = (
             prune_tool_results(messages, tail_start=tail_start)
             if self._prune_tool_outputs
             else list(messages)
         )
-
         compressed = _compressed_view(pruned_messages, state, boundary)
-
-        tokens_now = approx_tokens(compressed)
-        if tokens_now < self._max_tokens_before:
-            return compressed
 
         # Find boundary before guards (needed for anti-thrash new-msgs check).
         new_boundary = safe_boundary(
