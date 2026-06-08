@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import pytest
@@ -22,8 +21,9 @@ from cubepi.providers.base import (
     Model,
     StreamOptions,
     TextContent,
+    ThinkingBudgets,
+    ThinkingLevel,
     ToolDefinition,
-    Usage,
     UserMessage,
 )
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
@@ -58,8 +58,8 @@ class _RaisingProvider(BaseProvider):
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
-        thinking: Any = None,
-        thinking_budgets: Any = None,
+        thinking: ThinkingLevel | None = None,
+        thinking_budgets: ThinkingBudgets | None = None,
     ) -> AssistantMessage:
         raise self._error
 
@@ -78,6 +78,20 @@ def _raising(error: ProviderError, model_id: str = "model-1") -> BoundModel:
 
 def _messages() -> list[Message]:
     return [UserMessage(content=[TextContent(text="hi")])]
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT_TRIGGER_ERRORS tests
+# ---------------------------------------------------------------------------
+
+
+def test_default_trigger_errors_composition() -> None:
+    """DEFAULT_TRIGGER_ERRORS contains the right three error types."""
+    assert RateLimited in DEFAULT_TRIGGER_ERRORS
+    assert ProviderUnavailable in DEFAULT_TRIGGER_ERRORS
+    assert ContextLengthExceeded in DEFAULT_TRIGGER_ERRORS
+    assert ProviderAuthFailed not in DEFAULT_TRIGGER_ERRORS
+    assert ProviderBadRequest not in DEFAULT_TRIGGER_ERRORS
 
 
 # ---------------------------------------------------------------------------
