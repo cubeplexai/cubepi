@@ -35,8 +35,14 @@ _LAZY = {
     "TodoGuardType": ("cubepi.middleware.todo", "TodoGuardType"),
     "TodoListMiddleware": ("cubepi.middleware.todo", "TodoListMiddleware"),
     "WriteTodosInput": ("cubepi.middleware.todo", "WriteTodosInput"),
-    "WRITE_TODOS_SYSTEM_PROMPT": ("cubepi.middleware.todo", "WRITE_TODOS_SYSTEM_PROMPT"),
-    "WRITE_TODOS_TOOL_DESCRIPTION": ("cubepi.middleware.todo", "WRITE_TODOS_TOOL_DESCRIPTION"),
+    "WRITE_TODOS_SYSTEM_PROMPT": (
+        "cubepi.middleware.todo",
+        "WRITE_TODOS_SYSTEM_PROMPT",
+    ),
+    "WRITE_TODOS_TOOL_DESCRIPTION": (
+        "cubepi.middleware.todo",
+        "WRITE_TODOS_TOOL_DESCRIPTION",
+    ),
 }
 
 
