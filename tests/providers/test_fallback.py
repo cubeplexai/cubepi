@@ -123,9 +123,9 @@ async def test_stream_primary_raises_trigger_error_fallback_succeeds() -> None:
     primary = _raising(rate_err)
     fallback = _faux("fallback", "ok")
 
-    failover_calls: list[tuple[BoundModel, BoundModel, Any]] = []
+    failover_calls: list[tuple[BoundModel, BoundModel | None, Any]] = []
 
-    async def _cb(failed: BoundModel, nxt: BoundModel, err: Any) -> None:
+    async def _cb(failed: BoundModel, nxt: BoundModel | None, err: Any) -> None:
         failover_calls.append((failed, nxt, err))
 
     fbm = FallbackBoundModel(chain=(primary, fallback), on_failover=_cb)
@@ -190,7 +190,7 @@ async def test_stream_on_failover_callback_raises_is_swallowed() -> None:
     primary = _raising(rate_err)
     fallback = _faux("fallback", "ok")
 
-    async def _bad_cb(failed: BoundModel, nxt: BoundModel, err: Any) -> None:
+    async def _bad_cb(failed: BoundModel, nxt: BoundModel | None, err: Any) -> None:
         raise RuntimeError("callback is broken")
 
     fbm = FallbackBoundModel(chain=(primary, fallback), on_failover=_bad_cb)

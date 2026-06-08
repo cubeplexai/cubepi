@@ -149,7 +149,7 @@ class FallbackBoundModel:
                     async for ev in src:
                         out.push(ev)
                     out.set_result(await src_stream.result())
-                except Exception as exc:  # noqa: BLE001
+                except BaseException as exc:  # noqa: BLE001
                     err_msg = AssistantMessage(
                         content=[],
                         stop_reason="error",
@@ -159,6 +159,8 @@ class FallbackBoundModel:
                     )
                     out.push(StreamEvent(type="error", error_message=str(exc)))
                     out.set_result(err_msg)
+                    if not isinstance(exc, Exception):
+                        raise
 
             outer.attach_task(asyncio.create_task(_forward()))
             return outer
