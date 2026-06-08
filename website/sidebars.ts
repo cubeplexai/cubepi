@@ -43,6 +43,7 @@ const sidebars: SidebarsConfig = {
           'guides/middleware/examples',
           'guides/middleware/compaction',
           'guides/middleware/subagents',
+          'guides/middleware/todo',
         ]},
         { type: 'category', label: 'Human-in-the-Loop', items: [
           'guides/hitl/overview',

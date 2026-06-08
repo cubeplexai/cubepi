@@ -64,13 +64,14 @@ pip install cubepi
 
 ## 状态
 
-你正在浏览的是 **Next 🚧** 频道 —— 跟踪 `main` 分支的未发布文档。
-这里描述的 API 在打 tag 发布之前还可能变动。
+你正在浏览的是 **CubePi 0.9** 发布版文档，这是安装 CubePi 并基于 0.9
+API 开发的最新稳定文档。
 
-最新已发布版本是 v<PackageVersion />（[从右上角版本选择器切换](pathname:///)）。
 CubePi 0.9 新增 `FallbackBoundModel`（自动 provider 故障转移）、
 `BoundModel.generate()` / `.stream()`（不经 agent loop 直接调用
 provider）、以及 `TodoListMiddleware`（多步骤任务的结构化进度追踪）。
+同时对 `BoundModel` 相关内部 API 进行了若干破坏性收拢（迁移说明见
+[Changelog](/changelog)）。
 
 源代码、Issue 和讨论都在
 [GitHub](https://github.com/cubeplexai/cubepi)。

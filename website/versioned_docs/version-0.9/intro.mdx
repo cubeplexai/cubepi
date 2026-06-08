@@ -66,15 +66,15 @@ working tool-using agent in under five minutes.
 
 ## Status
 
-You are reading the **Next 🚧** channel — unreleased docs that track
-the `main` branch. APIs documented here can still change before they
-ship in a tagged release.
+You are reading the **CubePi 0.9** release docs. This is the latest
+stable documentation set for installing CubePi and building against the
+published 0.9 API.
 
-The latest released version is v<PackageVersion /> ([switch to it from the
-version picker, top-right](pathname:///)). CubePi 0.9 adds
-`FallbackBoundModel` for automatic provider failover,
-`BoundModel.generate()` / `.stream()` for direct provider calls, and
-`TodoListMiddleware` for structured task tracking in multi-step agents.
+CubePi 0.9 adds `FallbackBoundModel` for automatic provider failover,
+`BoundModel.generate()` / `.stream()` for direct provider calls without
+an agent loop, and `TodoListMiddleware` for structured task tracking in
+multi-step agents. Several internal APIs tightened around `BoundModel`
+(see [Changelog](/changelog) for migration notes).
 
 Source, issues, and discussion live on
 [GitHub](https://github.com/cubeplexai/cubepi).

@@ -1,0 +1,723 @@
+---
+id: cubepi-checkpointer
+title: cubepi.checkpointer
+sidebar_position: 3
+hide_table_of_contents: false
+---
+
+# `cubepi.checkpointer`
+
+### Checkpointer {#checkpointer}
+
+_class_
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L18)
+
+
+**Methods**
+
+#### `load` {#checkpointer-load}
+
+```python
+load(thread_id: str) -> CheckpointData | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L20)
+
+
+#### `append` {#checkpointer-append}
+
+```python
+append(thread_id: str, messages: list[Message]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L21)
+
+
+#### `save_extra` {#checkpointer-save-extra}
+
+```python
+save_extra(thread_id: str, extra: JsonObject) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L22)
+
+
+#### `save_pending_request` {#checkpointer-save-pending-request}
+
+```python
+save_pending_request(thread_id: str, request: HitlRequest | None, *, run_id: str | None = None) -> None
+```
+
+Persist (or clear, if request is None) the pending HITL request for a thread.
+
+First-party implementations (Memory, SQLite, Postgres, MySQL) all implement this.
+HITL-requiring features (Agent.respond, CheckpointedChannel) use
+`getattr(checkpointer, "save_pending_request", None)` for graceful degradation.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L24)
+
+
+#### `load_pending_request` {#checkpointer-load-pending-request}
+
+```python
+load_pending_request(thread_id: str) -> HitlRequest | None
+```
+
+Load the persisted pending HITL request for a thread, or None.
+
+Returns a `HitlRequest` instance or `None`.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L39)
+
+
+#### `snapshot` {#checkpointer-snapshot}
+
+```python
+snapshot(thread_id: str, *, after_run_id: str) -> list[Message]
+```
+
+Return messages of completed runs of `thread_id` up through
+and including `after_run_id`, in source seq order. Raises
+ThreadNotFoundError or RunNotCompletedError.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L46)
+
+
+#### `fork` {#checkpointer-fork}
+
+```python
+fork(src_thread_id: str, new_thread_id: str, *, after_run_id: str, metadata: JsonObject | None = None) -> None
+```
+
+Atomically physical-copy messages of completed runs up
+through `after_run_id` from src to new. See spec §3.2 / §3.4.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L52)
+
+
+#### `claim_run` {#checkpointer-claim-run}
+
+```python
+claim_run(thread_id: str, run_id: str) -> None
+```
+
+Insert cubepi_runs row with claimed_at=now, completed_at=NULL.
+Lazily creates the threads row if needed. Raises
+RunAlreadyClaimedError or RunAlreadyCompletedError on PK
+conflict (distinguished by completed_at IS NULL/NOT NULL).
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L64)
+
+
+#### `mark_run_complete` {#checkpointer-mark-run-complete}
+
+```python
+mark_run_complete(thread_id: str, run_id: str) -> None
+```
+
+Allocate next per-thread completion_seq; UPDATE the run row.
+Idempotent on already-completed rows (does NOT raise
+RunAlreadyCompletedError). Raises RunNotClaimedError when no
+row exists.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L75)
+
+
+#### `load_pending` {#checkpointer-load-pending}
+
+```python
+load_pending(thread_id: str) -> tuple[HitlRequest, str | None] | None
+```
+
+Read (HitlRequest, run_id) atomically from the pending row,
+or None when no pending request exists.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L86)
+
+
+
+### CheckpointData {#checkpointdata}
+
+_class_
+
+```python
+CheckpointData(self, messages: list[Message] = list(), extra: JsonObject = dict(), parent_thread_id: str | None = None)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/base.py#L11)
+
+
+**Attributes**
+
+- `messages`: `list[Message]`
+- `extra`: `JsonObject`
+- `parent_thread_id`: `str | None`
+
+
+### MemoryCheckpointer {#memorycheckpointer}
+
+_class_
+
+```python
+MemoryCheckpointer(self)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L33)
+
+
+**Methods**
+
+#### `load` {#memorycheckpointer-load}
+
+```python
+load(thread_id: str) -> CheckpointData | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L41)
+
+
+#### `append` {#memorycheckpointer-append}
+
+```python
+append(thread_id: str, messages: list[Message]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L44)
+
+
+#### `save_extra` {#memorycheckpointer-save-extra}
+
+```python
+save_extra(thread_id: str, extra: JsonObject) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L58)
+
+
+#### `save_pending_request` {#memorycheckpointer-save-pending-request}
+
+```python
+save_pending_request(thread_id: str, request: HitlRequest | None, *, run_id: str | None = None) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L64)
+
+
+#### `load_pending_request` {#memorycheckpointer-load-pending-request}
+
+```python
+load_pending_request(thread_id: str) -> HitlRequest | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L79)
+
+
+#### `load_pending_run_id` {#memorycheckpointer-load-pending-run-id}
+
+```python
+load_pending_run_id(thread_id: str) -> str | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L82)
+
+
+#### `load_pending` {#memorycheckpointer-load-pending}
+
+```python
+load_pending(thread_id: str) -> tuple[HitlRequest, str | None] | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L85)
+
+
+#### `claim_run` {#memorycheckpointer-claim-run}
+
+```python
+claim_run(thread_id: str, run_id: str) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L93)
+
+
+#### `mark_run_complete` {#memorycheckpointer-mark-run-complete}
+
+```python
+mark_run_complete(thread_id: str, run_id: str) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L107)
+
+
+#### `snapshot` {#memorycheckpointer-snapshot}
+
+```python
+snapshot(thread_id: str, *, after_run_id: str) -> list[Message]
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L124)
+
+
+#### `fork` {#memorycheckpointer-fork}
+
+```python
+fork(src_thread_id: str, new_thread_id: str, *, after_run_id: str, metadata: JsonObject | None = None) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/memory.py#L148)
+
+
+
+### PostgresCheckpointer {#postgrescheckpointer}
+
+_class_
+
+```python
+PostgresCheckpointer(self, dsn: str, *, min_pool_size: int = 1, max_pool_size: int = 10)
+```
+
+Checkpointer backed by PostgreSQL.
+
+
+**Usage**
+
+```python
+cp = PostgresCheckpointer(dsn="postgresql://...")
+async with cp:
+    await cp.append(thread_id, [msg1, msg2])
+    data = await cp.load(thread_id)
+    await cp.save_extra(thread_id, {"k": "v"})
+```
+
+Raises CubepiSchemaUninitialized / CubepiSchemaMismatch at __aenter__
+if the DB schema isn't compatible with this cubepi version.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L56)
+
+
+**Methods**
+
+#### `load` {#postgrescheckpointer-load}
+
+```python
+load(thread_id: str) -> CheckpointData | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L125)
+
+
+#### `append` {#postgrescheckpointer-append}
+
+```python
+append(thread_id: str, messages: list[Message]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L172)
+
+
+#### `claim_run` {#postgrescheckpointer-claim-run}
+
+```python
+claim_run(thread_id: str, run_id: str) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L238)
+
+
+#### `mark_run_complete` {#postgrescheckpointer-mark-run-complete}
+
+```python
+mark_run_complete(thread_id: str, run_id: str) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L275)
+
+
+#### `load_pending` {#postgrescheckpointer-load-pending}
+
+```python
+load_pending(thread_id: str) -> tuple[HitlRequest, str | None] | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L310)
+
+
+#### `snapshot` {#postgrescheckpointer-snapshot}
+
+```python
+snapshot(thread_id: str, *, after_run_id: str) -> list[Message]
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L329)
+
+
+#### `fork` {#postgrescheckpointer-fork}
+
+```python
+fork(src_thread_id: str, new_thread_id: str, *, after_run_id: str, metadata: JsonObject | None = None) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L375)
+
+
+#### `save_extra` {#postgrescheckpointer-save-extra}
+
+```python
+save_extra(thread_id: str, extra: JsonObject) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L477)
+
+
+#### `save_pending_request` {#postgrescheckpointer-save-pending-request}
+
+```python
+save_pending_request(thread_id: str, request: HitlRequest | None, *, run_id: str | None = None) -> None
+```
+
+Persist a pending HITL request and its owning run_id.
+
+When `request is None`, both `pending_request` and `run_id`
+are cleared; the `run_id` kwarg is ignored in that case (the
+pending row's run_id is always cleared alongside the pending).
+
+pending and run_id are set in ONE UPDATE; the surrounding
+transaction also covers the lazy thread INSERT.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L490)
+
+
+#### `load_pending_request` {#postgrescheckpointer-load-pending-request}
+
+```python
+load_pending_request(thread_id: str) -> HitlRequest | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L533)
+
+
+#### `load_pending_run_id` {#postgrescheckpointer-load-pending-run-id}
+
+```python
+load_pending_run_id(thread_id: str) -> str | None
+```
+
+Return the run_id of the currently pending HITL request.
+
+Filters on `pending_request IS NOT NULL` so the result reflects
+a real pending, not a leftover run_id from a cleared row. Returns
+None when: the thread is unknown, has no pending request, or was
+written by a pre-v3 host (legacy rows have run_id NULL).
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py#L548)
+
+
+
+### SQLiteCheckpointer {#sqlitecheckpointer}
+
+_class_
+
+```python
+SQLiteCheckpointer(self, db_path: str)
+```
+
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L49)
+
+
+**Methods**
+
+#### `load` {#sqlitecheckpointer-load}
+
+```python
+load(thread_id: str) -> CheckpointData | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L125)
+
+
+#### `append` {#sqlitecheckpointer-append}
+
+```python
+append(thread_id: str, messages: list[Message]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L155)
+
+
+#### `save_extra` {#sqlitecheckpointer-save-extra}
+
+```python
+save_extra(thread_id: str, extra: JsonObject) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L183)
+
+
+#### `save_pending_request` {#sqlitecheckpointer-save-pending-request}
+
+```python
+save_pending_request(thread_id: str, request: HitlRequest | None, *, run_id: str | None = None) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L204)
+
+
+#### `claim_run` {#sqlitecheckpointer-claim-run}
+
+```python
+claim_run(thread_id: str, run_id: str) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L228)
+
+
+#### `mark_run_complete` {#sqlitecheckpointer-mark-run-complete}
+
+```python
+mark_run_complete(thread_id: str, run_id: str) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L250)
+
+
+#### `load_pending` {#sqlitecheckpointer-load-pending}
+
+```python
+load_pending(thread_id: str) -> tuple[HitlRequest, str | None] | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L278)
+
+
+#### `load_pending_request` {#sqlitecheckpointer-load-pending-request}
+
+```python
+load_pending_request(thread_id: str) -> HitlRequest | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L293)
+
+
+#### `load_pending_run_id` {#sqlitecheckpointer-load-pending-run-id}
+
+```python
+load_pending_run_id(thread_id: str) -> str | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L303)
+
+
+#### `snapshot` {#sqlitecheckpointer-snapshot}
+
+```python
+snapshot(thread_id: str, *, after_run_id: str) -> list[Message]
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L313)
+
+
+#### `fork` {#sqlitecheckpointer-fork}
+
+```python
+fork(src_thread_id: str, new_thread_id: str, *, after_run_id: str, metadata: JsonObject | None = None) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py#L338)
+
+
+
+### MySQLCheckpointer {#mysqlcheckpointer}
+
+_class_
+
+```python
+MySQLCheckpointer(self, dsn: str, *, min_pool_size: int = 1, max_pool_size: int = 10)
+```
+
+Checkpointer backed by MySQL (8.0.13+, InnoDB).
+
+
+**Usage**
+
+```python
+cp = MySQLCheckpointer("mysql://user:pw@host:3306/db")
+async with cp:
+    await cp.append(thread_id, [msg1, msg2])
+    data = await cp.load(thread_id)
+    await cp.save_extra(thread_id, {"k": "v"})
+```
+
+Raises CubepiSchemaUninitialized / CubepiSchemaMismatch at __aenter__ if the
+DB schema isn't compatible with this cubepi version.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L85)
+
+
+**Methods**
+
+#### `load` {#mysqlcheckpointer-load}
+
+```python
+load(thread_id: str) -> CheckpointData | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L174)
+
+
+#### `append` {#mysqlcheckpointer-append}
+
+```python
+append(thread_id: str, messages: list[Message]) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L213)
+
+
+#### `claim_run` {#mysqlcheckpointer-claim-run}
+
+```python
+claim_run(thread_id: str, run_id: str) -> None
+```
+
+Atomically claim a run_id on a thread.
+
+Lazy-creates the cubepi_threads row, takes a per-thread FOR UPDATE
+lock to serialize concurrent claims for the same thread, then
+checks cubepi_runs for an existing row before inserting. The
+pre-check matches the Postgres approach — using INSERT + catching
+IntegrityError would also work, but a pre-SELECT lets us
+distinguish in-flight vs completed cleanly without relying on the
+error-class taxonomy.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L287)
+
+
+#### `mark_run_complete` {#mysqlcheckpointer-mark-run-complete}
+
+```python
+mark_run_complete(thread_id: str, run_id: str) -> None
+```
+
+Mark (thread_id, run_id) complete with a monotonic completion_seq.
+
+Idempotent: a second call on an already-completed row is a no-op.
+Raises `RunNotClaimedError` if no claim row exists. The
+completion_seq is the per-thread MAX(completion_seq) + 1, allocated
+under the same per-thread FOR UPDATE fence as claim_run/append.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L339)
+
+
+#### `load_pending` {#mysqlcheckpointer-load-pending}
+
+```python
+load_pending(thread_id: str) -> tuple[HitlRequest, str | None] | None
+```
+
+Return the thread's pending HITL request + the owning run_id.
+
+Single SELECT covers both columns (vs. `load_pending_request` +
+`load_pending_run_id`, which incur two round trips and can race
+across a clear/set window). Returns None when no pending exists.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L388)
+
+
+#### `snapshot` {#mysqlcheckpointer-snapshot}
+
+```python
+snapshot(thread_id: str, *, after_run_id: str) -> list[Message]
+```
+
+Return the message slice that fork() would copy, without writing.
+
+Includes legacy messages with NULL `run_id` plus messages whose
+`run_id` belongs to a completed run at or before
+`after_run_id`'s completion cutoff. Raises `ThreadNotFoundError`
+if the source thread row is absent, or `RunNotCompletedError` if
+`after_run_id` has not yet been completion-marked.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L415)
+
+
+#### `fork` {#mysqlcheckpointer-fork}
+
+```python
+fork(src_thread_id: str, new_thread_id: str, *, after_run_id: str, metadata: JsonObject | None = None) -> None
+```
+
+Copy completed prefix of `src_thread_id` into `new_thread_id`.
+
+Threads-row first: the destination `cubepi_threads` row is
+inserted before the message + runs copies so callers see a
+complete view if they probe mid-fork. There is no cubepi_runs ->
+cubepi_threads FK on MySQL (partition limitation), but we keep
+the same ordering for semantic parity with Postgres.
+
+Per-thread serialization: a `SELECT … FOR UPDATE` on the source
+thread row fences concurrent forks/appends — without it, an
+append racing the fork could leak a partial in-flight run into
+the destination.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L467)
+
+
+#### `save_extra` {#mysqlcheckpointer-save-extra}
+
+```python
+save_extra(thread_id: str, extra: JsonObject) -> None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L580)
+
+
+#### `save_pending_request` {#mysqlcheckpointer-save-pending-request}
+
+```python
+save_pending_request(thread_id: str, request: HitlRequest | None, *, run_id: str | None = None) -> None
+```
+
+Persist a pending HITL request and its owning run_id.
+
+When `request is None`, both `pending_request` and `run_id`
+are cleared; the `run_id` kwarg is ignored in that case (the
+pending row's run_id is always cleared alongside the pending).
+
+pending and run_id are set in ONE UPDATE; the surrounding
+explicit transaction also covers the lazy thread INSERT.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L614)
+
+
+#### `load_pending_request` {#mysqlcheckpointer-load-pending-request}
+
+```python
+load_pending_request(thread_id: str) -> HitlRequest | None
+```
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L660)
+
+
+#### `load_pending_run_id` {#mysqlcheckpointer-load-pending-run-id}
+
+```python
+load_pending_run_id(thread_id: str) -> str | None
+```
+
+Return the run_id of the currently pending HITL request.
+
+Filters on `pending_request IS NOT NULL` so the result reflects
+a real pending, not a leftover run_id from a cleared row. Returns
+None when: the thread is unknown, has no pending request, or was
+written by a pre-v3 host (legacy rows have run_id NULL).
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/mysql/checkpointer.py#L678)
+
+
+
+
+<!-- GENERATED by build_api_reference.py — DO NOT EDIT -->

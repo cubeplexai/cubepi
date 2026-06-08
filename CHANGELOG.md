@@ -5,9 +5,29 @@ All notable changes to CubePi are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2026-06-08
 
 ### Added
+
+- **`TodoListMiddleware`** — built-in task-tracking middleware for multi-step
+  agents. Adds a `write_todos` tool that lets the model maintain a structured
+  checklist (`pending` / `in_progress` / `completed`). Includes:
+  - **Finalization guard** — if the model delivers a plain-text final response
+    while items remain unfinished, it is looped back once to update the list
+    before the run ends.
+  - **Stale-todo reminder** — a soft `UserMessage` is injected after several
+    turns without a `write_todos` call, prompting the model to keep the list
+    in sync without blocking.
+  - **Parallel-call guard** — if the model calls `write_todos` more than once
+    in a single turn, the duplicates are rejected and the checklist is rolled
+    back to its pre-turn state.
+  - State (`todos`, guard counters) lives in `AgentContext.extra` and survives
+    checkpointing.
+  - Constructor: `TodoListMiddleware(extra_ref=..., tool_description=...,
+    system_prompt=...)`. `extra_ref` must return the live `AgentContext.extra`
+    dict (same object, not a copy) so the tool executor can write into it.
+  - Exported from `cubepi.middleware` as `TodoListMiddleware`, `Todo`,
+    `WriteTodosInput`, and `TodoGuardBlocked`.
 
 - **`FallbackBoundModel`** — built-in failover chain at the `BoundModel` level.
   Wrap an ordered `chain` of `BoundModel` instances; on `RateLimited`,
@@ -398,7 +418,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/cubeplexai/cubepi/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/cubeplexai/cubepi/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/cubeplexai/cubepi/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/cubeplexai/cubepi/compare/v0.5.0...v0.6.0
