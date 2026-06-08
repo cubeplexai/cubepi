@@ -186,3 +186,87 @@ class TestTypedMessages:
         event = TurnEndEvent(message=msg, tool_results=[tr])
         assert len(event.tool_results) == 1
         assert event.tool_results[0].role == "tool_result"
+
+
+class TestStructuredValueSerialization:
+    """Regression: fields typed ``StructuredValue`` must dump the runtime
+    subclass, not the declared ``BaseModel`` base. Without
+    ``SerializeAsAny`` on the union branch, pydantic silently emits ``{}``
+    for any concrete BaseModel held in such a field — which previously lost
+    ``ToolResultMessage.details`` on checkpointer save and compaction
+    message-ref hashing.
+    """
+
+    def _inner(self) -> AgentToolResult:
+        return AgentToolResult(
+            content=[TextContent(text="inner")],
+            details={"kind": "quote_result", "chip_metrics": {"price": 9}},
+        )
+
+    def test_tool_execution_end_event_preserves_basemodel_result(self):
+        ev = ToolExecutionEndEvent(
+            tool_call_id="t1", tool_name="quote", result=self._inner()
+        )
+        dumped = ev.model_dump()
+        assert dumped["result"] != {}
+        assert dumped["result"]["content"] == [{"type": "text", "text": "inner"}]
+        assert dumped["result"]["details"] == {
+            "kind": "quote_result",
+            "chip_metrics": {"price": 9},
+        }
+        # json mode must agree with python mode
+        assert ev.model_dump(mode="json")["result"] == dumped["result"]
+
+    def test_tool_result_message_preserves_basemodel_details(self):
+        msg = ToolResultMessage(
+            tool_call_id="t1",
+            tool_name="quote",
+            content=[TextContent(text="hi")],
+            details=self._inner(),
+        )
+        # Checkpointer path: plain model_dump()
+        dumped = msg.model_dump()
+        assert dumped["details"] != {}
+        assert dumped["details"]["details"] == {
+            "kind": "quote_result",
+            "chip_metrics": {"price": 9},
+        }
+        # Compaction path: mode="json", exclude_none=True
+        compact = msg.model_dump(mode="json", exclude_none=True)
+        assert compact["details"]["content"] == [{"type": "text", "text": "inner"}]
+        assert compact["content"] == [{"type": "text", "text": "hi"}]
+
+    def test_after_tool_call_result_preserves_basemodel_details(self):
+        r = AfterToolCallResult(details=self._inner())
+        dumped = r.model_dump()
+        assert dumped["details"] != {}
+        assert dumped["details"]["content"] == [{"type": "text", "text": "inner"}]
+
+    def test_basemodel_nested_in_list_and_dict_is_polymorphic(self):
+        # list branch
+        ev1 = ToolExecutionEndEvent(
+            tool_call_id="t1", tool_name="x", result=[self._inner()]
+        )
+        assert ev1.model_dump()["result"][0]["details"] == {
+            "kind": "quote_result",
+            "chip_metrics": {"price": 9},
+        }
+        # dict branch
+        ev2 = ToolExecutionEndEvent(
+            tool_call_id="t1", tool_name="x", result={"wrap": self._inner()}
+        )
+        assert ev2.model_dump()["result"]["wrap"]["content"] == [
+            {"type": "text", "text": "inner"}
+        ]
+
+    def test_plain_dict_value_still_roundtrips(self):
+        # Non-BaseModel payloads must still validate and dump cleanly.
+        msg = ToolResultMessage(
+            tool_call_id="t1",
+            tool_name="x",
+            content=[TextContent(text="hi")],
+            details={"k": [1, 2, {"nested": True}]},
+        )
+        dumped = msg.model_dump()
+        restored = ToolResultMessage.model_validate(dumped)
+        assert restored.details == {"k": [1, 2, {"nested": True}]}
