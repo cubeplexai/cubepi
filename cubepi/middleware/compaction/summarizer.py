@@ -241,37 +241,61 @@ async def summarize(
 
 
 _FALLBACK_HEADER = "[Compaction fallback — LLM summariser unavailable]"
+_FALLBACK_PRIOR_PREFIX = "Prior context: "
 _FALLBACK_USER_PREFIX = "User requests: "
 _FALLBACK_TOOL_PREFIX = "Tool calls: "
 
 
-def _parse_prior_fallback(summary: str) -> tuple[list[str], list[str]]:
-    """Extract user_lines and tool_names from a previous fallback summary.
+def _parse_prior_fallback(summary: str) -> tuple[list[str], list[str], str | None]:
+    """Extract structured fields from a previous fallback summary.
+
+    Returns ``(user_lines, tool_names, prior_context)``. ``prior_context``
+    is the multi-line text that originally followed the ``Prior context:``
+    marker (a real LLM summary that the previous fallback wrapped). It is
+    forwarded so an outage spanning multiple compactions doesn't drop the
+    real summary that preceded it.
 
     Format is the one this module emits:
 
         [Compaction fallback — LLM summariser unavailable]
+        Prior context: <possibly multi-line real summary>
         User requests: line1; line2
         Tool calls: bash, read_file
 
-    Returns ``([], [])`` if either marker is absent.
+    ``Prior context:`` may span multiple lines (the embedded real summary
+    has its own internal line breaks); we collect everything from that
+    marker until the next ``User requests:`` / ``Tool calls:`` line.
     """
     user_lines: list[str] = []
     tool_names: list[str] = []
+    prior_context_lines: list[str] = []
+    in_prior_context = False
+
     for line in summary.splitlines():
         if line.startswith(_FALLBACK_USER_PREFIX):
+            in_prior_context = False
             user_lines = [
                 s.strip()
                 for s in line[len(_FALLBACK_USER_PREFIX) :].split(";")
                 if s.strip()
             ]
         elif line.startswith(_FALLBACK_TOOL_PREFIX):
+            in_prior_context = False
             tool_names = [
                 s.strip()
                 for s in line[len(_FALLBACK_TOOL_PREFIX) :].split(",")
                 if s.strip()
             ]
-    return user_lines, tool_names
+        elif line.startswith(_FALLBACK_PRIOR_PREFIX):
+            in_prior_context = True
+            prior_context_lines.append(line[len(_FALLBACK_PRIOR_PREFIX) :])
+        elif in_prior_context:
+            prior_context_lines.append(line)
+
+    prior_context = (
+        "\n".join(prior_context_lines).rstrip() if prior_context_lines else None
+    )
+    return user_lines, tool_names, prior_context
 
 
 def build_fallback_summary(
@@ -323,13 +347,21 @@ def build_fallback_summary(
     if existing and existing.summary:
         if existing.is_fallback:
             # Merge the prior fallback's structured fields into the current
-            # turn — never embed the prior summary text. Preserves order
-            # (oldest user request first) and dedupes by exact match.
-            prior_users, prior_tools = _parse_prior_fallback(existing.summary)
+            # turn — never embed the prior summary text whole (that grows
+            # unboundedly across an outage). User lines / tool names are
+            # deduped and re-rendered. If the prior fallback embedded a
+            # real LLM summary under ``Prior context:``, forward it so an
+            # outage spanning multiple compactions doesn't drop everything
+            # that was summarised before the LLM went down.
+            prior_users, prior_tools, prior_real = _parse_prior_fallback(
+                existing.summary
+            )
             user_lines = list(dict.fromkeys(prior_users + user_lines))[:5]
             tool_names = list(dict.fromkeys(prior_tools + tool_names))
+            if prior_real:
+                parts.append(f"{_FALLBACK_PRIOR_PREFIX}{prior_real}")
         else:
-            parts.append(f"Prior context: {existing.summary}")
+            parts.append(f"{_FALLBACK_PRIOR_PREFIX}{existing.summary}")
     if user_lines:
         parts.append(_FALLBACK_USER_PREFIX + "; ".join(user_lines))
     if tool_names:

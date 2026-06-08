@@ -555,3 +555,49 @@ def test_fallback_summary_after_real_summary_still_embeds_prior() -> None:
     state = build_fallback_summary(msgs, existing=real_prior)
     assert "Prior context:" in state.summary
     assert "build the thing" in state.summary
+
+
+def test_fallback_preserves_real_prior_across_multiple_outage_turns() -> None:
+    """Codex P2: real summary → fallback → fallback. The 2nd fallback must
+    still carry the real summary's prior context, otherwise an outage of
+    more than one compaction cycle drops everything summarised before it."""
+    from cubepi.middleware.compaction.state import CompactionState
+    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+
+    # Step 1: a real LLM summary covering "early work".
+    real_summary = CompactionState(
+        summary="## Goal\nbuild the thing\n## Decisions\nused approach X",
+        is_fallback=False,
+    )
+
+    # Step 2: LLM goes down → first fallback, which embeds the real summary.
+    msgs_fb1 = [
+        UserMessage(content=[TextContent(text="task during outage 1")]),
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="bash", arguments={"q": "x"})]
+        ),
+    ]
+    fb1 = build_fallback_summary(msgs_fb1, existing=real_summary)
+    assert "build the thing" in fb1.summary  # real summary embedded
+    assert "task during outage 1" in fb1.summary
+
+    # Step 3: LLM STILL down → second fallback chained to first fallback.
+    msgs_fb2 = [
+        UserMessage(content=[TextContent(text="task during outage 2")]),
+        AssistantMessage(
+            content=[ToolCall(id="c2", name="grep", arguments={"q": "y"})]
+        ),
+    ]
+    fb2 = build_fallback_summary(msgs_fb2, existing=fb1)
+
+    # Critical: the real prior context (## Goal / ## Decisions) must
+    # still be reachable in the 2nd fallback. Otherwise multi-turn
+    # outages erase everything pre-outage.
+    assert "build the thing" in fb2.summary
+    assert "used approach X" in fb2.summary
+    # User-line merging still works.
+    assert "task during outage 1" in fb2.summary
+    assert "task during outage 2" in fb2.summary
+    # Tool-name merging still works (dedup + ordering).
+    assert "bash" in fb2.summary
+    assert "grep" in fb2.summary
