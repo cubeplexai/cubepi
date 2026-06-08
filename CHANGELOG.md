@@ -96,6 +96,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   )
   ```
 
+### Fixed
+
+- **`SubagentMiddleware` now strips checkpointed-HITL elements from a child
+  agent's inherited tools / middleware.** Previously, passing the parent
+  agent's `ask_user_tool(channel)` in `shared_tools` (the common pattern
+  when the host wants tools shared between parent and children) caused
+  the child's first `prompt()` to raise `Agent has checkpointed HITL
+  elements bound to run_ids ...` because the binding's parent `run_id`
+  didn't match the child's fresh `run_id`. The middleware now drops any
+  element whose `.hitl` is a checkpointed `HitlBinding` before
+  constructing the child — the subagent runs autonomously without the
+  parent's HITL channel, matching its "ephemeral and autonomous" design
+  intent. Elements without `.hitl`, or with non-checkpointed bindings,
+  are inherited as-is.
+
 ## [0.8.0] - 2026-06-06
 
 ### Added

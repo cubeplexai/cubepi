@@ -22,6 +22,24 @@ EventMapper = Callable[[AgentEvent], Sequence[StructuredValue] | StructuredValue
 EventHandler = Callable[[str, StructuredValue], Awaitable[None] | None]
 
 
+def _drop_checkpointed_hitl(items: Sequence) -> list:
+    """Remove elements whose ``.hitl`` is a checkpointed binding.
+
+    Used by ``SubagentMiddleware`` to keep parent-bound HITL state out of an
+    ephemeral child agent — the child has its own run_id, but a checkpointed
+    ``HitlBinding`` carries the parent's run_id, which ``Agent._validate_hitl
+    _bindings`` rejects at ``prompt()`` entry. Elements without ``.hitl`` (or
+    with a non-checkpointed binding) pass through untouched.
+    """
+    out: list = []
+    for x in items:
+        binding = getattr(x, "hitl", None)
+        if binding is not None and getattr(binding, "checkpointed", False):
+            continue
+        out.append(x)
+    return out
+
+
 class SubagentTracer(Protocol):
     def attach(
         self, agent: Agent[BaseModel]
@@ -151,8 +169,19 @@ class SubagentMiddleware(Middleware):
             self._subagents["general-purpose"],
         )
         model = spec.model or self._default_model
-        tools = [*self._shared_tools, *spec.tools]
-        middleware = [*self._inherited_middleware, *spec.middleware]
+        # Subagents are ephemeral and autonomous: they run under their own
+        # run_id, so a tool/middleware whose HITL channel was checkpointed
+        # against the parent's run_id can't legally pause from the child —
+        # ``Agent._validate_hitl_bindings`` would reject the child's
+        # ``prompt()`` call with "Agent has checkpointed HITL elements bound
+        # to run_ids ...". Drop those bindings before constructing the child;
+        # non-HITL behaviour on the same element (e.g. tool execution path,
+        # non-HITL middleware logic) is unaffected because we only strip the
+        # whole element when its ``.hitl`` is checkpointed.
+        tools = _drop_checkpointed_hitl([*self._shared_tools, *spec.tools])
+        middleware = _drop_checkpointed_hitl(
+            [*self._inherited_middleware, *spec.middleware]
+        )
         child: Agent[BaseModel] = Agent(
             model=model,
             system_prompt=spec.system_prompt,

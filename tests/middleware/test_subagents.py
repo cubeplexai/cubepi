@@ -495,3 +495,74 @@ class _FakeTracer:
             return flush()
 
         return detach
+
+
+async def test_subagent_strips_checkpointed_hitl_bound_tools() -> None:
+    """A shared_tool whose ``.hitl`` is a checkpointed binding (parent's
+    ``ask_user_tool`` is the typical case) must NOT reach the child agent.
+
+    Otherwise ``Agent._validate_hitl_bindings`` at the child's ``prompt()``
+    entry would reject the run with ``"Agent has checkpointed HITL elements
+    bound to run_ids ..."`` because the child runs under its own run_id.
+    """
+    from cubepi.hitl.binding import HitlBinding
+
+    class _NoOpParams(BaseModel):
+        pass
+
+    async def _noop_exec(
+        call_id: str, args: _NoOpParams, *, signal=None, on_update=None
+    ) -> AgentToolResult:
+        del call_id, args, signal, on_update
+        return AgentToolResult(content=[TextContent(text="noop")])
+
+    parent_bound_tool = AgentTool(
+        name="parent_hitl_tool",
+        description="A tool whose HITL channel is checkpointed against a parent run_id",
+        parameters=_NoOpParams,
+        execute=_noop_exec,
+        hitl=HitlBinding(checkpointed=True, run_id="parent-run-abc"),
+    )
+
+    plain_tool = AgentTool(
+        name="plain_tool",
+        description="Plain tool with no HITL binding",
+        parameters=_NoOpParams,
+        execute=_noop_exec,
+    )
+
+    provider = FauxProvider(provider_id="faux")
+    provider.set_responses([faux_assistant_message("subagent done")])
+
+    middleware = _make_middleware(
+        provider=provider,
+        shared_tools=[parent_bound_tool, plain_tool],
+    )
+
+    parent_provider = FauxProvider(provider_id="faux")
+    parent_provider.set_responses(
+        [
+            faux_assistant_message(
+                [
+                    faux_tool_call(
+                        "subagent",
+                        {"name": "n", "role": "r", "task": "t", "prompt": "p"},
+                    )
+                ],
+                stop_reason="tool_use",
+            ),
+            faux_assistant_message("done"),
+        ]
+    )
+    parent = Agent(
+        model=parent_provider.model("faux-1"),
+        system_prompt="parent",
+        tools=middleware.tools,
+        middleware=[middleware],
+    )
+
+    # Without the strip this raises:
+    #   ValueError: Agent has checkpointed HITL elements bound to run_ids ['parent-run-abc']; ...
+    await parent.prompt("dispatch the subagent")
+
+    assert parent.state.error_message is None

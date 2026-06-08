@@ -60,6 +60,20 @@ Subagents only receive the tools you pass in:
 Use `inherited_middleware` for middleware every child should run. Use
 `SubagentSpec.middleware` for behavior specific to one subagent type.
 
+### Checkpointed HITL bindings are stripped
+
+A tool or middleware whose `.hitl` is a checkpointed `HitlBinding` carries
+the parent run's `run_id`. The child runs under its own fresh `run_id`, so
+inheriting such an element would crash with `Agent has checkpointed HITL
+elements bound to run_ids ...` at the child's `prompt()` entry. The
+middleware drops these elements automatically before constructing the
+child agent. The most common case is the parent's `ask_user_tool(...)`
+appearing in `shared_tools` — it simply won't be in the child's tool list.
+
+Elements with no `.hitl`, or with a non-checkpointed binding, are
+inherited as-is. Use a non-HITL approval / policy mechanism if a subagent
+needs gating.
+
 ## Stream child events to your host
 
 Applications often need child events in their own UI or audit log. Provide an
