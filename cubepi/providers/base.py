@@ -95,6 +95,30 @@ class BoundModel:
     provider: Provider
     spec: Model
 
+    async def generate(
+        self,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        thinking: ThinkingLevel | None = None,
+        thinking_budgets: ThinkingBudgets | None = None,
+    ) -> AssistantMessage:
+        return await self.provider.generate(
+            model=self.spec,
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            options=options,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            thinking=thinking,
+            thinking_budgets=thinking_budgets,
+        )
+
 
 class TextContent(BaseModel):
     type: Literal["text"] = "text"
