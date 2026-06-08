@@ -5,7 +5,7 @@ import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Callable, Generic, TypeVar
+from typing import TYPE_CHECKING, Callable, Generic, TypeVar
 
 from cubepi.agent._outcome import RunOutcome
 from cubepi.agent._tool_cycle import ToolCycleViolation, check_tool_cycle
@@ -48,6 +48,9 @@ from cubepi.providers.base import (
 from cubepi.types import JsonObject, StructuredValue
 
 TMessage = TypeVar("TMessage")
+
+if TYPE_CHECKING:
+    from cubepi.providers.fallback import FallbackBoundModel
 
 
 def _default_convert_to_llm(
@@ -138,7 +141,7 @@ class Agent(Generic[TMessage]):
     def __init__(
         self,
         *,
-        model: BoundModel,
+        model: BoundModel | FallbackBoundModel,
         system_prompt: str = "",
         tools: list[AgentTool] | None = None,
         thinking: ThinkingLevel = "off",

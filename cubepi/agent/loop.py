@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from cubepi.agent.tools import execute_tool_calls
 from cubepi.agent.types import (
@@ -27,12 +27,15 @@ from cubepi.providers.base import (
     ToolResultMessage,
 )
 
+if TYPE_CHECKING:
+    from cubepi.providers.fallback import FallbackBoundModel
+
 
 async def run_agent_loop(
     *,
     prompts: list[Message],
     context: AgentContext,
-    model: BoundModel,
+    model: BoundModel | FallbackBoundModel,
     convert_to_llm: Callable,
     emit: Callable,
     transform_context: Callable | None = None,
@@ -90,7 +93,7 @@ async def run_agent_loop(
 async def run_agent_loop_continue(
     *,
     context: AgentContext,
-    model: BoundModel,
+    model: BoundModel | FallbackBoundModel,
     convert_to_llm: Callable,
     emit: Callable,
     transform_context: Callable | None = None,
@@ -148,7 +151,7 @@ async def run_agent_loop_continue(
 async def run_agent_loop_resume(
     *,
     context: AgentContext,
-    model: BoundModel,
+    model: BoundModel | FallbackBoundModel,
     convert_to_llm: Callable,
     emit: Callable,
     transform_context: Callable | None = None,
@@ -387,7 +390,7 @@ async def _run_loop(
     *,
     current_context: AgentContext,
     new_messages: list[Message],
-    model: BoundModel,
+    model: BoundModel | FallbackBoundModel,
     convert_to_llm: Callable,
     transform_context: Callable | None,
     transform_system_prompt: Callable | None,
@@ -443,7 +446,7 @@ async def _run_loop_inner(
     *,
     current_context: AgentContext,
     new_messages: list[Message],
-    model: BoundModel,
+    model: BoundModel | FallbackBoundModel,
     convert_to_llm: Callable,
     transform_context: Callable | None,
     transform_system_prompt: Callable | None,
@@ -683,7 +686,7 @@ async def _run_loop_inner(
 
 async def _stream_assistant_response(
     context: AgentContext,
-    model: BoundModel,
+    model: BoundModel | FallbackBoundModel,
     convert_to_llm: Callable,
     transform_context: Callable | None,
     transform_system_prompt: Callable | None,
