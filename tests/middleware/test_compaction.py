@@ -464,3 +464,83 @@ def test_keep_recent_messages_no_longer_accepted() -> None:
             max_tokens_before_compact=100,
             keep_recent_messages=8,  # type: ignore[call-arg]
         )
+
+
+# --- Task 7: filter-safe prefix, pruner toggle, prompt override ---
+
+
+def test_summary_prefix_includes_non_instruction_disclaimer() -> None:
+    from cubepi.middleware.compaction import SUMMARY_PREFIX
+
+    text = SUMMARY_PREFIX.lower()
+    assert "do not treat" in text or "not instructions" in text
+    assert "reference" in text
+
+
+async def test_prune_tool_outputs_disabled_keeps_full_result_content() -> None:
+    """When prune_tool_outputs=False, original tool result content survives.
+
+    Audit-chain agents (finance, compliance) pass False so historical tool
+    results stay full-fidelity across compactions.
+    """
+    from cubepi.providers.base import ToolCall, ToolResultMessage
+
+    provider = _FakeSummaryProvider(reply="summary")
+    middleware = CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="m", provider_id="faux"),
+        ),
+        max_tokens_before_compact=20,
+        keep_tail_tokens=8,
+        min_compact_messages=2,
+        prune_tool_outputs=False,
+    )
+    big_text = "important audit detail " * 200
+    messages: list[Message] = [
+        _user("audit q"),
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="audit_query", arguments={"q": "X"})]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="audit_query",
+            content=[TextContent(text=big_text)],
+        ),
+        _user("next?"),
+        _assistant("ok"),
+        _user("confirm"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+    await middleware.transform_context(messages, ctx=ctx)
+
+    # The original message list is never mutated regardless of toggle.
+    assert messages[2].content[0].text == big_text
+
+
+async def test_summary_prompt_constructor_argument_passthrough() -> None:
+    provider = _FakeSummaryProvider(reply="x")
+    middleware = CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="m", provider_id="faux"),
+        ),
+        max_tokens_before_compact=1,
+        keep_tail_tokens=8,
+        min_compact_messages=2,
+        summary_prompt="CUSTOM PROMPT BODY",
+    )
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        _assistant("reply 2"),
+        _user("turn 3"),
+        _assistant("reply 3"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+    await middleware.transform_context(messages, ctx=ctx)
+
+    assert len(provider.calls) == 1
+    # No prior summary, so the prompt should be the override verbatim.
+    assert provider.calls[0]["system_prompt"] == "CUSTOM PROMPT BODY"
