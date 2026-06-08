@@ -4,6 +4,7 @@ import asyncio
 import json
 
 from cubepi.middleware.compaction.state import CompactionState, message_refs
+from cubepi.middleware.compaction.tokens import approx_tokens
 from cubepi.providers.base import (
     BoundModel,
     Message,
@@ -15,6 +16,22 @@ from cubepi.providers.base import (
 
 _ARG_VALUE_CHARS = 200
 _ARG_REPR_MAX = 500
+
+_SUMMARY_MIN = 1024   # matches prior fixed default — never regress below it
+_SUMMARY_RATIO = 0.15
+_SUMMARY_MAX = 4096
+
+
+def _dynamic_summary_budget(messages: list[Message]) -> int:
+    """Compute a token budget for the summariser proportional to input size.
+
+    Floor is ``_SUMMARY_MIN = 1024`` — the previous fixed default. No
+    conversation ever gets a smaller budget than today; only larger ones
+    get more headroom.
+    """
+    content_tokens = approx_tokens(messages)
+    scaled = int(content_tokens * _SUMMARY_RATIO)
+    return max(_SUMMARY_MIN, min(scaled, _SUMMARY_MAX))
 
 
 SUMMARIZER_SYSTEM_PROMPT = """\
@@ -93,9 +110,30 @@ async def summarize(
     model: BoundModel,
     messages_to_summarize: list[Message],
     existing: CompactionState | None,
-    max_summary_tokens: int = 1024,
+    ref_messages: list[Message] | None = None,
+    max_summary_tokens: int | None = None,
     abort_signal: asyncio.Event | None = None,
 ) -> CompactionState:
+    """Run the LLM summariser and produce a new ``CompactionState``.
+
+    ``messages_to_summarize`` is the source for the transcript fed to the
+    LLM. ``ref_messages`` (when supplied) overrides the source for
+    ID/SHA256-ref extraction so the persisted state matches the *original*
+    message list — required when the transcript was built from pre-pruned
+    content (the pruner rewrites tool result text, which would otherwise
+    cause ``_state_matches_history`` to clear state on the next turn).
+
+    ``max_summary_tokens``: when ``None`` (default), the budget is computed
+    dynamically from ``messages_to_summarize`` size (floor 1024, ceiling
+    4096). When provided, that exact value is used.
+    """
+    ref_source = ref_messages if ref_messages is not None else messages_to_summarize
+    budget = (
+        max_summary_tokens
+        if max_summary_tokens is not None
+        else _dynamic_summary_budget(messages_to_summarize)
+    )
+
     system_prompt = SUMMARIZER_SYSTEM_PROMPT
     if existing and existing.summary:
         system_prompt += "\n\n" + EXISTING_SUMMARY_SUFFIX.format(prev=existing.summary)
@@ -108,7 +146,7 @@ async def summarize(
         ],
         system_prompt=system_prompt,
         options=StreamOptions(signal=abort_signal),
-        max_output_tokens=max_summary_tokens,
+        max_output_tokens=budget,
         temperature=0.0,
         thinking="off",
     )
@@ -119,9 +157,7 @@ async def summarize(
     if response.error_message is not None:
         raise RuntimeError(response.error_message)
 
-    new_ids = [
-        str(getattr(message, "id", "") or "") for message in messages_to_summarize
-    ]
+    new_ids = [str(getattr(message, "id", "") or "") for message in ref_source]
     new_ids = [message_id for message_id in new_ids if message_id]
     prior_ids = list(existing.summarized_message_ids) if existing else []
     prior_refs = list(existing.summarized_message_refs) if existing else []
@@ -134,6 +170,6 @@ async def summarize(
     return CompactionState(
         summary=text.strip(),
         summarized_message_ids=prior_ids + new_ids,
-        summarized_message_refs=prior_refs + message_refs(messages_to_summarize),
+        summarized_message_refs=prior_refs + message_refs(ref_source),
         last_summarized_message_id=last_id,
     )
