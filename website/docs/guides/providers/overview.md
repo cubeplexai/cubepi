@@ -322,9 +322,33 @@ provider, `provider.model("id", ...)` factory, typed `ProviderError`
 failures, and a capability descriptor for backend wire differences. See
 [Image Generation](./image-generation) for the full guide.
 
+## Failover chain
+
+`FallbackBoundModel` wraps an ordered chain of `BoundModel` instances. On a
+`RateLimited`, `ProviderUnavailable`, or `ContextLengthExceeded` error — or on
+a first-event stream error — it transparently tries the next model:
+
+```python
+from cubepi import FallbackBoundModel
+
+model = FallbackBoundModel(
+    chain=(
+        anthropic.model("claude-opus-4-8"),   # primary
+        openai.model("gpt-5"),                # fallback
+    )
+)
+agent = Agent(model=model, ...)
+```
+
+`trigger_errors` is configurable; an optional `on_failover` callback fires on
+each switchover for billing/metrics. See the
+[Multi-Provider Failover recipe](../../recipes/multi-provider-failover) for the
+full guide.
+
 ## See also
 
 - [OpenAI Provider](./openai) — concrete OpenAI / OpenAI-compatible setup.
 - [Anthropic Provider](./anthropic) — the `int_budget` reasoning shape in practice.
 - [Writing a Custom Provider](./custom) — when the endpoint isn't even OpenAI/Anthropic-shaped.
+- [Multi-Provider Failover](../../recipes/multi-provider-failover) — `FallbackBoundModel` in action.
 - [API Reference → `cubepi.providers`](../../api/cubepi-providers).
