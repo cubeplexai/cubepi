@@ -30,7 +30,7 @@ from cubepi.tracing.schema import SCHEMA_URL, SCOPE_NAME
 
 if TYPE_CHECKING:
     from cubepi.agent.agent import Agent
-    from cubepi.providers.base import BoundModel, Message, Model, Provider
+    from cubepi.providers.base import BoundModel, Message
 
 
 class _OneShotSession:
@@ -43,11 +43,9 @@ class _OneShotSession:
 
     def __init__(
         self,
-        provider: "Provider",
-        model: "Model",
+        model: "BoundModel",
         run: Any,
     ) -> None:
-        self._provider = provider
         self._model = model
         self._run = run
 
@@ -87,8 +85,7 @@ class _OneShotSession:
         abort_signal = _asyncio.Event()
 
         try:
-            response = await self._provider.generate(
-                model=self._model,
+            response = await self._model.generate(
                 messages=messages,
                 system_prompt=system,
                 options=_StreamOptions(signal=abort_signal),
@@ -474,7 +471,6 @@ class Tracer:
         )
         run_id = str(uuid.uuid4())
         provider = model.provider
-        model_spec = model.spec
 
         root_attrs: dict[str, Any] = {
             GEN_AI_OPERATION_NAME: OP_INVOKE_AGENT,
@@ -570,7 +566,7 @@ class Tracer:
         # calls that belong to this oneshot session.
         token = _active_run.set(run)
         try:
-            yield _OneShotSession(provider=provider, model=model_spec, run=run)
+            yield _OneShotSession(model=model, run=run)
         except BaseException as _exc:
             # Mark the root span as failed so `cubepi trace ls` (which
             # reads status off the root) lists this run as an error

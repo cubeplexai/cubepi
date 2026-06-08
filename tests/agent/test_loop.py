@@ -13,6 +13,7 @@ from cubepi.agent.types import (
 )
 from cubepi.providers.base import (
     AssistantMessage,
+    BoundModel,
     Message,
     MessageStream,
     Model,
@@ -24,10 +25,6 @@ from cubepi.providers.base import (
     UserMessage,
 )
 from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
-
-
-def make_model() -> Model:
-    return Model(id="faux-1", provider_id="faux")
 
 
 def make_user_message(text: str) -> UserMessage:
@@ -62,7 +59,7 @@ def make_echo_tool(*, execution_mode=None, execute_fn=None) -> AgentTool:
 
 class TestAgentLoop:
     async def test_emit_events_with_agent_message_types(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("Hi there!")])
         context = AgentContext(system_prompt="You are helpful.", messages=[], tools=[])
         user_prompt = make_user_message("Hello")
@@ -71,8 +68,7 @@ class TestAgentLoop:
         messages = await run_agent_loop(
             prompts=[user_prompt],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             emit=lambda e: events.append(e),
         )
@@ -90,7 +86,7 @@ class TestAgentLoop:
         assert "agent_end" in event_types
 
     async def test_custom_message_types_via_convert_to_llm(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("Response")])
 
         notification = {"role": "notification", "text": "info"}
@@ -116,8 +112,7 @@ class TestAgentLoop:
         await run_agent_loop(
             prompts=[user_prompt],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=converter,
             emit=lambda e: None,
         )
@@ -126,7 +121,7 @@ class TestAgentLoop:
         assert converted[0].role == "user"
 
     async def test_transform_context_before_convert_to_llm(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("Response")])
 
         context = AgentContext(
@@ -157,8 +152,7 @@ class TestAgentLoop:
         await run_agent_loop(
             prompts=[make_user_message("new")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=converter,
             transform_context=transform,
             emit=lambda e: None,
@@ -177,7 +171,7 @@ class TestAgentLoop:
             )
 
         tool = make_echo_tool(execute_fn=echo_execute)
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message(
@@ -194,8 +188,7 @@ class TestAgentLoop:
         await run_agent_loop(
             prompts=[make_user_message("echo something")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             emit=lambda e: events.append(e),
         )
@@ -215,7 +208,7 @@ class TestAgentLoop:
         from cubepi.providers.base import ToolCall
 
         tool = make_echo_tool()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message(
@@ -239,8 +232,7 @@ class TestAgentLoop:
         result = await run_agent_loop(
             prompts=[make_user_message("echo something")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             emit=lambda e: None,
             after_model_response=inject_on_toolcall,
@@ -265,7 +257,7 @@ class TestAgentLoop:
 
     async def test_should_stop_after_turn(self):
         tool = make_echo_tool()
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message(
@@ -287,8 +279,7 @@ class TestAgentLoop:
         messages = await run_agent_loop(
             prompts=[make_user_message("echo something")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             should_stop_after_turn=should_stop,
             emit=lambda e: events.append(e),
@@ -307,7 +298,7 @@ class TestAgentLoop:
             return AgentToolResult(content=[TextContent(text=f"ok:{params.value}")])
 
         tool = make_echo_tool(execute_fn=echo_execute)
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message(
@@ -335,8 +326,7 @@ class TestAgentLoop:
         await run_agent_loop(
             prompts=[make_user_message("start")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             get_steering_messages=get_steering,
             tool_execution="sequential",
@@ -350,7 +340,7 @@ class TestAgentLoop:
             return AgentToolResult(content=[TextContent(text="done")], terminate=True)
 
         tool = make_echo_tool(execute_fn=term_execute)
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message(
@@ -364,8 +354,7 @@ class TestAgentLoop:
         messages = await run_agent_loop(
             prompts=[make_user_message("echo something")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             emit=lambda e: None,
         )
@@ -375,7 +364,7 @@ class TestAgentLoop:
         assert roles == ["user", "assistant", "tool_result"]
 
     async def test_steering_messages_polled_before_first_turn(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("Got it")])
 
         context = AgentContext(system_prompt="", messages=[], tools=[])
@@ -392,8 +381,7 @@ class TestAgentLoop:
         messages = await run_agent_loop(
             prompts=[make_user_message("Hello")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             get_steering_messages=get_steering,
             emit=lambda e: events.append(e),
@@ -414,7 +402,7 @@ class TestAgentLoop:
     async def test_steering_drained_at_turn_boundary_when_no_more_tools(self):
         # Pre-loop poll returns nothing; the steer arrives at the turn boundary
         # of a tool-less turn. Without the boundary drain it would be dropped.
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message("first answer"),
@@ -435,8 +423,7 @@ class TestAgentLoop:
         messages = await run_agent_loop(
             prompts=[make_user_message("start")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             get_steering_messages=get_steering,
             emit=lambda e: events.append(e),
@@ -446,7 +433,7 @@ class TestAgentLoop:
         assert roles == ["user", "assistant", "user", "assistant"]
 
     async def test_error_stop_reason_ends_loop(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message(
@@ -461,8 +448,7 @@ class TestAgentLoop:
         messages = await run_agent_loop(
             prompts=[make_user_message("hello")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             emit=lambda e: events.append(e),
         )
@@ -475,14 +461,13 @@ class TestAgentLoop:
 
 class TestAgentLoopContinue:
     async def test_raises_when_no_messages(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         context = AgentContext(system_prompt="", messages=[], tools=[])
 
         try:
             await run_agent_loop_continue(
                 context=context,
-                provider=provider,
-                model=make_model(),
+                model=provider.model("faux-1"),
                 convert_to_llm=identity_converter,
                 emit=lambda e: None,
             )
@@ -491,7 +476,7 @@ class TestAgentLoopContinue:
             assert "no messages" in str(e).lower()
 
     async def test_continue_without_user_message_events(self):
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("Response")])
 
         context = AgentContext(
@@ -503,8 +488,7 @@ class TestAgentLoopContinue:
         events: list[AgentEvent] = []
         messages = await run_agent_loop_continue(
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             emit=lambda e: events.append(e),
         )
@@ -520,7 +504,7 @@ class TestAgentLoopContinue:
 class TestFollowUpMessages:
     async def test_follow_up_messages_trigger_second_turn(self):
         """Lines 238-244: get_follow_up_messages injects messages and continues loop."""
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses(
             [
                 faux_assistant_message("first response"),
@@ -542,8 +526,7 @@ class TestFollowUpMessages:
         messages = await run_agent_loop(
             prompts=[make_user_message("Hello")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=identity_converter,
             get_follow_up_messages=get_follow_ups,
             emit=lambda e: events.append(e),
@@ -571,7 +554,7 @@ class TestFollowUpMessages:
 class TestAsyncConvertToLlm:
     async def test_async_converter_awaited_correctly(self):
         """Line 266: convert_to_llm returning a coroutine is awaited."""
-        provider = FauxProvider()
+        provider = FauxProvider(provider_id="faux")
         provider.set_responses([faux_assistant_message("Response")])
 
         context = AgentContext(system_prompt="", messages=[], tools=[])
@@ -595,8 +578,7 @@ class TestAsyncConvertToLlm:
         messages = await run_agent_loop(
             prompts=[make_user_message("Hello")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=provider.model("faux-1"),
             convert_to_llm=async_converter,
             emit=lambda e: events.append(e),
         )
@@ -712,8 +694,10 @@ class TestStreamFallback:
         messages = await run_agent_loop(
             prompts=[make_user_message("Hello")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=BoundModel(
+                provider=provider,
+                spec=Model(id="faux-1", provider_id="faux"),
+            ),
             convert_to_llm=identity_converter,
             emit=lambda e: events.append(e),
         )
@@ -741,8 +725,10 @@ class TestStreamFallback:
         messages = await run_agent_loop(
             prompts=[make_user_message("Hello")],
             context=context,
-            provider=provider,
-            model=make_model(),
+            model=BoundModel(
+                provider=provider,
+                spec=Model(id="faux-1", provider_id="faux"),
+            ),
             convert_to_llm=identity_converter,
             emit=lambda e: events.append(e),
         )

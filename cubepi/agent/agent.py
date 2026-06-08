@@ -37,7 +37,6 @@ from cubepi.providers.base import (
     Model,
     OnPayloadCallback,
     OnResponseCallback,
-    Provider,
     StreamOptions,
     TextContent,
     ThinkingLevel,
@@ -162,7 +161,6 @@ class Agent(Generic[TMessage]):
         channel: HitlChannel | None = None,
         messages: Sequence[Message] | None = None,
     ) -> None:
-        self._provider: Provider = model.provider
         self._model = model
         self._state = AgentState(
             system_prompt=system_prompt,
@@ -661,8 +659,7 @@ class Agent(Generic[TMessage]):
             lambda signal: run_agent_loop(
                 prompts=messages,
                 context=self._create_context_snapshot(),
-                provider=self._provider,
-                model=self._state.model,
+                model=self._model,
                 convert_to_llm=self.convert_to_llm,
                 transform_context=self.transform_context,
                 transform_system_prompt=self.transform_system_prompt,
@@ -685,8 +682,7 @@ class Agent(Generic[TMessage]):
         await self._run_with_lifecycle(
             lambda signal: run_agent_loop_continue(
                 context=self._create_context_snapshot(),
-                provider=self._provider,
-                model=self._state.model,
+                model=self._model,
                 convert_to_llm=self.convert_to_llm,
                 transform_context=self.transform_context,
                 transform_system_prompt=self.transform_system_prompt,
@@ -956,8 +952,7 @@ class Agent(Generic[TMessage]):
         await self._run_with_lifecycle(
             lambda signal: run_agent_loop_resume(
                 context=self._create_context_snapshot(),
-                provider=self._provider,
-                model=self._state.model,
+                model=self._model,
                 convert_to_llm=self.convert_to_llm,
                 transform_context=self.transform_context,
                 transform_system_prompt=self.transform_system_prompt,

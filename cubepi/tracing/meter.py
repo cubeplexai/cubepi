@@ -174,7 +174,12 @@ class Meter:
             self._handle_provider_response(state, body, model, exc)
 
         unsub_agent = agent.subscribe(_on_agent_event)
-        provider = getattr(agent, "_provider", None) or getattr(agent, "provider", None)
+        agent_model = getattr(agent, "_model", None)
+        provider = (
+            agent_model.provider
+            if agent_model is not None
+            else getattr(agent, "provider", None)
+        )
         detachers: list[Callable[[], None]] = []
         if isinstance(provider, BaseProvider):
             detachers.append(provider.subscribe_request(_on_request))

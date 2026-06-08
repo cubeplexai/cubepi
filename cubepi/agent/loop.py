@@ -20,9 +20,8 @@ from cubepi.hitl.exceptions import HitlAborted, HitlDetached
 from cubepi.utils import emit_event
 from cubepi.providers.base import (
     AssistantMessage,
+    BoundModel,
     Message,
-    Model,
-    Provider,
     StreamOptions,
     ToolCall,
     ToolResultMessage,
@@ -33,8 +32,7 @@ async def run_agent_loop(
     *,
     prompts: list[Message],
     context: AgentContext,
-    provider: Provider,
-    model: Model,
+    model: BoundModel,
     convert_to_llm: Callable,
     emit: Callable,
     transform_context: Callable | None = None,
@@ -70,7 +68,6 @@ async def run_agent_loop(
     await _run_loop(
         current_context=current_context,
         new_messages=new_messages,
-        provider=provider,
         model=model,
         convert_to_llm=convert_to_llm,
         transform_context=transform_context,
@@ -93,8 +90,7 @@ async def run_agent_loop(
 async def run_agent_loop_continue(
     *,
     context: AgentContext,
-    provider: Provider,
-    model: Model,
+    model: BoundModel,
     convert_to_llm: Callable,
     emit: Callable,
     transform_context: Callable | None = None,
@@ -130,7 +126,6 @@ async def run_agent_loop_continue(
     await _run_loop(
         current_context=current_context,
         new_messages=new_messages,
-        provider=provider,
         model=model,
         convert_to_llm=convert_to_llm,
         transform_context=transform_context,
@@ -153,8 +148,7 @@ async def run_agent_loop_continue(
 async def run_agent_loop_resume(
     *,
     context: AgentContext,
-    provider: Provider,
-    model: Model,
+    model: BoundModel,
     convert_to_llm: Callable,
     emit: Callable,
     transform_context: Callable | None = None,
@@ -178,7 +172,6 @@ async def run_agent_loop_resume(
     try:
         return await _run_agent_loop_resume_body(
             context=context,
-            provider=provider,
             model=model,
             convert_to_llm=convert_to_llm,
             emit=emit,
@@ -218,7 +211,6 @@ async def run_agent_loop_resume(
 async def _run_agent_loop_resume_body(  # pragma: no cover — E2E tested
     *,
     context,
-    provider,
     model,
     convert_to_llm,
     emit,
@@ -372,7 +364,6 @@ async def _run_agent_loop_resume_body(  # pragma: no cover — E2E tested
     await _run_loop(
         current_context=current_context,
         new_messages=new_messages,
-        provider=provider,
         model=model,
         convert_to_llm=convert_to_llm,
         transform_context=transform_context,
@@ -396,8 +387,7 @@ async def _run_loop(
     *,
     current_context: AgentContext,
     new_messages: list[Message],
-    provider: Provider,
-    model: Model,
+    model: BoundModel,
     convert_to_llm: Callable,
     transform_context: Callable | None,
     transform_system_prompt: Callable | None,
@@ -417,7 +407,6 @@ async def _run_loop(
         await _run_loop_inner(
             current_context=current_context,
             new_messages=new_messages,
-            provider=provider,
             model=model,
             convert_to_llm=convert_to_llm,
             transform_context=transform_context,
@@ -454,8 +443,7 @@ async def _run_loop_inner(
     *,
     current_context: AgentContext,
     new_messages: list[Message],
-    provider: Provider,
-    model: Model,
+    model: BoundModel,
     convert_to_llm: Callable,
     transform_context: Callable | None,
     transform_system_prompt: Callable | None,
@@ -496,7 +484,6 @@ async def _run_loop_inner(
 
             message = await _stream_assistant_response(
                 current_context,
-                provider,
                 model,
                 convert_to_llm,
                 transform_context,
@@ -696,8 +683,7 @@ async def _run_loop_inner(
 
 async def _stream_assistant_response(
     context: AgentContext,
-    provider: Provider,
-    model: Model,
+    model: BoundModel,
     convert_to_llm: Callable,
     transform_context: Callable | None,
     transform_system_prompt: Callable | None,
@@ -720,8 +706,7 @@ async def _stream_assistant_response(
     if transform_system_prompt:
         sp = await transform_system_prompt(sp, ctx=context, signal=options.signal)
 
-    stream = await provider.stream(
-        model,
+    stream = await model.stream(
         llm_messages,
         system_prompt=sp,
         tools=tools_defs,
