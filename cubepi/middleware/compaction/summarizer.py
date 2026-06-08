@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from cubepi.middleware.compaction.state import CompactionState, message_refs
 from cubepi.providers.base import (
@@ -11,6 +12,9 @@ from cubepi.providers.base import (
     ToolCall,
     UserMessage,
 )
+
+_ARG_VALUE_CHARS = 200
+_ARG_REPR_MAX = 500
 
 
 SUMMARIZER_SYSTEM_PROMPT = """\
@@ -34,6 +38,39 @@ A previous summary already covers earlier turns:
 Merge it with the new turns below. Output the updated summary."""
 
 
+def _shrink_strings(obj: object) -> object:
+    """Recursively shrink long string leaves; preserve everything else."""
+    if isinstance(obj, str):
+        if len(obj) <= _ARG_VALUE_CHARS:
+            return obj
+        return obj[:_ARG_VALUE_CHARS] + "...[truncated]"
+    if isinstance(obj, dict):
+        return {k: _shrink_strings(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_shrink_strings(v) for v in obj]
+    return obj
+
+
+def _format_arguments(arguments: object) -> str:
+    """Render a ToolCall arguments dict as a compact JSON-ish suffix.
+
+    Long string field values are shrunk individually so short fields (file
+    paths, command names, query strings) survive intact. The full repr is
+    additionally capped at ``_ARG_REPR_MAX`` chars as a last-line defence
+    against pathological inputs (e.g. thousands of small fields).
+    """
+    if not arguments:
+        return ""
+    try:
+        shrunk = _shrink_strings(arguments)
+        serialised = json.dumps(shrunk, ensure_ascii=False)
+    except (TypeError, ValueError):
+        serialised = str(arguments)
+    if len(serialised) > _ARG_REPR_MAX:
+        serialised = serialised[:_ARG_REPR_MAX] + "..."
+    return " " + serialised
+
+
 def _format_message_for_summary(message: Message) -> str:
     role = message.__class__.__name__.removesuffix("Message").lower() or "message"
     parts: list[str] = []
@@ -41,7 +78,7 @@ def _format_message_for_summary(message: Message) -> str:
         if isinstance(block, TextContent):
             parts.append(block.text)
         elif isinstance(block, ToolCall):
-            parts.append(f"[tool_call:{block.name}]")
+            parts.append(f"[tool_call:{block.name}]{_format_arguments(block.arguments)}")
         elif hasattr(block, "text"):
             parts.append(str(getattr(block, "text", "")))
     return f"[{role}] " + " ".join(parts)

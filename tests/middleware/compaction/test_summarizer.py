@@ -154,3 +154,73 @@ def test_format_message_for_summary_includes_tool_calls_and_text_like_blocks() -
     assert "checking" in formatted
     assert "[tool_call:lookup]" in formatted
     assert "extra text" in formatted
+
+
+def test_tool_call_arguments_included() -> None:
+    msg = AssistantMessage(
+        content=[
+            ToolCall(
+                id="c1",
+                name="read_file",
+                arguments={"path": "/home/user/config.py"},
+            ),
+        ]
+    )
+    formatted = _format_message_for_summary(msg)
+    assert "read_file" in formatted
+    assert "/home/user/config.py" in formatted
+
+
+def test_tool_call_long_string_value_truncated() -> None:
+    big_content = "x" * 1000
+    msg = AssistantMessage(
+        content=[
+            ToolCall(
+                id="c1",
+                name="write_file",
+                arguments={"path": "out.py", "content": big_content},
+            ),
+        ]
+    )
+    formatted = _format_message_for_summary(msg)
+    # Short field survives intact
+    assert "out.py" in formatted
+    # Long field gets truncated
+    assert big_content not in formatted
+    assert "truncated" in formatted
+
+
+def test_tool_call_short_arguments_kept_intact() -> None:
+    msg = AssistantMessage(
+        content=[
+            ToolCall(id="c1", name="bash", arguments={"command": "ls -la"}),
+        ]
+    )
+    formatted = _format_message_for_summary(msg)
+    assert "bash" in formatted
+    assert "ls -la" in formatted
+
+
+def test_tool_call_repr_max_chars_enforced() -> None:
+    # Many small fields — each individually under the per-field limit, but
+    # the total serialised JSON would balloon. Cap at _ARG_REPR_MAX.
+    msg = AssistantMessage(
+        content=[
+            ToolCall(
+                id="c1",
+                name="search",
+                arguments={f"k{i}": f"v{i}" * 20 for i in range(40)},
+            ),
+        ]
+    )
+    formatted = _format_message_for_summary(msg)
+    # Total formatted message must stay bounded.
+    assert len(formatted) < 1000
+
+
+def test_tool_call_empty_arguments() -> None:
+    msg = AssistantMessage(
+        content=[ToolCall(id="c1", name="ping", arguments={})]
+    )
+    formatted = _format_message_for_summary(msg)
+    assert "[tool_call:ping]" in formatted
