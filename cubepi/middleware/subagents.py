@@ -22,19 +22,47 @@ EventMapper = Callable[[AgentEvent], Sequence[StructuredValue] | StructuredValue
 EventHandler = Callable[[str, StructuredValue], Awaitable[None] | None]
 
 
+def _is_checkpointed_hitl(x: object) -> bool:
+    """True if ``x.hitl`` is a checkpointed ``HitlBinding``."""
+    binding = getattr(x, "hitl", None)
+    return binding is not None and bool(getattr(binding, "checkpointed", False))
+
+
 def _drop_checkpointed_hitl(items: Sequence) -> list:
-    """Remove elements whose ``.hitl`` is a checkpointed binding.
+    """Remove elements that carry — or expose — a checkpointed HITL binding.
 
     Used by ``SubagentMiddleware`` to keep parent-bound HITL state out of an
-    ephemeral child agent — the child has its own run_id, but a checkpointed
-    ``HitlBinding`` carries the parent's run_id, which ``Agent._validate_hitl
-    _bindings`` rejects at ``prompt()`` entry. Elements without ``.hitl`` (or
-    with a non-checkpointed binding) pass through untouched.
+    ephemeral child agent. The child has its own run_id, but a checkpointed
+    ``HitlBinding`` carries the parent's run_id, which
+    ``Agent._validate_hitl_bindings`` rejects at ``prompt()`` entry.
+
+    Two ways an element can introduce parent-bound HITL into the child:
+
+    * The element itself has ``.hitl`` set (an ``AgentTool`` like
+      ``ask_user_tool(...)`` or a middleware like
+      ``ApprovalPolicyMiddleware``). Dropped directly.
+    * A middleware that doesn't carry ``.hitl`` itself but exposes
+      ``.tools`` containing an HITL-checkpointed tool — ``Agent.__init__``
+      appends ``getattr(mw, "tools", [])`` to ``state.tools`` and the
+      validator would still see the parent-bound tool there. The whole
+      middleware is dropped in this case; constructing a tools-filtered
+      proxy would break ``compose_middleware._has_method`` (it does
+      ``type(mw)`` lookups), so dropping the unit is the simpler and
+      type-safe option. Trade-off: any non-HITL hooks on that middleware
+      are also lost in the subagent — by packaging HITL tools inside a
+      middleware the host has effectively declared the middleware to be
+      an HITL unit.
+
+    Elements without ``.hitl`` (or with a non-checkpointed binding) and
+    with no checkpointed-HITL tools inside their ``.tools`` attribute
+    pass through untouched.
     """
     out: list = []
     for x in items:
-        binding = getattr(x, "hitl", None)
-        if binding is not None and getattr(binding, "checkpointed", False):
+        if _is_checkpointed_hitl(x):
+            continue
+        nested_tools = getattr(x, "tools", None)
+        if nested_tools and any(_is_checkpointed_hitl(t) for t in nested_tools):
             continue
         out.append(x)
     return out
