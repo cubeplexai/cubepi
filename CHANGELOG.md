@@ -31,11 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `Iterable[tuple[Provider, Model]]`. Third-party middleware overriding
   this hook must update the return shape (see Migration). The recorder
   consumer in `cubepi.tracing` was adapted in lock-step; built-in
-  `CompactionMiddleware` already updated. The tracing recorder defensively
-  skips legacy tuple entries with a `cubepi.tracing` logger warning so an
-  un-migrated middleware degrades gracefully (its extra LLM call simply
-  won't appear in the trace) instead of breaking attach for the whole
-  agent.
+  `CompactionMiddleware` already updated.
 - **`cubepi.middleware.compaction.summarizer.summarize()` takes
   `model: BoundModel`** instead of separate `provider: Provider, model: Model`
   kwargs. Direct callers (rare — this is internal to `CompactionMiddleware`)
