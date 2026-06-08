@@ -26,7 +26,7 @@
 - **Modify** `tests/tracing/test_recorder.py` — three middleware mocks (`extra_llm_calls` at lines ~666, ~706, ~735) return `BoundModel` instead of tuples.
 - **Modify** `website/docs/agents/providers.md` (or whichever current providers page documents `provider.model(...)`) — add a one-paragraph note that the returned `BoundModel` is itself callable via `.stream()` / `.generate()`.
 
-`tests/middleware/test_compaction.py` already constructs `CompactionMiddleware(summary_model=BoundModel(...), ...)` (line 75), so the public-API surface needs no test changes there. Recorder tests at `tests/tracing/test_recorder.py:515` / `:591` likewise construct `BoundModel(...)` directly and stay green through both Task 3 (internal call-site change) and Task 4 (field collapse + extra_llm_calls shape change).
+`tests/middleware/test_compaction.py` already constructs `CompactionMiddleware(summary_model=BoundModel(...), ...)` (line 75), so the public-API surface needs no test changes there. Recorder tests at `tests/tracing/test_recorder.py:515` / `:591` likewise already construct `BoundModel(...)` directly and stay green after the Task 3 atomic flip.
 
 ---
 
@@ -285,26 +285,37 @@ git commit -m "feat(providers): add BoundModel.stream convenience method"
 
 ---
 
-## Task 3: Migrate `summarize()` to take a `BoundModel` (signature-only)
+## Task 3: Migrate compaction + `extra_llm_calls()` to `BoundModel` (atomic)
 
-**Files:**
-- Modify: `cubepi/middleware/compaction/summarizer.py:55-80`
-- Modify: `cubepi/middleware/compaction/__init__.py` (call site inside `transform_context` only — `__init__` and `extra_llm_calls` untouched)
+**Files (all flip in one commit):**
+- Modify: `cubepi/middleware/compaction/summarizer.py` (function signature + body, imports)
+- Modify: `cubepi/middleware/compaction/__init__.py` (`__init__`, `transform_context` call site, `extra_llm_calls`, imports)
+- Modify: `cubepi/middleware/base.py:96-116` (`extra_llm_calls` signature + docstring, imports)
+- Modify: `cubepi/tracing/recorder.py:286-299` (the unpacking loop, imports)
 - Modify: `tests/middleware/compaction/test_summarizer.py` (three call sites at lines ~60, ~85, ~119)
+- Modify: `tests/tracing/test_recorder.py` (three mocks at ~666, ~706, ~735 — per-test replacements, not one template)
 
-**Scope discipline:** This task only changes the `summarize` boundary. `CompactionMiddleware` keeps its `_summary_provider` + `_summary_model: Model` split fields and its existing `extra_llm_calls()` *unchanged* — Task 4 collapses them. This keeps the intermediate commit fully working (compaction tests + recorder tests both pass after Task 3).
+**Why atomic:** The producer side (`Middleware.extra_llm_calls` return shape) and the consumer side (`cubepi/tracing/recorder.py` + the test mocks) are coupled. Splitting this into two commits leaves an intermediate state where either the recorder unpacks the wrong shape or `CompactionMiddleware` re-pairs split fields that have already been collapsed. One commit, one atomic flip, larger diff — accepted trade-off for skipping the awkward `BoundModel(provider=self._summary_provider, spec=self._summary_model)` transition.
 
-- [ ] **Step 1: Run the existing compaction + summarizer tests as a baseline**
+- [ ] **Step 0: Confirm no third-party `extra_llm_calls` overrides exist**
 
 ```bash
-uv run pytest tests/middleware/test_compaction.py tests/middleware/compaction/test_summarizer.py tests/tracing/test_recorder.py -v
+grep -rn "extra_llm_calls" cubepi/ tests/ --include="*.py"
 ```
 
-Expected: PASS. Record the totals — we need them all to still pass after Task 3.
+Expected hits: the base definition (`cubepi/middleware/base.py`), the compaction override (`cubepi/middleware/compaction/__init__.py`), the recorder consumer (`cubepi/tracing/recorder.py`), and four test references (`tests/tracing/test_recorder.py`). If anything else shows up, fold it into the migration before continuing.
 
-- [ ] **Step 2: Update `summarize()` signature**
+- [ ] **Step 1: Baseline run**
 
-In `cubepi/middleware/compaction/summarizer.py`, replace the function header and the provider call site. Replace the import block + the function body (lines 6-14 imports, lines 55-80 function):
+```bash
+uv run pytest tests/middleware/ tests/tracing/test_recorder.py tests/middleware/compaction/test_summarizer.py -v
+```
+
+Expected: PASS. Record the totals — these must all still pass after the refactor.
+
+- [ ] **Step 2: Update `summarize()` to take a `BoundModel`**
+
+In `cubepi/middleware/compaction/summarizer.py`, replace the import block (lines 6-14) and the function (lines 55-80):
 
 ```python
 from cubepi.middleware.compaction.state import CompactionState, message_refs
@@ -344,134 +355,11 @@ async def summarize(
     )
 ```
 
-Remove `Model` and `Provider` from the imports (now unused inside this file).
+Drop `Model` and `Provider` from the imports (now unused).
 
-- [ ] **Step 3: Update the `summarize` call site in `CompactionMiddleware`**
+- [ ] **Step 3: Collapse `CompactionMiddleware` to one `BoundModel` field**
 
-In `cubepi/middleware/compaction/__init__.py`, **only** the call inside `transform_context` changes. Do NOT touch `__init__` or `extra_llm_calls()` in this task.
-
-Replace the existing `summarize(...)` call (the block around `try: new_state = await summarize(...)`) with:
-
-```python
-        try:
-            new_state = await summarize(
-                model=BoundModel(
-                    provider=self._summary_provider,
-                    spec=self._summary_model,
-                ),
-                messages_to_summarize=messages[boundary:new_boundary],
-                existing=state,
-                max_summary_tokens=self._max_summary_tokens,
-                abort_signal=signal,
-            )
-```
-
-`BoundModel` is already imported at the top of this file. The `extra_llm_calls()` method below still returns `((self._summary_provider, self._summary_model),)` — leave it; Task 4 handles it.
-
-- [ ] **Step 4: Migrate `tests/middleware/compaction/test_summarizer.py` to the new signature**
-
-This file has three `summarize(provider=..., model=...)` call sites (around lines 60, 85, 119). All three need to wrap the provider + model in a `BoundModel`. Example for the first call site:
-
-```python
-# At the top, extend the imports:
-from cubepi.providers.base import (
-    AssistantMessage,
-    BoundModel,
-    Message,
-    Model,
-    StreamOptions,
-    TextContent,
-    ToolCall,
-    ToolDefinition,
-    UserMessage,
-)
-
-# Then replace each `summarize(provider=provider, model=model, ...)` with:
-result = await summarize(
-    model=BoundModel(provider=provider, spec=model),
-    messages_to_summarize=[...],
-    existing=None,
-    max_summary_tokens=512,
-    abort_signal=signal,
-)
-```
-
-`_FakeProvider` (defined in the same file) only implements `generate` — that's fine because `BoundModel.generate` delegates to `self.provider.generate(model=self.spec, ...)`, so `_FakeProvider.generate` receives the same kwargs it does today and the `provider.calls[0]["max_output_tokens"]` style assertions stay green.
-
-Do all three call sites in one edit. Don't change the `_FakeProvider` definition or the assertions.
-
-- [ ] **Step 5: Run the touched test suites**
-
-```bash
-uv run pytest tests/middleware/compaction/test_summarizer.py tests/middleware/test_compaction.py tests/tracing/test_recorder.py -v
-```
-
-Expected: same PASS totals as Step 1 (no behavior change). If `test_summarizer.py` fails, the migration in Step 4 missed a call site.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add cubepi/middleware/compaction/summarizer.py cubepi/middleware/compaction/__init__.py tests/middleware/compaction/test_summarizer.py
-git commit -m "refactor(compaction): summarize() takes BoundModel"
-```
-
----
-
-## Task 4: Collapse compaction fields + `extra_llm_calls()` returns `Iterable[BoundModel]`
-
-**Files:**
-- Modify: `cubepi/middleware/base.py:96-116`
-- Modify: `cubepi/middleware/compaction/__init__.py` (`__init__`, the `summarize` call site, and `extra_llm_calls`)
-- Modify: `cubepi/tracing/recorder.py:286-299`
-- Test: `tests/tracing/test_recorder.py` (three mocks at ~666, ~706, ~735)
-
-This task does the atomic switchover: one `BoundModel` field instead of split provider+spec, and a `BoundModel`-shaped `extra_llm_calls()` API. All four pieces (base, compaction impl, recorder consumer, recorder test mocks) flip together to keep tests green.
-
-- [ ] **Step 0: Confirm no third-party `extra_llm_calls` overrides exist**
-
-```bash
-grep -rn "extra_llm_calls" cubepi/ tests/ --include="*.py"
-```
-
-Expected hits: the base definition, the compaction override, the recorder consumer, and four test references (`tests/tracing/test_recorder.py`). If anything else shows up, fold it into the migration before continuing.
-
-- [ ] **Step 1: Update the base interface and docstring**
-
-In `cubepi/middleware/base.py`, replace lines 96–116 (the `extra_llm_calls` method) and adjust imports:
-
-```python
-from cubepi.providers.base import AssistantMessage, BoundModel, Message  # drop Model, Provider
-```
-
-(Keep `Provider` only if it's still referenced elsewhere in the file — currently it isn't outside `extra_llm_calls`'s annotation, so drop it. Same for `Model`. Verify with `grep -n "Provider\b\|Model\b" cubepi/middleware/base.py` after editing.)
-
-```python
-    def extra_llm_calls(self) -> Iterable[BoundModel]:
-        """Declare LLM calls this middleware drives outside the agent's main
-        bound model.
-
-        Each entry is a ``BoundModel`` — the same handle the user gets from
-        ``provider.model(...)``. ``cubepi.tracing.Recorder`` uses these to:
-
-        * Subscribe listeners on any provider the recorder isn't already
-          watching, so the resulting calls show up in the trace tree
-          alongside the agent's own chat spans.
-        * Identify middleware-owned calls by ``(spec.provider_id, spec.id)``
-          so they don't overwrite the root ``invoke_agent`` span's
-          attribution (provider name, system prompt hash, tool list). This
-          model-based gate is what handles the common "reuse one provider
-          client, swap the model" pattern — listener identity alone would
-          attribute the middleware's first call to the agent.
-
-        Default is empty — middlewares that do not call any LLM directly
-        need not override.
-        """
-        return ()
-```
-
-- [ ] **Step 2: Collapse `CompactionMiddleware` fields and update `extra_llm_calls`**
-
-In `cubepi/middleware/compaction/__init__.py`, three changes in one pass:
+In `cubepi/middleware/compaction/__init__.py`, three changes in one pass.
 
 **(a)** Replace `__init__`:
 
@@ -492,7 +380,7 @@ In `cubepi/middleware/compaction/__init__.py`, three changes in one pass:
         self._min_compact = min_compact_messages
 ```
 
-**(b)** Simplify the `summarize` call inside `transform_context` — Task 3 set it to `BoundModel(provider=self._summary_provider, spec=self._summary_model)`; now it's just:
+**(b)** Simplify the `summarize` call inside `transform_context`:
 
 ```python
         try:
@@ -518,11 +406,45 @@ In `cubepi/middleware/compaction/__init__.py`, three changes in one pass:
         return (self._summary_model,)
 ```
 
-Drop `Model` and `Provider` from the imports at the top of this file (no longer referenced).
+Drop `Model` and `Provider` from the imports at the top of this file.
 
-- [ ] **Step 3: Update the recorder consumer**
+- [ ] **Step 4: Update the `Middleware.extra_llm_calls` base signature + docstring**
 
-In `cubepi/tracing/recorder.py`, around lines 286–299, replace the unpacking loop. The current code is:
+In `cubepi/middleware/base.py`, adjust imports and replace lines 96–116:
+
+```python
+from cubepi.providers.base import AssistantMessage, BoundModel, Message  # drop Model, Provider
+```
+
+(Verify with `grep -n "Provider\b\|Model\b" cubepi/middleware/base.py` after editing — neither should remain in the file.)
+
+```python
+    def extra_llm_calls(self) -> Iterable[BoundModel]:
+        """Declare LLM calls this middleware drives outside the agent's main
+        bound model.
+
+        Each entry is a ``BoundModel`` — the same handle the user gets from
+        ``provider.model(...)``. ``cubepi.tracing.Recorder`` uses these to:
+
+        * Subscribe listeners on any provider the recorder isn't already
+          watching, so the resulting calls show up in the trace tree
+          alongside the agent's own chat spans.
+        * Identify middleware-owned calls by ``(spec.provider_id, spec.id)``
+          so they don't overwrite the root ``invoke_agent`` span's
+          attribution (provider name, system prompt hash, tool list). This
+          model-based gate is what handles the common "reuse one provider
+          client, swap the model" pattern — listener identity alone would
+          attribute the middleware's first call to the agent.
+
+        Default is empty — middlewares that do not call any LLM directly
+        need not override.
+        """
+        return ()
+```
+
+- [ ] **Step 5: Update the recorder consumer**
+
+In `cubepi/tracing/recorder.py`, around lines 286–299, the current unpacking loop is:
 
 ```python
 for p, m in extra:
@@ -550,20 +472,54 @@ for bound in extra:
     _subscribe(provider)
 ```
 
-Add `BoundModel` to the file's imports if not already imported (the surrounding code uses `Model`, `Provider`, etc., from `cubepi.providers.base`).
+**Do not** add `BoundModel` to this file's imports. The loop body only uses attribute access (`bound.spec`, `bound.provider`) and no other code in `recorder.py` references the `BoundModel` type, so an import would be flagged by ruff as `F401`. (Verify with `grep -n "from cubepi.providers.base" cubepi/tracing/recorder.py` — only `StreamEvent`, `ToolCall`, `ToolResultMessage`, `UserMessage` are imported today; leave that list unchanged.)
 
-- [ ] **Step 4: Update the three mocks in the recorder tests**
+- [ ] **Step 6: Migrate `tests/middleware/compaction/test_summarizer.py` to the new signature**
 
-In `tests/tracing/test_recorder.py`, three middleware classes return from `extra_llm_calls`. They are NOT interchangeable — each exercises a different recorder branch, so spell out the per-test replacement instead of applying one template. `BoundModel` is already imported at line 22 of the test file.
+This file has three `summarize(provider=..., model=...)` call sites (around lines 60, 85, 119). All three wrap the provider + model in a `BoundModel`. Extend the imports:
 
-**(a)** `_SameModelMiddleware` (around line 666): exercises the "same `(provider_id, id)` as the agent's bound model — must be excluded from `_extra_call_models`" branch. The mock takes `provider` and `model` via its constructor and stores them on `self._p` / `self._m`.
+```python
+from cubepi.providers.base import (
+    AssistantMessage,
+    BoundModel,
+    Message,
+    Model,
+    StreamOptions,
+    TextContent,
+    ToolCall,
+    ToolDefinition,
+    UserMessage,
+)
+```
+
+Replace each `summarize(provider=provider, model=model, ...)` with:
+
+```python
+result = await summarize(
+    model=BoundModel(provider=provider, spec=model),
+    messages_to_summarize=[...],
+    existing=None,
+    max_summary_tokens=512,
+    abort_signal=signal,
+)
+```
+
+`_FakeProvider` (defined in the same file) only implements `generate` — that's fine. `BoundModel.generate` delegates to `self.provider.generate(model=self.spec, ...)`, so `_FakeProvider.generate` receives the same kwargs it does today, and the `provider.calls[0]["max_output_tokens"]` style assertions stay green. Don't change `_FakeProvider` or the assertions.
+
+Do all three call sites in one edit.
+
+- [ ] **Step 7: Update the three recorder test mocks**
+
+In `tests/tracing/test_recorder.py`, three middleware classes return from `extra_llm_calls`. They are NOT interchangeable — each exercises a different recorder branch, so spell out the per-test replacement. `BoundModel` is already imported at line 22 of the test file.
+
+**(a)** `_SameModelMiddleware` (around line 666): exercises the "same `(provider_id, id)` as the agent's bound model — must be excluded from `_extra_call_models`" branch. The mock stores `provider` and `model` on `self._p` / `self._m`.
 
 ```python
             def extra_llm_calls(self):
                 return [BoundModel(provider=self._p, spec=self._m)]
 ```
 
-**(b)** `_DuckMiddleware` (around line 706): exercises the "provider not derived from `BaseProvider` is skipped in `_subscribe`" branch. The provider here MUST stay `_DuckProvider()` — using the agent's BaseProvider would silently kill the branch this test exists to cover. The model field is `self._m` from the middleware's constructor.
+**(b)** `_DuckMiddleware` (around line 706): exercises the "provider not derived from `BaseProvider` is skipped in `_subscribe`" branch. The provider MUST stay `_DuckProvider()` — using the agent's BaseProvider would silently kill the branch this test exists to cover. The model field is `self._m` from the middleware's constructor.
 
 ```python
             def extra_llm_calls(self):
@@ -574,23 +530,21 @@ In `tests/tracing/test_recorder.py`, three middleware classes return from `extra
 
 **(c)** `_BoomMiddleware` (around line 735): raises before returning, so the return shape doesn't matter. **Do not change this class.**
 
-After editing, verify the test method names that contain the changed classes still pass intact:
+- [ ] **Step 8: Run the touched suites, then the full sweep**
+
+```bash
+uv run pytest tests/middleware/ tests/middleware/compaction/test_summarizer.py tests/tracing/test_recorder.py -v
+```
+
+Expected: same PASS totals as Step 1. If anything fails, the producer/consumer didn't flip together — re-check Steps 2-7.
+
+Specifically verify the branch-coverage tests still hit their intended branches:
 
 ```bash
 uv run pytest tests/tracing/test_recorder.py -k "extra_llm_calls or extra_provider_not_baseprovider" -v
 ```
 
-Expected: all PASS — in particular the duck-provider test must still hit the "skipped non-BaseProvider" branch (you can sanity-check by reading the recorder's `_subscribe` and confirming the same code path runs).
-
-- [ ] **Step 5: Run the recorder + middleware test suites**
-
-```bash
-uv run pytest tests/tracing/test_recorder.py tests/middleware/ -v
-```
-
-Expected: PASS. Any new failure here means the consumer or a mock wasn't fully migrated.
-
-- [ ] **Step 6: Full test sweep + lint + types**
+Then the full sweep + lint + types:
 
 ```bash
 uv run pytest tests/ -x
@@ -599,18 +553,18 @@ uv run ruff format --check cubepi/ tests/
 uv run mypy cubepi
 ```
 
-Expected: all green. (`pytest -x` stops at the first failure so issues surface fast.)
+Expected: all green.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add cubepi/middleware/base.py cubepi/middleware/compaction/__init__.py cubepi/tracing/recorder.py tests/tracing/test_recorder.py
-git commit -m "refactor(middleware): extra_llm_calls returns BoundModel"
+git add cubepi/middleware/compaction/summarizer.py cubepi/middleware/compaction/__init__.py cubepi/middleware/base.py cubepi/tracing/recorder.py tests/middleware/compaction/test_summarizer.py tests/tracing/test_recorder.py
+git commit -m "refactor(middleware): take and surface BoundModel through compaction + extra_llm_calls"
 ```
 
 ---
 
-## Task 5: Document the new ergonomics
+## Task 4: Document the new ergonomics
 
 **Files:**
 - Modify: `website/docs/agents/providers.md` (or the closest existing page; verify with `ls website/docs/agents/ website/docs/getting-started/`)
@@ -672,7 +626,7 @@ git commit -m "docs(providers): document BoundModel.generate/stream"
 
 ---
 
-## Task 6 (gated): Local codex review loop
+## Task 5 (gated): Local codex review loop
 
 **Per CLAUDE.md, ask the user before starting this loop.** Do not enter it autonomously.
 
@@ -714,12 +668,14 @@ Poll `gh api repos/cubeplexai/cubepi/pulls/<#>/comments` every ~2 minutes, resol
 
 1. **Spec coverage** — every item from the conversation is mapped to a task:
    - "Add `BoundModel.generate/stream`" → Task 1, Task 2.
-   - "`summarize()` takes `BoundModel`" → Task 3.
-   - "`extra_llm_calls()` returns `Iterable[BoundModel]`" → Task 4.
-   - Consumer updates (recorder + test mocks) → Task 4 Steps 3–4.
-   - Docs requirement (CLAUDE.md) → Task 5.
+   - "`summarize()` takes `BoundModel`" → Task 3 Step 2.
+   - "`extra_llm_calls()` returns `Iterable[BoundModel]`" → Task 3 Step 4.
+   - Recorder consumer + test mocks → Task 3 Steps 5, 7.
+   - Compaction field collapse + summarizer test migration → Task 3 Steps 3, 6.
+   - Docs requirement (CLAUDE.md) → Task 4.
 2. **Placeholders** — none. Every code step has the actual code; commands are concrete.
-3. **Type consistency** — `BoundModel.generate` / `BoundModel.stream` signatures mirror `Provider.generate` / `Provider.stream` exactly (verified against `cubepi/providers/base.py:579-603`). Field name `self._summary_model: BoundModel` is used consistently in Tasks 3 and 4.
+3. **Type consistency** — `BoundModel.generate` / `BoundModel.stream` signatures mirror `Provider.generate` / `Provider.stream` exactly (verified against `cubepi/providers/base.py:579-603`). `self._summary_model: BoundModel` is the single field name used throughout Task 3.
+4. **Atomicity** — Task 3 producer-side (compaction `__init__` / `extra_llm_calls` return shape) and consumer-side (recorder loop + test mocks) flip in one commit. No intermediate broken state.
 
 ## Follow-ups (out of scope)
 
