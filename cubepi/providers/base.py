@@ -95,6 +95,22 @@ class BoundModel:
     provider: Provider
     spec: Model
 
+    async def stream(
+        self,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        return await self.provider.stream(
+            model=self.spec,
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            options=options,
+        )
+
     async def generate(
         self,
         messages: list[Message],

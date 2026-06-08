@@ -14,6 +14,7 @@ from cubepi.providers.base import (
     ToolDefinition,
     UserMessage,
 )
+from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
 
 class _RecordingProvider(BaseProvider):
@@ -80,3 +81,27 @@ async def test_bound_model_generate_forwards_to_provider() -> None:
     assert call["max_output_tokens"] == 64
     assert call["temperature"] == 0.0
     assert call["thinking"] == "off"
+
+
+@pytest.mark.asyncio
+async def test_bound_model_stream_forwards_to_provider() -> None:
+    provider = FauxProvider(provider_id="faux")
+    provider.set_responses([faux_assistant_message("hello")])
+    bound = provider.model("faux-1")
+
+    stream = await bound.stream(
+        messages=[UserMessage(content=[TextContent(text="hi")])],
+        system_prompt="be brief",
+    )
+
+    events: list[str] = []
+    async for event in stream:
+        events.append(event.type)
+        if event.type in ("done", "error"):
+            break
+    result = await stream.result()
+
+    assert "start" in events
+    assert "done" in events
+    assert result.model_id == "faux-1"
+    assert result.provider_id == "faux"
