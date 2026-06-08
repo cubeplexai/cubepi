@@ -19,6 +19,7 @@ from cubepi.providers.base import (
     Message,
     MessageStream,
     Model,
+    StreamEvent,
     StreamOptions,
     TextContent,
     ThinkingBudgets,
@@ -241,3 +242,117 @@ async def test_custom_trigger_errors_includes_auth_failed() -> None:
     result = await stream.result()
 
     assert result.provider_id == "fallback"
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+def test_provider_and_spec_properties() -> None:
+    """provider and spec proxy chain[0]."""
+    primary = _faux("primary", "hello")
+    fallback = _faux("fallback", "world")
+    fbm = FallbackBoundModel(chain=(primary, fallback))
+
+    assert fbm.provider is primary.provider
+    assert fbm.spec is primary.spec
+
+
+class _EmptyStreamProvider(BaseProvider):
+    """Returns a stream that immediately terminates with no events (StopAsyncIteration path)."""
+
+    async def stream(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        ms = MessageStream()
+
+        async def _produce() -> None:
+            raise RuntimeError("empty stream — no events emitted")
+
+        ms.attach_task(__import__("asyncio").create_task(_produce()))
+        return ms
+
+
+@pytest.mark.asyncio
+async def test_stream_empty_stream_triggers_failover() -> None:
+    """Stream that terminates before emitting any event → StopAsyncIteration path → failover."""
+    primary_prov = _EmptyStreamProvider()
+    primary_prov.provider_id = "empty"
+    primary = BoundModel(provider=primary_prov, spec=Model(id="m", provider_id="empty"))
+    fallback = _faux("fallback", "recovered")
+
+    fbm = FallbackBoundModel(chain=(primary, fallback))
+
+    stream = await fbm.stream(_messages())
+    result = await stream.result()
+
+    assert result.provider_id == "fallback"
+
+
+class _MidStreamErrorProvider(BaseProvider):
+    """Emits one start event then the producer task raises — exercises _forward's except handler."""
+
+    async def stream(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        ms = MessageStream()
+
+        async def _produce() -> None:
+            ms.push(StreamEvent(type="start"))
+            raise RuntimeError("mid-stream failure")
+
+        ms.attach_task(__import__("asyncio").create_task(_produce()))
+        return ms
+
+
+@pytest.mark.asyncio
+async def test_stream_mid_stream_error_is_forwarded() -> None:
+    """Error after the first non-error event is forwarded as-is (no retry)."""
+    prov = _MidStreamErrorProvider()
+    prov.provider_id = "midstream"
+    bound = BoundModel(provider=prov, spec=Model(id="m", provider_id="midstream"))
+    fbm = FallbackBoundModel(chain=(bound,))
+
+    stream = await fbm.stream(_messages())
+    events = [ev.type async for ev in stream]
+    result = await stream.result()
+
+    assert "start" in events
+    assert "error" in events
+    assert result.stop_reason == "error"
+
+
+@pytest.mark.asyncio
+async def test_generate_non_trigger_error_reraises() -> None:
+    """generate() — ProviderBadRequest (not in trigger_errors) re-raised immediately."""
+    bad_req = ProviderBadRequest("400", provider="primary", model="model-1")
+    primary = _raising(bad_req)
+    fallback = _faux("fallback", "ok")
+
+    fbm = FallbackBoundModel(chain=(primary, fallback))
+
+    with pytest.raises(ProviderBadRequest):
+        await fbm.generate(_messages())
+
+
+@pytest.mark.asyncio
+async def test_generate_all_exhausted_raises_provider_unavailable() -> None:
+    """generate() — all models fail → raises ProviderUnavailable."""
+    err = RateLimited("429", provider="p", model="m")
+    fbm = FallbackBoundModel(chain=(_raising(err, "m1"), _raising(err, "m2")))
+
+    with pytest.raises(ProviderUnavailable, match="all providers exhausted"):
+        await fbm.generate(_messages())
