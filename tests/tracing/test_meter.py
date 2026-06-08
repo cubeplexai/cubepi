@@ -235,8 +235,8 @@ class TestConcurrentAgents:
         # Walk the agents' provider listener registries directly so
         # we control the ordering. Each agent has its own listener
         # callable bound to its own _MeterState.
-        prov_a = agent_a._provider
-        prov_b = agent_b._provider
+        prov_a = agent_a._model.provider
+        prov_b = agent_b._model.provider
         req_a = next(iter(prov_a._request_listeners))
         req_b = next(iter(prov_b._request_listeners))
         resp_a = next(iter(prov_a._response_listeners))

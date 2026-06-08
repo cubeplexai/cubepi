@@ -236,10 +236,15 @@ class Recorder:
 
         self._agent = agent
         unsub_agent = agent.subscribe(self._on_agent_event)
-        # ``Agent`` stores the provider as a private attribute; accept
-        # either the (private) ``_provider`` or a public ``provider``
+        # ``Agent`` holds the bound model on ``_model``; the provider is
+        # reached via ``_model.provider``. Fall back to a public ``provider``
         # alias should one be added later.
-        provider = getattr(agent, "_provider", None) or getattr(agent, "provider", None)
+        agent_model = getattr(agent, "_model", None)
+        provider = (
+            agent_model.provider
+            if agent_model is not None
+            else getattr(agent, "provider", None)
+        )
         provider_detachers: list[Callable[[], None]] = []
 
         def _subscribe(p: Any) -> None:
@@ -289,12 +294,12 @@ class Recorder:
                     extra = list(mw.extra_llm_calls())
                 except Exception:
                     extra = []
-                for bound in extra:
-                    spec = bound.spec
+                for model in extra:
+                    spec = model.spec
                     key = (spec.provider_id, spec.id)
                     if key != agent_key:
                         self._extra_call_models.add(key)
-                    provider = bound.provider
+                    provider = model.provider
                     if id(provider) in seen:
                         continue
                     seen.add(id(provider))
