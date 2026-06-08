@@ -719,3 +719,49 @@ async def test_corrupt_failure_counter_treated_as_zero() -> None:
     # Compaction proceeded as if all counters were 0.
     assert "compaction" in ctx.extra
     assert ctx.extra["compaction_failures"] == 0  # success path
+
+
+async def test_state_invalidation_clears_guard_counters() -> None:
+    """When the persisted summary is invalidated (history replaced), the
+    breaker / anti-thrash counters must also reset — otherwise a fresh
+    conversation would skip the LLM on its first compaction because the
+    previous conversation hit MAX_FAILURES."""
+    provider = _FakeSummaryProvider(reply="summary")
+    middleware = _make_middleware(provider, max_tokens_before=1)
+    # New messages — refs in ctx.extra won't match, so state is invalidated.
+    messages: list[Message] = [
+        _user("brand new 1"),
+        _assistant("reply 1"),
+        _user("brand new 2"),
+        _assistant("reply 2"),
+        _user("brand new 3"),
+        _assistant("reply 3"),
+    ]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=messages,
+        extra={
+            "compaction": CompactionState(
+                summary="stale from previous conversation",
+                summarized_message_refs=["sha256:does-not-match"],
+            ).model_dump(),
+            "compaction_until_msg_index": 1,
+            "compaction_failures": 3,  # stale breaker — would gate LLM
+            "compaction_low_savings_count": 2,  # stale guard — would skip
+            "compaction_fallback_runs": 99,
+        },
+    )
+
+    await middleware.transform_context(messages, ctx=ctx)
+
+    # The LLM was called (breaker counter cleared); fresh state written.
+    assert len(provider.calls) == 1
+    assert ctx.extra["compaction_failures"] == 0
+    # The new summary is real, not a fallback.
+    state = CompactionState.model_validate(ctx.extra["compaction"])
+    assert state.is_fallback is False
+    # Stale guard counters were cleared BEFORE the turn; the new turn may
+    # legitimately set them to small values. The point is that the STALE
+    # values (2 and 99) did not carry through.
+    assert ctx.extra.get("compaction_low_savings_count", 0) < 2
+    assert ctx.extra.get("compaction_fallback_runs", 0) < 99

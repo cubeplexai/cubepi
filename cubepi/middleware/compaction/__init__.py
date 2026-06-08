@@ -68,8 +68,20 @@ def _load_state(value: Any) -> CompactionState | None:
 
 
 def _clear_state(ctx: AgentContext) -> None:
+    """Drop every piece of compaction bookkeeping in ``ctx.extra``.
+
+    Called when the persisted summary / boundary is no longer trustworthy
+    (corrupt payload, boundary beyond history, refs mismatch from a replaced
+    history). The breaker / anti-thrash counters are tied to a specific
+    conversation; carrying them over to a fresh history would, for example,
+    skip the LLM on the first turn of a brand-new conversation because the
+    *previous* one had hit ``compaction_failures = 3``.
+    """
     ctx.extra.pop("compaction", None)
     ctx.extra.pop("compaction_until_msg_index", None)
+    ctx.extra.pop("compaction_failures", None)
+    ctx.extra.pop("compaction_low_savings_count", None)
+    ctx.extra.pop("compaction_fallback_runs", None)
 
 
 def _load_int(value: Any, default: int) -> int:
