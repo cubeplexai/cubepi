@@ -369,6 +369,7 @@ def _make_user_message(text: str) -> UserMessage:
 
 def _make_write_todos_tool(
     extra_ref: Callable[[], dict[str, Any]],
+    description: str = WRITE_TODOS_TOOL_DESCRIPTION,
 ) -> AgentTool[WriteTodosInput]:
     """Build the ``write_todos`` AgentTool that stores results in extra.
 
@@ -438,7 +439,7 @@ def _make_write_todos_tool(
 
     return AgentTool(
         name="write_todos",
-        description=WRITE_TODOS_TOOL_DESCRIPTION,
+        description=description,
         parameters=WriteTodosInput,
         execute=_execute,
     )
@@ -495,7 +496,7 @@ class TodoListMiddleware(Middleware):
         self._extra_ref = extra_ref
         self._system_prompt = system_prompt
         self._tool_description = tool_description
-        self.tools = [_make_write_todos_tool(self._extra_ref)]
+        self.tools = [_make_write_todos_tool(self._extra_ref, self._tool_description)]
 
     # ------------------------------------------------------------------
     # transform_system_prompt
@@ -675,7 +676,10 @@ class TodoListMiddleware(Middleware):
         # --- payload validation (parallel calls, schema, invariants) --------
         parallel_errors = self._parallel_write_todos_error(last_assistant_msg)
         if parallel_errors is not None:
-            return TurnAction(inject_messages=cast("list[Any]", parallel_errors))
+            return TurnAction(
+                inject_messages=cast("list[Any]", parallel_errors),
+                decision="loop_to_model",
+            )
 
         validation_errors = _todo_validation_errors_local(
             last_assistant_msg,
