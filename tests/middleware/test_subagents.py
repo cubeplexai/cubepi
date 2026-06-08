@@ -566,3 +566,73 @@ async def test_subagent_strips_checkpointed_hitl_bound_tools() -> None:
     await parent.prompt("dispatch the subagent")
 
     assert parent.state.error_message is None
+
+
+async def test_subagent_strips_middleware_exposing_checkpointed_hitl_tools() -> None:
+    """A custom middleware that itself has no ``.hitl`` but exposes a
+    checkpointed-HITL tool via its ``.tools`` attribute must NOT reach the
+    child agent — ``Agent.__init__`` would otherwise append that tool to
+    ``state.tools`` and the child's ``prompt()`` would fail with the same
+    ``checkpointed HITL elements bound to run_ids`` error this fix is meant
+    to avoid (codex P2 on PR #159).
+    """
+    from cubepi.hitl.binding import HitlBinding
+    from cubepi.middleware.base import Middleware
+
+    class _NoOpParams(BaseModel):
+        pass
+
+    async def _noop_exec(
+        call_id: str, args: _NoOpParams, *, signal=None, on_update=None
+    ) -> AgentToolResult:
+        del call_id, args, signal, on_update
+        return AgentToolResult(content=[TextContent(text="noop")])
+
+    parent_bound_tool = AgentTool(
+        name="parent_hitl_tool",
+        description="HITL tool inside a custom middleware",
+        parameters=_NoOpParams,
+        execute=_noop_exec,
+        hitl=HitlBinding(checkpointed=True, run_id="parent-run-zzz"),
+    )
+
+    class _HitlPackagingMiddleware(Middleware):
+        def __init__(self) -> None:
+            self.tools = [parent_bound_tool]
+
+    provider = FauxProvider(provider_id="faux")
+    provider.set_responses([faux_assistant_message("done")])
+
+    middleware = _make_middleware(
+        provider=provider,
+        inherited_middleware=[_HitlPackagingMiddleware()],
+    )
+
+    parent_provider = FauxProvider(provider_id="faux")
+    parent_provider.set_responses(
+        [
+            faux_assistant_message(
+                [
+                    faux_tool_call(
+                        "subagent",
+                        {"name": "n", "role": "r", "task": "t", "prompt": "p"},
+                    )
+                ],
+                stop_reason="tool_use",
+            ),
+            faux_assistant_message("done"),
+        ]
+    )
+    parent = Agent(
+        model=parent_provider.model("faux-1"),
+        system_prompt="parent",
+        tools=middleware.tools,
+        middleware=[middleware],
+    )
+
+    # Without the .tools drill-in, the wrapping middleware passes the strip
+    # and ``Agent.__init__`` lifts ``parent_hitl_tool`` into the child's
+    # ``state.tools`` — child ``prompt()`` then raises.
+    await parent.prompt("dispatch the subagent")
+
+    assert parent.state.error_message is None
