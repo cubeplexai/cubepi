@@ -559,14 +559,36 @@ class TodoListMiddleware(Middleware):
         *,
         signal: asyncio.Event | None = None,
     ) -> AfterToolCallResult | None:
-        """No-op for all tools except write_todos.
+        """Override duplicate write_todos results when parallel calls are detected.
 
-        The write_todos tool's execute() already writes to extra["todos"].
-        This hook is a hook attachment point but does no additional work —
-        the tool result is already set.
+        For the normal (single call) case this is a no-op; write_todos.execute()
+        already wrote the validated list to extra["todos"].
+
+        For the parallel case, after_model_response snapshotted the pre-turn todos
+        in extra["_todos_snapshot"].  Each duplicate write_todos call's result is
+        replaced with an error here, and extra["todos"] is restored to the snapshot
+        so the turn leaves the checklist unchanged.
         """
         del signal  # not used
-        return None
+        if ctx.tool_call.name != "write_todos":
+            return None
+        extra = self._extra_ref()
+        parallel_calls = _submitted_write_todos_calls(ctx.assistant_message)
+        if len(parallel_calls) <= 1:
+            return None
+        # Restore pre-turn state and mark every parallel write as an error.
+        extra["todos"] = extra.pop("_todos_snapshot", extra.get("todos"))
+        return AfterToolCallResult(
+            content=[
+                TextContent(
+                    text=(
+                        "Error: write_todos was called multiple times in parallel. "
+                        "Call it only once per response."
+                    )
+                )
+            ],
+            is_error=True,
+        )
 
     # ------------------------------------------------------------------
     # after_model_response — full guard state machine
@@ -678,9 +700,11 @@ class TodoListMiddleware(Middleware):
         # --- payload validation (parallel calls, schema, invariants) --------
         parallel_errors = self._parallel_write_todos_error(last_assistant_msg)
         if parallel_errors is not None:
-            # decision="natural" so cubepi defers inject_messages until after the
-            # duplicate calls' ToolResultMessages are appended, keeping Anthropic-style
-            # tool_use/tool_result ordering intact.
+            # Snapshot todos BEFORE any tool executes this turn so after_tool_call
+            # can restore the list when overriding duplicate write_todos results.
+            # decision="natural": cubepi defers inject_messages until after
+            # ToolResultMessages, keeping Anthropic-style ordering intact.
+            extra["_todos_snapshot"] = extra.get("todos")
             return TurnAction(inject_messages=cast("list[Any]", parallel_errors))
 
         validation_errors = _todo_validation_errors_local(
