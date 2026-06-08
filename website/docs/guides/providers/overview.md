@@ -34,6 +34,32 @@ arguments:
 - `thinking_level_map: dict[str, str | None] | None` — optional map for level
   overrides and unsupported levels (`None` disables a level).
 
+### Calling a bound model directly
+
+`provider.model(...)` returns a `BoundModel` that you can invoke without
+fishing the provider back out:
+
+```python
+from cubepi.providers.base import TextContent, UserMessage
+
+bound = provider.model("claude-sonnet-4-6")
+
+# Single-shot call.
+reply = await bound.generate(
+    messages=[UserMessage(content=[TextContent(text="hi")])],
+    system_prompt="Be brief.",
+)
+
+# Streaming.
+stream = await bound.stream(messages=[...])
+async for event in stream:
+    ...
+```
+
+Both methods forward to the bound provider with `model=bound.spec` — useful
+for utilities (summarizers, classifiers) where you already hold a
+`BoundModel` and want to skip the agent loop.
+
 ## `CapabilityDescriptor` is what to use when behavior differs by backend
 
 `CapabilityDescriptor` is passed to a provider to express wire differences for
