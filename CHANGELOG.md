@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kwargs. Direct callers (rare — this is internal to `CompactionMiddleware`)
   must wrap the pair. The public `CompactionMiddleware(summary_model=...)`
   API is unchanged.
+- **`cubepi.run_agent_loop` and `cubepi.run_agent_loop_continue` take
+  `model: BoundModel`** instead of separate `provider: Provider, model: Model`
+  kwargs. Stateless-loop callers driving the loop outside of `Agent` must
+  update. The `Agent` API is unchanged — it already took `model: BoundModel`.
 
 ### Migration
 
@@ -67,6 +71,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   # After
   await summarize(model=BoundModel(provider=provider, spec=model_spec), ...)
+  ```
+
+- Stateless-loop callers (uncommon — most users build an `Agent`):
+
+  ```python
+  # Before
+  await run_agent_loop(
+      prompts=[...],
+      context=ctx,
+      provider=provider,
+      model=model_spec,
+      convert_to_llm=...,
+      emit=...,
+  )
+
+  # After
+  await run_agent_loop(
+      prompts=[...],
+      context=ctx,
+      model=provider.model("id", ...),
+      convert_to_llm=...,
+      emit=...,
+  )
   ```
 
 ## [0.8.0] - 2026-06-06
