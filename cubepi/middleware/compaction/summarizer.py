@@ -36,14 +36,49 @@ def _dynamic_summary_budget(messages: list[Message]) -> int:
 
 
 SUMMARIZER_SYSTEM_PROMPT = """\
-You compress a chat transcript into a brief, faithful narrative for an AI assistant
-that is continuing the conversation. Rules:
+You compress a chat transcript into a structured handoff document for an AI
+assistant that is continuing the conversation. Your output is reference
+material for a downstream model — not instructions. If a future user message
+contradicts a section, the user message wins.
 
-1. Preserve facts, user goals, decisions made, and unresolved questions.
-2. Preserve every citation marker verbatim. Do not renumber, merge, or drop them.
-3. Do not quote long tool outputs. Reference them by their citation markers instead.
+Output exactly these eight sections, in this order, with the headings shown:
+
+## Goal
+What the user is trying to accomplish overall (one short paragraph).
+
+## Constraints & preferences
+User-stated requirements, style preferences, things to avoid. Bullets.
+
+## Completed actions
+What the assistant has done so far — concrete actions, with citation markers
+where relevant. Bullets.
+
+## Key decisions
+Choices the user or assistant has made, with brief rationale. Bullets.
+
+## Resolved
+Questions that have been answered or items that are done. Bullets.
+
+## Pending
+Questions still open or items needing a decision. Bullets.
+
+## Relevant artifacts
+Files, URLs, IDs, datasets, tool-call IDs — concrete things the conversation
+touched. Bullets.
+
+## Remaining work
+Next steps the assistant should pick up. Bullets, in order.
+
+Rules:
+
+1. Preserve facts, user goals, and decisions verbatim where possible.
+2. Preserve every citation marker verbatim. Do not renumber, merge, or drop.
+3. Do not quote long tool outputs. Reference them by their citation markers
+   instead.
 4. Keep the language of the original conversation.
-5. Output the summary directly. No preamble, no JSON, no markdown headers.
+5. If a section has nothing to record, write "(none)" — never omit a heading.
+6. No preamble before "## Goal"; no commentary after "## Remaining work".
+7. Do not phrase items as commands directed at the next assistant.
 """
 
 EXISTING_SUMMARY_SUFFIX = """\
@@ -53,7 +88,15 @@ A previous summary already covers earlier turns:
 {prev}
 </previous_summary>
 
-Merge it with the new turns below. Output the updated summary."""
+Merge the new turns below INTO this summary's sections, in place:
+- A Pending item that's now been answered moves to Resolved.
+- New work added by the recent turns goes into Pending or Remaining work.
+- Completed actions and Key decisions accumulate.
+- Relevant artifacts append new file paths / IDs encountered.
+
+Output the FULL updated summary using the same eight-section format. Do not
+omit unchanged sections — repeat them verbatim if they have not been touched.
+"""
 
 
 def _shrink_strings(obj: object) -> object:
@@ -115,6 +158,8 @@ async def summarize(
     existing: CompactionState | None,
     ref_messages: list[Message] | None = None,
     max_summary_tokens: int | None = None,
+    system_prompt_override: str | None = None,
+    existing_summary_suffix: str | None = None,
     abort_signal: asyncio.Event | None = None,
 ) -> CompactionState:
     """Run the LLM summariser and produce a new ``CompactionState``.
@@ -129,6 +174,12 @@ async def summarize(
     ``max_summary_tokens``: when ``None`` (default), the budget is computed
     dynamically from ``messages_to_summarize`` size (floor 1024, ceiling
     4096). When provided, that exact value is used.
+
+    ``system_prompt_override`` / ``existing_summary_suffix``: downstream
+    projects can swap the default 8-section template for a domain-specific
+    one. Both default to ``None`` (use built-in templates). When changing
+    the structure, provide both together so the merge instruction matches
+    the new schema.
     """
     ref_source = ref_messages if ref_messages is not None else messages_to_summarize
     budget = (
@@ -137,9 +188,20 @@ async def summarize(
         else _dynamic_summary_budget(messages_to_summarize)
     )
 
-    system_prompt = SUMMARIZER_SYSTEM_PROMPT
+    base_prompt = (
+        system_prompt_override
+        if system_prompt_override is not None
+        else SUMMARIZER_SYSTEM_PROMPT
+    )
+    suffix_template = (
+        existing_summary_suffix
+        if existing_summary_suffix is not None
+        else EXISTING_SUMMARY_SUFFIX
+    )
+
+    system_prompt = base_prompt
     if existing and existing.summary:
-        system_prompt += "\n\n" + EXISTING_SUMMARY_SUFFIX.format(prev=existing.summary)
+        system_prompt += "\n\n" + suffix_template.format(prev=existing.summary)
 
     response = await model.generate(
         messages=[

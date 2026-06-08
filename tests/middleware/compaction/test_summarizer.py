@@ -382,3 +382,63 @@ def test_fallback_summary_uses_ref_messages_for_refs() -> None:
     original = [UserMessage(content=[TextContent(text="full original")])]
     state = build_fallback_summary(transcript, ref_messages=original, existing=None)
     assert state.summarized_message_refs == message_refs(original)
+
+
+# --- Task 7: structured prompt + override hooks ---
+
+
+def test_summary_has_eight_sections() -> None:
+    from cubepi.middleware.compaction.summarizer import SUMMARIZER_SYSTEM_PROMPT
+
+    for section in (
+        "Goal",
+        "Constraints & preferences",
+        "Completed actions",
+        "Key decisions",
+        "Resolved",
+        "Pending",
+        "Relevant artifacts",
+        "Remaining work",
+    ):
+        assert f"## {section}" in SUMMARIZER_SYSTEM_PROMPT
+
+
+def test_system_prompt_marks_output_as_non_instruction() -> None:
+    from cubepi.middleware.compaction.summarizer import SUMMARIZER_SYSTEM_PROMPT
+
+    # Collapse whitespace so line breaks don't fail the substring assertions.
+    text = " ".join(SUMMARIZER_SYSTEM_PROMPT.lower().split())
+    assert "reference material" in text
+    assert "user message wins" in text
+
+
+async def test_summarize_uses_system_prompt_override() -> None:
+    provider = _FakeProvider("CUSTOM")
+    await summarize(
+        model=BoundModel(
+            provider=provider,
+            spec=Model(id="m", provider_id="faux"),
+        ),
+        messages_to_summarize=[UserMessage(content=[TextContent(text="hi")])],
+        existing=None,
+        system_prompt_override="CUSTOM PROMPT BODY",
+    )
+    assert provider.calls[0]["system_prompt"] == "CUSTOM PROMPT BODY"
+
+
+async def test_summarize_uses_existing_summary_suffix_override() -> None:
+    provider = _FakeProvider("merged")
+    existing = CompactionState(summary="prior")
+    await summarize(
+        model=BoundModel(
+            provider=provider,
+            spec=Model(id="m", provider_id="faux"),
+        ),
+        messages_to_summarize=[UserMessage(content=[TextContent(text="hi")])],
+        existing=existing,
+        system_prompt_override="BASE",
+        existing_summary_suffix="MERGE THIS: {prev}",
+    )
+    captured = provider.calls[0]["system_prompt"]
+    assert captured.startswith("BASE")
+    assert "MERGE THIS: prior" in captured
