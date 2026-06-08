@@ -15,8 +15,6 @@ from cubepi.middleware.compaction.tokens import approx_tokens
 from cubepi.providers.base import (
     BoundModel,
     Message,
-    Model,
-    Provider,
     TextContent,
     UserMessage,
 )
@@ -81,8 +79,7 @@ class CompactionMiddleware(Middleware):
         max_summary_tokens: int = 1024,
         min_compact_messages: int = 4,
     ) -> None:
-        self._summary_provider = summary_model.provider
-        self._summary_model = summary_model.spec
+        self._summary_model = summary_model
         self._max_tokens_before = max_tokens_before_compact
         self._keep_recent = keep_recent_messages
         self._max_summary_tokens = max_summary_tokens
@@ -124,7 +121,6 @@ class CompactionMiddleware(Middleware):
 
         try:
             new_state = await summarize(
-                provider=self._summary_provider,
                 model=self._summary_model,
                 messages_to_summarize=messages[boundary:new_boundary],
                 existing=state,
@@ -139,14 +135,14 @@ class CompactionMiddleware(Middleware):
         ctx.extra["compaction_until_msg_index"] = new_boundary
         return _compressed_view(messages, new_state, new_boundary)
 
-    def extra_llm_calls(self) -> tuple[tuple[Provider, Model], ...]:
-        # Surface (provider, model) so ``cubepi.tracing.Recorder`` can both
-        # subscribe its listeners (the summarizer's chat span lands in the
-        # trace) AND identify the summary call by model — important when
-        # ``summary_provider`` is the same instance as the agent's main
-        # provider, which is the common "reuse the client, swap the model"
+    def extra_llm_calls(self) -> tuple[BoundModel, ...]:
+        # Surface the bound summary model so ``cubepi.tracing.Recorder`` can
+        # both subscribe its listeners (the summarizer's chat span lands in
+        # the trace) AND identify the summary call by spec — important when
+        # the summary model's provider is the same instance as the agent's
+        # main provider, the common "reuse the client, swap the model"
         # pattern.
-        return ((self._summary_provider, self._summary_model),)
+        return (self._summary_model,)
 
 
 __all__ = [

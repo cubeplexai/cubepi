@@ -4,9 +4,8 @@ import asyncio
 
 from cubepi.middleware.compaction.state import CompactionState, message_refs
 from cubepi.providers.base import (
+    BoundModel,
     Message,
-    Model,
-    Provider,
     StreamOptions,
     TextContent,
     ToolCall,
@@ -54,8 +53,7 @@ def _format_transcript(messages: list[Message]) -> str:
 
 async def summarize(
     *,
-    provider: Provider,
-    model: Model,
+    model: BoundModel,
     messages_to_summarize: list[Message],
     existing: CompactionState | None,
     max_summary_tokens: int = 1024,
@@ -65,8 +63,7 @@ async def summarize(
     if existing and existing.summary:
         system_prompt += "\n\n" + EXISTING_SUMMARY_SUFFIX.format(prev=existing.summary)
 
-    response = await provider.generate(
-        model=model,
+    response = await model.generate(
         messages=[
             UserMessage(
                 content=[TextContent(text=_format_transcript(messages_to_summarize))]

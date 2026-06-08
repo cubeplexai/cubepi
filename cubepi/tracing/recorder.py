@@ -289,14 +289,16 @@ class Recorder:
                     extra = list(mw.extra_llm_calls())
                 except Exception:
                     extra = []
-                for p, m in extra:
-                    key = (m.provider_id, m.id)
+                for bound in extra:
+                    spec = bound.spec
+                    key = (spec.provider_id, spec.id)
                     if key != agent_key:
                         self._extra_call_models.add(key)
-                    if id(p) in seen:
+                    provider = bound.provider
+                    if id(provider) in seen:
                         continue
-                    seen.add(id(p))
-                    _subscribe(p)
+                    seen.add(id(provider))
+                    _subscribe(provider)
         except BaseException:
             for d in provider_detachers:
                 try:

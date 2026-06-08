@@ -10,6 +10,7 @@ from cubepi.middleware.compaction.summarizer import (
 )
 from cubepi.providers.base import (
     AssistantMessage,
+    BoundModel,
     Message,
     Model,
     StreamOptions,
@@ -60,8 +61,7 @@ async def test_summarize_uses_provider_generate_with_common_overrides() -> None:
     signal = asyncio.Event()
 
     result = await summarize(
-        provider=provider,
-        model=model,
+        model=BoundModel(provider=provider, spec=model),
         messages_to_summarize=[
             UserMessage(content=[TextContent(text="hello")]),
             AssistantMessage(content=[TextContent(text="hi")]),
@@ -85,8 +85,10 @@ async def test_summarize_merges_existing_state() -> None:
     existing = CompactionState(summary="Older context.")
 
     result = await summarize(
-        provider=provider,
-        model=Model(id="summary-model", provider_id="faux"),
+        model=BoundModel(
+            provider=provider,
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
         messages_to_summarize=[UserMessage(content=[TextContent(text="new")])],
         existing=existing,
     )
@@ -120,8 +122,10 @@ async def test_summarize_raises_on_provider_error_message() -> None:
 
     try:
         await summarize(
-            provider=_ErrorProvider(""),
-            model=Model(id="summary-model", provider_id="faux"),
+            model=BoundModel(
+                provider=_ErrorProvider(""),
+                spec=Model(id="summary-model", provider_id="faux"),
+            ),
             messages_to_summarize=[UserMessage(content=[TextContent(text="new")])],
             existing=None,
         )

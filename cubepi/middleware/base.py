@@ -13,7 +13,7 @@ from cubepi.agent.types import (
     BeforeToolCallResult,
 )
 from cubepi.hitl.binding import HitlBinding
-from cubepi.providers.base import AssistantMessage, Message, Model, Provider
+from cubepi.providers.base import AssistantMessage, BoundModel, Message
 from cubepi.types import JsonObject, StructuredObject
 
 
@@ -93,17 +93,17 @@ class Middleware:
     ) -> list[Message] | None:
         raise NotImplementedError
 
-    def extra_llm_calls(self) -> Iterable[tuple[Provider, Model]]:
+    def extra_llm_calls(self) -> Iterable[BoundModel]:
         """Declare LLM calls this middleware drives outside the agent's main
-        provider/model.
+        bound model.
 
-        Each pair is ``(provider, model)``. ``cubepi.tracing.Recorder`` uses
-        these to:
+        Each entry is a ``BoundModel`` — the same handle the user gets from
+        ``provider.model(...)``. ``cubepi.tracing.Recorder`` uses these to:
 
         * Subscribe listeners on any provider the recorder isn't already
           watching, so the resulting calls show up in the trace tree
           alongside the agent's own chat spans.
-        * Identify middleware-owned calls by ``(model.provider, model.id)``
+        * Identify middleware-owned calls by ``(spec.provider_id, spec.id)``
           so they don't overwrite the root ``invoke_agent`` span's
           attribution (provider name, system prompt hash, tool list). This
           model-based gate is what handles the common "reuse one provider
