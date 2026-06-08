@@ -422,8 +422,6 @@ def _make_write_todos_tool(
                 is_error=True,
             )
 
-        # Persist validated todos onto the per-agent ``extra`` dict so the
-        # checkpointer's ``save_extra`` call at agent_end picks them up.
         extra_ref()["todos"] = validated_todos
 
         # Build the JSON content identical to _build_todo_tool_message
@@ -493,6 +491,10 @@ class TodoListMiddleware(Middleware):
         system_prompt: str = WRITE_TODOS_SYSTEM_PROMPT,
         tool_description: str = WRITE_TODOS_TOOL_DESCRIPTION,
     ) -> None:
+        # extra_ref must return the agent's persisted extra dict (i.e. the same
+        # object as AgentContext.extra) so that todo state survives session
+        # checkpointing.  AgentTool.execute() does not receive AgentContext, so
+        # extra_ref is the only way for the tool to write into that dict.
         self._extra_ref = extra_ref
         self._system_prompt = system_prompt
         self._tool_description = tool_description
