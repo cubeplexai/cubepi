@@ -127,24 +127,37 @@ finder walks backward from the end of the message list, accumulating
 `keep_tail_tokens`. The resulting message index becomes the candidate tail
 start.
 
-`safe_boundary()` gains a `keep_tail_tokens: int` parameter. The existing
-`keep_recent: int` parameter is kept temporarily for backwards-compatibility
-but is deprecated.
+**API change** (breaking — no shim, per CLAUDE.md `feedback_breaking_no_shim`):
 
-`CompactionMiddleware.__init__` replaces `keep_recent_messages` with
-`keep_tail_tokens` (default `8_000`).
+- `tail_start_by_tokens(messages, budget) -> int` is a new **public** helper
+  exported from `boundary.py` (no leading underscore).
+- `safe_boundary()` signature changes from `keep_recent` to `tail_start: int`
+  (an integer index, not a token budget). The function no longer computes
+  the tail itself — the caller must compute it via `tail_start_by_tokens()`
+  first and pass the result. The previous `keep_recent` parameter is removed.
+- `CompactionMiddleware.__init__` replaces `keep_recent_messages` with
+  `keep_tail_tokens: int = 8_000`.
 
-**Tail start is computed once and shared.** `transform_context` calls
-`_tail_start_by_tokens(messages, keep_tail_tokens)` once to get `tail_start`
-(an integer index). That same index is passed to both the pruner and to
-`safe_boundary` as the initial candidate. This guarantees both see the same
-protection boundary — no token-to-count conversion.
+**Why this shape:** `transform_context` calls `tail_start_by_tokens(messages,
+keep_tail_tokens)` exactly once per turn to get `tail_start`. That same
+integer is passed to both the pruner (`prune_tool_results(messages,
+tail_start=tail_start)`) and to `safe_boundary(messages, tail_start=tail_start,
+…)`. There is no second computation, no token-to-count conversion, and no
+way for pruner and boundary to disagree.
 
-**Overflow behaviour of `_tail_start_by_tokens`:** if the last message alone
-exceeds `budget`, return `len(messages) - 1` so the tail always contains at
-least one message. If *all* messages together are under budget, return `0`
-(entire history in tail, nothing to compact). The returned index is always in
-`[0, len(messages) - 1]` for non-empty lists; for empty input return `0`.
+**`tail_start_by_tokens(messages, budget)` contract:**
+
+- For empty input → return `0`.
+- For non-empty input → return an index in `[0, len(messages) - 1]`.
+- Walk backward, accumulating `approx_tokens([msg])`. Return the **first**
+  index whose inclusion would push the accumulated total over `budget`,
+  **provided** at least one message is already in the tail. If the last
+  message alone exceeds `budget`, it is still included (tail always has
+  ≥ 1 message). If all messages fit, return `0`.
+
+**Pruner signature change:** `prune_tool_results(messages, *, tail_start: int)`
+takes an index, not a count. Messages at indices `>= tail_start` are left
+intact; only `messages[:tail_start]` are eligible for pruning.
 
 ### 2.4 Dynamic `max_summary_tokens`
 
@@ -154,13 +167,18 @@ least one message. If *all* messages together are under budget, return `0`
 
 ```python
 content_tokens = approx_tokens(messages_to_summarize)
-budget = max(512, min(int(content_tokens * _SUMMARY_RATIO), _SUMMARY_MAX))
-# _SUMMARY_RATIO = 0.15, _SUMMARY_MAX = 4096
+budget = max(_SUMMARY_MIN, min(int(content_tokens * _SUMMARY_RATIO), _SUMMARY_MAX))
+# _SUMMARY_MIN = 1024  (matches the previous fixed default — never regress
+#                       summary quality below today's baseline)
+# _SUMMARY_RATIO = 0.15
+# _SUMMARY_MAX = 4096
 ```
 
 The `max_summary_tokens` constructor parameter becomes an **override** (when
 provided, use it verbatim; when `None`, use the dynamic formula). Default
-changes to `None`.
+changes to `None`. The floor `_SUMMARY_MIN = 1024` deliberately matches the
+prior fixed default — no conversation gets a smaller budget than it did under
+the old code, only larger ones get more headroom.
 
 ### 2.5 Circuit breaker
 
@@ -249,15 +267,19 @@ callers to distinguish fallback from real summaries.
 
 | File | Change |
 |------|--------|
-| `cubepi/middleware/compaction/pruner.py` | **New.** `prune_tool_results(messages, keep_tail) -> list[Message]`. |
-| `cubepi/middleware/compaction/summarizer.py` | `_format_message_for_summary`: add per-field-truncated arguments. Dynamic token budget. |
-| `cubepi/middleware/compaction/boundary.py` | `safe_boundary`: add `keep_tail_tokens` param, deprecate `keep_recent`. |
+| `cubepi/middleware/compaction/pruner.py` | **New.** `prune_tool_results(messages, *, tail_start) -> list[Message]`. |
+| `cubepi/middleware/compaction/summarizer.py` | `_format_message_for_summary`: add per-field-truncated arguments. Dynamic token budget. `summarize()` and `build_fallback_summary()` accept `ref_messages`. |
+| `cubepi/middleware/compaction/boundary.py` | Add public `tail_start_by_tokens()`. `safe_boundary()` takes `tail_start: int` directly (replaces `keep_recent`). |
 | `cubepi/middleware/compaction/state.py` | Add `is_fallback: bool = False` to `CompactionState`. |
-| `cubepi/middleware/compaction/__init__.py` | Orchestrate pre-pruning, circuit breaker, anti-thrashing, fallback. Replace `keep_recent_messages` with `keep_tail_tokens`. |
+| `cubepi/middleware/compaction/__init__.py` | Orchestrate pre-pruning, circuit breaker, anti-thrashing, fallback. Replace `keep_recent_messages` with `keep_tail_tokens`. Preserve existing `extra_llm_calls()` method. |
 | `tests/middleware/compaction/test_pruner.py` | **New.** Unit tests for pre-pruning pass. |
 | `tests/middleware/compaction/test_summarizer.py` | Add tests for argument formatting, dynamic budget. |
 | `tests/middleware/compaction/test_boundary.py` | Add tests for token-based boundary. |
-| `tests/middleware/test_compaction.py` | Add tests for circuit breaker, anti-thrashing, fallback. |
+| `tests/middleware/test_compaction.py` | Add tests for circuit breaker, anti-thrashing, fallback. **Update** `test_summarizer_failure_returns_current_view_without_writing_state` to reflect new fallback-writes-state behaviour. |
+| `tests/tracing/test_recorder.py` | **Update** call sites at lines 517 and 593: replace `keep_recent_messages=1` with `keep_tail_tokens=…`. |
+| `website/docs/guides/middleware/compaction.md` | **Update** code samples that reference `keep_recent_messages` (lines 32, 62, 68). Document the new `keep_tail_tokens` parameter and dynamic `max_summary_tokens`. |
+| `website/docs/guides/middleware/examples.md` | **Update** code sample at line 192. |
+| `website/docs/api/cubepi-middleware.mdx` | **Regenerate** API reference at line 167 (auto-generated by `pnpm apiref` — re-run after the code change lands). |
 
 ---
 
@@ -302,15 +324,17 @@ def _result(call_id, text, tool_name="tool"):
         content=[TextContent(text=text)],
     )
 
-def test_short_result_kept_intact():
+def test_large_result_outside_tail_replaced_with_one_liner():
+    big = "x" * 5000
     msgs = [
-        _user(), _assistant_with_call("bash", "c1"), _result("c1", "ok", "bash"),
+        _user(), _assistant_with_call("bash", "c1"), _result("c1", big, "bash"),
         _user(), _assistant_with_call("bash", "c2"), _result("c2", "ok2", "bash"),
     ]
-    pruned = prune_tool_results(msgs, keep_tail=2)
-    # last 2 messages untouched; first result replaced
-    assert "bash" in pruned[2].content[0].text  # one-liner
-    assert pruned[5].content[0].text == "ok2"   # tail kept
+    # tail_start=4 → indices 4,5 are tail; index 2 (the big result) is prunable
+    pruned = prune_tool_results(msgs, tail_start=4)
+    assert "bash" in pruned[2].content[0].text       # replaced with one-liner
+    assert "chars" in pruned[2].content[0].text
+    assert pruned[5].content[0].text == "ok2"        # tail kept
 
 def test_large_result_replaced_with_one_liner():
     big = "x" * 5000
@@ -318,19 +342,19 @@ def test_large_result_replaced_with_one_liner():
         _user(), _assistant_with_call("read_file", "c1"), _result("c1", big, "read_file"),
         _user(),
     ]
-    pruned = prune_tool_results(msgs, keep_tail=1)
+    pruned = prune_tool_results(msgs, tail_start=3)
     result_text = pruned[2].content[0].text
     assert len(result_text) < 200
     assert "read_file" in result_text
-    assert "5000" in result_text or "5 000" in result_text or "chars" in result_text
+    assert "5000" in result_text or "chars" in result_text
 
 def test_tail_messages_kept_intact():
     big = "x" * 5000
     msgs = [
         _user(), _assistant_with_call("bash", "c1"), _result("c1", big, "bash"),
     ]
-    pruned = prune_tool_results(msgs, keep_tail=3)
-    # all 3 in tail — none pruned
+    # tail_start=0 → every message is tail → nothing pruned
+    pruned = prune_tool_results(msgs, tail_start=0)
     assert pruned[2].content[0].text == big
 
 def test_result_already_short_kept_intact():
@@ -338,12 +362,13 @@ def test_result_already_short_kept_intact():
         _user(), _assistant_with_call("bash", "c1"), _result("c1", "exit 0", "bash"),
         _user(),
     ]
-    pruned = prune_tool_results(msgs, keep_tail=1)
+    pruned = prune_tool_results(msgs, tail_start=3)
+    # "exit 0" is 6 chars ≤ 120, so left alone even though it's outside the tail
     assert pruned[2].content[0].text == "exit 0"
 
 def test_non_tool_result_messages_untouched():
     msgs = [_user("hello"), _user("world")]
-    assert prune_tool_results(msgs, keep_tail=0) == msgs
+    assert prune_tool_results(msgs, tail_start=len(msgs)) == msgs
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -365,20 +390,19 @@ from cubepi.providers.base import Message, TextContent, ToolResultMessage
 _PRUNE_KEEP_CHARS = 120
 
 
-def prune_tool_results(messages: list[Message], *, keep_tail: int) -> list[Message]:
+def prune_tool_results(messages: list[Message], *, tail_start: int) -> list[Message]:
     """Replace old ToolResultMessage content with a compact one-liner.
 
-    Messages within the last ``keep_tail`` positions are left intact.
-    Results whose text is already <= _PRUNE_KEEP_CHARS chars are also kept.
+    Messages at indices ``>= tail_start`` are the tail and are left intact.
+    Among ``messages[:tail_start]``, results whose text is already
+    <= _PRUNE_KEEP_CHARS chars are also left as-is.
     """
-    if keep_tail >= len(messages):
+    if tail_start <= 0:
         return list(messages)
 
-    boundary = len(messages) - keep_tail
     result: list[Message] = []
-
     for i, msg in enumerate(messages):
-        if i >= boundary or not isinstance(msg, ToolResultMessage):
+        if i >= tail_start or not isinstance(msg, ToolResultMessage):
             result.append(msg)
             continue
 
@@ -552,7 +576,10 @@ git commit -m "feat(compaction): include tool call arguments in summariser trans
 Add to `tests/middleware/compaction/test_boundary.py`:
 
 ```python
-from cubepi.middleware.compaction.boundary import safe_boundary
+from cubepi.middleware.compaction.boundary import (
+    safe_boundary,
+    tail_start_by_tokens,
+)
 from cubepi.providers.base import (
     AssistantMessage, TextContent, ToolCall, ToolResultMessage, UserMessage,
 )
@@ -560,50 +587,61 @@ from cubepi.providers.base import (
 def _big_user(chars: int) -> UserMessage:
     return UserMessage(content=[TextContent(text="x" * chars)])
 
-def test_token_based_tail_protects_by_budget():
-    # 4 messages, each ~2000 chars ≈ 1000 tokens
+# --- tail_start_by_tokens ---
+
+def test_tail_start_protects_what_fits_in_budget():
+    # 4 messages, each ~2000 chars ≈ 1000 tokens. Budget 1500 fits only the
+    # last message (adding the second-to-last would push to 2000 > 1500).
     msgs = [_big_user(2000), _big_user(2000), _big_user(2000), _big_user(2000)]
-    # tail budget = 1500 tokens → protects last 2 messages (first one that fits
-    # brings accumulated to ~1000, second brings it to ~2000 > 1500 so tail
-    # starts at index 2, meaning messages[2] and [3] are protected)
-    boundary = safe_boundary(msgs, keep_tail_tokens=1500, min_compact=1)
-    assert boundary is not None
-    assert boundary == 2  # exactly 2 messages protected
+    assert tail_start_by_tokens(msgs, 1500) == 3   # only msgs[3] in tail
 
-def test_token_based_tail_all_fit_returns_none():
-    # all 3 messages together are under budget → nothing to compact
+def test_tail_start_all_fit_returns_zero():
     msgs = [_big_user(10), _big_user(10), _big_user(10)]
-    boundary = safe_boundary(msgs, keep_tail_tokens=100_000, min_compact=1)
-    assert boundary is None
+    assert tail_start_by_tokens(msgs, 100_000) == 0
 
-def test_token_based_tail_oversized_last_message():
-    # last message alone exceeds budget — it must still be in the tail
+def test_tail_start_oversized_last_message_still_in_tail():
+    # last message alone exceeds budget — it must still be in the tail (never
+    # return len(messages), which would mean empty tail).
     msgs = [_big_user(100), _big_user(100), _big_user(100_000)]
-    boundary = safe_boundary(msgs, keep_tail_tokens=1000, min_compact=1)
-    # tail_start = len-1 = 2 (clamped), candidate walks back to find UserMessage
-    # message[2] is UserMessage → safe_boundary returns 2
-    assert boundary == 2
+    assert tail_start_by_tokens(msgs, 1000) == 2
 
-def test_token_based_exact_budget():
-    # each message exactly fits budget — tail has exactly 1 message
-    msgs = [_big_user(2000), _big_user(2000), _big_user(2000)]
-    # budget = 1000 tokens; each msg ≈ 1000 tokens; walking back: first msg
-    # brings accumulated to 1000 = budget (not strictly over), so include it.
-    # second msg would push to 2000 > 1000, so tail_start = 2
-    boundary = safe_boundary(msgs, keep_tail_tokens=1000, min_compact=1)
-    assert boundary is not None
-    assert boundary == 2
+def test_tail_start_empty_input():
+    assert tail_start_by_tokens([], 1000) == 0
+
+def test_tail_start_two_messages_fit_in_budget():
+    # 3 messages of ~500 tokens (1000 chars). Budget 1500 fits the last 2
+    # (the third-to-last would push to 1500 = budget; equal-to-budget is OK,
+    # only strictly-greater triggers the overflow stop, so it's included too).
+    msgs = [_big_user(1000), _big_user(1000), _big_user(1000)]
+    # walk: i=2 acc=0+500=500; i=1 acc=500+500=1000; i=0 acc=1000+500=1500.
+    # 1500 > 1500 is False → include msgs[0] too → returns 0 (everything fits)
+    assert tail_start_by_tokens(msgs, 1500) == 0
+
+# --- safe_boundary with explicit tail_start ---
+
+def test_safe_boundary_takes_tail_start_directly():
+    msgs = [_big_user(10) for _ in range(6)]
+    # tail_start=4 means msgs[4:] are protected; safe_boundary searches in
+    # [0..4] for the latest UserMessage. msgs[4] is a UserMessage and the
+    # suffix [4..] is self-contained.
+    assert safe_boundary(msgs, tail_start=4, min_compact=1) == 4
+
+def test_safe_boundary_min_compact_returns_none():
+    msgs = [_big_user(10) for _ in range(6)]
+    # tail_start=1 but min_compact=4 → candidate (1) < min_compact → None
+    assert safe_boundary(msgs, tail_start=1, min_compact=4) is None
 ```
 
 - [ ] **Step 2: Run to verify they fail**
 
 ```bash
-uv run pytest tests/middleware/compaction/test_boundary.py -v -k "token_based"
+uv run pytest tests/middleware/compaction/test_boundary.py -v
 ```
 
-Expected: `TypeError` — `keep_tail_tokens` not a valid parameter.
+Expected: `ImportError` for `tail_start_by_tokens`, or `TypeError` for the
+new `tail_start` parameter on `safe_boundary`.
 
-- [ ] **Step 3: Implement token-based tail in `boundary.py`**
+- [ ] **Step 3: Rewrite `boundary.py`**
 
 ```python
 # cubepi/middleware/compaction/boundary.py
@@ -615,26 +653,51 @@ from cubepi.providers.base import (
 )
 
 
+def tail_start_by_tokens(messages: list[Message], budget: int) -> int:
+    """Walk backward accumulating token estimates; return where the tail starts.
+
+    Contract:
+    - Empty input → return 0.
+    - Non-empty input → return an index in ``[0, len(messages) - 1]``.
+    - Walk backward, summing ``approx_tokens([msg])``. Return the first index
+      whose inclusion would push the accumulated total *strictly over* budget,
+      *provided* at least one message is already in the tail. (Equal-to-budget
+      is acceptable.) If the last message alone exceeds budget, it is still
+      included.
+    """
+    if not messages:
+        return 0
+    accumulated = 0
+    for i in range(len(messages) - 1, -1, -1):
+        msg_tokens = approx_tokens([messages[i]])
+        if accumulated + msg_tokens > budget and accumulated > 0:
+            return i + 1
+        accumulated += msg_tokens
+    return 0
+
+
 def safe_boundary(
     messages: list[Message],
     *,
-    keep_tail_tokens: int | None = None,
-    keep_recent: int | None = None,   # deprecated, use keep_tail_tokens
+    tail_start: int,
     min_compact: int = 1,
 ) -> int | None:
     """Return a message index that can be summarised safely.
 
-    Tail size is determined by ``keep_tail_tokens`` (preferred) or the legacy
-    ``keep_recent`` message count.  At least one of the two must be provided.
+    ``tail_start`` is the precomputed protection boundary (call
+    ``tail_start_by_tokens()`` first). Messages at ``[tail_start, end)`` are
+    considered the protected tail; ``safe_boundary`` searches the prefix for
+    the latest ``UserMessage`` where the suffix is self-contained.
     """
-    if keep_tail_tokens is not None:
-        tail_start = _tail_start_by_tokens(messages, keep_tail_tokens)
-    elif keep_recent is not None:
-        tail_start = max(0, len(messages) - keep_recent)
-    else:
-        raise ValueError("Provide keep_tail_tokens or keep_recent")
+    if tail_start <= 0 or tail_start > len(messages):
+        return None
 
     candidate = tail_start
+    # Clamp into bounds — the suffix at len(messages) is empty (vacuously
+    # self-contained); we want to start the search at the last valid index.
+    if candidate == len(messages):
+        candidate -= 1
+
     while candidate > 0:
         if not isinstance(messages[candidate], UserMessage):
             candidate -= 1
@@ -647,27 +710,6 @@ def safe_boundary(
         return candidate
 
     return None
-
-
-def _tail_start_by_tokens(messages: list[Message], budget: int) -> int:
-    """Walk backward accumulating token estimates; return where the tail starts.
-
-    Overflow rule: if a single message exceeds ``budget``, it is still included
-    in the tail (tail always contains at least one message for non-empty input).
-    Returns an index in [0, len(messages)-1] for non-empty input; 0 for empty.
-    """
-    if not messages:
-        return 0
-    accumulated = 0
-    for i in range(len(messages) - 1, -1, -1):
-        msg_tokens = approx_tokens([messages[i]])
-        if accumulated + msg_tokens > budget and accumulated > 0:
-            # adding this message would exceed budget and tail already has
-            # at least one message — stop here
-            return i + 1
-        accumulated += msg_tokens
-    # all messages fit in budget (or only one message total)
-    return 0
 
 
 def _suffix_is_self_contained(suffix: list[Message]) -> bool:
@@ -716,13 +758,13 @@ from cubepi.providers.base import UserMessage, TextContent
 
 def test_dynamic_budget_scales_with_content():
     small = [UserMessage(content=[TextContent(text="hi")])]
-    large = [UserMessage(content=[TextContent(text="x" * 20_000)])]
-    assert _dynamic_summary_budget(small) == 512           # floor
-    assert _dynamic_summary_budget(large) > 512
+    large = [UserMessage(content=[TextContent(text="x" * 40_000)])]
+    assert _dynamic_summary_budget(small) == 1024          # floor
+    assert _dynamic_summary_budget(large) > 1024
     assert _dynamic_summary_budget(large) <= 4096          # ceiling
 
 def test_dynamic_budget_floor():
-    assert _dynamic_summary_budget([]) == 512
+    assert _dynamic_summary_budget([]) == 1024
 
 def test_dynamic_budget_ceiling():
     huge = [UserMessage(content=[TextContent(text="x" * 200_000)])]
@@ -737,14 +779,14 @@ uv run pytest tests/middleware/compaction/test_summarizer.py -v -k "dynamic_budg
 
 Expected: `ImportError` — `_dynamic_summary_budget` does not exist.
 
-- [ ] **Step 3: Add `_dynamic_summary_budget` and update `summarize()`**
+- [ ] **Step 3: Add `_dynamic_summary_budget` and rewrite `summarize()`**
 
 Add to `summarizer.py`:
 
 ```python
 _SUMMARY_RATIO = 0.15
 _SUMMARY_MAX = 4096
-_SUMMARY_MIN = 512
+_SUMMARY_MIN = 1024   # matches prior fixed default — never regress below it
 
 
 def _dynamic_summary_budget(messages: list[Message]) -> int:
@@ -753,7 +795,8 @@ def _dynamic_summary_budget(messages: list[Message]) -> int:
     return max(_SUMMARY_MIN, min(int(content_tokens * _SUMMARY_RATIO), _SUMMARY_MAX))
 ```
 
-Update `summarize()` signature — add `ref_messages` and make `max_summary_tokens` optional:
+**Rewrite the entire `summarize()` function** (don't just edit the signature
+— the body changes too, to use `budget` and `ref_source`):
 
 ```python
 async def summarize(
@@ -766,11 +809,35 @@ async def summarize(
     abort_signal: asyncio.Event | None = None,
 ) -> CompactionState:
     ref_source = ref_messages if ref_messages is not None else messages_to_summarize
-    budget = max_summary_tokens if max_summary_tokens is not None else _dynamic_summary_budget(messages_to_summarize)
+    budget = (
+        max_summary_tokens
+        if max_summary_tokens is not None
+        else _dynamic_summary_budget(messages_to_summarize)
+    )
 
-    # ... existing generate() call unchanged ...
+    system_prompt = SUMMARIZER_SYSTEM_PROMPT
+    if existing and existing.summary:
+        system_prompt += "\n\n" + EXISTING_SUMMARY_SUFFIX.format(prev=existing.summary)
 
-    # Replace ref extraction to use ref_source instead of messages_to_summarize:
+    response = await model.generate(
+        messages=[
+            UserMessage(
+                content=[TextContent(text=_format_transcript(messages_to_summarize))]
+            )
+        ],
+        system_prompt=system_prompt,
+        options=StreamOptions(signal=abort_signal),
+        max_output_tokens=budget,     # ← use the dynamic/override budget
+        temperature=0.0,
+        thinking="off",
+    )
+
+    text = "".join(
+        block.text for block in response.content if isinstance(block, TextContent)
+    )
+    if response.error_message is not None:
+        raise RuntimeError(response.error_message)
+
     new_ids = [str(getattr(m, "id", "") or "") for m in ref_source]
     new_ids = [mid for mid in new_ids if mid]
     prior_ids = list(existing.summarized_message_ids) if existing else []
@@ -834,7 +901,11 @@ def test_fallback_summary_includes_tool_names():
     msgs = [
         UserMessage(content=[TextContent(text="run the tests")]),
         AssistantMessage(content=[ToolCall(id="c1", name="bash", arguments={"command": "pytest"})]),
-        ToolResultMessage(tool_call_id="c1", content=[TextContent(text="3 passed")]),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="bash",   # required field on ToolResultMessage
+            content=[TextContent(text="3 passed")],
+        ),
     ]
     state = build_fallback_summary(msgs, existing=None)
     assert "bash" in state.summary
@@ -993,16 +1064,23 @@ def _failing_bound_model() -> BoundModel:
     return m
 
 def _counting_bound_model(summary: str = "ok") -> tuple:
-    """BoundModel that records call count and returns a fixed summary."""
-    from cubepi.providers.base import ModelResponse
+    """BoundModel that records call count and returns a fixed summary.
+
+    The return value matches the AssistantMessage attributes that
+    ``summarize()`` reads: ``content`` (list of blocks), ``error_message``,
+    ``usage``. A plain object is simpler than a Mock here.
+    """
     call_count = {"n": 0}
-    resp = MagicMock(spec=ModelResponse)
-    resp.content = [TextContent(text=summary)]
-    resp.error_message = None
-    resp.usage = None
+
+    class _FakeResponse:
+        content = [TextContent(text=summary)]
+        error_message = None
+        usage = None
+
     async def _generate(*args, **kwargs):
         call_count["n"] += 1
-        return resp
+        return _FakeResponse()
+
     m = MagicMock(spec=BoundModel)
     m.generate = _generate
     return m, call_count
@@ -1185,6 +1263,20 @@ Expected: `TypeError` or `AssertionError`.
 
 - [ ] **Step 3: Rewrite `CompactionMiddleware.__init__` and `transform_context`**
 
+⚠️ **Do NOT delete `extra_llm_calls()`.** The existing implementation at
+`cubepi/middleware/compaction/__init__.py:138-145` must be preserved verbatim —
+§3 ("What does NOT change") locks it in for tracing.
+
+Add to imports at the top of `__init__.py`:
+
+```python
+from cubepi.middleware.compaction.boundary import tail_start_by_tokens
+from cubepi.middleware.compaction.pruner import prune_tool_results
+from cubepi.middleware.compaction.summarizer import build_fallback_summary
+```
+
+Replace the class body (keep `extra_llm_calls` intact at the bottom):
+
 ```python
 _MAX_FAILURES = 3
 _MIN_SAVINGS_PCT = 10.0
@@ -1228,12 +1320,11 @@ class CompactionMiddleware(Middleware):
             state = None
             _clear_state(ctx)
 
-        # Compute shared tail start once — used by both pruner and safe_boundary
-        tail_start = _tail_start_by_tokens(messages, self._keep_tail_tokens)
+        # Single tail computation — shared by pruner and safe_boundary.
+        tail_start = tail_start_by_tokens(messages, self._keep_tail_tokens)
 
-        # Phase 1: pre-prune old tool results (cheap, no LLM call)
-        # Pruner uses the same tail_start so it never touches protected messages.
-        pruned_messages = prune_tool_results(messages, keep_tail=len(messages) - tail_start)
+        # Phase 1: pre-prune old tool results (cheap, no LLM call).
+        pruned_messages = prune_tool_results(messages, tail_start=tail_start)
 
         compressed = _compressed_view(pruned_messages, state, boundary)
 
@@ -1241,16 +1332,17 @@ class CompactionMiddleware(Middleware):
         if tokens_now < self._max_tokens_before:
             return compressed
 
-        # Find boundary before running guards (needed for anti-thrash new-msgs check)
+        # Find boundary before running guards (needed for anti-thrash new-msgs check).
+        # Use the SAME tail_start computed above — no second token walk.
         new_boundary = safe_boundary(
-            pruned_messages,
-            keep_tail_tokens=self._keep_tail_tokens,
+            messages,                       # original messages for boundary search
+            tail_start=tail_start,
             min_compact=max(self._min_compact, boundary + 1),
         )
         if new_boundary is None or new_boundary <= boundary:
             return compressed
 
-        # Circuit breaker — gates LLM only; fallback always runs
+        # Circuit breaker — gates LLM only; fallback always runs.
         failures = ctx.extra.get("compaction_failures", 0)
         llm_allowed = failures < _MAX_FAILURES
         if not llm_allowed:
@@ -1259,15 +1351,16 @@ class CompactionMiddleware(Middleware):
                 failures,
             )
 
-        # Anti-thrashing guard (skips both LLM and fallback)
+        # Anti-thrashing guard (skips both LLM and fallback).
+        # Emergency uses raw message tokens — not compressed view — so prior
+        # cumulative summaries don't mask a genuinely over-limit history.
+        raw_tokens = approx_tokens(messages)
         low_savings = ctx.extra.get("compaction_low_savings_count", 0)
-        force_emergency = tokens_now >= self._max_tokens_before * _ANTI_THRASH_FORCE_RATIO
+        force_emergency = raw_tokens >= self._max_tokens_before * _ANTI_THRASH_FORCE_RATIO
         enough_new = (new_boundary - boundary) >= _ANTI_THRASH_NEW_MSGS
         if low_savings >= _MAX_LOW_SAVINGS and not force_emergency and not enough_new:
             logger.debug("CompactionMiddleware: skipping — low savings guard active")
             return compressed
-
-        tokens_before = approx_tokens(compressed)
 
         if llm_allowed:
             try:
@@ -1299,32 +1392,67 @@ class CompactionMiddleware(Middleware):
         ctx.extra["compaction_until_msg_index"] = new_boundary
         result = _compressed_view(pruned_messages, new_state, new_boundary)
 
-        # Anti-thrashing tracking
+        # Anti-thrashing tracking. Compare raw history to result tokens so the
+        # ratio reflects actual context shrinkage, not just summary churn on
+        # top of an existing cumulative summary.
         tokens_after = approx_tokens(result)
-        if tokens_before > 0:
-            savings_pct = (tokens_before - tokens_after) / tokens_before * 100
+        if raw_tokens > 0:
+            savings_pct = (raw_tokens - tokens_after) / raw_tokens * 100
             ctx.extra["compaction_low_savings_count"] = (
                 low_savings + 1 if savings_pct < _MIN_SAVINGS_PCT else 0
             )
 
         return result
+
+    # Keep this method as-is — preserves trace-attribution for the summary
+    # LLM call. See cubepi.tracing.Recorder.
+    def extra_llm_calls(self) -> tuple[BoundModel, ...]:
+        return (self._summary_model,)
 ```
 
-Add to imports at the top of `__init__.py`:
+`summarize()` and `build_fallback_summary()` already accept `ref_messages`
+from Tasks 4 and 5 — no further edits needed here.
+
+- [ ] **Step 4: Update existing test `test_summarizer_failure_returns_current_view_without_writing_state`**
+
+The pre-existing test in `tests/middleware/test_compaction.py:173` asserts
+`result == messages` and `"compaction" not in ctx.extra` after a summariser
+failure. The new behaviour writes a fallback `CompactionState` and returns a
+compressed result. Rewrite the test:
 
 ```python
-from cubepi.middleware.compaction.boundary import _tail_start_by_tokens
-from cubepi.middleware.compaction.pruner import prune_tool_results
-from cubepi.middleware.compaction.summarizer import build_fallback_summary
+async def test_summarizer_failure_writes_fallback_state() -> None:
+    provider = _FakeSummaryProvider(raises=RuntimeError("LLM unavailable"))
+    middleware = _make_middleware(provider, max_tokens_before=1)
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        _assistant("reply 2"),
+        _user("turn 3"),
+        _assistant("reply 3"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    # Fallback summary was written despite LLM failure
+    assert "compaction" in ctx.extra
+    state = CompactionState.model_validate(ctx.extra["compaction"])
+    assert state.is_fallback is True
+    # Failure counter incremented
+    assert ctx.extra["compaction_failures"] == 1
+    # Result is compressed (summary + tail), not the original message list
+    assert len(result) < len(messages)
 ```
 
-Also update `summarize()` and `build_fallback_summary()` in `summarizer.py` to
-accept `ref_messages: list[Message] | None = None`. When provided, use
-`ref_messages` instead of `messages_to_summarize` for all ref/ID extraction.
-When `None`, fall back to `messages_to_summarize` (existing behaviour, no
-breaking change for direct callers).
+- [ ] **Step 5: Update tracing tests**
 
-- [ ] **Step 4: Run full compaction test suite**
+`tests/tracing/test_recorder.py` calls `CompactionMiddleware(keep_recent_messages=1)`
+at lines 517 and 593. Replace each with `keep_tail_tokens=200` (a small budget
+so the existing test fixtures still trigger compaction).
+
+- [ ] **Step 6: Run full compaction test suite**
 
 ```bash
 uv run pytest tests/middleware/ -v
@@ -1332,15 +1460,15 @@ uv run pytest tests/middleware/ -v
 
 Expected: all pass.
 
-- [ ] **Step 5: Run full test suite**
+- [ ] **Step 7: Run full test suite**
 
 ```bash
 uv run pytest tests/ -v
 ```
 
-Expected: all pass. Fix any regressions before proceeding.
+Expected: all pass — including `tests/tracing/` after the Step 5 update.
 
-- [ ] **Step 6: Run type check and linter**
+- [ ] **Step 8: Run type check and linter**
 
 ```bash
 uv run mypy cubepi/middleware/compaction/
@@ -1349,11 +1477,28 @@ uv run ruff check cubepi/middleware/compaction/ tests/middleware/
 
 Expected: no errors.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Update user-facing docs (CLAUDE.md mandate)**
+
+Update the three docs files that reference `keep_recent_messages`:
+
+- `website/docs/guides/middleware/compaction.md:32, 62, 68` — change parameter
+  name to `keep_tail_tokens` in code samples. Add a short paragraph explaining
+  the token-budget semantics and the new `max_summary_tokens=None` default
+  (dynamic budget). Mention the circuit breaker / fallback behaviour for
+  operators.
+- `website/docs/guides/middleware/examples.md:192` — update the example.
+- `website/docs/api/cubepi-middleware.mdx` — regenerate via `pnpm apiref` in
+  the `website/` directory after the code change is committed.
+
+- [ ] **Step 10: Commit**
 
 ```bash
-git add cubepi/middleware/compaction/__init__.py tests/middleware/test_compaction.py
-git commit -m "feat(compaction): circuit breaker, anti-thrashing, fallback, pre-pruning wire-up"
+git add cubepi/middleware/compaction/ tests/middleware/ tests/tracing/ \
+        website/docs/guides/middleware/ website/docs/api/
+git commit -m "feat(compaction): circuit breaker, anti-thrashing, fallback, pre-pruning wire-up
+
+Breaking: CompactionMiddleware.keep_recent_messages → keep_tail_tokens.
+Updates docs, tracing tests, and existing summariser-failure test."
 ```
 
 ---
