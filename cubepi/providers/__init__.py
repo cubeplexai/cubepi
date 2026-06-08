@@ -35,6 +35,10 @@ from cubepi.providers.faux import (
     faux_thinking,
     faux_tool_call,
 )
+from cubepi.providers.fallback import (
+    DEFAULT_TRIGGER_ERRORS,
+    FallbackBoundModel,
+)
 from cubepi.providers.models import (
     THINKING_LEVELS,
     clamp_thinking_level,
@@ -67,7 +71,9 @@ __all__ = [
     "BaseProvider",
     "BoundModel",
     "Content",
+    "DEFAULT_TRIGGER_ERRORS",
     "FauxProvider",
+    "FallbackBoundModel",
     "ImageContent",
     "Message",
     "MessageStream",
