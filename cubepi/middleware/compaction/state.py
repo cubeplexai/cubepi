@@ -15,6 +15,7 @@ class CompactionState(BaseModel):
     summarized_message_ids: list[str] = Field(default_factory=list)
     summarized_message_refs: list[str] = Field(default_factory=list)
     last_summarized_message_id: str | None = None
+    is_fallback: bool = False
 
 
 def message_ref(message: Message) -> str:

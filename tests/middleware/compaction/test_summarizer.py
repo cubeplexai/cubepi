@@ -318,3 +318,71 @@ async def test_summarize_ref_messages_used_for_refs() -> None:
     from cubepi.middleware.compaction.state import message_refs
 
     assert state.summarized_message_refs == message_refs(original)
+
+
+# --- static fallback summary ---
+
+
+def test_fallback_summary_includes_user_requests() -> None:
+    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+
+    msgs: list[Message] = [
+        UserMessage(content=[TextContent(text="Please write a hello world script")]),
+        AssistantMessage(content=[TextContent(text="Sure")]),
+    ]
+    state = build_fallback_summary(msgs, existing=None)
+    assert state.is_fallback is True
+    assert "Please write a hello world script" in state.summary
+
+
+def test_fallback_summary_includes_tool_names() -> None:
+    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+    from cubepi.providers.base import ToolResultMessage
+
+    msgs: list[Message] = [
+        UserMessage(content=[TextContent(text="run the tests")]),
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="bash", arguments={"command": "pytest"})]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="bash",
+            content=[TextContent(text="3 passed")],
+        ),
+    ]
+    state = build_fallback_summary(msgs, existing=None)
+    assert "bash" in state.summary
+    assert state.is_fallback is True
+
+
+def test_fallback_summary_merges_existing() -> None:
+    from cubepi.middleware.compaction.state import CompactionState
+    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+
+    existing = CompactionState(summary="prior context", is_fallback=False)
+    msgs: list[Message] = [UserMessage(content=[TextContent(text="new task")])]
+    state = build_fallback_summary(msgs, existing=existing)
+    assert "prior context" in state.summary
+    assert state.is_fallback is True
+
+
+def test_fallback_summary_caps_user_requests_at_five() -> None:
+    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+
+    msgs: list[Message] = [
+        UserMessage(content=[TextContent(text=f"request {i}")]) for i in range(10)
+    ]
+    state = build_fallback_summary(msgs, existing=None)
+    assert "request 0" in state.summary
+    assert "request 4" in state.summary
+    assert "request 5" not in state.summary  # capped at 5
+
+
+def test_fallback_summary_uses_ref_messages_for_refs() -> None:
+    from cubepi.middleware.compaction.state import message_refs
+    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+
+    transcript = [UserMessage(content=[TextContent(text="pruned content")])]
+    original = [UserMessage(content=[TextContent(text="full original")])]
+    state = build_fallback_summary(transcript, ref_messages=original, existing=None)
+    assert state.summarized_message_refs == message_refs(original)

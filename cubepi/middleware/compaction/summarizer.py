@@ -6,6 +6,7 @@ import json
 from cubepi.middleware.compaction.state import CompactionState, message_refs
 from cubepi.middleware.compaction.tokens import approx_tokens
 from cubepi.providers.base import (
+    AssistantMessage,
     BoundModel,
     Message,
     StreamOptions,
@@ -172,4 +173,72 @@ async def summarize(
         summarized_message_ids=prior_ids + new_ids,
         summarized_message_refs=prior_refs + message_refs(ref_source),
         last_summarized_message_id=last_id,
+    )
+
+
+def build_fallback_summary(
+    messages_to_summarize: list[Message],
+    *,
+    existing: CompactionState | None,
+    ref_messages: list[Message] | None = None,
+) -> CompactionState:
+    """Deterministic fallback when the LLM summariser is unavailable.
+
+    Builds a low-fidelity but structured handoff from the message list itself:
+    first lines of up to 5 user requests, plus distinct tool names invoked.
+    Lets compaction proceed (shrinking context) so the agent isn't stuck
+    over-limit on every subsequent turn when the summariser model is down.
+
+    ``ref_messages`` overrides the source for ID/SHA256-ref extraction —
+    mirrors the contract of :func:`summarize`. ``is_fallback=True`` is set
+    on the returned state.
+    """
+    ref_source = ref_messages if ref_messages is not None else messages_to_summarize
+
+    user_lines: list[str] = []
+    tool_names: list[str] = []
+
+    for msg in messages_to_summarize:
+        if isinstance(msg, UserMessage):
+            if len(user_lines) >= 5:
+                continue
+            for user_block in msg.content:
+                if isinstance(user_block, TextContent) and user_block.text.strip():
+                    first_line = user_block.text.strip().splitlines()[0][:120]
+                    user_lines.append(first_line)
+                    break
+        elif isinstance(msg, AssistantMessage):
+            for asst_block in msg.content:
+                if (
+                    isinstance(asst_block, ToolCall)
+                    and asst_block.name not in tool_names
+                ):
+                    tool_names.append(asst_block.name)
+
+    parts: list[str] = ["[Compaction fallback — LLM summariser unavailable]"]
+    if existing and existing.summary:
+        parts.append(f"Prior context: {existing.summary}")
+    if user_lines:
+        parts.append("User requests: " + "; ".join(user_lines))
+    if tool_names:
+        parts.append("Tool calls: " + ", ".join(sorted(tool_names)))
+
+    summary = "\n".join(parts)
+
+    prior_ids = list(existing.summarized_message_ids) if existing else []
+    prior_refs = list(existing.summarized_message_refs) if existing else []
+    new_ids = [str(getattr(m, "id", "") or "") for m in ref_source]
+    new_ids = [mid for mid in new_ids if mid]
+    last_id = (
+        new_ids[-1]
+        if new_ids
+        else (existing.last_summarized_message_id if existing else None)
+    )
+
+    return CompactionState(
+        summary=summary,
+        summarized_message_ids=prior_ids + new_ids,
+        summarized_message_refs=prior_refs + message_refs(ref_source),
+        last_summarized_message_id=last_id,
+        is_fallback=True,
     )
