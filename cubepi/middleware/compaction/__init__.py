@@ -111,9 +111,13 @@ class CompactionMiddleware(Middleware):
         if approx_tokens(compressed) < self._max_tokens_before:
             return compressed
 
+        # Bridge: Task 3 replaced safe_boundary's keep_recent param with
+        # an explicit tail_start index. Task 6 will swap the constructor
+        # to keep_tail_tokens and call tail_start_by_tokens here.
+        tail_start = max(0, len(messages) - self._keep_recent)
         new_boundary = safe_boundary(
             messages,
-            keep_recent=self._keep_recent,
+            tail_start=tail_start,
             min_compact=max(self._min_compact, boundary + 1),
         )
         if new_boundary is None or new_boundary <= boundary:
