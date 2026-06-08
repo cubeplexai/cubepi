@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`FallbackBoundModel`** — built-in failover chain at the `BoundModel` level.
+  Wrap an ordered `chain` of `BoundModel` instances; on `RateLimited`,
+  `ProviderUnavailable`, or `ContextLengthExceeded` (configurable via
+  `trigger_errors`), or on a first-event stream error, the next model in the
+  chain is tried transparently. Optional `on_failover` callback for
+  billing/metrics hooks. Exported from `cubepi` and `cubepi.providers`.
+
+- **`DEFAULT_TRIGGER_ERRORS`** — `frozenset({RateLimited, ProviderUnavailable,
+  ContextLengthExceeded})`. The default set of error types that trigger failover
+  in `FallbackBoundModel`.
+
 - **`BoundModel.generate()` / `BoundModel.stream()`** — the handle returned by
   `provider.model(...)` now drives a provider call directly. Useful for
   utilities (summarizers, classifiers) where you already hold a `BoundModel`

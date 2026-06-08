@@ -100,6 +100,21 @@ faux = FauxProvider(provider_id="faux")
 faux.set_responses(["Hello!", "How can I help?"])
 ```
 
+Use `FallbackBoundModel` to chain providers — on a rate limit, outage, or
+context-length error the next model in the chain is tried automatically:
+
+```python
+from cubepi import FallbackBoundModel
+
+model = FallbackBoundModel(
+    chain=(
+        anthropic.model("claude-opus-4-8"),   # primary
+        openai.model("gpt-5"),                # fallback
+    )
+)
+agent = Agent(model=model, system_prompt="...")
+```
+
 ### Tools
 
 Decorate an async function with `@tool`: the input schema is derived from the
