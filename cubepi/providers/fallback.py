@@ -46,10 +46,18 @@ class FallbackBoundModel:
 
     chain[0] is the primary model. On a trigger_errors exception or a first-event
     error from stream(), the next model in the chain is tried transparently.
-    Mid-stream errors (after the first non-error event) are forwarded as-is.
+    For generate(), an error AssistantMessage (stop_reason="error") also triggers
+    failover. Mid-stream errors (after the first non-error event) are forwarded
+    as-is.
 
     provider and spec proxy chain[0] so tracing/billing code that reads
     agent._model.provider / agent._model.spec continues to work unchanged.
+
+    Known limitation: Tracer.attach() and Meter.attach() subscribe only to
+    chain[0].provider. Successful fallback calls (chain[1..]) are invisible to
+    provider-level observability (chat spans, token/cost metrics). Tracked as a
+    follow-up: update recorder.py and meter.py to iterate chain and subscribe
+    to every unique BaseProvider.
     """
 
     chain: tuple[BoundModel, ...]
@@ -195,7 +203,7 @@ class FallbackBoundModel:
             next_bound = self.chain[attempt] if attempt < len(self.chain) else None
 
             try:
-                return await bound.generate(
+                result = await bound.generate(
                     messages,
                     system_prompt=system_prompt,
                     tools=tools,
@@ -211,6 +219,13 @@ class FallbackBoundModel:
                 continue
             except Exception:
                 raise
+
+            if result.stop_reason == "error":
+                last_error = result.error_message or "generate error"
+                await self._notify(bound, next_bound, last_error, attempt)
+                continue
+
+            return result
 
         raise ProviderUnavailable(
             f"all providers exhausted; last error: {last_error!r}"

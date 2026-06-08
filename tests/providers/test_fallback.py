@@ -356,3 +356,19 @@ async def test_generate_all_exhausted_raises_provider_unavailable() -> None:
 
     with pytest.raises(ProviderUnavailable, match="all providers exhausted"):
         await fbm.generate(_messages())
+
+
+@pytest.mark.asyncio
+async def test_generate_error_assistant_message_triggers_failover() -> None:
+    """generate() — primary returns AssistantMessage(stop_reason="error") → failover."""
+    # FauxProvider with no queued responses returns an error AssistantMessage.
+    primary_prov = FauxProvider(provider_id="primary")
+    primary = primary_prov.model("model-1")
+    fallback = _faux("fallback", "generated via fallback")
+
+    fbm = FallbackBoundModel(chain=(primary, fallback))
+
+    result = await fbm.generate(_messages())
+
+    assert result.provider_id == "fallback"
+    assert result.stop_reason != "error"
