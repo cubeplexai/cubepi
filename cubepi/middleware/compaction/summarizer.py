@@ -18,7 +18,7 @@ from cubepi.providers.base import (
 _ARG_VALUE_CHARS = 200
 _ARG_REPR_MAX = 500
 
-_SUMMARY_MIN = 1024   # matches prior fixed default — never regress below it
+_SUMMARY_MIN = 1024  # matches prior fixed default — never regress below it
 _SUMMARY_RATIO = 0.15
 _SUMMARY_MAX = 4096
 
@@ -96,7 +96,9 @@ def _format_message_for_summary(message: Message) -> str:
         if isinstance(block, TextContent):
             parts.append(block.text)
         elif isinstance(block, ToolCall):
-            parts.append(f"[tool_call:{block.name}]{_format_arguments(block.arguments)}")
+            parts.append(
+                f"[tool_call:{block.name}]{_format_arguments(block.arguments)}"
+            )
         elif hasattr(block, "text"):
             parts.append(str(getattr(block, "text", "")))
     return f"[{role}] " + " ".join(parts)

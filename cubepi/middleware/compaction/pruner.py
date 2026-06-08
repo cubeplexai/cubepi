@@ -30,9 +30,7 @@ def prune_tool_results(messages: list[Message], *, tail_start: int) -> list[Mess
             continue
 
         summary = f"[{msg.tool_name}] {len(text)} chars"
-        result.append(
-            msg.model_copy(update={"content": [TextContent(text=summary)]})
-        )
+        result.append(msg.model_copy(update={"content": [TextContent(text=summary)]}))
 
     return result
 

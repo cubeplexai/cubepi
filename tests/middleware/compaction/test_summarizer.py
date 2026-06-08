@@ -219,9 +219,7 @@ def test_tool_call_repr_max_chars_enforced() -> None:
 
 
 def test_tool_call_empty_arguments() -> None:
-    msg = AssistantMessage(
-        content=[ToolCall(id="c1", name="ping", arguments={})]
-    )
+    msg = AssistantMessage(content=[ToolCall(id="c1", name="ping", arguments={})])
     formatted = _format_message_for_summary(msg)
     assert "[tool_call:ping]" in formatted
 
@@ -267,9 +265,7 @@ async def test_summarize_uses_dynamic_budget_when_none() -> None:
             provider=provider,
             spec=Model(id="summary-model", provider_id="faux"),
         ),
-        messages_to_summarize=[
-            UserMessage(content=[TextContent(text="x" * 40_000)])
-        ],
+        messages_to_summarize=[UserMessage(content=[TextContent(text="x" * 40_000)])],
         existing=None,
     )
     # 20 000 tokens * 0.15 = 3 000

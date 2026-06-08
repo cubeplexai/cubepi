@@ -29,15 +29,17 @@ agent = Agent(
         CompactionMiddleware(
             summary_model=summary_model,
             max_tokens_before_compact=80_000,
-            keep_recent_messages=8,
-            max_summary_tokens=1024,
+            keep_tail_tokens=8_000,        # token budget for the protected tail
+            # max_summary_tokens=None → dynamic budget (recommended)
         ),
     ],
 )
 ```
 
-The summary call uses `Provider.generate(...)` with `temperature=0.0`,
-`thinking="off"`, and `max_output_tokens=max_summary_tokens`.
+The summary call uses `Provider.generate(...)` with `temperature=0.0` and
+`thinking="off"`. `max_output_tokens` is computed dynamically from the
+content size (floor 1024, ceiling 4096) when `max_summary_tokens` is `None`,
+or passed verbatim otherwise.
 
 ## What gets persisted
 
@@ -59,16 +61,20 @@ Start with conservative values:
 CompactionMiddleware(
     summary_model=cheap_model,
     max_tokens_before_compact=80_000,
-    keep_recent_messages=8,
-    max_summary_tokens=1024,
+    keep_tail_tokens=8_000,
 )
 ```
 
-Raise `max_tokens_before_compact` if your model has a large context window and
-you want fewer summary calls. Raise `keep_recent_messages` when recent tool
-outputs or user corrections are especially important. Increase
-`max_summary_tokens` for long-running research or coding sessions where the
-summary needs more detail.
+Raise `max_tokens_before_compact` if your model has a large context window
+and you want fewer summary calls. Raise `keep_tail_tokens` when recent tool
+outputs or user corrections are especially important — the tail-token budget
+is checked against `approx_tokens` per message, so it adapts to how heavy
+the recent traffic actually is (a budget of 8 000 protects ~1–2 large tool
+results, or 30+ short turns).
+
+By default, `max_summary_tokens=None` means the summariser's output budget
+is computed dynamically as `clamp(content_tokens × 0.15, 1024, 4096)`.
+Override with an explicit int to pin the budget.
 
 ## Tracing
 
@@ -96,9 +102,18 @@ when summarization runs first.
 
 ## Failure behavior
 
-If the summary provider fails, CubePi logs a warning and continues with the
-previous compressed view or the original messages. The agent run is not failed
-only because compaction could not refresh.
+If the summary provider fails, CubePi falls back to a deterministic, no-LLM
+summary built from message structure (user-request first lines, distinct
+tool names) so context still shrinks. After three consecutive LLM failures
+a circuit breaker opens and skips the LLM entirely; the fallback keeps
+running so the agent doesn't get stuck over-limit waiting for a broken
+summariser model. The breaker resets the first time the LLM succeeds again.
+
+A second guard tracks **anti-thrashing**: if compaction saves less than 10%
+of context two runs in a row, the next attempt is skipped to avoid burning
+LLM calls for no gain. The guard automatically lifts when raw history grows
+past 1.5× the threshold, when the boundary would advance ≥ 8 messages, or
+when a later compaction does save ≥ 10%.
 
 ## When not to use it
 

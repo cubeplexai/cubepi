@@ -189,7 +189,7 @@ agent = Agent(
         CompactionMiddleware(
             summary_model=summary_model,
             max_tokens_before_compact=80_000,
-            keep_recent_messages=8,
+            keep_tail_tokens=8_000,
         ),
     ],
 )
