@@ -26,7 +26,9 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
-from typing import Any, Literal, TypeAlias, TypedDict, cast
+from typing import Any, Literal, TypeAlias, cast
+
+from typing_extensions import TypedDict
 
 from cubepi.agent.types import (
     AfterToolCallContext,
