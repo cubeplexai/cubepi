@@ -159,3 +159,16 @@ def test_safe_boundary_rejects_out_of_range_tail_start() -> None:
     # Negative or too-large tail_start → None (no work to do).
     assert safe_boundary(messages, tail_start=-1) is None
     assert safe_boundary(messages, tail_start=99) is None
+
+
+def test_safe_boundary_tail_start_equals_len_clamps_in_bounds() -> None:
+    """When tail_start == len(messages), the search starts at the last valid
+    index — exercises the clamp at boundary.py's ``candidate -= 1``."""
+    messages: list[Message] = [
+        _user("q1"),
+        _assistant("a1"),
+        _user("q2"),
+        _assistant("a2"),
+    ]
+    # tail_start == 4 == len(messages). Clamp to 3, walk back to 2 (UserMessage).
+    assert safe_boundary(messages, tail_start=4, min_compact=1) == 2

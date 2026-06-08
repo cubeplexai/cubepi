@@ -34,6 +34,7 @@ SUMMARY_PREFIX = (
 logger = logging.getLogger(__name__)
 
 _MAX_FAILURES = 3
+_HALF_OPEN_AFTER_FALLBACK_RUNS = 5
 _MIN_SAVINGS_PCT = 10.0
 _MAX_LOW_SAVINGS = 2
 _ANTI_THRASH_NEW_MSGS = 8
@@ -69,6 +70,15 @@ def _load_state(value: Any) -> CompactionState | None:
 def _clear_state(ctx: AgentContext) -> None:
     ctx.extra.pop("compaction", None)
     ctx.extra.pop("compaction_until_msg_index", None)
+
+
+def _load_int(value: Any, default: int) -> int:
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+    return default
 
 
 def _state_matches_history(
@@ -145,7 +155,17 @@ class CompactionMiddleware(Middleware):
             _clear_state(ctx)
 
         # Single tail computation — shared by pruner and safe_boundary.
-        tail_start = tail_start_by_tokens(messages, self._keep_tail_tokens)
+        # Clamp the effective tail budget to at most half the trigger
+        # threshold. Without this, a configuration where
+        # ``keep_tail_tokens`` exceeds ``max_tokens_before_compact``
+        # produces ``tail_start == 0`` for any history that triggers
+        # compaction — the tail swallows everything and ``safe_boundary``
+        # finds nothing to summarise.
+        effective_tail_tokens = min(
+            self._keep_tail_tokens,
+            max(1, self._max_tokens_before // 2),
+        )
+        tail_start = tail_start_by_tokens(messages, effective_tail_tokens)
 
         # Phase 1: pre-prune old tool results (cheap, no LLM call) — skip
         # entirely when prune_tool_outputs=False (audit-chain agents).
@@ -171,26 +191,37 @@ class CompactionMiddleware(Middleware):
             return compressed
 
         # Circuit breaker — gates LLM only; fallback always runs.
-        failures_raw = ctx.extra.get("compaction_failures", 0)
-        failures = (
-            int(failures_raw) if isinstance(failures_raw, (int, float, str)) else 0
-        )
+        failures = _load_int(ctx.extra.get("compaction_failures"), 0)
         llm_allowed = failures < _MAX_FAILURES
+
+        # Half-open: after enough fallback-only runs, give the LLM one
+        # attempt. Success → full reset; failure → breaker re-opens.
+        # Without this the breaker would be permanent: LLM is gated → it
+        # never gets a chance to succeed → counter never decrements.
+        half_open_retry = False
         if not llm_allowed:
-            logger.warning(
-                "CompactionMiddleware: LLM circuit breaker open (%d failures), using fallback",
-                failures,
-            )
+            fallback_runs = _load_int(ctx.extra.get("compaction_fallback_runs"), 0)
+            if fallback_runs >= _HALF_OPEN_AFTER_FALLBACK_RUNS:
+                logger.info(
+                    "CompactionMiddleware: breaker half-open after %d fallback runs, retrying LLM",
+                    fallback_runs,
+                )
+                llm_allowed = True
+                half_open_retry = True
+                # Consume the wait window — on retry failure the LLM should
+                # not fire again immediately; another N fallback runs must
+                # accumulate first.
+                ctx.extra["compaction_fallback_runs"] = 0
+            else:
+                logger.warning(
+                    "CompactionMiddleware: LLM circuit breaker open (%d failures), using fallback",
+                    failures,
+                )
 
         # Anti-thrashing guard — uses raw_tokens so prior cumulative summaries
         # don't mask a genuinely over-limit history.
         raw_tokens = approx_tokens(messages)
-        low_savings_raw = ctx.extra.get("compaction_low_savings_count", 0)
-        low_savings = (
-            int(low_savings_raw)
-            if isinstance(low_savings_raw, (int, float, str))
-            else 0
-        )
+        low_savings = _load_int(ctx.extra.get("compaction_low_savings_count"), 0)
         force_emergency = (
             raw_tokens >= self._max_tokens_before * _ANTI_THRASH_FORCE_RATIO
         )
@@ -211,20 +242,31 @@ class CompactionMiddleware(Middleware):
                     existing_summary_suffix=self._existing_summary_suffix,
                     abort_signal=signal,
                 )
+                # Full reset on LLM success.
                 ctx.extra["compaction_failures"] = 0
+                ctx.extra["compaction_fallback_runs"] = 0
             except Exception as exc:  # noqa: BLE001
                 logger.warning("CompactionMiddleware LLM summariser failed: %s", exc)
-                ctx.extra["compaction_failures"] = failures + 1
+                # Half-open retry that fails re-opens the breaker; a normal
+                # failure just increments toward open.
+                ctx.extra["compaction_failures"] = (
+                    _MAX_FAILURES if half_open_retry else failures + 1
+                )
                 new_state = build_fallback_summary(
                     pruned_messages[boundary:new_boundary],
                     ref_messages=messages[boundary:new_boundary],
                     existing=state,
                 )
+                # The LLM was just attempted — restart the half-open wait.
+                ctx.extra["compaction_fallback_runs"] = 0
         else:
             new_state = build_fallback_summary(
                 pruned_messages[boundary:new_boundary],
                 ref_messages=messages[boundary:new_boundary],
                 existing=state,
+            )
+            ctx.extra["compaction_fallback_runs"] = (
+                _load_int(ctx.extra.get("compaction_fallback_runs"), 0) + 1
             )
 
         ctx.extra["compaction"] = new_state.model_dump()

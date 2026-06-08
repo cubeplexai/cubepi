@@ -442,3 +442,40 @@ async def test_summarize_uses_existing_summary_suffix_override() -> None:
     captured = provider.calls[0]["system_prompt"]
     assert captured.startswith("BASE")
     assert "MERGE THIS: prior" in captured
+
+
+# --- coverage: _shrink_strings list + fall-through; _format_arguments non-JSON ---
+
+
+def test_shrink_strings_recurses_into_lists() -> None:
+    """The list branch of _shrink_strings shrinks string leaves inside lists,
+    leaves non-string leaves intact."""
+    from cubepi.middleware.compaction.summarizer import _shrink_strings
+
+    long_text = "x" * 500
+    obj = ["short", long_text, 42, True, None, [long_text]]
+    shrunk = _shrink_strings(obj)
+    assert isinstance(shrunk, list)
+    assert shrunk[0] == "short"
+    assert shrunk[1].startswith("x" * 200) and "truncated" in shrunk[1]
+    assert shrunk[2] == 42
+    assert shrunk[3] is True
+    assert shrunk[4] is None
+    # Nested list also recurses.
+    assert "truncated" in shrunk[5][0]
+
+
+def test_format_arguments_non_json_serialisable_falls_back_to_str() -> None:
+    """A value json.dumps can't handle (e.g. a custom object) falls back to
+    str() instead of raising — defensive against odd backend payloads."""
+    from cubepi.middleware.compaction.summarizer import _format_arguments
+
+    class _NotJson:
+        def __repr__(self) -> str:
+            return "<not-json>"
+
+    # Pass a dict where one VALUE is non-serialisable. _shrink_strings does
+    # NOT recurse into custom objects (returns them as-is), so json.dumps
+    # raises TypeError → fallback to str().
+    result = _format_arguments({"x": _NotJson()})
+    assert "<not-json>" in result

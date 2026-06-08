@@ -365,9 +365,10 @@ async def test_anti_thrashing_skips_compaction_when_guard_tripped() -> None:
     """Guard fires when low_savings_count >= 2, raw history not over 1.5×
     threshold, and new_boundary advance < 8 messages."""
     provider = _FakeSummaryProvider(reply="x")
-    # Threshold chosen so raw_tokens (~24) stays under 1.5 * threshold
-    # (= 36) but above threshold (= 20) — guard CAN fire.
-    middleware = _make_middleware(provider, max_tokens_before=20)
+    # Threshold chosen so tokens_now (~18) EXCEEDS threshold (so the
+    # under-threshold fast-path doesn't fire) AND raw_tokens (~18) stays
+    # under 1.5 * threshold (so emergency override doesn't bypass the guard).
+    middleware = _make_middleware(provider, max_tokens_before=15)
     messages: list[Message] = [
         _user("turn 1"),
         _assistant("reply 1"),
@@ -544,3 +545,177 @@ async def test_summary_prompt_constructor_argument_passthrough() -> None:
     assert len(provider.calls) == 1
     # No prior summary, so the prompt should be the override verbatim.
     assert provider.calls[0]["system_prompt"] == "CUSTOM PROMPT BODY"
+
+
+# --- coverage: extra_llm_calls ---
+
+
+def test_extra_llm_calls_returns_summary_model() -> None:
+    provider = _FakeSummaryProvider()
+    bound = BoundModel(
+        provider=provider,
+        spec=Model(id="m", provider_id="faux"),
+    )
+    middleware = CompactionMiddleware(
+        summary_model=bound,
+        max_tokens_before_compact=100,
+        keep_tail_tokens=8,
+    )
+    assert middleware.extra_llm_calls() == (bound,)
+
+
+# --- codex review: effective tail budget clamp ---
+
+
+async def test_keep_tail_tokens_clamped_below_threshold() -> None:
+    """If keep_tail_tokens >= max_tokens_before_compact, the tail must NOT
+    swallow the entire history; otherwise compaction can never trigger.
+    The middleware clamps the effective tail to half the threshold."""
+    provider = _FakeSummaryProvider(reply="summary")
+    middleware = CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="m", provider_id="faux"),
+        ),
+        max_tokens_before_compact=10,
+        keep_tail_tokens=200,  # configured larger than threshold AND than raw
+        min_compact_messages=2,
+    )
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        _assistant("reply 2"),
+        _user("turn 3"),
+        _assistant("reply 3"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+    await middleware.transform_context(messages, ctx=ctx)
+
+    # Without the clamp, the whole 18-token history would fit in the
+    # 200-token tail budget and safe_boundary would return None → no
+    # compaction. With the clamp, the effective tail is min(200, 10//2)=5
+    # tokens, so compaction fires and writes state.
+    assert "compaction" in ctx.extra
+    assert len(provider.calls) == 1
+
+
+# --- codex review: half-open circuit breaker ---
+
+
+async def test_circuit_breaker_half_open_retries_llm_after_fallback_runs() -> None:
+    """After _MAX_FAILURES failures the breaker opens. After
+    _HALF_OPEN_AFTER_FALLBACK_RUNS fallback-only runs, the breaker goes
+    half-open and the LLM is attempted again. If it succeeds, the breaker
+    fully resets."""
+    from cubepi.middleware.compaction import _HALF_OPEN_AFTER_FALLBACK_RUNS
+
+    provider = _FakeSummaryProvider(raises=RuntimeError("down"))
+    middleware = _make_middleware(provider, max_tokens_before=1)
+    ctx = AgentContext(system_prompt="", messages=[], extra={})
+
+    # Drive the breaker open with 3 LLM failures across growing histories.
+    messages: list[Message] = []
+    for i in range(3):
+        messages = [
+            *messages,
+            _user(f"turn {i * 2}"),
+            _assistant(f"reply {i * 2}"),
+            _user(f"turn {i * 2 + 1}"),
+            _assistant(f"reply {i * 2 + 1}"),
+        ]
+        await middleware.transform_context(messages, ctx=ctx)
+    assert ctx.extra["compaction_failures"] == 3
+    calls_when_open = len(provider.calls)
+
+    # Run fallback-only turns until the breaker should go half-open.
+    for i in range(_HALF_OPEN_AFTER_FALLBACK_RUNS):
+        messages = [
+            *messages,
+            _user(f"fbr {i} q"),
+            _assistant(f"fbr {i} a"),
+        ]
+        await middleware.transform_context(messages, ctx=ctx)
+    # No LLM call attempted during fallback-only phase.
+    assert len(provider.calls) == calls_when_open
+    assert ctx.extra["compaction_fallback_runs"] == _HALF_OPEN_AFTER_FALLBACK_RUNS
+
+    # Swap to a working LLM and run one more turn — half-open path triggers,
+    # LLM is attempted, succeeds, breaker fully resets.
+    provider.raises = None
+    provider.reply = "real summary"
+    messages = [*messages, _user("recovered q"), _assistant("recovered a")]
+    await middleware.transform_context(messages, ctx=ctx)
+
+    assert len(provider.calls) == calls_when_open + 1
+    assert ctx.extra["compaction_failures"] == 0
+    assert ctx.extra["compaction_fallback_runs"] == 0
+
+
+async def test_half_open_failure_re_opens_breaker() -> None:
+    """Half-open retry that fails snaps the breaker back to MAX_FAILURES."""
+    from cubepi.middleware.compaction import _HALF_OPEN_AFTER_FALLBACK_RUNS
+
+    provider = _FakeSummaryProvider(raises=RuntimeError("down"))
+    middleware = _make_middleware(provider, max_tokens_before=1)
+    ctx = AgentContext(system_prompt="", messages=[], extra={})
+
+    messages: list[Message] = []
+    # 3 failures → breaker opens.
+    for i in range(3):
+        messages = [
+            *messages,
+            _user(f"t{i}a"),
+            _assistant(f"r{i}a"),
+            _user(f"t{i}b"),
+            _assistant(f"r{i}b"),
+        ]
+        await middleware.transform_context(messages, ctx=ctx)
+    # Fallback-only runs until half-open is ready.
+    for i in range(_HALF_OPEN_AFTER_FALLBACK_RUNS):
+        messages = [*messages, _user(f"f{i}"), _assistant(f"a{i}")]
+        await middleware.transform_context(messages, ctx=ctx)
+
+    # Half-open turn: LLM still failing.
+    calls_before_retry = len(provider.calls)
+    messages = [*messages, _user("retry q"), _assistant("retry a")]
+    await middleware.transform_context(messages, ctx=ctx)
+
+    # LLM was attempted (half-open allowed one try) and failed.
+    assert len(provider.calls) == calls_before_retry + 1
+    # Breaker re-opens (failures back to MAX, not MAX+1).
+    assert ctx.extra["compaction_failures"] == 3
+
+
+# --- coverage: _load_int with bad type ---
+
+
+async def test_corrupt_failure_counter_treated_as_zero() -> None:
+    """Non-numeric values in ctx.extra are treated as 0 — defensive parsing.
+
+    Covers both the ``isinstance`` reject path (wrong type) and the
+    ``ValueError`` catch path (string that can't be parsed as int).
+    """
+    provider = _FakeSummaryProvider()
+    middleware = _make_middleware(provider, max_tokens_before=1)
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        _assistant("reply 2"),
+        _user("turn 3"),
+        _assistant("reply 3"),
+    ]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=messages,
+        extra={
+            "compaction_failures": "not-an-int",  # ValueError in int()
+            "compaction_low_savings_count": ["bad", "shape"],  # isinstance reject
+            "compaction_fallback_runs": None,  # isinstance reject
+        },
+    )
+    await middleware.transform_context(messages, ctx=ctx)
+    # Compaction proceeded as if all counters were 0.
+    assert "compaction" in ctx.extra
+    assert ctx.extra["compaction_failures"] == 0  # success path
