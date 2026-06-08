@@ -240,6 +240,40 @@ async def summarize(
     )
 
 
+_FALLBACK_HEADER = "[Compaction fallback — LLM summariser unavailable]"
+_FALLBACK_USER_PREFIX = "User requests: "
+_FALLBACK_TOOL_PREFIX = "Tool calls: "
+
+
+def _parse_prior_fallback(summary: str) -> tuple[list[str], list[str]]:
+    """Extract user_lines and tool_names from a previous fallback summary.
+
+    Format is the one this module emits:
+
+        [Compaction fallback — LLM summariser unavailable]
+        User requests: line1; line2
+        Tool calls: bash, read_file
+
+    Returns ``([], [])`` if either marker is absent.
+    """
+    user_lines: list[str] = []
+    tool_names: list[str] = []
+    for line in summary.splitlines():
+        if line.startswith(_FALLBACK_USER_PREFIX):
+            user_lines = [
+                s.strip()
+                for s in line[len(_FALLBACK_USER_PREFIX) :].split(";")
+                if s.strip()
+            ]
+        elif line.startswith(_FALLBACK_TOOL_PREFIX):
+            tool_names = [
+                s.strip()
+                for s in line[len(_FALLBACK_TOOL_PREFIX) :].split(",")
+                if s.strip()
+            ]
+    return user_lines, tool_names
+
+
 def build_fallback_summary(
     messages_to_summarize: list[Message],
     *,
@@ -256,6 +290,12 @@ def build_fallback_summary(
     ``ref_messages`` overrides the source for ID/SHA256-ref extraction —
     mirrors the contract of :func:`summarize`. ``is_fallback=True`` is set
     on the returned state.
+
+    When ``existing`` is itself a fallback, we re-derive its user_lines /
+    tool_names and merge with the current turn's instead of embedding the
+    prior fallback text verbatim. Embedding would compound through every
+    outage turn (run N includes run N-1 which includes N-2…), growing the
+    summary unboundedly and defeating compaction.
     """
     ref_source = ref_messages if ref_messages is not None else messages_to_summarize
 
@@ -279,13 +319,21 @@ def build_fallback_summary(
                 ):
                     tool_names.append(asst_block.name)
 
-    parts: list[str] = ["[Compaction fallback — LLM summariser unavailable]"]
+    parts: list[str] = [_FALLBACK_HEADER]
     if existing and existing.summary:
-        parts.append(f"Prior context: {existing.summary}")
+        if existing.is_fallback:
+            # Merge the prior fallback's structured fields into the current
+            # turn — never embed the prior summary text. Preserves order
+            # (oldest user request first) and dedupes by exact match.
+            prior_users, prior_tools = _parse_prior_fallback(existing.summary)
+            user_lines = list(dict.fromkeys(prior_users + user_lines))[:5]
+            tool_names = list(dict.fromkeys(prior_tools + tool_names))
+        else:
+            parts.append(f"Prior context: {existing.summary}")
     if user_lines:
-        parts.append("User requests: " + "; ".join(user_lines))
+        parts.append(_FALLBACK_USER_PREFIX + "; ".join(user_lines))
     if tool_names:
-        parts.append("Tool calls: " + ", ".join(sorted(tool_names)))
+        parts.append(_FALLBACK_TOOL_PREFIX + ", ".join(sorted(tool_names)))
 
     summary = "\n".join(parts)
 

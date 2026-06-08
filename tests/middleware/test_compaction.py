@@ -765,3 +765,65 @@ async def test_state_invalidation_clears_guard_counters() -> None:
     # values (2 and 99) did not carry through.
     assert ctx.extra.get("compaction_low_savings_count", 0) < 2
     assert ctx.extra.get("compaction_fallback_runs", 0) < 99
+
+
+# --- codex round 3: tail clamp only fires when tail would swallow history ---
+
+
+async def test_keep_tail_tokens_below_threshold_honoured_verbatim() -> None:
+    """A configured tail smaller than the threshold must NOT be silently
+    reduced. Codex P2: the original ``// 2`` clamp was over-eager."""
+    provider = _FakeSummaryProvider(reply="summary")
+    middleware = CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="m", provider_id="faux"),
+        ),
+        max_tokens_before_compact=100,
+        keep_tail_tokens=80,  # below threshold — must be honoured as-is
+        min_compact_messages=2,
+    )
+    # Build messages that, combined with a tail of 80 tokens, leave enough
+    # prefix to summarise. With keep_tail clamped to 50 (the OLD bug), the
+    # tail would protect more recent history than the caller wanted.
+    messages: list[Message] = [_user("x" * 60) for _ in range(8)]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+    await middleware.transform_context(messages, ctx=ctx)
+    # State written → boundary captured.
+    boundary = ctx.extra.get("compaction_until_msg_index")
+    assert boundary is not None and boundary > 0
+
+    # Compute what tail_start should be with the un-clamped 80-token budget.
+    # _user("x"*60) → 30 tokens each (60 chars / 2). tail budget 80 →
+    # last 2 messages fit (60 tokens, third would push to 90 > 80).
+    # Boundary should land at ≤ 6 (last 2 in tail).
+    # With the old `// 2` clamp (50 tokens), only 1 message fits; boundary
+    # would land at 7 — much more aggressive.
+    assert boundary <= 6
+
+
+async def test_keep_tail_tokens_above_threshold_still_clamped() -> None:
+    """Safety net is still active for the truly-broken configuration."""
+    provider = _FakeSummaryProvider(reply="summary")
+    middleware = CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="m", provider_id="faux"),
+        ),
+        max_tokens_before_compact=10,
+        keep_tail_tokens=200,  # above threshold — clamp engages
+        min_compact_messages=2,
+    )
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        _assistant("reply 2"),
+        _user("turn 3"),
+        _assistant("reply 3"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+    await middleware.transform_context(messages, ctx=ctx)
+    # Clamp let compaction fire.
+    assert "compaction" in ctx.extra
+    assert len(provider.calls) == 1

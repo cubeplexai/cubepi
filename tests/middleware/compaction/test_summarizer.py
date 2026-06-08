@@ -479,3 +479,79 @@ def test_format_arguments_non_json_serialisable_falls_back_to_str() -> None:
     # raises TypeError → fallback to str().
     result = _format_arguments({"x": _NotJson()})
     assert "<not-json>" in result
+
+
+# --- codex round 3: fallback does not recurse ---
+
+
+def test_fallback_summary_does_not_embed_prior_fallback() -> None:
+    """A fallback that follows another fallback must NOT embed the prior
+    fallback text under 'Prior context:'. Otherwise each LLM-outage turn
+    doubles the summary size — the chain compounds verbatim across runs."""
+    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+
+    # Run 1: clean fallback.
+    msgs_1: list[Message] = [
+        UserMessage(content=[TextContent(text="task A")]),
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="bash", arguments={"cmd": "ls"})]
+        ),
+    ]
+    state_1 = build_fallback_summary(msgs_1, existing=None)
+    assert state_1.is_fallback is True
+    assert "task A" in state_1.summary
+
+    # Run 2: NEW fallback whose existing is run 1's fallback.
+    msgs_2: list[Message] = [
+        UserMessage(content=[TextContent(text="task B")]),
+        AssistantMessage(
+            content=[ToolCall(id="c2", name="grep", arguments={"q": "x"})]
+        ),
+    ]
+    state_2 = build_fallback_summary(msgs_2, existing=state_1)
+
+    # The prior fallback text MUST NOT appear verbatim as a "Prior context:"
+    # line — that's the unbounded-growth pattern.
+    assert "Prior context:" not in state_2.summary
+    # But the structured fields from the prior fallback ARE preserved by
+    # merging into the new fallback's user_lines / tool_names.
+    assert "task A" in state_2.summary
+    assert "task B" in state_2.summary
+    assert "bash" in state_2.summary
+    assert "grep" in state_2.summary
+    # Tool names are deduplicated, not appended.
+    assert state_2.summary.count("bash") == 1
+
+
+def test_fallback_summary_user_lines_capped_after_merging() -> None:
+    """Cap of 5 user lines holds across the merge with a prior fallback."""
+    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+
+    msgs_1 = [UserMessage(content=[TextContent(text=f"older {i}")]) for i in range(4)]
+    state_1 = build_fallback_summary(msgs_1, existing=None)
+
+    msgs_2 = [UserMessage(content=[TextContent(text=f"newer {i}")]) for i in range(4)]
+    state_2 = build_fallback_summary(msgs_2, existing=state_1)
+
+    # 4 prior + 4 new = 8 candidates, capped at 5.
+    user_line_section = [
+        ln for ln in state_2.summary.splitlines() if ln.startswith("User requests:")
+    ][0]
+    items = [
+        s.strip() for s in user_line_section.removeprefix("User requests: ").split(";")
+    ]
+    assert len(items) == 5
+
+
+def test_fallback_summary_after_real_summary_still_embeds_prior() -> None:
+    """When the prior was a REAL summary (is_fallback=False), the new
+    fallback still embeds it under 'Prior context:' — only fallback-after-
+    fallback is the unbounded-growth path."""
+    from cubepi.middleware.compaction.state import CompactionState
+    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+
+    real_prior = CompactionState(summary="## Goal\nbuild the thing", is_fallback=False)
+    msgs = [UserMessage(content=[TextContent(text="next task")])]
+    state = build_fallback_summary(msgs, existing=real_prior)
+    assert "Prior context:" in state.summary
+    assert "build the thing" in state.summary

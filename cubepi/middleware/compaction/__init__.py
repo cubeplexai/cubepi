@@ -167,16 +167,15 @@ class CompactionMiddleware(Middleware):
             _clear_state(ctx)
 
         # Single tail computation — shared by pruner and safe_boundary.
-        # Clamp the effective tail budget to at most half the trigger
-        # threshold. Without this, a configuration where
-        # ``keep_tail_tokens`` exceeds ``max_tokens_before_compact``
-        # produces ``tail_start == 0`` for any history that triggers
-        # compaction — the tail swallows everything and ``safe_boundary``
-        # finds nothing to summarise.
-        effective_tail_tokens = min(
-            self._keep_tail_tokens,
-            max(1, self._max_tokens_before // 2),
-        )
+        # The clamp below ONLY kicks in when ``keep_tail_tokens`` would
+        # swallow the entire triggering history (tail >= threshold). At
+        # smaller tail budgets the configured value is honoured verbatim:
+        # the caller knows their threshold and how much recent context
+        # they want preserved.
+        if self._keep_tail_tokens >= self._max_tokens_before:
+            effective_tail_tokens = max(1, self._max_tokens_before // 2)
+        else:
+            effective_tail_tokens = self._keep_tail_tokens
         tail_start = tail_start_by_tokens(messages, effective_tail_tokens)
 
         # Phase 1: pre-prune old tool results (cheap, no LLM call) — skip
