@@ -224,3 +224,97 @@ def test_tool_call_empty_arguments() -> None:
     )
     formatted = _format_message_for_summary(msg)
     assert "[tool_call:ping]" in formatted
+
+
+# --- dynamic summary budget ---
+
+
+def test_dynamic_budget_floor_for_small_content() -> None:
+    from cubepi.middleware.compaction.summarizer import _dynamic_summary_budget
+
+    small = [UserMessage(content=[TextContent(text="hi")])]
+    assert _dynamic_summary_budget(small) == 1024
+
+
+def test_dynamic_budget_scales_with_content() -> None:
+    from cubepi.middleware.compaction.summarizer import _dynamic_summary_budget
+
+    # 40 000 chars ≈ 20 000 tokens → budget = 20 000 * 0.15 = 3 000
+    large = [UserMessage(content=[TextContent(text="x" * 40_000)])]
+    budget = _dynamic_summary_budget(large)
+    assert budget > 1024
+    assert budget <= 4096
+
+
+def test_dynamic_budget_empty_input_floor() -> None:
+    from cubepi.middleware.compaction.summarizer import _dynamic_summary_budget
+
+    assert _dynamic_summary_budget([]) == 1024
+
+
+def test_dynamic_budget_ceiling() -> None:
+    from cubepi.middleware.compaction.summarizer import _dynamic_summary_budget
+
+    huge = [UserMessage(content=[TextContent(text="x" * 200_000)])]
+    assert _dynamic_summary_budget(huge) == 4096
+
+
+async def test_summarize_uses_dynamic_budget_when_none() -> None:
+    provider = _FakeProvider("Summary.")
+    # max_summary_tokens omitted (None default) → use dynamic
+    await summarize(
+        model=BoundModel(
+            provider=provider,
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
+        messages_to_summarize=[
+            UserMessage(content=[TextContent(text="x" * 40_000)])
+        ],
+        existing=None,
+    )
+    # 20 000 tokens * 0.15 = 3 000
+    captured = provider.calls[0]["max_output_tokens"]
+    assert captured > 1024
+    assert captured <= 4096
+
+
+async def test_summarize_explicit_override_used_verbatim() -> None:
+    provider = _FakeProvider("Summary.")
+    await summarize(
+        model=BoundModel(
+            provider=provider,
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
+        messages_to_summarize=[UserMessage(content=[TextContent(text="x" * 40_000)])],
+        existing=None,
+        max_summary_tokens=777,
+    )
+    assert provider.calls[0]["max_output_tokens"] == 777
+
+
+async def test_summarize_ref_messages_used_for_refs() -> None:
+    """When ref_messages is supplied, refs are taken from it (not from
+    messages_to_summarize). Needed for the pre-pruning case where the
+    transcript is built from pruned content but state must reflect originals."""
+    provider = _FakeProvider("Summary.")
+    transcript = [UserMessage(content=[TextContent(text="pruned content")])]
+    original = [UserMessage(content=[TextContent(text="original full content")])]
+
+    state = await summarize(
+        model=BoundModel(
+            provider=provider,
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
+        messages_to_summarize=transcript,
+        ref_messages=original,
+        existing=None,
+        max_summary_tokens=512,
+    )
+
+    # The transcript sent to the LLM contains "pruned content"
+    transcript_text = provider.calls[0]["messages"][0].content[0].text
+    assert "pruned content" in transcript_text
+    # But refs are computed from the ORIGINAL messages
+    from cubepi.middleware.compaction.state import message_refs
+
+    assert state.summarized_message_refs == message_refs(original)
