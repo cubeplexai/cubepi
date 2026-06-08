@@ -664,7 +664,7 @@ class TestMiddlewareProviders:
                 self._m = model
 
             def extra_llm_calls(self):
-                return [(self._p, self._m)]
+                return [BoundModel(provider=self._p, spec=self._m)]
 
         provider = FauxProvider()
         agent = Agent(
@@ -704,7 +704,7 @@ class TestMiddlewareProviders:
                 self._m = model
 
             def extra_llm_calls(self):
-                return [(_DuckProvider(), self._m)]
+                return [BoundModel(provider=_DuckProvider(), spec=self._m)]
 
         provider = FauxProvider()
         agent = Agent(
