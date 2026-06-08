@@ -187,25 +187,17 @@ class CompactionMiddleware(Middleware):
         if tokens_now < self._max_tokens_before:
             return unpruned_compressed
 
-        # We are going to compact — pre-prune old tool results now so the
-        # summariser transcript and the post-compaction view shrink. Skip
-        # the pruner entirely when ``prune_tool_outputs=False`` (audit-chain
-        # agents that need full historical tool results preserved).
-        pruned_messages = (
-            prune_tool_results(messages, tail_start=tail_start)
-            if self._prune_tool_outputs
-            else list(messages)
-        )
-        compressed = _compressed_view(pruned_messages, state, boundary)
-
-        # Find boundary before guards (needed for anti-thrash new-msgs check).
+        # Find boundary on the ORIGINAL messages. Pruning is deferred until
+        # we're committed to compacting — otherwise a bailout path (no safe
+        # boundary, or the anti-thrash guard firing) would silently return a
+        # pruned view with no state recording the loss.
         new_boundary = safe_boundary(
             messages,
             tail_start=tail_start,
             min_compact=max(self._min_compact, boundary + 1),
         )
         if new_boundary is None or new_boundary <= boundary:
-            return compressed
+            return unpruned_compressed
 
         # Circuit breaker — gates LLM only; fallback always runs.
         failures = _load_int(ctx.extra.get("compaction_failures"), 0)
@@ -245,7 +237,16 @@ class CompactionMiddleware(Middleware):
         enough_new = (new_boundary - boundary) >= _ANTI_THRASH_NEW_MSGS
         if low_savings >= _MAX_LOW_SAVINGS and not force_emergency and not enough_new:
             logger.debug("CompactionMiddleware: skipping — low savings guard active")
-            return compressed
+            return unpruned_compressed
+
+        # Committed to compacting — apply pre-pruning now. Skip entirely when
+        # ``prune_tool_outputs=False`` (audit-chain agents that need full
+        # historical tool results preserved).
+        pruned_messages = (
+            prune_tool_results(messages, tail_start=tail_start)
+            if self._prune_tool_outputs
+            else list(messages)
+        )
 
         if llm_allowed:
             try:

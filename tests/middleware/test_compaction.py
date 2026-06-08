@@ -865,3 +865,78 @@ async def test_under_threshold_does_not_silently_prune_tool_outputs() -> None:
     # The original tool result content is intact in the returned view.
     tool_result_msg = next(m for m in result if isinstance(m, ToolResultMessage))
     assert tool_result_msg.content[0].text == big_text
+
+
+async def test_no_safe_boundary_does_not_silently_prune_tool_outputs() -> None:
+    """Codex round 6 P2: when over threshold but safe_boundary returns None
+    (no valid split point), the middleware must return original messages
+    rather than the pruned view."""
+    from cubepi.providers.base import ToolCall, ToolResultMessage
+
+    provider = _FakeSummaryProvider()
+    # Threshold low enough that the conversation exceeds it.
+    middleware = _make_middleware(provider, max_tokens_before=10, keep_tail_tokens=1000)
+    big_text = "x" * 5000  # > _PRUNE_KEEP_CHARS
+    # Only 2 messages — too short for safe_boundary to find a valid split.
+    messages: list[Message] = [
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="read_file", arguments={"p": "x"})]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="read_file",
+            content=[TextContent(text=big_text)],
+        ),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    # No compaction (no valid boundary), no LLM call.
+    assert provider.calls == []
+    assert "compaction" not in ctx.extra
+    # The big tool result content must NOT have been silently pruned.
+    tool_result_msg = next(m for m in result if isinstance(m, ToolResultMessage))
+    assert tool_result_msg.content[0].text == big_text
+
+
+async def test_anti_thrash_guard_skip_does_not_silently_prune() -> None:
+    """Codex round 6 P2: when the anti-thrash guard fires, the returned view
+    must come from the un-pruned messages so the main model still sees the
+    full tool outputs."""
+    from cubepi.providers.base import ToolCall, ToolResultMessage
+
+    provider = _FakeSummaryProvider()
+    big_text = "x" * 5000  # 2500 tokens via approx_tokens
+    # Threshold chosen so raw_tokens (~2515) > threshold (compaction
+    # triggers) but raw < 1.5 × threshold (emergency override skipped) and
+    # the boundary advance stays under _ANTI_THRASH_NEW_MSGS=8.
+    middleware = _make_middleware(provider, max_tokens_before=2000)
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="read_file", arguments={"p": "x"})]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="read_file",
+            content=[TextContent(text=big_text)],
+        ),
+        _user("turn 3"),
+    ]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=messages,
+        extra={"compaction_low_savings_count": 2},  # guard tripped
+    )
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    # Guard fired — no LLM call, no state written.
+    assert provider.calls == []
+    assert "compaction" not in ctx.extra
+    # The original big tool result is intact in the returned view.
+    tool_result_msg = next(m for m in result if isinstance(m, ToolResultMessage))
+    assert tool_result_msg.content[0].text == big_text
