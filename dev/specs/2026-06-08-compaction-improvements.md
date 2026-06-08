@@ -91,8 +91,31 @@ Rules:
 - No deduplication in this iteration (different from hermes-agent) — keep it
   simple.
 
-The pre-pruning pass runs **before** boundary finding. This means boundary
-finding and the summariser both operate on already-pruned content.
+The pre-pruning pass runs **before** boundary finding. Boundary finding and
+the summariser transcript both operate on the pruned content.
+
+**Critical invariant — refs must come from original messages.**
+`CompactionState.summarized_message_refs` is computed by `message_refs()` which
+SHA256-hashes each message for stale-state detection on the next turn.
+`_state_matches_history()` compares those refs against the *raw* `messages`
+list (never pruned). Therefore refs must always be computed from the original
+unpruned slice `messages[boundary:new_boundary]`, not from `pruned_messages`.
+The pruner output is used **only** for token counting and transcript generation.
+
+In `transform_context`, the call sequence is:
+
+```
+pruned = prune_tool_results(messages, keep_tail=tail_start)
+...
+new_state = summarize(
+    messages_to_summarize=pruned[boundary:new_boundary],  # transcript only
+    ref_messages=messages[boundary:new_boundary],          # refs from originals
+    ...
+)
+```
+
+`summarize()` gains an optional `ref_messages` parameter. When provided, refs
+and IDs are extracted from `ref_messages` instead of `messages_to_summarize`.
 
 ### 2.3 Token-based tail protection
 
@@ -110,6 +133,18 @@ but is deprecated.
 
 `CompactionMiddleware.__init__` replaces `keep_recent_messages` with
 `keep_tail_tokens` (default `8_000`).
+
+**Tail start is computed once and shared.** `transform_context` calls
+`_tail_start_by_tokens(messages, keep_tail_tokens)` once to get `tail_start`
+(an integer index). That same index is passed to both the pruner and to
+`safe_boundary` as the initial candidate. This guarantees both see the same
+protection boundary — no token-to-count conversion.
+
+**Overflow behaviour of `_tail_start_by_tokens`:** if the last message alone
+exceeds `budget`, return `len(messages) - 1` so the tail always contains at
+least one message. If *all* messages together are under budget, return `0`
+(entire history in tail, nothing to compact). The returned index is always in
+`[0, len(messages) - 1]` for non-empty lists; for empty input return `0`.
 
 ### 2.4 Dynamic `max_summary_tokens`
 
@@ -129,37 +164,50 @@ changes to `None`.
 
 ### 2.5 Circuit breaker
 
-Track consecutive summariser failures in `AgentContext.extra["compaction_failures"]`
-(int, default 0). After each failure, increment. On success, reset to 0.
+Track consecutive **LLM summariser** failures in
+`AgentContext.extra["compaction_failures"]` (int, default 0).
 
-When the count reaches `_MAX_FAILURES = 3`, `transform_context` skips the
-summarisation attempt entirely and returns the current compressed view — same
-as the "under threshold" fast path. Log a warning once when the breaker trips.
+- On LLM success: reset to 0.
+- On LLM failure: increment; then attempt fallback summary (§2.7). The fallback
+  is a successful compaction (context shrinks) — it does NOT count as an LLM
+  failure for circuit-breaker purposes.
+- When `compaction_failures >= _MAX_FAILURES = 3`: skip the LLM call but
+  **still run the fallback**. The breaker gates only the expensive LLM call.
+  Log a warning once when the breaker first trips.
+- The LLM failure counter resets only when the LLM summariser succeeds, not
+  when the fallback succeeds.
 
-The breaker resets automatically the first time the agent successfully completes
-a compaction.
+This separation ensures the agent continues to compact (via fallback) even
+after three LLM failures, so context never grows unbounded due to a temporarily
+broken summariser model.
 
 ### 2.6 Anti-thrashing guard
 
-After each successful compaction, record:
+After each compaction attempt (LLM or fallback), record savings:
 
 ```python
-ctx.extra["compaction_savings_pct"] = savings_pct   # float 0–100
+savings_pct = (tokens_before - tokens_after) / tokens_before * 100
+ctx.extra["compaction_low_savings_count"] = (
+    low_savings + 1 if savings_pct < _MIN_SAVINGS_PCT else 0
+)
 ```
 
-Where `savings_pct = (tokens_before - tokens_after) / tokens_before * 100`.
+When `compaction_low_savings_count >= _MAX_LOW_SAVINGS = 2`, skip the next
+compaction trigger. Log a debug message.
 
-On the **next** compaction trigger, check: if the previous `savings_pct < 10.0`
-**and** the current `savings_pct` (computed speculatively by comparing
-`approx_tokens(compressed)` before and after a dry-run boundary search) would
-also be < 10.0, skip compaction. Log a debug message.
+**Reset conditions** (any one clears the guard):
+1. A subsequent compaction saves ≥ `_MIN_SAVINGS_PCT = 10.0 %` — tracked by
+   resetting the counter to 0 in the savings recording step above.
+2. The candidate `new_boundary` advances by `_ANTI_THRASH_NEW_MSGS = 8` or
+   more messages beyond the current boundary — enough new content has
+   accumulated that compaction is likely worthwhile again. Check this before
+   the guard fires: if `new_boundary - boundary >= _ANTI_THRASH_NEW_MSGS`,
+   skip the guard and proceed.
+3. Context exceeds `max_tokens_before_compact * _ANTI_THRASH_FORCE_RATIO = 1.5`
+   — treat as an emergency override regardless of prior savings.
 
-Simpler implementation: skip the speculative dry-run; instead, after two
-consecutive savings_pct < 10.0, skip until the breaker resets (next successful
-compaction).
-
-Track consecutive low-savings count in
-`ctx.extra["compaction_low_savings_count"]` (int).
+These reset conditions prevent the guard from permanently disabling compaction
+for a long-running agent.
 
 ### 2.7 Static fallback summary
 
@@ -247,11 +295,12 @@ def _user(text="hi"):
 def _assistant_with_call(tool_name, call_id, args=None):
     return AssistantMessage(content=[ToolCall(id=call_id, name=tool_name, arguments=args or {})])
 
-def _result(call_id, text, tool_name=None):
-    r = ToolResultMessage(tool_call_id=call_id, content=[TextContent(text=text)])
-    if tool_name:
-        r.tool_name = tool_name
-    return r
+def _result(call_id, text, tool_name="tool"):
+    return ToolResultMessage(
+        tool_call_id=call_id,
+        tool_name=tool_name,
+        content=[TextContent(text=text)],
+    )
 
 def test_short_result_kept_intact():
     msgs = [
@@ -514,17 +563,36 @@ def _big_user(chars: int) -> UserMessage:
 def test_token_based_tail_protects_by_budget():
     # 4 messages, each ~2000 chars ≈ 1000 tokens
     msgs = [_big_user(2000), _big_user(2000), _big_user(2000), _big_user(2000)]
-    # tail budget = 1500 tokens → should protect last 2 messages (≈ 2000 tokens)
+    # tail budget = 1500 tokens → protects last 2 messages (first one that fits
+    # brings accumulated to ~1000, second brings it to ~2000 > 1500 so tail
+    # starts at index 2, meaning messages[2] and [3] are protected)
     boundary = safe_boundary(msgs, keep_tail_tokens=1500, min_compact=1)
-    # boundary must be ≤ 2 (at most 2 messages in tail)
     assert boundary is not None
-    assert boundary <= 2
+    assert boundary == 2  # exactly 2 messages protected
 
-def test_token_based_tail_falls_back_to_first_message_if_all_fit():
+def test_token_based_tail_all_fit_returns_none():
+    # all 3 messages together are under budget → nothing to compact
     msgs = [_big_user(10), _big_user(10), _big_user(10)]
     boundary = safe_boundary(msgs, keep_tail_tokens=100_000, min_compact=1)
-    # everything fits in tail budget, nothing to compact
     assert boundary is None
+
+def test_token_based_tail_oversized_last_message():
+    # last message alone exceeds budget — it must still be in the tail
+    msgs = [_big_user(100), _big_user(100), _big_user(100_000)]
+    boundary = safe_boundary(msgs, keep_tail_tokens=1000, min_compact=1)
+    # tail_start = len-1 = 2 (clamped), candidate walks back to find UserMessage
+    # message[2] is UserMessage → safe_boundary returns 2
+    assert boundary == 2
+
+def test_token_based_exact_budget():
+    # each message exactly fits budget — tail has exactly 1 message
+    msgs = [_big_user(2000), _big_user(2000), _big_user(2000)]
+    # budget = 1000 tokens; each msg ≈ 1000 tokens; walking back: first msg
+    # brings accumulated to 1000 = budget (not strictly over), so include it.
+    # second msg would push to 2000 > 1000, so tail_start = 2
+    boundary = safe_boundary(msgs, keep_tail_tokens=1000, min_compact=1)
+    assert boundary is not None
+    assert boundary == 2
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -582,13 +650,23 @@ def safe_boundary(
 
 
 def _tail_start_by_tokens(messages: list[Message], budget: int) -> int:
-    """Walk backward accumulating token estimates; return where the tail starts."""
+    """Walk backward accumulating token estimates; return where the tail starts.
+
+    Overflow rule: if a single message exceeds ``budget``, it is still included
+    in the tail (tail always contains at least one message for non-empty input).
+    Returns an index in [0, len(messages)-1] for non-empty input; 0 for empty.
+    """
+    if not messages:
+        return 0
     accumulated = 0
     for i in range(len(messages) - 1, -1, -1):
         msg_tokens = approx_tokens([messages[i]])
-        if accumulated + msg_tokens > budget:
+        if accumulated + msg_tokens > budget and accumulated > 0:
+            # adding this message would exceed budget and tail already has
+            # at least one message — stop here
             return i + 1
         accumulated += msg_tokens
+    # all messages fit in budget (or only one message total)
     return 0
 
 
@@ -675,7 +753,7 @@ def _dynamic_summary_budget(messages: list[Message]) -> int:
     return max(_SUMMARY_MIN, min(int(content_tokens * _SUMMARY_RATIO), _SUMMARY_MAX))
 ```
 
-Update `summarize()` signature — `max_summary_tokens` becomes optional:
+Update `summarize()` signature — add `ref_messages` and make `max_summary_tokens` optional:
 
 ```python
 async def summarize(
@@ -683,15 +761,29 @@ async def summarize(
     model: BoundModel,
     messages_to_summarize: list[Message],
     existing: CompactionState | None,
-    max_summary_tokens: int | None = None,   # None → dynamic
+    ref_messages: list[Message] | None = None,  # overrides source for ID/refs
+    max_summary_tokens: int | None = None,       # None → dynamic
     abort_signal: asyncio.Event | None = None,
 ) -> CompactionState:
+    ref_source = ref_messages if ref_messages is not None else messages_to_summarize
     budget = max_summary_tokens if max_summary_tokens is not None else _dynamic_summary_budget(messages_to_summarize)
 
-    response = await model.generate(
-        ...
-        max_output_tokens=budget,
-        ...
+    # ... existing generate() call unchanged ...
+
+    # Replace ref extraction to use ref_source instead of messages_to_summarize:
+    new_ids = [str(getattr(m, "id", "") or "") for m in ref_source]
+    new_ids = [mid for mid in new_ids if mid]
+    prior_ids = list(existing.summarized_message_ids) if existing else []
+    prior_refs = list(existing.summarized_message_refs) if existing else []
+    last_id = (
+        new_ids[-1] if new_ids
+        else (existing.last_summarized_message_id if existing else None)
+    )
+    return CompactionState(
+        summary=text.strip(),
+        summarized_message_ids=prior_ids + new_ids,
+        summarized_message_refs=prior_refs + message_refs(ref_source),
+        last_summarized_message_id=last_id,
     )
 ```
 
@@ -783,8 +875,16 @@ def build_fallback_summary(
     messages_to_summarize: list[Message],
     *,
     existing: CompactionState | None,
+    ref_messages: list[Message] | None = None,
 ) -> CompactionState:
-    """Deterministic fallback when the LLM summariser is unavailable."""
+    """Deterministic fallback when the LLM summariser is unavailable.
+
+    ``ref_messages`` overrides which messages are used for ID/ref extraction.
+    Pass the original (unpruned) slice when the transcript was built from pruned
+    content so SHA256 refs stay consistent with ``_state_matches_history``.
+    """
+    ref_source = ref_messages if ref_messages is not None else messages_to_summarize
+
     user_lines: list[str] = []
     tool_names: list[str] = []
 
@@ -813,13 +913,13 @@ def build_fallback_summary(
 
     prior_ids = list(existing.summarized_message_ids) if existing else []
     prior_refs = list(existing.summarized_message_refs) if existing else []
-    new_ids = [str(getattr(m, "id", "") or "") for m in messages_to_summarize]
+    new_ids = [str(getattr(m, "id", "") or "") for m in ref_source]
     new_ids = [i for i in new_ids if i]
 
     return CompactionState(
         summary=summary,
         summarized_message_ids=prior_ids + new_ids,
-        summarized_message_refs=prior_refs + message_refs(messages_to_summarize),
+        summarized_message_refs=prior_refs + message_refs(ref_source),
         last_summarized_message_id=new_ids[-1] if new_ids else (existing.last_summarized_message_id if existing else None),
         is_fallback=True,
     )
@@ -858,40 +958,221 @@ This task updates `CompactionMiddleware` to:
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `tests/middleware/test_compaction.py`:
+Add to `tests/middleware/test_compaction.py`. The file already has `FauxProvider`
+fixtures and helpers — adapt the pattern. A "failing model" is a `BoundModel`
+whose `generate()` always raises `RuntimeError`. Look at the existing fixture
+setup in the file; create `failing_model` similarly by making `FauxProvider`
+raise on every call, or by using a minimal stub.
 
 ```python
-# Helpers already exist in the file — adapt as needed.
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+from cubepi.middleware.compaction import CompactionMiddleware
+from cubepi.agent.types import AgentContext
+from cubepi.providers.base import (
+    AssistantMessage, BoundModel, TextContent, ToolCall,
+    ToolResultMessage, UserMessage,
+)
 
-async def test_circuit_breaker_stops_after_three_failures(faux_provider, failing_model):
-    """After 3 consecutive LLM failures, no more summariser calls."""
-    # failing_model: a BoundModel whose provider always raises RuntimeError
+# --- helpers ---
+
+def _big_msgs(n: int, chars: int = 2000) -> list:
+    """Alternating user/assistant messages large enough to trigger compaction."""
+    msgs = []
+    for i in range(n):
+        if i % 2 == 0:
+            msgs.append(UserMessage(content=[TextContent(text="q" * chars)]))
+        else:
+            msgs.append(AssistantMessage(content=[TextContent(text="a" * chars)]))
+    return msgs
+
+def _failing_bound_model() -> BoundModel:
+    """BoundModel whose generate() always raises RuntimeError."""
+    m = MagicMock(spec=BoundModel)
+    m.generate = AsyncMock(side_effect=RuntimeError("summariser down"))
+    return m
+
+def _counting_bound_model(summary: str = "ok") -> tuple:
+    """BoundModel that records call count and returns a fixed summary."""
+    from cubepi.providers.base import ModelResponse
+    call_count = {"n": 0}
+    resp = MagicMock(spec=ModelResponse)
+    resp.content = [TextContent(text=summary)]
+    resp.error_message = None
+    resp.usage = None
+    async def _generate(*args, **kwargs):
+        call_count["n"] += 1
+        return resp
+    m = MagicMock(spec=BoundModel)
+    m.generate = _generate
+    return m, call_count
+
+# --- circuit breaker ---
+
+async def test_circuit_breaker_stops_after_three_failures():
+    """After 3 LLM failures the breaker opens; 4th call uses fallback, not LLM."""
+    failing = _failing_bound_model()
     mw = CompactionMiddleware(
-        summary_model=failing_model,
-        max_tokens_before_compact=10,
-        keep_tail_tokens=500,
+        summary_model=failing,
+        max_tokens_before_compact=100,
+        keep_tail_tokens=200,
     )
     ctx = AgentContext(thread_id="t1")
-    big_messages = [...]  # enough messages to trigger compaction
+    msgs = _big_msgs(10, chars=200)  # well over 100-token threshold
 
-    for _ in range(4):
-        await mw.transform_context(big_messages, ctx=ctx)
+    # Turns 1-3: LLM fails, fallback writes state, failure counter climbs
+    for i in range(3):
+        result = await mw.transform_context(msgs, ctx=ctx)
+        assert ctx.extra["compaction_failures"] == i + 1
+        # fallback state still written — result is compressed
+        assert "compaction" in ctx.extra
 
-    assert ctx.extra.get("compaction_failures", 0) >= 3
-    # 4th call must NOT invoke the model (check call count on failing_model)
+    # Turn 4: breaker is open — LLM must NOT be called again
+    call_count_before = failing.generate.call_count
+    await mw.transform_context(msgs, ctx=ctx)
+    assert failing.generate.call_count == call_count_before  # no new LLM call
+    # failure counter frozen at 3 (not incremented beyond MAX_FAILURES)
+    assert ctx.extra["compaction_failures"] == 3
 
-async def test_anti_thrashing_skips_when_savings_below_threshold(faux_provider):
-    """If compaction saves < 10% twice in a row, skip on the third trigger."""
-    ...
-
-async def test_keep_tail_tokens_replaces_keep_recent_messages(faux_provider):
-    """CompactionMiddleware accepts keep_tail_tokens, not keep_recent_messages."""
+async def test_circuit_breaker_resets_on_llm_success():
+    """Failure counter resets to 0 after LLM summariser succeeds once."""
+    model, calls = _counting_bound_model("summary text")
     mw = CompactionMiddleware(
-        summary_model=...,
+        summary_model=model,
+        max_tokens_before_compact=100,
+        keep_tail_tokens=200,
+    )
+    ctx = AgentContext(thread_id="t1")
+    ctx.extra["compaction_failures"] = 2  # pre-seed: 2 prior failures
+    msgs = _big_msgs(10, chars=200)
+
+    await mw.transform_context(msgs, ctx=ctx)
+    assert ctx.extra["compaction_failures"] == 0  # reset after success
+
+async def test_fallback_written_when_breaker_open():
+    """When breaker is open, fallback still runs and compresses context."""
+    failing = _failing_bound_model()
+    mw = CompactionMiddleware(
+        summary_model=failing,
+        max_tokens_before_compact=100,
+        keep_tail_tokens=200,
+    )
+    ctx = AgentContext(thread_id="t1")
+    ctx.extra["compaction_failures"] = 3  # breaker already open
+    msgs = _big_msgs(10, chars=200)
+
+    result = await mw.transform_context(msgs, ctx=ctx)
+    # fallback must have written state (context was compressed)
+    assert "compaction" in ctx.extra
+    assert len(result) < len(msgs)
+
+# --- anti-thrashing ---
+
+async def test_anti_thrashing_skips_after_two_low_savings():
+    """After two low-savings compactions, the third trigger is skipped."""
+    model, calls = _counting_bound_model("x")  # very short summary → low savings
+    mw = CompactionMiddleware(
+        summary_model=model,
+        max_tokens_before_compact=100,
+        keep_tail_tokens=200,
+    )
+    ctx = AgentContext(thread_id="t1")
+    ctx.extra["compaction_low_savings_count"] = 2  # guard already tripped
+    msgs = _big_msgs(10, chars=200)
+
+    call_count_before = calls["n"]
+    await mw.transform_context(msgs, ctx=ctx)
+    assert calls["n"] == call_count_before  # no LLM call made
+
+async def test_anti_thrashing_resets_after_good_savings():
+    """Low-savings counter resets to 0 when a compaction saves >= 10%."""
+    # Use a summary that is significantly shorter than the messages
+    model, calls = _counting_bound_model("short summary")
+    mw = CompactionMiddleware(
+        summary_model=model,
+        max_tokens_before_compact=100,
+        keep_tail_tokens=200,
+    )
+    ctx = AgentContext(thread_id="t1")
+    ctx.extra["compaction_low_savings_count"] = 1  # 1 prior low-savings run
+    msgs = _big_msgs(10, chars=2000)  # very large messages → high savings
+
+    await mw.transform_context(msgs, ctx=ctx)
+    assert ctx.extra.get("compaction_low_savings_count", 0) == 0  # reset
+
+async def test_anti_thrashing_resets_when_enough_new_messages():
+    """Guard is bypassed when new_boundary advances by >= _ANTI_THRASH_NEW_MSGS."""
+    model, calls = _counting_bound_model("summary")
+    mw = CompactionMiddleware(
+        summary_model=model,
+        max_tokens_before_compact=100,
+        keep_tail_tokens=200,
+    )
+    ctx = AgentContext(thread_id="t1")
+    ctx.extra["compaction_low_savings_count"] = 2  # guard tripped
+    # pre-seed a low boundary so new_boundary - boundary will be >= 8
+    ctx.extra["compaction_until_msg_index"] = 0
+
+    msgs = _big_msgs(20, chars=200)  # enough new messages beyond boundary
+    call_count_before = calls["n"]
+    await mw.transform_context(msgs, ctx=ctx)
+    # LLM was called despite guard because enough new msgs accumulated
+    assert calls["n"] > call_count_before
+
+# --- pruned refs do not corrupt state ---
+
+async def test_pruned_messages_do_not_corrupt_state_refs():
+    """State refs must survive even when tool result content is pruned."""
+    model, _ = _counting_bound_model("summary of work done")
+    mw = CompactionMiddleware(
+        summary_model=model,
+        max_tokens_before_compact=50,
+        keep_tail_tokens=100,
+    )
+    ctx = AgentContext(thread_id="t1")
+
+    # Conversation with a large tool result that will be pruned
+    big_result_text = "output " * 500  # >> 120 chars → will be pruned
+    msgs = [
+        UserMessage(content=[TextContent(text="run tests")]),
+        AssistantMessage(content=[ToolCall(id="c1", name="bash", arguments={"cmd": "pytest"})]),
+        ToolResultMessage(tool_call_id="c1", tool_name="bash", content=[TextContent(text=big_result_text)]),
+        UserMessage(content=[TextContent(text="what next?")]),
+        AssistantMessage(content=[TextContent(text="fix the failures")]),
+        UserMessage(content=[TextContent(text="ok fix them")]),
+    ]
+
+    # First turn: compaction runs, state is written
+    await mw.transform_context(msgs, ctx=ctx)
+    assert "compaction" in ctx.extra
+    boundary_after_first = ctx.extra["compaction_until_msg_index"]
+
+    # Second turn with same messages: state must validate (not cleared)
+    await mw.transform_context(msgs, ctx=ctx)
+    # boundary must not have been reset to 0 (stale state detection fired)
+    assert ctx.extra.get("compaction_until_msg_index", 0) >= boundary_after_first
+
+# --- keep_tail_tokens replaces keep_recent_messages ---
+
+def test_keep_tail_tokens_constructor():
+    """CompactionMiddleware accepts keep_tail_tokens."""
+    model, _ = _counting_bound_model()
+    mw = CompactionMiddleware(
+        summary_model=model,
         max_tokens_before_compact=100,
         keep_tail_tokens=2000,
     )
     assert mw._keep_tail_tokens == 2000
+
+def test_keep_recent_messages_no_longer_accepted():
+    """keep_recent_messages is no longer a valid constructor argument."""
+    model, _ = _counting_bound_model()
+    with pytest.raises(TypeError):
+        CompactionMiddleware(
+            summary_model=model,
+            max_tokens_before_compact=100,
+            keep_recent_messages=8,  # removed parameter
+        )
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -908,6 +1189,8 @@ Expected: `TypeError` or `AssertionError`.
 _MAX_FAILURES = 3
 _MIN_SAVINGS_PCT = 10.0
 _MAX_LOW_SAVINGS = 2
+_ANTI_THRASH_NEW_MSGS = 8
+_ANTI_THRASH_FORCE_RATIO = 1.5
 
 
 class CompactionMiddleware(Middleware):
@@ -945,26 +1228,20 @@ class CompactionMiddleware(Middleware):
             state = None
             _clear_state(ctx)
 
+        # Compute shared tail start once — used by both pruner and safe_boundary
+        tail_start = _tail_start_by_tokens(messages, self._keep_tail_tokens)
+
         # Phase 1: pre-prune old tool results (cheap, no LLM call)
-        pruned_messages = prune_tool_results(messages, keep_tail=self._keep_tail_tokens // 500 or 8)
+        # Pruner uses the same tail_start so it never touches protected messages.
+        pruned_messages = prune_tool_results(messages, keep_tail=len(messages) - tail_start)
 
         compressed = _compressed_view(pruned_messages, state, boundary)
 
-        if approx_tokens(compressed) < self._max_tokens_before:
+        tokens_now = approx_tokens(compressed)
+        if tokens_now < self._max_tokens_before:
             return compressed
 
-        # Circuit breaker
-        failures = ctx.extra.get("compaction_failures", 0)
-        if failures >= _MAX_FAILURES:
-            logger.warning("CompactionMiddleware: circuit breaker open (%d failures)", failures)
-            return compressed
-
-        # Anti-thrashing guard
-        low_savings = ctx.extra.get("compaction_low_savings_count", 0)
-        if low_savings >= _MAX_LOW_SAVINGS:
-            logger.debug("CompactionMiddleware: skipping — low savings in last %d runs", low_savings)
-            return compressed
-
+        # Find boundary before running guards (needed for anti-thrash new-msgs check)
         new_boundary = safe_boundary(
             pruned_messages,
             keep_tail_tokens=self._keep_tail_tokens,
@@ -973,23 +1250,48 @@ class CompactionMiddleware(Middleware):
         if new_boundary is None or new_boundary <= boundary:
             return compressed
 
+        # Circuit breaker — gates LLM only; fallback always runs
+        failures = ctx.extra.get("compaction_failures", 0)
+        llm_allowed = failures < _MAX_FAILURES
+        if not llm_allowed:
+            logger.warning(
+                "CompactionMiddleware: LLM circuit breaker open (%d failures), using fallback",
+                failures,
+            )
+
+        # Anti-thrashing guard (skips both LLM and fallback)
+        low_savings = ctx.extra.get("compaction_low_savings_count", 0)
+        force_emergency = tokens_now >= self._max_tokens_before * _ANTI_THRASH_FORCE_RATIO
+        enough_new = (new_boundary - boundary) >= _ANTI_THRASH_NEW_MSGS
+        if low_savings >= _MAX_LOW_SAVINGS and not force_emergency and not enough_new:
+            logger.debug("CompactionMiddleware: skipping — low savings guard active")
+            return compressed
+
         tokens_before = approx_tokens(compressed)
 
-        try:
-            new_state = await summarize(
-                model=self._summary_model,
-                messages_to_summarize=pruned_messages[boundary:new_boundary],
-                existing=state,
-                max_summary_tokens=self._max_summary_tokens,
-                abort_signal=signal,
-            )
-            ctx.extra["compaction_failures"] = 0
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("CompactionMiddleware summariser failed: %s", exc)
-            ctx.extra["compaction_failures"] = failures + 1
-            # Use fallback summary so context shrinks even without LLM
+        if llm_allowed:
+            try:
+                new_state = await summarize(
+                    model=self._summary_model,
+                    messages_to_summarize=pruned_messages[boundary:new_boundary],
+                    ref_messages=messages[boundary:new_boundary],   # refs from originals
+                    existing=state,
+                    max_summary_tokens=self._max_summary_tokens,
+                    abort_signal=signal,
+                )
+                ctx.extra["compaction_failures"] = 0
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("CompactionMiddleware LLM summariser failed: %s", exc)
+                ctx.extra["compaction_failures"] = failures + 1
+                new_state = build_fallback_summary(
+                    pruned_messages[boundary:new_boundary],
+                    ref_messages=messages[boundary:new_boundary],
+                    existing=state,
+                )
+        else:
             new_state = build_fallback_summary(
                 pruned_messages[boundary:new_boundary],
+                ref_messages=messages[boundary:new_boundary],
                 existing=state,
             )
 
@@ -1001,22 +1303,26 @@ class CompactionMiddleware(Middleware):
         tokens_after = approx_tokens(result)
         if tokens_before > 0:
             savings_pct = (tokens_before - tokens_after) / tokens_before * 100
-            if savings_pct < _MIN_SAVINGS_PCT:
-                ctx.extra["compaction_low_savings_count"] = low_savings + 1
-            else:
-                ctx.extra["compaction_low_savings_count"] = 0
+            ctx.extra["compaction_low_savings_count"] = (
+                low_savings + 1 if savings_pct < _MIN_SAVINGS_PCT else 0
+            )
 
         return result
 ```
 
-Also add to the imports at the top:
+Add to imports at the top of `__init__.py`:
 
 ```python
+from cubepi.middleware.compaction.boundary import _tail_start_by_tokens
 from cubepi.middleware.compaction.pruner import prune_tool_results
 from cubepi.middleware.compaction.summarizer import build_fallback_summary
 ```
 
-Update `safe_boundary` call to use `keep_tail_tokens`.
+Also update `summarize()` and `build_fallback_summary()` in `summarizer.py` to
+accept `ref_messages: list[Message] | None = None`. When provided, use
+`ref_messages` instead of `messages_to_summarize` for all ref/ID extraction.
+When `None`, fall back to `messages_to_summarize` (existing behaviour, no
+breaking change for direct callers).
 
 - [ ] **Step 4: Run full compaction test suite**
 
