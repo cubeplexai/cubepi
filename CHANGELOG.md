@@ -129,6 +129,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`FallbackBoundModel.generate()` now triggers failover on an error
+  `AssistantMessage`.** Previously `generate()` only caught stream-level
+  exceptions; a provider that completed the stream but returned an
+  `AssistantMessage` with `stop_reason="error"` was passed through as a
+  successful result instead of attempting the next model in the chain.
+
 - **`SubagentMiddleware` now strips checkpointed-HITL elements from a child
   agent's inherited tools / middleware.** Previously, passing the parent
   agent's `ask_user_tool(channel)` in `shared_tools` (the common pattern
