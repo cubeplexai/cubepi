@@ -6,7 +6,12 @@ import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from cubepi.errors import ContextLengthExceeded, ProviderError, ProviderUnavailable, RateLimited
+from cubepi.errors import (
+    ContextLengthExceeded,
+    ProviderError,
+    ProviderUnavailable,
+    RateLimited,
+)
 from cubepi.providers.base import (
     AssistantMessage,
     BoundModel,
@@ -50,7 +55,9 @@ class FallbackBoundModel:
     chain: tuple[BoundModel, ...]
     trigger_errors: frozenset[type[ProviderError]] = DEFAULT_TRIGGER_ERRORS
     on_failover: (
-        Callable[[BoundModel, BoundModel | None, BaseException | str], Awaitable[None] | None]
+        Callable[
+            [BoundModel, BoundModel | None, BaseException | str], Awaitable[None] | None
+        ]
         | None
     ) = None
 
