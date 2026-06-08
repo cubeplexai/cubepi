@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import json
+import logging
 import time
 import traceback
 import uuid
@@ -42,6 +43,7 @@ from cubepi.agent.types import (
     ToolExecutionStartEvent,
 )
 from cubepi.providers.base import (
+    BoundModel,
     StreamEvent,
     ToolCall,
     ToolResultMessage,
@@ -290,6 +292,25 @@ class Recorder:
                 except Exception:
                     extra = []
                 for bound in extra:
+                    # Defensive: a third-party middleware that hasn't
+                    # migrated from the pre-BoundModel ``(provider, model)``
+                    # tuple contract would raise AttributeError on
+                    # ``bound.spec`` here, killing tracing attach for the
+                    # whole agent. Mirror the existing tolerance shown by
+                    # the ``except Exception`` above and the
+                    # ``_DuckMiddleware`` skip path: warn once per entry,
+                    # drop the bad item, keep the rest of attach working.
+                    if not isinstance(bound, BoundModel):
+                        logging.getLogger("cubepi.tracing").warning(
+                            "cubepi tracing: middleware %s returned a "
+                            "non-BoundModel entry (%s) from "
+                            "extra_llm_calls(); skipping. The "
+                            "(Provider, Model) tuple form was removed in "
+                            "this release — return a BoundModel instead.",
+                            type(mw).__name__,
+                            type(bound).__name__,
+                        )
+                        continue
                     spec = bound.spec
                     key = (spec.provider_id, spec.id)
                     if key != agent_key:

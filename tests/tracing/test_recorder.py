@@ -725,6 +725,44 @@ class TestMiddlewareProviders:
         await tracer.shutdown()
         assert any(s.name.startswith("chat ") for s in exporter.spans)
 
+    async def test_middleware_extra_llm_calls_legacy_tuple_is_skipped(self, caplog):
+        # A third-party middleware that hasn't migrated from the
+        # pre-BoundModel ``(provider, model)`` tuple contract must not kill
+        # tracing attach — the recorder skips the bad entry, logs a
+        # warning, and continues. Same defensive philosophy as the raising
+        # and duck-provider cases below.
+        from cubepi.middleware.base import Middleware
+
+        legacy_provider = FauxProvider()
+        legacy_model = Model(id="legacy-m", provider_id="legacy")
+
+        class _LegacyTupleMiddleware(Middleware):
+            def extra_llm_calls(self):
+                return [(legacy_provider, legacy_model)]
+
+        provider = FauxProvider()
+        agent = Agent(
+            model=BoundModel(provider=provider, spec=MODEL),
+            system_prompt="test",
+            middleware=[_LegacyTupleMiddleware()],
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            exporters=[exporter],
+        )
+        with caplog.at_level("WARNING", logger="cubepi.tracing"):
+            tracer.attach(agent)
+        provider.append_responses([faux_assistant_message("ok")])
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+        assert any(s.name.startswith("chat ") for s in exporter.spans)
+        assert any("non-BoundModel" in record.message for record in caplog.records), (
+            "expected a warning about the legacy tuple entry"
+        )
+
     async def test_middleware_extra_llm_calls_raising_is_swallowed(self):
         # If a middleware's ``extra_llm_calls()`` raises during attach the
         # recorder must keep going — the agent's own provider is the
