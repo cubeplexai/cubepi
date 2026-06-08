@@ -676,10 +676,10 @@ class TodoListMiddleware(Middleware):
         # --- payload validation (parallel calls, schema, invariants) --------
         parallel_errors = self._parallel_write_todos_error(last_assistant_msg)
         if parallel_errors is not None:
-            return TurnAction(
-                inject_messages=cast("list[Any]", parallel_errors),
-                decision="loop_to_model",
-            )
+            # decision="natural" so cubepi defers inject_messages until after the
+            # duplicate calls' ToolResultMessages are appended, keeping Anthropic-style
+            # tool_use/tool_result ordering intact.
+            return TurnAction(inject_messages=cast("list[Any]", parallel_errors))
 
         validation_errors = _todo_validation_errors_local(
             last_assistant_msg,
