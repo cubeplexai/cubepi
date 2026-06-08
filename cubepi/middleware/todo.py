@@ -36,7 +36,13 @@ from cubepi.agent.types import (
     AgentToolResult,
 )
 from cubepi.middleware.base import Middleware, TurnAction
-from cubepi.providers.base import AssistantMessage, Message, TextContent, ToolCall, UserMessage
+from cubepi.providers.base import (
+    AssistantMessage,
+    Message,
+    TextContent,
+    ToolCall,
+    UserMessage,
+)
 from cubepi.types import StructuredValue
 from pydantic import BaseModel
 
@@ -229,7 +235,9 @@ def _validated_write_todos_payload(
                 "Error: Received invalid `write_todos` payload. Each todo must include "
                 "`content` and `status` fields."
             )
-        if not isinstance(todo.get("content"), str) or not isinstance(todo.get("status"), str):
+        if not isinstance(todo.get("content"), str) or not isinstance(
+            todo.get("status"), str
+        ):
             return None, (
                 "Error: Received invalid `write_todos` payload. Each todo must include "
                 "`content` and `status` fields."
@@ -297,7 +305,9 @@ def _pure_text_assistant_response(last_assistant_msg: AssistantMessage) -> bool:
         isinstance(block, TextContent) and block.text.strip()
         for block in last_assistant_msg.content
     )
-    has_tool_calls = any(isinstance(block, ToolCall) for block in last_assistant_msg.content)
+    has_tool_calls = any(
+        isinstance(block, ToolCall) for block in last_assistant_msg.content
+    )
     return has_text and not has_tool_calls
 
 
@@ -355,7 +365,9 @@ def _make_user_message(text: str) -> UserMessage:
 # ---------------------------------------------------------------------------
 
 
-def _make_write_todos_tool(extra_ref: Callable[[], dict[str, Any]]) -> AgentTool[WriteTodosInput]:
+def _make_write_todos_tool(
+    extra_ref: Callable[[], dict[str, Any]],
+) -> AgentTool[WriteTodosInput]:
     """Build the ``write_todos`` AgentTool that stores results in extra.
 
     The tool:
@@ -643,7 +655,9 @@ class TodoListMiddleware(Middleware):
             # Still in blocked state: re-inject the blocked guard message.
             extra["todo_finalization_correction"] = None
             return TurnAction(
-                inject_messages=[_make_user_message(_blocked_todo_guard_message(blocked_guard))],
+                inject_messages=[
+                    _make_user_message(_blocked_todo_guard_message(blocked_guard))
+                ],
                 decision="loop_to_model",
             )
 
@@ -666,7 +680,9 @@ class TodoListMiddleware(Middleware):
             extra.get("todos"),
         )
         if validation_errors:
-            inject: list[Any] = [_make_user_message(e["error"]) for e in validation_errors]
+            inject: list[Any] = [
+                _make_user_message(e["error"]) for e in validation_errors
+            ]
             return TurnAction(inject_messages=inject)
 
         # --- stale-todo soft reminder ---------------------------------------
@@ -680,7 +696,8 @@ class TodoListMiddleware(Middleware):
         if unfinished and has_non_todo_tools and not has_write_todos:
             stale_count_new = extra.get("todo_stale_iterations", 0) + 1
             if stale_count_new >= STALE_REMINDER_THRESHOLD and (
-                (stale_count_new - STALE_REMINDER_THRESHOLD) % STALE_REMINDER_INTERVAL == 0
+                (stale_count_new - STALE_REMINDER_THRESHOLD) % STALE_REMINDER_INTERVAL
+                == 0
             ):
                 stale_injections.append(_make_user_message(_STALE_REMINDER_TEXT))
         elif has_write_todos or not has_non_todo_tools:
