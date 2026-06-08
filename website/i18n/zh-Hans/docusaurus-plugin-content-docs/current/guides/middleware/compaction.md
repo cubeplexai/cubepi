@@ -25,15 +25,17 @@ agent = Agent(
         CompactionMiddleware(
             summary_model=summary_model,
             max_tokens_before_compact=80_000,
-            keep_recent_messages=8,
-            max_summary_tokens=1024,
+            keep_tail_tokens=8_000,         # 受保护尾部的 token 预算
+            # max_summary_tokens=None → 动态预算（推荐）
         ),
     ],
 )
 ```
 
 摘要调用使用 `Provider.generate(...)`，并设置 `temperature=0.0`、
-`thinking="off"`、`max_output_tokens=max_summary_tokens`。
+`thinking="off"`。当 `max_summary_tokens=None`（默认）时，
+`max_output_tokens` 根据内容大小动态计算（下限 1024、上限 4096）；
+传入显式整数则原样使用。
 
 ## 持久化内容
 
@@ -54,14 +56,19 @@ middleware 会向 `AgentContext.extra` 写入两个键：
 CompactionMiddleware(
     summary_model=cheap_model,
     max_tokens_before_compact=80_000,
-    keep_recent_messages=8,
-    max_summary_tokens=1024,
+    keep_tail_tokens=8_000,
 )
 ```
 
 如果模型上下文很大、希望减少摘要调用，可以提高
 `max_tokens_before_compact`。如果最近工具输出或用户修正很重要，可以提高
-`keep_recent_messages`。长时间研究或编码会话可提高 `max_summary_tokens`。
+`keep_tail_tokens`——这是基于 `approx_tokens` 的 token 预算，
+能根据近期流量自动适配（8 000 大约能保护 1–2 个大工具结果，或
+30+ 条短消息）。
+
+默认 `max_summary_tokens=None` 时，summariser 输出预算按
+`clamp(content_tokens × 0.15, 1024, 4096)` 动态计算。传入显式整数
+则原样固定。
 
 ## Tracing
 
@@ -85,8 +92,15 @@ agent 的主 provider/model，不会被先跑的 summarizer 覆盖。
 
 ## 失败行为
 
-如果摘要 provider 失败，CubePi 会记录 warning，并继续使用之前的压缩视图或
-原始消息。agent 不会仅仅因为压缩刷新失败而失败。
+如果摘要 provider 失败，CubePi 会用基于消息结构的**确定性 fallback**
+（用户请求首行 + 出现过的工具名）来生成摘要，让上下文继续收缩。连续 3 次
+LLM 失败后**熔断器**打开，跳过 LLM 调用——但 fallback 仍然运行，
+agent 不会因为 summariser 模型故障而卡在超限状态。下一次 LLM 成功调用
+会自动重置熔断器。
+
+第二道防线是**防抖（anti-thrashing）**：如果连续两次压缩节省不到 10%，
+下一次会跳过——避免在临界状态反复消耗 LLM 调用。当原始历史超过阈值的
+1.5 倍、边界能前进 ≥ 8 条消息、或一次压缩节省 ≥ 10% 时，防抖会自动解除。
 
 ## 什么时候不用
 

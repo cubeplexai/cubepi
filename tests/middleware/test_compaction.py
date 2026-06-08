@@ -70,14 +70,17 @@ def _make_middleware(
     provider: _FakeSummaryProvider,
     *,
     max_tokens_before: int = 1000,
+    keep_tail_tokens: int = 8,
 ) -> CompactionMiddleware:
+    """Tiny tail-token budget (~2 small test messages) approximates the
+    old ``keep_recent_messages=2`` behaviour for these scenarios."""
     return CompactionMiddleware(
         summary_model=BoundModel(
             provider=provider,
             spec=Model(id="summary-model", provider_id="faux"),
         ),
         max_tokens_before_compact=max_tokens_before,
-        keep_recent_messages=2,
+        keep_tail_tokens=keep_tail_tokens,
         max_summary_tokens=512,
         min_compact_messages=2,
     )
@@ -170,7 +173,9 @@ async def test_over_threshold_without_safe_boundary_returns_compressed_view() ->
     assert provider.calls == []
 
 
-async def test_summarizer_failure_returns_current_view_without_writing_state() -> None:
+async def test_summarizer_failure_writes_fallback_state() -> None:
+    """When the LLM raises, build_fallback_summary() runs so the agent
+    still gets a compressed view; failures counter increments."""
     provider = _FakeSummaryProvider(raises=RuntimeError("LLM unavailable"))
     middleware = _make_middleware(provider, max_tokens_before=1)
     messages: list[Message] = [
@@ -185,8 +190,14 @@ async def test_summarizer_failure_returns_current_view_without_writing_state() -
 
     result = await middleware.transform_context(messages, ctx=ctx)
 
-    assert result == messages
-    assert "compaction" not in ctx.extra
+    # Fallback state was written despite the LLM failure.
+    assert "compaction" in ctx.extra
+    state = CompactionState.model_validate(ctx.extra["compaction"])
+    assert state.is_fallback is True
+    # Failure counter incremented.
+    assert ctx.extra["compaction_failures"] == 1
+    # Result is compressed (summary + tail), not the raw message list.
+    assert len(result) < len(messages)
 
 
 async def test_stale_boundary_larger_than_history_is_ignored() -> None:
@@ -289,3 +300,167 @@ async def test_malformed_persisted_state_is_cleared() -> None:
     assert result == messages
     assert "compaction" not in ctx.extra
     assert "compaction_until_msg_index" not in ctx.extra
+
+
+# --- Task 6: circuit breaker, anti-thrashing, refs survive pruning ---
+
+
+async def test_circuit_breaker_opens_after_three_failures() -> None:
+    """After 3 LLM failures the breaker opens; 4th call uses fallback (no LLM).
+
+    Messages grow each turn so safe_boundary keeps advancing — without that,
+    once a fallback state is persisted, subsequent calls early-return at
+    ``new_boundary <= boundary`` and the LLM is never called again.
+    """
+    provider = _FakeSummaryProvider(raises=RuntimeError("down"))
+    middleware = _make_middleware(provider, max_tokens_before=1)
+    ctx = AgentContext(system_prompt="", messages=[], extra={})
+
+    messages: list[Message] = []
+    for i in range(3):
+        messages = [
+            *messages,
+            _user(f"turn {i * 2}"),
+            _assistant(f"reply {i * 2}"),
+            _user(f"turn {i * 2 + 1}"),
+            _assistant(f"reply {i * 2 + 1}"),
+        ]
+        await middleware.transform_context(messages, ctx=ctx)
+        assert ctx.extra["compaction_failures"] == i + 1
+        assert "compaction" in ctx.extra
+
+    calls_before_breaker = len(provider.calls)
+
+    # Turn 4: breaker open → LLM NOT called, fallback still runs.
+    messages = [*messages, _user("more"), _assistant("more reply")]
+    result = await middleware.transform_context(messages, ctx=ctx)
+    assert len(provider.calls) == calls_before_breaker  # no new LLM call
+    assert ctx.extra["compaction_failures"] == 3  # frozen at MAX_FAILURES
+    assert "compaction" in ctx.extra
+    assert len(result) < len(messages)  # still compressed via fallback
+
+
+async def test_circuit_breaker_resets_on_llm_success() -> None:
+    provider = _FakeSummaryProvider(reply="real summary")
+    middleware = _make_middleware(provider, max_tokens_before=1)
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        _assistant("reply 2"),
+        _user("turn 3"),
+        _assistant("reply 3"),
+    ]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=messages,
+        extra={"compaction_failures": 2},  # pre-seed: 2 prior failures
+    )
+
+    await middleware.transform_context(messages, ctx=ctx)
+    assert ctx.extra["compaction_failures"] == 0  # reset after success
+
+
+async def test_anti_thrashing_skips_compaction_when_guard_tripped() -> None:
+    """Guard fires when low_savings_count >= 2, raw history not over 1.5×
+    threshold, and new_boundary advance < 8 messages."""
+    provider = _FakeSummaryProvider(reply="x")
+    # Threshold chosen so raw_tokens (~24) stays under 1.5 * threshold
+    # (= 36) but above threshold (= 20) — guard CAN fire.
+    middleware = _make_middleware(provider, max_tokens_before=20)
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        _assistant("reply 2"),
+        _user("turn 3"),
+        _assistant("reply 3"),
+    ]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=messages,
+        extra={"compaction_low_savings_count": 2},  # guard tripped
+    )
+
+    calls_before = len(provider.calls)
+    await middleware.transform_context(messages, ctx=ctx)
+    # Neither LLM nor fallback ran — early skip.
+    assert len(provider.calls) == calls_before
+    assert "compaction" not in ctx.extra
+
+
+async def test_anti_thrashing_emergency_override_when_raw_history_too_large() -> None:
+    """When raw history >= 1.5 × threshold, the guard is overridden."""
+    provider = _FakeSummaryProvider(reply="short summary")
+    middleware = _make_middleware(provider, max_tokens_before=10)
+    # Build a large enough history that raw tokens exceed 1.5 × 10 = 15.
+    messages: list[Message] = [
+        _user("x" * 100),
+        _assistant("y" * 100),
+        _user("z" * 100),
+        _assistant("w" * 100),
+        _user("a" * 100),
+        _assistant("b" * 100),
+    ]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=messages,
+        extra={"compaction_low_savings_count": 2},  # guard tripped
+    )
+
+    calls_before = len(provider.calls)
+    await middleware.transform_context(messages, ctx=ctx)
+    # Emergency override fired despite the guard.
+    assert len(provider.calls) > calls_before
+    assert "compaction" in ctx.extra
+
+
+async def test_pruned_tool_results_do_not_break_state_refs() -> None:
+    """Refs persisted in CompactionState come from ORIGINAL messages even
+    when the transcript was built from pre-pruned content. Otherwise the
+    next turn would see ref mismatch and clear the state, looping forever."""
+    from cubepi.providers.base import ToolCall, ToolResultMessage
+
+    provider = _FakeSummaryProvider(reply="real summary")
+    middleware = _make_middleware(provider, max_tokens_before=1)
+    big_result = "tool output line\n" * 200  # > 120 chars → pruner targets it
+    messages: list[Message] = [
+        _user("audit q"),
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="audit_query", arguments={"q": "X"})]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="audit_query",
+            content=[TextContent(text=big_result)],
+        ),
+        _user("what next?"),
+        _assistant("fix it"),
+        _user("ok"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    await middleware.transform_context(messages, ctx=ctx)
+    boundary_after_first = ctx.extra["compaction_until_msg_index"]
+
+    # Second turn with same messages: state must validate, not be cleared.
+    await middleware.transform_context(messages, ctx=ctx)
+    assert ctx.extra.get("compaction_until_msg_index", 0) >= boundary_after_first
+    state = CompactionState.model_validate(ctx.extra["compaction"])
+    assert state.is_fallback is False  # real LLM summary
+
+
+def test_keep_recent_messages_no_longer_accepted() -> None:
+    """Breaking change — old parameter name raises TypeError."""
+    import pytest
+
+    provider = _FakeSummaryProvider()
+    with pytest.raises(TypeError):
+        CompactionMiddleware(
+            summary_model=BoundModel(
+                provider=provider,
+                spec=Model(id="m", provider_id="faux"),
+            ),
+            max_tokens_before_compact=100,
+            keep_recent_messages=8,  # type: ignore[call-arg]
+        )

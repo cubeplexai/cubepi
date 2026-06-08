@@ -514,7 +514,7 @@ class TestMiddlewareProviders:
         mw = CompactionMiddleware(
             summary_model=BoundModel(provider=summarizer, spec=summary_model),
             max_tokens_before_compact=1,
-            keep_recent_messages=1,
+            keep_tail_tokens=4,
             max_summary_tokens=128,
             min_compact_messages=2,
         )
@@ -590,7 +590,7 @@ class TestMiddlewareProviders:
         mw = CompactionMiddleware(
             summary_model=BoundModel(provider=shared, spec=summary_model),
             max_tokens_before_compact=1,
-            keep_recent_messages=1,
+            keep_tail_tokens=4,
             max_summary_tokens=128,
             min_compact_messages=2,
         )

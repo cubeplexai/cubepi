@@ -1,16 +1,23 @@
 from __future__ import annotations
 
-import logging
 import asyncio
+import logging
 from typing import Any
 
 from pydantic import ValidationError
 
 from cubepi.agent.types import AgentContext
 from cubepi.middleware.base import Middleware
-from cubepi.middleware.compaction.boundary import safe_boundary
+from cubepi.middleware.compaction.boundary import (
+    safe_boundary,
+    tail_start_by_tokens,
+)
+from cubepi.middleware.compaction.pruner import prune_tool_results
 from cubepi.middleware.compaction.state import CompactionState, message_refs
-from cubepi.middleware.compaction.summarizer import summarize
+from cubepi.middleware.compaction.summarizer import (
+    build_fallback_summary,
+    summarize,
+)
 from cubepi.middleware.compaction.tokens import approx_tokens
 from cubepi.providers.base import (
     BoundModel,
@@ -21,6 +28,12 @@ from cubepi.providers.base import (
 
 SUMMARY_PREFIX = "[Conversation summary so far]\n"
 logger = logging.getLogger(__name__)
+
+_MAX_FAILURES = 3
+_MIN_SAVINGS_PCT = 10.0
+_MAX_LOW_SAVINGS = 2
+_ANTI_THRASH_NEW_MSGS = 8
+_ANTI_THRASH_FORCE_RATIO = 1.5
 
 
 def _compressed_view(
@@ -68,20 +81,33 @@ def _state_matches_history(
 
 
 class CompactionMiddleware(Middleware):
-    """Keep long histories within context by summarizing older turns."""
+    """Keep long histories within context by summarizing older turns.
+
+    Three layered guards keep the summariser from misbehaving under load:
+
+    - **Pre-pruning pass** (cheap, no LLM call) replaces large old tool
+      results with one-line summaries before the LLM ever sees them.
+    - **Circuit breaker** gates only the LLM call; after
+      ``_MAX_FAILURES`` consecutive errors, switches to the deterministic
+      fallback summariser (still compacts context — never gets stuck).
+    - **Anti-thrashing guard** skips compaction when prior runs saved
+      under ``_MIN_SAVINGS_PCT``; resets when savings recover, the
+      boundary advances by ``_ANTI_THRASH_NEW_MSGS`` messages, or raw
+      history exceeds ``max_tokens_before_compact * _ANTI_THRASH_FORCE_RATIO``.
+    """
 
     def __init__(
         self,
         *,
         summary_model: BoundModel,
         max_tokens_before_compact: int,
-        keep_recent_messages: int = 8,
-        max_summary_tokens: int = 1024,
+        keep_tail_tokens: int = 8_000,
+        max_summary_tokens: int | None = None,
         min_compact_messages: int = 4,
     ) -> None:
         self._summary_model = summary_model
         self._max_tokens_before = max_tokens_before_compact
-        self._keep_recent = keep_recent_messages
+        self._keep_tail_tokens = keep_tail_tokens
         self._max_summary_tokens = max_summary_tokens
         self._min_compact = min_compact_messages
 
@@ -97,6 +123,7 @@ class CompactionMiddleware(Middleware):
         boundary = (
             int(raw_boundary) if isinstance(raw_boundary, (int, float, str)) else 0
         )
+
         if state is None and ("compaction" in ctx.extra or boundary > 0):
             boundary = 0
             _clear_state(ctx)
@@ -106,15 +133,20 @@ class CompactionMiddleware(Middleware):
             boundary = 0
             state = None
             _clear_state(ctx)
-        compressed = _compressed_view(messages, state, boundary)
 
-        if approx_tokens(compressed) < self._max_tokens_before:
+        # Single tail computation — shared by pruner and safe_boundary.
+        tail_start = tail_start_by_tokens(messages, self._keep_tail_tokens)
+
+        # Phase 1: pre-prune old tool results (cheap, no LLM call).
+        pruned_messages = prune_tool_results(messages, tail_start=tail_start)
+
+        compressed = _compressed_view(pruned_messages, state, boundary)
+
+        tokens_now = approx_tokens(compressed)
+        if tokens_now < self._max_tokens_before:
             return compressed
 
-        # Bridge: Task 3 replaced safe_boundary's keep_recent param with
-        # an explicit tail_start index. Task 6 will swap the constructor
-        # to keep_tail_tokens and call tail_start_by_tokens here.
-        tail_start = max(0, len(messages) - self._keep_recent)
+        # Find boundary before guards (needed for anti-thrash new-msgs check).
         new_boundary = safe_boundary(
             messages,
             tail_start=tail_start,
@@ -123,21 +155,74 @@ class CompactionMiddleware(Middleware):
         if new_boundary is None or new_boundary <= boundary:
             return compressed
 
-        try:
-            new_state = await summarize(
-                model=self._summary_model,
-                messages_to_summarize=messages[boundary:new_boundary],
-                existing=state,
-                max_summary_tokens=self._max_summary_tokens,
-                abort_signal=signal,
+        # Circuit breaker — gates LLM only; fallback always runs.
+        failures_raw = ctx.extra.get("compaction_failures", 0)
+        failures = (
+            int(failures_raw) if isinstance(failures_raw, (int, float, str)) else 0
+        )
+        llm_allowed = failures < _MAX_FAILURES
+        if not llm_allowed:
+            logger.warning(
+                "CompactionMiddleware: LLM circuit breaker open (%d failures), using fallback",
+                failures,
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("CompactionMiddleware summarizer failed, skipping: %s", exc)
+
+        # Anti-thrashing guard — uses raw_tokens so prior cumulative summaries
+        # don't mask a genuinely over-limit history.
+        raw_tokens = approx_tokens(messages)
+        low_savings_raw = ctx.extra.get("compaction_low_savings_count", 0)
+        low_savings = (
+            int(low_savings_raw)
+            if isinstance(low_savings_raw, (int, float, str))
+            else 0
+        )
+        force_emergency = (
+            raw_tokens >= self._max_tokens_before * _ANTI_THRASH_FORCE_RATIO
+        )
+        enough_new = (new_boundary - boundary) >= _ANTI_THRASH_NEW_MSGS
+        if low_savings >= _MAX_LOW_SAVINGS and not force_emergency and not enough_new:
+            logger.debug("CompactionMiddleware: skipping — low savings guard active")
             return compressed
+
+        if llm_allowed:
+            try:
+                new_state = await summarize(
+                    model=self._summary_model,
+                    messages_to_summarize=pruned_messages[boundary:new_boundary],
+                    ref_messages=messages[boundary:new_boundary],
+                    existing=state,
+                    max_summary_tokens=self._max_summary_tokens,
+                    abort_signal=signal,
+                )
+                ctx.extra["compaction_failures"] = 0
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("CompactionMiddleware LLM summariser failed: %s", exc)
+                ctx.extra["compaction_failures"] = failures + 1
+                new_state = build_fallback_summary(
+                    pruned_messages[boundary:new_boundary],
+                    ref_messages=messages[boundary:new_boundary],
+                    existing=state,
+                )
+        else:
+            new_state = build_fallback_summary(
+                pruned_messages[boundary:new_boundary],
+                ref_messages=messages[boundary:new_boundary],
+                existing=state,
+            )
 
         ctx.extra["compaction"] = new_state.model_dump()
         ctx.extra["compaction_until_msg_index"] = new_boundary
-        return _compressed_view(messages, new_state, new_boundary)
+        result = _compressed_view(pruned_messages, new_state, new_boundary)
+
+        # Anti-thrashing tracking — compare raw history to result tokens.
+        tokens_after = approx_tokens(result)
+        if raw_tokens > 0:
+            savings_pct = (raw_tokens - tokens_after) / raw_tokens * 100
+            ctx.extra["compaction_low_savings_count"] = (
+                low_savings + 1 if savings_pct < _MIN_SAVINGS_PCT else 0
+            )
+
+        return result
 
     def extra_llm_calls(self) -> tuple[BoundModel, ...]:
         # Surface the bound summary model so ``cubepi.tracing.Recorder`` can
@@ -152,4 +237,5 @@ class CompactionMiddleware(Middleware):
 __all__ = [
     "CompactionMiddleware",
     "CompactionState",
+    "SUMMARY_PREFIX",
 ]
