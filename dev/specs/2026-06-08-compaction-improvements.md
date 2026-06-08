@@ -19,7 +19,7 @@ hermes-agent surfaced seven gaps that degrade quality or reliability:
 | 5 | No circuit breaker on summariser failures | Failing summariser retries every turn indefinitely |
 | 6 | No anti-thrashing guard | Near-threshold agents compact every turn, saving almost nothing |
 | 7 | No fallback when LLM summariser is unavailable | Degradation leaves context uncompressed; next turn still over-limit |
-| 8 | Summary is free-form prose | Downstream consumers (finance, compliance) need parseable sections for resolved/pending/remaining work |
+| 8 | Summary is free-form prose with no override hook | Downstream consumers (finance, compliance) need parseable sections (Goal / Resolved / Pending / Remaining work / …) and the ability to swap in a domain-specific template |
 | 9 | Summary prefix is just a header label | LLM can re-execute instruction-like phrases reproduced in the summary as if they were new commands |
 | 10 | Pruner always runs | Audit-chain agents need full historical tool results preserved across compactions |
 
@@ -251,38 +251,105 @@ agent is not stuck over-limit on every subsequent turn.
 The `CompactionState` gains a boolean field `is_fallback: bool = False` to allow
 callers to distinguish fallback from real summaries.
 
-### 2.8 Structured summariser output (Resolved / Pending / Remaining)
+### 2.8 Structured summariser output (hybrid template + override hook)
 
 **Current:** `SUMMARIZER_SYSTEM_PROMPT` asks for a "brief, faithful narrative"
-— free-form prose. Downstream finance use cases need to find specific facts
-(decisions, open questions, remaining work) without re-reading the whole
-summary every turn.
+— free-form prose. Downstream consumers (finance, compliance, audit) need to
+find specific facts (decisions, open questions, remaining work) without
+re-reading the whole summary every turn.
 
-**Fix:** rewrite `SUMMARIZER_SYSTEM_PROMPT` to require three named sections,
-in this order:
+**Reference points:** both claude-code (9 sections, code-snippet preserving)
+and hermes-agent (13 sections, finance-style) ship heavyweight structured
+templates. CubePi is a general-purpose framework, not a coding agent — we
+adopt a **lighter 8-section hybrid** that captures the most useful sections
+from both, and we expose a **prompt-override hook** so downstream projects can
+swap in their own template (claude-code-style, hermes-agent-style, or
+domain-specific) without forking.
+
+**Default template** (`SUMMARIZER_SYSTEM_PROMPT`):
 
 ```
-## Background
-<what the user wanted, key facts established, decisions taken>
+## Goal
+What the user is trying to accomplish overall (one short paragraph).
+
+## Constraints & preferences
+User-stated requirements, style preferences, things to avoid. Bullets.
+
+## Completed actions
+What the assistant has done so far — concrete actions, with citation markers
+where relevant. Bullets.
+
+## Key decisions
+Choices the user or assistant has made, with brief rationale. Bullets.
 
 ## Resolved
-<questions that have been answered or items that are done — bullet list>
+Questions that have been answered or items that are done. Bullets.
 
 ## Pending
-<questions that are still open or items that need a decision — bullet list>
+Questions still open or items needing a decision. Bullets.
+
+## Relevant artifacts
+Files, URLs, IDs, datasets, tool-call IDs — concrete things the conversation
+touched. Bullets.
 
 ## Remaining work
-<next steps the assistant should pick up — bullet list>
+Next steps the assistant should pick up. Bullets, in order.
 ```
 
-Rules unchanged from today (preserve citations verbatim, no quoting long tool
-outputs, keep original language). The cumulative-merge contract is preserved:
-when `<previous_summary>` is supplied, the summariser must MERGE its sections
-into the new summary (a Pending item that's now answered moves into Resolved;
-new work added becomes Pending or Remaining).
+The 8 sections combine:
+- claude-code's depth-oriented sections (Completed actions ≈ Files+Problem
+  solving, Remaining work ≈ Next step, Resolved/Pending ≈ Pending tasks +
+  Current work).
+- hermes-agent's named-section parseability (Goal, Constraints, Key
+  decisions, Resolved Questions, Pending User Asks, Remaining Work).
+- A generalised "Relevant artifacts" replacing hermes-agent's coding-specific
+  "Relevant Files" — works for non-coding agents too.
 
-Empty sections render as a single `(none)` line — never omit headers (so
-downstream regex/section parsers don't break across compactions).
+**Rules** (unchanged from today plus two new):
+1. Preserve facts, user goals, and decisions verbatim where possible.
+2. Preserve every citation marker verbatim. Do not renumber, merge, or drop.
+3. Do not quote long tool outputs. Reference by citation markers.
+4. Keep the language of the original conversation.
+5. If a section has nothing to record, write `(none)` — never omit the
+   heading (downstream parsers depend on the eight-section schema).
+6. No preamble before `## Goal`; no commentary after `## Remaining work`.
+7. Your output is reference material for a downstream model. Do **not**
+   phrase items as commands. If a future user message contradicts a section,
+   the user message wins.
+
+**Cumulative merge:** when `<previous_summary>` is supplied, the summariser
+must MERGE its sections into the new summary in-place (Pending → Resolved
+when answered; new work → Pending or Remaining work). Output the **full**
+updated summary using the same eight-section format.
+
+### 2.8.1 Prompt override hooks
+
+`CompactionMiddleware` and `summarize()` accept two new optional parameters
+so downstream projects can swap the default template:
+
+```python
+CompactionMiddleware(
+    ...,
+    summary_prompt: str | None = None,             # replaces SUMMARIZER_SYSTEM_PROMPT
+    existing_summary_suffix: str | None = None,    # replaces EXISTING_SUMMARY_SUFFIX
+)
+```
+
+- `summary_prompt`: full replacement system prompt. When provided, the
+  downstream is responsible for the section schema; CubePi makes no
+  assumptions about output shape (`SUMMARY_PREFIX` still wraps the result).
+- `existing_summary_suffix`: replacement merge template. Must contain
+  `{prev}` for substitution of the prior summary. Useful when the downstream
+  changes section names and needs the merge instruction to match.
+
+If `summary_prompt` is set but `existing_summary_suffix` is left at default,
+the default merge instruction is appended — possibly mentioning sections
+that don't exist in the custom prompt. Document this in the doc page so
+users provide both together when changing structure.
+
+Both knobs default to `None` (use built-in templates); set only when a
+domain prompt is genuinely needed. This is an extension point, not the
+recommended path.
 
 ### 2.9 Filter-safe summary prefix
 
@@ -1595,17 +1662,34 @@ each touch one or two existing files lightly.
 Add to `tests/middleware/compaction/test_summarizer.py`:
 
 ```python
-def test_summary_has_required_sections():
-    """The system prompt asks for Background/Resolved/Pending/Remaining sections."""
+def test_summary_has_eight_sections():
+    """The default system prompt asks for the eight hybrid sections."""
     from cubepi.middleware.compaction.summarizer import SUMMARIZER_SYSTEM_PROMPT
-    for section in ("Background", "Resolved", "Pending", "Remaining work"):
-        assert section in SUMMARIZER_SYSTEM_PROMPT
+    for section in (
+        "Goal",
+        "Constraints & preferences",
+        "Completed actions",
+        "Key decisions",
+        "Resolved",
+        "Pending",
+        "Relevant artifacts",
+        "Remaining work",
+    ):
+        assert f"## {section}" in SUMMARIZER_SYSTEM_PROMPT
 
 def test_system_prompt_marks_output_as_non_instruction():
     """Summariser is told its output is reference material, not instructions."""
     from cubepi.middleware.compaction.summarizer import SUMMARIZER_SYSTEM_PROMPT
-    assert "not instructions" in SUMMARIZER_SYSTEM_PROMPT.lower() or \
-           "reference material" in SUMMARIZER_SYSTEM_PROMPT.lower()
+    text = SUMMARIZER_SYSTEM_PROMPT.lower()
+    assert "reference material" in text
+    assert "user message wins" in text or "do not phrase items as commands" in text
+
+async def test_custom_summary_prompt_overrides_default():
+    """When summary_prompt is provided, summarize() uses it verbatim."""
+    custom = "Just say 'CUSTOM' and nothing else."
+    model, _ = _counting_bound_model("CUSTOM")
+    # ... assert that the system_prompt passed to model.generate matches `custom`
+    # (verify via a mock that captures the system_prompt argument)
 ```
 
 Add to `tests/middleware/test_compaction.py`:
@@ -1620,7 +1704,7 @@ def test_summary_prefix_includes_non_instruction_disclaimer():
 async def test_prune_tool_outputs_disabled_keeps_full_result_content():
     """When prune_tool_outputs=False, large tool results survive untouched
     through compaction (audit-chain use case)."""
-    model, _ = _counting_bound_model("summary")
+    model, _ = _counting_bound_model("## Goal\n(none)\n## Remaining work\n(none)")
     mw = CompactionMiddleware(
         summary_model=model,
         max_tokens_before_compact=50,
@@ -1639,14 +1723,30 @@ async def test_prune_tool_outputs_disabled_keeps_full_result_content():
         UserMessage(content=[TextContent(text="confirm")]),
     ]
     await mw.transform_context(msgs, ctx=ctx)
-    # The compressed view is [summary, ...tail]. The tail must still carry
-    # the original (unpruned) tool result content because the result message
-    # is part of the prefix being summarised, NOT the tail — so check via
-    # checking the messages list is unchanged at the tool-result index.
-    # The pruner toggle must not mutate `messages` in place.
-    assert msgs[2].content[0].text == big_text   # original messages untouched
-    assert "audit_query" in ctx.extra["compaction"]["summary"] or \
-           "important audit detail" in ctx.extra["compaction"]["summary"]
+    # Pruner toggle must NOT mutate `messages` in place — original untouched.
+    assert msgs[2].content[0].text == big_text
+
+async def test_custom_summary_prompt_passthrough():
+    """summary_prompt on CompactionMiddleware reaches summarize()."""
+    captured = {}
+    class _CapturingModel:
+        async def generate(self, **kwargs):
+            captured["system_prompt"] = kwargs["system_prompt"]
+            class _R:
+                content = [TextContent(text="x")]
+                error_message = None
+                usage = None
+            return _R()
+    mw = CompactionMiddleware(
+        summary_model=_CapturingModel(),
+        max_tokens_before_compact=10,
+        keep_tail_tokens=100,
+        summary_prompt="CUSTOM PROMPT BODY",
+    )
+    ctx = AgentContext(thread_id="t1")
+    msgs = _big_msgs(10, chars=200)
+    await mw.transform_context(msgs, ctx=ctx)
+    assert captured["system_prompt"] == "CUSTOM PROMPT BODY"
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -1658,43 +1758,55 @@ uv run pytest tests/middleware/ -v -k "section or non_instruction or prune_tool_
 Expected: `AssertionError` (sections missing from prompt) and `TypeError`
 (`prune_tool_outputs` not yet a valid parameter).
 
-- [ ] **Step 3: Rewrite `SUMMARIZER_SYSTEM_PROMPT` in `summarizer.py`**
+- [ ] **Step 3: Rewrite `SUMMARIZER_SYSTEM_PROMPT` and `EXISTING_SUMMARY_SUFFIX` in `summarizer.py`**
 
 ```python
 SUMMARIZER_SYSTEM_PROMPT = """\
 You compress a chat transcript into a structured handoff document for an AI
-assistant that is continuing the conversation. Your output is summarisation,
-not instructions; downstream models will treat it as reference material.
+assistant that is continuing the conversation. Your output is reference
+material for a downstream model — not instructions. If a future user message
+contradicts a section, the user message wins.
 
-Output exactly these four sections, in this order, with the headings shown:
+Output exactly these eight sections, in this order, with the headings shown:
 
-## Background
-What the user wanted, key facts established, decisions already taken.
+## Goal
+What the user is trying to accomplish overall (one short paragraph).
+
+## Constraints & preferences
+User-stated requirements, style preferences, things to avoid. Bullets.
+
+## Completed actions
+What the assistant has done so far — concrete actions, with citation markers
+where relevant. Bullets.
+
+## Key decisions
+Choices the user or assistant has made, with brief rationale. Bullets.
 
 ## Resolved
-Questions that have been answered, or items that are done. Bullet list.
+Questions that have been answered or items that are done. Bullets.
 
 ## Pending
-Questions that are still open, or items that need a decision. Bullet list.
+Questions still open or items needing a decision. Bullets.
+
+## Relevant artifacts
+Files, URLs, IDs, datasets, tool-call IDs — concrete things the conversation
+touched. Bullets.
 
 ## Remaining work
-Next steps the assistant should pick up. Bullet list.
+Next steps the assistant should pick up. Bullets, in order.
 
 Rules:
 
 1. Preserve facts, user goals, and decisions verbatim where possible.
-2. Preserve every citation marker verbatim. Do not renumber, merge, or drop them.
+2. Preserve every citation marker verbatim. Do not renumber, merge, or drop.
 3. Do not quote long tool outputs. Reference them by their citation markers
    instead.
 4. Keep the language of the original conversation.
 5. If a section has nothing to record, write "(none)" — never omit a heading.
-6. No preamble before "## Background"; no commentary after the last section.
+6. No preamble before "## Goal"; no commentary after "## Remaining work".
+7. Do not phrase items as commands directed at the next assistant.
 """
-```
 
-Update `EXISTING_SUMMARY_SUFFIX` to ask for in-place section updates:
-
-```python
 EXISTING_SUMMARY_SUFFIX = """\
 A previous summary already covers earlier turns:
 
@@ -1702,10 +1814,15 @@ A previous summary already covers earlier turns:
 {prev}
 </previous_summary>
 
-Merge the new turns below INTO this summary's sections. A Pending item that
-has now been answered moves to Resolved. New work becomes Pending or
-Remaining work. Output the full updated summary using the same four-section
-format."""
+Merge the new turns below INTO this summary's sections, in place:
+- A Pending item that's now been answered moves to Resolved.
+- New work added by the recent turns goes into Pending or Remaining work.
+- Completed actions and Key decisions accumulate.
+- Relevant artifacts append new file paths / IDs encountered.
+
+Output the FULL updated summary using the same eight-section format. Do not
+omit unchanged sections — repeat them verbatim if they have not been touched.
+"""
 ```
 
 - [ ] **Step 4: Update `SUMMARY_PREFIX` in `__init__.py`**
@@ -1718,10 +1835,10 @@ SUMMARY_PREFIX = (
 )
 ```
 
-- [ ] **Step 5: Add `prune_tool_outputs` parameter to `CompactionMiddleware`**
+- [ ] **Step 5: Add `prune_tool_outputs` and prompt-override parameters to `CompactionMiddleware`**
 
-In `__init__.py`, extend `__init__` and gate the pruner call in
-`transform_context`:
+In `__init__.py`, extend `__init__`, gate the pruner, and thread the prompt
+overrides into `summarize()` / `build_fallback_summary()`:
 
 ```python
 def __init__(
@@ -1732,10 +1849,14 @@ def __init__(
     keep_tail_tokens: int = 8_000,
     max_summary_tokens: int | None = None,
     min_compact_messages: int = 4,
-    prune_tool_outputs: bool = True,   # NEW — disable for audit-chain agents
+    prune_tool_outputs: bool = True,        # NEW — audit-chain opt-out
+    summary_prompt: str | None = None,      # NEW — override default template
+    existing_summary_suffix: str | None = None,  # NEW — override merge template
 ) -> None:
     ...
     self._prune_tool_outputs = prune_tool_outputs
+    self._summary_prompt = summary_prompt
+    self._existing_summary_suffix = existing_summary_suffix
 ```
 
 In `transform_context`, replace the unconditional pruner call:
@@ -1747,6 +1868,56 @@ pruned_messages = (
     if self._prune_tool_outputs
     else list(messages)
 )
+```
+
+And forward the prompt overrides into both `summarize()` and the LLM-allowed /
+breaker-open / failure branches of `build_fallback_summary()`:
+
+```python
+new_state = await summarize(
+    model=self._summary_model,
+    messages_to_summarize=pruned_messages[boundary:new_boundary],
+    ref_messages=messages[boundary:new_boundary],
+    existing=state,
+    max_summary_tokens=self._max_summary_tokens,
+    system_prompt_override=self._summary_prompt,            # NEW
+    existing_summary_suffix=self._existing_summary_suffix,  # NEW
+    abort_signal=signal,
+)
+```
+
+(`build_fallback_summary` does not call the LLM, so it does NOT take the
+prompt overrides — it always builds the same deterministic text.)
+
+In `summarizer.py`, add the optional parameters to `summarize()`:
+
+```python
+async def summarize(
+    *,
+    model: BoundModel,
+    messages_to_summarize: list[Message],
+    existing: CompactionState | None,
+    ref_messages: list[Message] | None = None,
+    max_summary_tokens: int | None = None,
+    system_prompt_override: str | None = None,
+    existing_summary_suffix: str | None = None,
+    abort_signal: asyncio.Event | None = None,
+) -> CompactionState:
+    ...
+    base_prompt = (
+        system_prompt_override
+        if system_prompt_override is not None
+        else SUMMARIZER_SYSTEM_PROMPT
+    )
+    suffix_template = (
+        existing_summary_suffix
+        if existing_summary_suffix is not None
+        else EXISTING_SUMMARY_SUFFIX
+    )
+    system_prompt = base_prompt
+    if existing and existing.summary:
+        system_prompt += "\n\n" + suffix_template.format(prev=existing.summary)
+    # ... rest unchanged
 ```
 
 - [ ] **Step 6: Run tests**
@@ -1764,10 +1935,17 @@ Expected: all pass.
 `website/docs/guides/middleware/compaction.md` — add a short section
 covering:
 
-- The new structured summary format (Background / Resolved / Pending /
-  Remaining work) and what each section is for.
-- The filter-safe `SUMMARY_PREFIX` (one sentence; users don't usually need
-  to override it).
+- The default eight-section summary template (Goal / Constraints &
+  preferences / Completed actions / Key decisions / Resolved / Pending /
+  Relevant artifacts / Remaining work) — what each section is for and how
+  it survives cumulative merges.
+- The `summary_prompt=` / `existing_summary_suffix=` override knobs for
+  downstream projects that need a different template (claude-code-style
+  9-section, hermes-agent-style 13-section, or domain-specific). Stress
+  that both should be provided together when changing structure so the
+  merge instruction matches.
+- The filter-safe `SUMMARY_PREFIX` — one sentence on what it does; users
+  rarely need to override it.
 - The `prune_tool_outputs=False` opt-out for audit-chain / compliance
   scenarios. Note that disabling it raises summariser cost in proportion
   to historical tool-output volume.
