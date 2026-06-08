@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`BoundModel.generate()` / `BoundModel.stream()`** — the handle returned by
+  `provider.model(...)` now drives a provider call directly. Useful for
+  utilities (summarizers, classifiers) where you already hold a `BoundModel`
+  and want to skip the agent loop:
+
+  ```python
+  bound = provider.model("claude-sonnet-4-6")
+  reply = await bound.generate(
+      messages=[UserMessage(content=[TextContent(text="hi")])],
+      system_prompt="Be brief.",
+  )
+  ```
+
+  Both methods forward to the bound provider with `model=bound.spec` and
+  mirror the `Provider.generate` / `Provider.stream` signatures exactly.
+
+### Breaking
+
+- **`Middleware.extra_llm_calls()` returns `Iterable[BoundModel]`** instead
+  of `Iterable[tuple[Provider, Model]]`. Third-party middleware overriding
+  this hook must update the return shape (see Migration). The recorder
+  consumer in `cubepi.tracing` was adapted in lock-step; built-in
+  `CompactionMiddleware` already updated.
+- **`cubepi.middleware.compaction.summarizer.summarize()` takes
+  `model: BoundModel`** instead of separate `provider: Provider, model: Model`
+  kwargs. Direct callers (rare — this is internal to `CompactionMiddleware`)
+  must wrap the pair. The public `CompactionMiddleware(summary_model=...)`
+  API is unchanged.
+
+### Migration
+
+- Middleware authors overriding `extra_llm_calls()`:
+
+  ```python
+  from cubepi.providers.base import BoundModel
+
+  # Before
+  def extra_llm_calls(self):
+      return [(self._provider, self._model_spec)]
+
+  # After — either build one explicitly…
+  def extra_llm_calls(self):
+      return [BoundModel(provider=self._provider, spec=self._model_spec)]
+
+  # …or, if your middleware already holds a BoundModel (recommended),
+  # just return it:
+  def extra_llm_calls(self):
+      return [self._bound_model]
+  ```
+
+- Direct `summarize()` callers (uncommon):
+
+  ```python
+  # Before
+  await summarize(provider=provider, model=model_spec, ...)
+
+  # After
+  await summarize(model=BoundModel(provider=provider, spec=model_spec), ...)
+  ```
+
 ## [0.8.0] - 2026-06-06
 
 ### Added
