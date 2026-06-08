@@ -577,7 +577,9 @@ class TodoListMiddleware(Middleware):
         if len(parallel_calls) <= 1:
             return None
         # Restore pre-turn state and mark every parallel write as an error.
-        extra["todos"] = extra.pop("_todos_snapshot", extra.get("todos"))
+        # Use get (not pop) so the snapshot remains available for every
+        # duplicate call's after_tool_call invocation.
+        extra["todos"] = extra.get("_todos_snapshot", extra.get("todos"))
         return AfterToolCallResult(
             content=[
                 TextContent(
