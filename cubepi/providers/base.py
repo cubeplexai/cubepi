@@ -103,9 +103,15 @@ class BoundModel:
         tools: list[ToolDefinition] | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
+        # Forward ``model`` and ``messages`` positionally so a custom
+        # provider that follows the protocol shape but uses different
+        # parameter names (e.g. ``model_spec``, ``msgs``) keeps working —
+        # the pre-BoundModel loop also called ``provider.stream(model,
+        # messages, ...)`` positionally. The remaining args sit after
+        # ``*`` in the protocol so they must stay keyword.
         return await self.provider.stream(
-            model=self.spec,
-            messages=messages,
+            self.spec,
+            messages,
             system_prompt=system_prompt,
             tools=tools,
             options=options,
@@ -123,9 +129,10 @@ class BoundModel:
         thinking: ThinkingLevel | None = None,
         thinking_budgets: ThinkingBudgets | None = None,
     ) -> AssistantMessage:
+        # Same positional-forwarding rationale as ``stream`` above.
         return await self.provider.generate(
-            model=self.spec,
-            messages=messages,
+            self.spec,
+            messages,
             system_prompt=system_prompt,
             tools=tools,
             options=options,

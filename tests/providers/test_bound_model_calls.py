@@ -105,3 +105,55 @@ async def test_bound_model_stream_forwards_to_provider() -> None:
     assert "done" in events
     assert result.model_id == "faux-1"
     assert result.provider_id == "faux"
+
+
+class _MangledNamesProvider(BaseProvider):
+    """A custom provider that follows the Provider protocol shape but uses
+    different parameter names for ``model`` and ``messages``. Pre-BoundModel,
+    cubepi/agent/loop.py called ``provider.stream(model, messages, ...)``
+    positionally, so this kind of provider worked. ``BoundModel.stream`` /
+    ``BoundModel.generate`` must keep forwarding those two args positionally
+    so this still works.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(provider_id="mangled")
+        self.captured_model: Model | None = None
+        self.captured_messages: list[Message] | None = None
+
+    async def generate(  # type: ignore[override]
+        self,
+        spec_in,  # NOT ``model=``
+        msg_in,  # NOT ``messages=``
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        thinking: Any = None,
+        thinking_budgets: Any = None,
+    ) -> AssistantMessage:
+        self.captured_model = spec_in
+        self.captured_messages = msg_in
+        return AssistantMessage(
+            content=[TextContent(text="ok")],
+            provider_id=spec_in.provider_id,
+            model_id=spec_in.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_bound_model_generate_forwards_positionally_for_mangled_provider() -> (
+    None
+):
+    provider = _MangledNamesProvider()
+    bound = provider.model("model-x")
+    messages = [UserMessage(content=[TextContent(text="hi")])]
+
+    response = await bound.generate(messages=messages, system_prompt="x")
+
+    assert response.provider_id == "mangled"
+    assert response.model_id == "model-x"
+    assert provider.captured_model is bound.spec
+    assert provider.captured_messages is messages
