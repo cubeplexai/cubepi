@@ -84,7 +84,7 @@ async def test_all_none_returns_none() -> None:
 
 @pytest.mark.asyncio
 async def test_on_run_end_fires_after_main_run() -> None:
-    """on_run_end injects a message and the agent runs one more model call."""
+    """on_run_end injects a message; fires again after the injected turn, then stops."""
     provider = FauxProvider(provider_id="faux")
     provider.set_responses(
         [
@@ -98,7 +98,9 @@ async def test_on_run_end_fires_after_main_run() -> None:
     class _Reflect(Middleware):
         async def on_run_end(self, ctx, *, signal=None):
             fired.append("fired")
-            return [UserMessage(content=[TextContent(text="reflect now")])]
+            if len(fired) == 1:
+                return [UserMessage(content=[TextContent(text="reflect now")])]
+            return None
 
     agent = Agent(
         model=provider.model("test"),
@@ -107,36 +109,41 @@ async def test_on_run_end_fires_after_main_run() -> None:
     await agent.prompt("hi")
 
     assert provider.call_count == 2
-    assert fired == ["fired"]
+    assert fired == ["fired", "fired"]
 
 
 @pytest.mark.asyncio
-async def test_on_run_end_fires_exactly_once() -> None:
-    """Reflection pass does NOT trigger another on_run_end (_reflection_fired guard)."""
+async def test_on_run_end_fires_multiple_times() -> None:
+    """on_run_end fires on each outer-loop iteration, not just once."""
     provider = FauxProvider(provider_id="faux")
+    # 1 main + 2 continuation + 1 final = 4 model calls
     provider.set_responses(
         [
             faux_assistant_message("main"),
-            faux_assistant_message("reflected"),
+            faux_assistant_message("cont-1"),
+            faux_assistant_message("cont-2"),
+            faux_assistant_message("final"),
         ]
     )
 
     fire_count = 0
 
-    class _CountFires(Middleware):
+    class _FireThrice(Middleware):
         async def on_run_end(self, ctx, *, signal=None):
             nonlocal fire_count
             fire_count += 1
-            return [UserMessage(content=[TextContent(text="reflect")])]
+            if fire_count <= 3:
+                return [UserMessage(content=[TextContent(text="continue")])]
+            return None
 
     agent = Agent(
         model=provider.model("test"),
-        middleware=[_CountFires()],
+        middleware=[_FireThrice()],
     )
     await agent.prompt("hi")
 
-    assert fire_count == 1
-    assert provider.call_count == 2
+    assert fire_count == 4  # 3 injections + 1 final check returning None
+    assert provider.call_count == 4
 
 
 @pytest.mark.asyncio
@@ -217,7 +224,9 @@ async def test_on_run_end_fires_via_should_stop_after_turn() -> None:
     class _Reflect(Middleware):
         async def on_run_end(self, ctx, *, signal=None):
             fired.append("fired")
-            return [UserMessage(content=[TextContent(text="reflect")])]
+            if len(fired) == 1:
+                return [UserMessage(content=[TextContent(text="reflect")])]
+            return None
 
     agent = Agent(
         model=provider.model("test"),
@@ -225,7 +234,7 @@ async def test_on_run_end_fires_via_should_stop_after_turn() -> None:
     )
     await agent.prompt("hi")
 
-    assert fired == ["fired"]
+    assert fired == ["fired", "fired"]
     assert provider.call_count == 2
 
 
