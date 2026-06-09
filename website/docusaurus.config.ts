@@ -159,10 +159,13 @@ const config: Config = {
           position: 'left',
           items: [
             { to: '/compare/langgraph', label: 'vs LangGraph' },
+            { to: '/compare/crewai', label: 'vs CrewAI' },
+            { to: '/compare/pydantic-ai', label: 'vs PydanticAI' },
             { to: '/compare/pi-agent-core', label: 'vs pi-agent-core' },
           ],
         },
         { to: '/changelog', label: 'Changelog', position: 'left' },
+        { to: '/faq', label: 'FAQ', position: 'left' },
         { type: 'docsVersionDropdown', position: 'right' },
         { type: 'localeDropdown', position: 'right' },
         { href: 'https://github.com/cubeplexai/cubepi', label: 'GitHub', position: 'right' },
