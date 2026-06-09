@@ -1565,9 +1565,13 @@ class TestFallbackChainCoverage:
         tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)
 
-        # Each event type registered exactly once on the shared provider.
-        request_listeners = list(getattr(shared, "_request_listeners", []))
-        assert len(request_listeners) == 1, request_listeners
+        # Each event type registered exactly once on the shared provider —
+        # matches the meter dedupe test for symmetry. Without the chunk /
+        # response asserts, a regression that double-subscribed only the
+        # streaming or terminal listener would slip through.
+        assert len(getattr(shared, "_request_listeners", [])) == 1
+        assert len(getattr(shared, "_chunk_listeners", [])) == 1
+        assert len(getattr(shared, "_response_listeners", [])) == 1
 
         await tracer.shutdown()
 
