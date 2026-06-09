@@ -11,12 +11,15 @@ from typing import (
     Callable,
     Literal,
     Protocol,
+    TypeVar,
     runtime_checkable,
 )
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from cubepi.types import JsonObject, StructuredValue
+
+BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
 
 ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 
@@ -92,61 +95,8 @@ class Model(BaseModel):
     thinking_level_map: dict[str, str | None] | None = None
 
 
-@dataclass(frozen=True)
-class BoundModel:
-    provider: Provider
-    spec: Model
-
-    async def stream(
-        self,
-        messages: list[Message],
-        *,
-        system_prompt: str = "",
-        tools: list[ToolDefinition] | None = None,
-        tool_choice: ToolChoice | None = None,
-        options: StreamOptions | None = None,
-    ) -> MessageStream:
-        # Forward ``model`` and ``messages`` positionally so a custom
-        # provider that follows the protocol shape but uses different
-        # parameter names (e.g. ``model_spec``, ``msgs``) keeps working —
-        # the pre-BoundModel loop also called ``provider.stream(model,
-        # messages, ...)`` positionally. The remaining args sit after
-        # ``*`` in the protocol so they must stay keyword.
-        return await self.provider.stream(
-            self.spec,
-            messages,
-            system_prompt=system_prompt,
-            tools=tools,
-            tool_choice=tool_choice,
-            options=options,
-        )
-
-    async def generate(
-        self,
-        messages: list[Message],
-        *,
-        system_prompt: str = "",
-        tools: list[ToolDefinition] | None = None,
-        tool_choice: ToolChoice | None = None,
-        options: StreamOptions | None = None,
-        max_output_tokens: int | None = None,
-        temperature: float | None = None,
-        thinking: ThinkingLevel | None = None,
-        thinking_budgets: ThinkingBudgets | None = None,
-    ) -> AssistantMessage:
-        # Same positional-forwarding rationale as ``stream`` above.
-        return await self.provider.generate(
-            self.spec,
-            messages,
-            system_prompt=system_prompt,
-            tools=tools,
-            tool_choice=tool_choice,
-            options=options,
-            max_output_tokens=max_output_tokens,
-            temperature=temperature,
-            thinking=thinking,
-            thinking_budgets=thinking_budgets,
-        )
+class StructuredOutputError(Exception):
+    """Raised when generate_structured() cannot extract or validate the output."""
 
 
 class TextContent(BaseModel):
@@ -824,6 +774,129 @@ class BaseProvider:
         ms.push(event)
         if model is not None and self._chunk_listeners:
             await _fire_chunk_listeners(self._chunk_listeners, event, model)
+
+
+@dataclass(frozen=True)
+class BoundModel:
+    provider: Provider
+    spec: Model
+
+    async def stream(
+        self,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        # Forward ``model`` and ``messages`` positionally so a custom
+        # provider that follows the protocol shape but uses different
+        # parameter names (e.g. ``model_spec``, ``msgs``) keeps working —
+        # the pre-BoundModel loop also called ``provider.stream(model,
+        # messages, ...)`` positionally. The remaining args sit after
+        # ``*`` in the protocol so they must stay keyword.
+        return await self.provider.stream(
+            self.spec,
+            messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            tool_choice=tool_choice,
+            options=options,
+        )
+
+    async def generate(
+        self,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
+        options: StreamOptions | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        thinking: ThinkingLevel | None = None,
+        thinking_budgets: ThinkingBudgets | None = None,
+    ) -> AssistantMessage:
+        # Same positional-forwarding rationale as ``stream`` above.
+        return await self.provider.generate(
+            self.spec,
+            messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            tool_choice=tool_choice,
+            options=options,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            thinking=thinking,
+            thinking_budgets=thinking_budgets,
+        )
+
+    async def generate_structured(
+        self,
+        output_type: type[BaseModelT],
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tool_name: str = "structured_output",
+        tool_description: str = "Return the structured output",
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        max_retries: int = 1,
+    ) -> BaseModelT:
+        schema = output_type.model_json_schema()
+        tool = ToolDefinition(
+            name=tool_name,
+            description=tool_description,
+            parameters=schema,
+        )
+        default_hint = (
+            f"You MUST respond by calling the '{tool_name}' tool. "
+            "Do NOT respond with plain text."
+        )
+        full_system = (
+            f"{system_prompt}\n\n{default_hint}".strip() if system_prompt else default_hint
+        )
+
+        attempt_messages = list(messages)
+        last_error: Exception | None = None
+
+        for _ in range(1 + max_retries):
+            response = await self.generate(
+                attempt_messages,
+                system_prompt=full_system,
+                tools=[tool],
+                tool_choice=tool_name,
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+            )
+            for block in response.content:
+                if isinstance(block, ToolCall) and block.name == tool_name:
+                    try:
+                        return output_type.model_validate(block.arguments)
+                    except Exception as exc:
+                        last_error = exc
+                        attempt_messages = [
+                            *attempt_messages,
+                            response,
+                            UserMessage(
+                                content=[
+                                    TextContent(
+                                        text=f"Validation error: {exc}. Fix the data and try again."
+                                    )
+                                ]
+                            ),
+                        ]
+                        break
+            else:
+                raise StructuredOutputError(
+                    f"Model returned no tool call for '{tool_name}'; "
+                    f"got stop_reason={response.stop_reason!r}"
+                )
+
+        raise StructuredOutputError(
+            f"Structured output validation failed after retries: {last_error}"
+        ) from last_error
 
 
 def chain_providers(model: object) -> list["BaseProvider"]:
