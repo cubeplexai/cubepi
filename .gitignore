@@ -29,6 +29,7 @@ Thumbs.db
 website/.docusaurus/
 website/build/
 website/node_modules/
+website/package-lock.json
 website/docs/api/*.mdx
 !website/docs/api/index.mdx
 
