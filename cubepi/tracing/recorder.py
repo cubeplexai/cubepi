@@ -47,7 +47,7 @@ from cubepi.providers.base import (
     ToolCall,
     ToolResultMessage,
     UserMessage,
-    chain_providers,
+    collect_agent_providers,
 )
 from cubepi.tracing.content import (
     messages_to_semconv,
@@ -236,22 +236,13 @@ class Recorder:
     def attach(self, agent: "Agent") -> Callable[[], None]:
         self._agent = agent
         unsub_agent = agent.subscribe(self._on_agent_event)
-        # ``Agent`` holds the bound model on ``_model``; the provider is
-        # reached via ``_model.provider``. Fall back to a public ``provider``
-        # alias should one be added later.
-        agent_model = getattr(agent, "_model", None)
-        # When the bound model is a FallbackBoundModel, subscribe to every
-        # unique provider in the chain so post-failover provider events
-        # (chat spans, token usage, errors) land in the trace tree like
-        # primary-leg events do. Non-fallback models yield a single-entry
-        # list with the only provider.
-        agent_providers: list[Any] = chain_providers(agent_model)
-        if not agent_providers:
-            # Legacy / unusual agents may expose ``provider`` directly on
-            # the Agent instead of via ``_model``; preserve the fallback.
-            legacy = getattr(agent, "provider", None)
-            if legacy is not None:
-                agent_providers = [legacy]
+        # When the bound model is a FallbackBoundModel, ``collect_agent_providers``
+        # returns every unique BaseProvider in the chain so post-failover provider
+        # events (chat spans, token usage, errors) land in the trace tree like
+        # primary-leg events do. Non-fallback models yield a single-entry list.
+        # Legacy agents that expose ``provider`` directly (instead of via
+        # ``_model``) are handled inside the helper.
+        agent_providers: list[BaseProvider] = collect_agent_providers(agent)
         provider = agent_providers[0] if agent_providers else None
         provider_detachers: list[Callable[[], None]] = []
 

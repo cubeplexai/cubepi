@@ -27,6 +27,8 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
     adjust_max_tokens_for_thinking,
+    chain_providers,
+    collect_agent_providers,
 )
 from cubepi.providers.faux import (
     FauxProvider,
@@ -98,7 +100,9 @@ __all__ = [
     "Usage",
     "UserMessage",
     "adjust_max_tokens_for_thinking",
+    "chain_providers",
     "clamp_thinking_level",
+    "collect_agent_providers",
     "faux_assistant_message",
     "faux_text",
     "faux_thinking",
