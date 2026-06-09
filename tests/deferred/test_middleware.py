@@ -15,7 +15,9 @@ def _dummy_tool(name: str, description: str = "dummy") -> AgentTool:
     async def _exec(tool_call_id, args, *, signal=None, on_update=None):
         return AgentToolResult(content=[TextContent(text="ok")])
 
-    return AgentTool(name=name, description=description, parameters=_Empty, execute=_exec)
+    return AgentTool(
+        name=name, description=description, parameters=_Empty, execute=_exec
+    )
 
 
 def _make_group(
@@ -92,11 +94,16 @@ class TestAfterToolCallExpansion:
 
         context_tools: list[AgentTool] = [mw.tools[0]]
         ctx = AgentContext(
-            system_prompt="", messages=[], tools=context_tools, extra=extra,
+            system_prompt="",
+            messages=[],
+            tools=context_tools,
+            extra=extra,
         )
 
         output = await mw._expand(
-            group_id="mcp:github", tool_names=None, context=ctx,
+            group_id="mcp:github",
+            tool_names=None,
+            context=ctx,
         )
         assert output.expanded is True
         assert len(output.tool_names) == 2
@@ -107,17 +114,23 @@ class TestAfterToolCallExpansion:
     async def test_expand_selective_injects_only_requested(self) -> None:
         extra: dict = {}
         group = _make_group(
-            "mcp:github", ["create_issue", "search_repos", "create_pr"],
+            "mcp:github",
+            ["create_issue", "search_repos", "create_pr"],
         )
         mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
 
         context_tools: list[AgentTool] = [mw.tools[0]]
         ctx = AgentContext(
-            system_prompt="", messages=[], tools=context_tools, extra=extra,
+            system_prompt="",
+            messages=[],
+            tools=context_tools,
+            extra=extra,
         )
 
         output = await mw._expand(
-            group_id="mcp:github", tool_names=["create_issue"], context=ctx,
+            group_id="mcp:github",
+            tool_names=["create_issue"],
+            context=ctx,
         )
         assert output.expanded is True
         assert output.tool_names == ["create_issue"]
@@ -129,13 +142,18 @@ class TestAfterToolCallExpansion:
         extra: dict = {}
         call_count = [0]
         group = _make_group(
-            "mcp:github", ["t1", "t2", "t3"], loader_call_count=call_count,
+            "mcp:github",
+            ["t1", "t2", "t3"],
+            loader_call_count=call_count,
         )
         mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
 
         context_tools: list[AgentTool] = [mw.tools[0]]
         ctx = AgentContext(
-            system_prompt="", messages=[], tools=context_tools, extra=extra,
+            system_prompt="",
+            messages=[],
+            tools=context_tools,
+            extra=extra,
         )
 
         await mw._expand(group_id="mcp:github", tool_names=["t1"], context=ctx)
@@ -152,11 +170,16 @@ class TestAfterToolCallExpansion:
         extra: dict = {}
         mw = DeferredToolsMiddleware(groups=[], extra_ref=lambda: extra)
         ctx = AgentContext(
-            system_prompt="", messages=[], tools=[], extra=extra,
+            system_prompt="",
+            messages=[],
+            tools=[],
+            extra=extra,
         )
 
         output = await mw._expand(
-            group_id="bad:id", tool_names=None, context=ctx,
+            group_id="bad:id",
+            tool_names=None,
+            context=ctx,
         )
         assert output.expanded is False
         assert output.error is not None
@@ -169,16 +192,23 @@ class TestAfterToolCallExpansion:
 
         context_tools: list[AgentTool] = [mw.tools[0]]
         ctx = AgentContext(
-            system_prompt="", messages=[], tools=context_tools, extra=extra,
+            system_prompt="",
+            messages=[],
+            tools=context_tools,
+            extra=extra,
         )
 
         await mw._expand(
-            group_id="mcp:github", tool_names=None, context=ctx,
+            group_id="mcp:github",
+            tool_names=None,
+            context=ctx,
         )
         assert len(context_tools) == 2
 
         await mw._expand(
-            group_id="mcp:github", tool_names=None, context=ctx,
+            group_id="mcp:github",
+            tool_names=None,
+            context=ctx,
         )
         assert len(context_tools) == 2
 
@@ -196,11 +226,16 @@ class TestAfterToolCallExpansion:
         extra: dict = {}
         mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
         ctx = AgentContext(
-            system_prompt="", messages=[], tools=[], extra=extra,
+            system_prompt="",
+            messages=[],
+            tools=[],
+            extra=extra,
         )
 
         output = await mw._expand(
-            group_id="mcp:broken", tool_names=None, context=ctx,
+            group_id="mcp:broken",
+            tool_names=None,
+            context=ctx,
         )
         assert output.expanded is False
         assert "connection refused" in (output.error or "")
@@ -235,7 +270,8 @@ class TestPrepareResumedState:
         group = _make_group("mcp:github", ["t1", "t2"])
         expanded: dict[str, list[str] | None] = {"mcp:github": None}
         resumed = await DeferredToolsMiddleware.prepare_resumed_state(
-            groups=[group], expanded=expanded,
+            groups=[group],
+            expanded=expanded,
         )
         assert len(resumed.pre_loaded_tools) == 2
         assert len(resumed.remaining_groups) == 0
@@ -247,7 +283,8 @@ class TestPrepareResumedState:
         group = _make_group("mcp:github", ["t1", "t2", "t3"])
         expanded: dict[str, list[str] | None] = {"mcp:github": ["t1"]}
         resumed = await DeferredToolsMiddleware.prepare_resumed_state(
-            groups=[group], expanded=expanded,
+            groups=[group],
+            expanded=expanded,
         )
         assert len(resumed.pre_loaded_tools) == 1
         assert resumed.pre_loaded_tools[0].name == "t1"
@@ -259,7 +296,8 @@ class TestPrepareResumedState:
         group = _make_group("mcp:github", ["t1"])
         expanded: dict[str, list[str] | None] = {}
         resumed = await DeferredToolsMiddleware.prepare_resumed_state(
-            groups=[group], expanded=expanded,
+            groups=[group],
+            expanded=expanded,
         )
         assert len(resumed.pre_loaded_tools) == 0
         assert len(resumed.remaining_groups) == 1
@@ -273,7 +311,8 @@ class TestPrepareResumedState:
             "mcp:slack": ["s1"],
         }
         resumed = await DeferredToolsMiddleware.prepare_resumed_state(
-            groups=[group_a, group_b], expanded=expanded,
+            groups=[group_a, group_b],
+            expanded=expanded,
         )
         extra: dict[str, object] = {"expanded_groups": dict(expanded)}
         mw = DeferredToolsMiddleware(

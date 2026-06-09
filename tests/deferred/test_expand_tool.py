@@ -58,7 +58,9 @@ class TestMakeExpandTools:
     async def test_execute_calls_callback(self) -> None:
         calls: list[tuple[str, list[str] | None]] = []
 
-        async def _callback(group_id: str, tool_names: list[str] | None) -> ExpandToolsOutput:
+        async def _callback(
+            group_id: str, tool_names: list[str] | None
+        ) -> ExpandToolsOutput:
             calls.append((group_id, tool_names))
             return ExpandToolsOutput(
                 group_id=group_id,
@@ -76,7 +78,9 @@ class TestMakeExpandTools:
     async def test_execute_with_tool_names(self) -> None:
         calls: list[tuple[str, list[str] | None]] = []
 
-        async def _callback(group_id: str, tool_names: list[str] | None) -> ExpandToolsOutput:
+        async def _callback(
+            group_id: str, tool_names: list[str] | None
+        ) -> ExpandToolsOutput:
             calls.append((group_id, tool_names))
             return ExpandToolsOutput(
                 group_id=group_id,
@@ -93,7 +97,9 @@ class TestMakeExpandTools:
         assert calls[0] == ("mcp:github", ["create_issue"])
 
     async def test_execute_error_sets_is_error(self) -> None:
-        async def _err_callback(group_id: str, tool_names: list[str] | None) -> ExpandToolsOutput:
+        async def _err_callback(
+            group_id: str, tool_names: list[str] | None
+        ) -> ExpandToolsOutput:
             return ExpandToolsOutput(
                 group_id=group_id,
                 expanded=False,
@@ -107,5 +113,9 @@ class TestMakeExpandTools:
         assert result.is_error is True
 
 
-async def _noop_callback(group_id: str, tool_names: list[str] | None) -> ExpandToolsOutput:
-    return ExpandToolsOutput(group_id=group_id, expanded=True, tool_names=[], remaining=0)
+async def _noop_callback(
+    group_id: str, tool_names: list[str] | None
+) -> ExpandToolsOutput:
+    return ExpandToolsOutput(
+        group_id=group_id, expanded=True, tool_names=[], remaining=0
+    )

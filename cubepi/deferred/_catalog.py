@@ -40,7 +40,11 @@ def render_catalog(
             continue
 
         count = len(remaining)
-        count_label = f"{count} remaining tools" if group.group_id in expanded else f"{count} tools"
+        count_label = (
+            f"{count} remaining tools"
+            if group.group_id in expanded
+            else f"{count} tools"
+        )
         lines.append(
             f"- `{group.group_id}` — {group.display_name}: {group.description} ({count_label})"
         )
