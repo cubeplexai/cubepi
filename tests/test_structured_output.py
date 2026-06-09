@@ -137,3 +137,44 @@ async def test_generate_structured_retry_succeeds() -> None:
     assert result.title == "Dune"
     assert result.rating == 8
     assert provider.call_count == 2
+
+
+async def test_generate_structured_retry_includes_tool_result_message() -> None:
+    """Retry path inserts a ToolResultMessage between the failed assistant message and the retry prompt."""
+    provider = FauxProvider()
+
+    captured_messages: list = []
+
+    def capture_and_respond(messages, model):
+        captured_messages.clear()
+        captured_messages.extend(messages)
+        return faux_assistant_message(
+            faux_tool_call(
+                "structured_output",
+                {"title": "Dune", "rating": 8, "summary": "ok"},
+            ),
+            stop_reason="tool_use",
+        )
+
+    invalid_response = faux_assistant_message(
+        faux_tool_call(
+            "structured_output",
+            {"title": "Dune", "rating": "bad", "summary": "ok"},
+        ),
+        stop_reason="tool_use",
+    )
+    provider.set_responses([invalid_response, capture_and_respond])
+
+    model = provider.model("faux-1")
+    messages = [UserMessage(content=[TextContent(text="Review Dune")])]
+    result = await model.generate_structured(MovieReview, messages, max_retries=1)
+
+    assert result.rating == 8
+    # The retry call should have: original UserMessage, failed AssistantMessage,
+    # ToolResultMessage (error), UserMessage (retry prompt)
+    from cubepi.providers.base import ToolResultMessage
+
+    tool_results = [m for m in captured_messages if isinstance(m, ToolResultMessage)]
+    assert len(tool_results) == 1
+    assert tool_results[0].is_error is True
+    assert "Validation error" in tool_results[0].content[0].text

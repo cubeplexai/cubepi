@@ -19,6 +19,8 @@ from cubepi.providers.base import (
     BoundModel,
     Message,
     TextContent,
+    ToolCall,
+    ToolResultMessage,
     UserMessage,
 )
 
@@ -49,12 +51,21 @@ def _format_messages_for_eval(messages: list[Message], window: int) -> str:
     parts: list[str] = []
     for msg in tail:
         role = getattr(msg, "role", "unknown")
-        texts: list[str] = []
+        fragments: list[str] = []
+        if isinstance(msg, ToolResultMessage):
+            for block in msg.content:
+                if isinstance(block, TextContent):
+                    fragments.append(block.text)
+            if fragments:
+                parts.append(f"[tool_result:{msg.tool_name}] {' '.join(fragments)}")
+            continue
         for block in getattr(msg, "content", []):
             if isinstance(block, TextContent):
-                texts.append(block.text)
-        if texts:
-            parts.append(f"[{role}] {' '.join(texts)}")
+                fragments.append(block.text)
+            elif isinstance(block, ToolCall):
+                fragments.append(f"[called {block.name}]")
+        if fragments:
+            parts.append(f"[{role}] {' '.join(fragments)}")
     return "\n".join(parts)
 
 
@@ -99,9 +110,11 @@ class GoalMiddleware(Middleware):
         self._evaluations = 0
 
         rewritten = last.model_copy(update={"content": [TextContent(text=condition)]})
-        # Mutate ctx.messages so the stripped form is what gets stored in
-        # agent state — the /goal prefix is a one-way control signal that
-        # should not persist in the conversation history.
+        # Strip the /goal prefix from the in-memory message list so the
+        # worker model never sees it.  Note: the checkpointer may have
+        # already persisted the raw message via MessageEndEvent — the
+        # prefix in stored history is harmless (it won't be the last
+        # message on restore, so transform_context won't re-trigger).
         ctx.messages[-1] = rewritten
         return [*messages[:-1], rewritten]
 
@@ -144,11 +157,13 @@ class GoalMiddleware(Middleware):
         if result.achieved:
             goal_state["status"] = "achieved"
             ctx.extra["goal"] = goal_state
+            self._condition = None
             return None
 
         if self._evaluations >= self._max_evaluations:
             goal_state["status"] = "exhausted"
             ctx.extra["goal"] = goal_state
+            self._condition = None
             return None
 
         goal_state["status"] = "active"

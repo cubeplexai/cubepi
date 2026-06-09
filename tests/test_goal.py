@@ -5,12 +5,14 @@ from __future__ import annotations
 
 from cubepi import Agent
 from cubepi.agent.types import AgentContext
-from cubepi.middleware.goal import GoalMiddleware
+from cubepi.middleware.goal import GoalMiddleware, _format_messages_for_eval
 from cubepi.providers.base import (
     AssistantMessage,
     ImageContent,
     Message,
     TextContent,
+    ToolCall,
+    ToolResultMessage,
     UserMessage,
 )
 from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
@@ -353,3 +355,67 @@ async def test_goal_state_restored_from_extra() -> None:
 
     assert agent2.state.extra["goal"]["status"] == "achieved"
     assert agent2.state.extra["goal"]["evaluations"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Test 9: Stale _condition cleared after goal completes
+# ---------------------------------------------------------------------------
+
+
+async def test_condition_cleared_after_achieved() -> None:
+    """After goal achieved, subsequent non-goal prompt does NOT fire the evaluator."""
+    worker = FauxProvider(provider_id="worker")
+    worker.set_responses(
+        [
+            faux_assistant_message("goal work"),
+            faux_assistant_message("normal work"),
+        ]
+    )
+
+    evaluator_provider = FauxProvider(provider_id="evaluator")
+    evaluator_provider.set_responses(
+        [
+            faux_assistant_message(
+                faux_tool_call(
+                    "structured_output",
+                    {"achieved": True, "reason": "done"},
+                )
+            )
+        ]
+    )
+
+    goal = GoalMiddleware(evaluator=evaluator_provider.model("eval"))
+    agent = Agent(model=worker.model("test"), middleware=[goal])
+
+    await agent.prompt("/goal all tests pass")
+    assert agent.state.extra["goal"]["status"] == "achieved"
+    assert evaluator_provider.call_count == 1
+
+    await agent.prompt("refactor auth.py")
+    assert evaluator_provider.call_count == 1  # evaluator NOT called again
+
+
+# ---------------------------------------------------------------------------
+# Test 10: _format_messages_for_eval includes tool calls and results
+# ---------------------------------------------------------------------------
+
+
+def test_format_messages_includes_tool_calls() -> None:
+    """Evaluator transcript includes tool call names and tool result text."""
+    messages: list[Message] = [
+        UserMessage(content=[TextContent(text="run the tests")]),
+        AssistantMessage(
+            content=[ToolCall(id="tc-1", name="run_tests", arguments={"cmd": "pytest"})]
+        ),
+        ToolResultMessage(
+            tool_call_id="tc-1",
+            tool_name="run_tests",
+            content=[TextContent(text="5 passed, 0 failed")],
+        ),
+        AssistantMessage(content=[TextContent(text="All tests pass now.")]),
+    ]
+    transcript = _format_messages_for_eval(messages, window=10)
+
+    assert "[called run_tests]" in transcript
+    assert "[tool_result:run_tests] 5 passed, 0 failed" in transcript
+    assert "All tests pass now." in transcript

@@ -192,7 +192,7 @@ class AnthropicProvider(BaseProvider):
                 ]
             else:
                 kwargs["system"] = system_prompt
-        if tools:
+        if tools and tool_choice != "none":
             api_tools = [self._convert_tool(t) for t in tools]
             if cache_control and api_tools and self._cache_policy.mark_last_tool():
                 api_tools[-1]["cache_control"] = cache_control
