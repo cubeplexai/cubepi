@@ -4,9 +4,57 @@ from __future__ import annotations
 
 
 from cubepi import Agent
+from cubepi.agent.types import AgentContext
 from cubepi.middleware.goal import GoalMiddleware
-from cubepi.providers.base import UserMessage
+from cubepi.providers.base import (
+    AssistantMessage,
+    ImageContent,
+    Message,
+    TextContent,
+    UserMessage,
+)
 from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
+
+
+def _ctx(messages: list[Message] | None = None) -> AgentContext:
+    msgs = messages or []
+    return AgentContext(system_prompt="", messages=msgs)
+
+
+# ---------------------------------------------------------------------------
+# transform_context guard branches (unit tests)
+# ---------------------------------------------------------------------------
+
+
+async def test_transform_context_empty_messages() -> None:
+    evaluator = FauxProvider(provider_id="eval")
+    goal = GoalMiddleware(evaluator=evaluator.model("eval"))
+    result = await goal.transform_context([], ctx=_ctx())
+    assert result == []
+
+
+async def test_transform_context_last_not_user_message() -> None:
+    evaluator = FauxProvider(provider_id="eval")
+    goal = GoalMiddleware(evaluator=evaluator.model("eval"))
+    msgs: list[Message] = [AssistantMessage(content=[TextContent(text="hi")])]
+    result = await goal.transform_context(msgs, ctx=_ctx(msgs))
+    assert result is msgs
+
+
+async def test_transform_context_empty_content() -> None:
+    evaluator = FauxProvider(provider_id="eval")
+    goal = GoalMiddleware(evaluator=evaluator.model("eval"))
+    msgs: list[Message] = [UserMessage(content=[])]
+    result = await goal.transform_context(msgs, ctx=_ctx(msgs))
+    assert result is msgs
+
+
+async def test_transform_context_first_block_not_text() -> None:
+    evaluator = FauxProvider(provider_id="eval")
+    goal = GoalMiddleware(evaluator=evaluator.model("eval"))
+    msgs: list[Message] = [UserMessage(content=[ImageContent(source="data:image/png")])]
+    result = await goal.transform_context(msgs, ctx=_ctx(msgs))
+    assert result is msgs
 
 
 # ---------------------------------------------------------------------------
