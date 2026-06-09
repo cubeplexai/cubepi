@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/cubepi)](https://pypi.org/project/cubepi/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Docs](https://img.shields.io/badge/docs-cubepi.ai-blue)](https://cubepi.ai)
-[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1f6feb)](https://deepwiki.com/cubeplexai/cubepi)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/cubeplexai/cubepi)
 [![skills.sh](https://skills.sh/b/cubeplexai/cubepi)](https://skills.sh/cubeplexai/cubepi)
 
 CubePi is a Pythonic, async-native agent framework designed for high performance, readability, and production-grade persistence. It provides a leaner alternative to graph-based agent runtimes by modeling agent logic as a linear while loop that developers can easily trace and debug.
