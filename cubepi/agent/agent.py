@@ -25,6 +25,7 @@ from cubepi.agent.types import (
     AgentEndEvent,
     AgentEvent,
     AgentTool,
+    AgentToolResult,
     ForkOnceResult,
     MessageEndEvent,
     MessageStartEvent,
@@ -52,6 +53,31 @@ TMessage = TypeVar("TMessage")
 if TYPE_CHECKING:
     from cubepi.deferred.types import DeferredToolGroup
     from cubepi.providers.fallback import FallbackBoundModel
+
+
+def _deny_in_fork(tool: AgentTool) -> AgentTool:
+    """Return a copy of *tool* whose execute always returns an error.
+
+    Used by fork_once to keep middleware tools in the schema (prompt-cache
+    parity) while preventing execution that would mutate parent state.
+    """
+    from dataclasses import replace
+
+    async def _denied(
+        tool_call_id: str,
+        args: object,
+        *,
+        signal: asyncio.Event | None = None,
+        on_update: Callable | None = None,
+    ) -> AgentToolResult:
+        return AgentToolResult(
+            content=[
+                TextContent(text=f"{tool.name} is not available in a forked agent.")
+            ],
+            is_error=True,
+        )
+
+    return replace(tool, execute=_denied)
 
 
 def _default_convert_to_llm(
@@ -537,12 +563,15 @@ class Agent(Generic[TMessage]):
         # middleware twice — the parent's composed result already lives on
         # self.transform_context etc.
         #
-        # Strip middleware-owned tools (e.g. expand_tools) — their execute
-        # callbacks close over the parent's state and would corrupt it.
+        # Keep middleware-owned tools in the schema (prompt-cache parity)
+        # but deny their execution at runtime — their execute callbacks
+        # close over the parent's state and would corrupt it.
         _mw_tool_ids = {
             id(t) for mw in self._middleware for t in getattr(mw, "tools", []) or []
         }
-        fork_tools = [t for t in self._state.tools if id(t) not in _mw_tool_ids]
+        fork_tools = [
+            _deny_in_fork(t) if id(t) in _mw_tool_ids else t for t in self._state.tools
+        ]
         child: Agent = Agent(
             model=self._model,
             system_prompt=self._state.system_prompt,

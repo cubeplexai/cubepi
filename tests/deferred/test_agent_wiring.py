@@ -135,8 +135,11 @@ class TestAgentDeferredToolGroups:
         assert deferred_mw._on_tools_expanded is not None
 
 
-class TestForkOnceStripsMiddlewareTools:
-    def test_fork_tools_exclude_expand_tools(self) -> None:
+class TestForkOnceDeniesMiddlewareTools:
+    def test_fork_keeps_expand_tools_in_schema(self) -> None:
+        """expand_tools stays in the tool list for prompt-cache parity."""
+        from cubepi.agent.agent import _deny_in_fork
+
         model = _make_faux_model()
         group = _make_group("mcp:github", ["t1", "t2"])
         agent = Agent(
@@ -144,11 +147,29 @@ class TestForkOnceStripsMiddlewareTools:
             tools=[_dummy_tool("builtin")],
             deferred_tool_groups=[group],
         )
-        # Collect middleware tool ids.
         mw_tool_ids = {
             id(t) for mw in agent._middleware for t in getattr(mw, "tools", []) or []
         }
-        fork_tools = [t for t in agent._state.tools if id(t) not in mw_tool_ids]
+        fork_tools = [
+            _deny_in_fork(t) if id(t) in mw_tool_ids else t for t in agent._state.tools
+        ]
         fork_tool_names = [t.name for t in fork_tools]
         assert "builtin" in fork_tool_names
-        assert "expand_tools" not in fork_tool_names
+        assert "expand_tools" in fork_tool_names
+
+    async def test_fork_expand_tools_returns_error(self) -> None:
+        """expand_tools in fork returns is_error=True instead of executing."""
+        from cubepi.agent.agent import _deny_in_fork
+
+        model = _make_faux_model()
+        group = _make_group("mcp:github", ["t1"])
+        agent = Agent(
+            model=model,
+            deferred_tool_groups=[group],
+        )
+        expand_tool = next(t for t in agent._state.tools if t.name == "expand_tools")
+        denied = _deny_in_fork(expand_tool)
+        assert denied.name == "expand_tools"
+        result = await denied.execute("call-1", _Empty())
+        assert result.is_error is True
+        assert "not available in a forked agent" in result.content[0].text
