@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`DeferredToolGroup` / `DeferredToolsMiddleware`** — progressive tool
   disclosure primitive. Hides MCP tool schemas from the model by default,
   injecting a compact catalog into the system prompt instead. The model
-  expands groups on demand via the built-in `expand_tools` tool (full or
+  expands groups on demand via the built-in `load_tools` tool (full or
   selective). Key properties:
   - Catalog sorted by `group_id` for byte-stable system prompt prefix.
   - Expanded schemas append-only (expansion order, never reordered) for

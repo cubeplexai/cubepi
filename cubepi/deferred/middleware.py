@@ -1,7 +1,7 @@
 """DeferredToolsMiddleware — progressive tool disclosure for large tool sets.
 
 Two-phase expansion:
-1. ``_expand_callback`` runs inside ``expand_tools`` execute (no AgentContext).
+1. ``_expand_callback`` runs inside ``load_tools`` execute (no AgentContext).
    Validates, invokes the loader (cached), updates state, queues pending tools.
 2. ``after_tool_call`` fires after execute and injects pending tools into
    ``ctx.context.tools`` so the next model loop iteration sees them.
@@ -29,8 +29,9 @@ from cubepi.deferred._catalog import (
     render_expanded_schemas,
 )
 from cubepi.deferred._expand_tool import (
-    ExpandToolsOutput,
-    _make_expand_tools,
+    TOOL_NAME,
+    LoadToolsOutput,
+    _make_load_tools,
 )
 from cubepi.deferred.types import DeferredToolGroup
 from cubepi.middleware.base import Middleware
@@ -50,7 +51,7 @@ class DeferredToolsMiddleware(Middleware):
     """Middleware that manages deferred tool groups via progressive disclosure.
 
     Attributes:
-        tools: ``[expand_tools]`` — merged into agent state at construction.
+        tools: ``[load_tools]`` — merged into agent state at construction.
     """
 
     def __init__(
@@ -82,7 +83,7 @@ class DeferredToolsMiddleware(Middleware):
         self._loader_locks: dict[str, asyncio.Lock] = {}
 
         self.tools: list[AgentTool] = [
-            _make_expand_tools(expand_callback=self._expand_callback)
+            _make_load_tools(load_callback=self._expand_callback)
         ]
 
     # ------------------------------------------------------------------
@@ -93,11 +94,11 @@ class DeferredToolsMiddleware(Middleware):
         self,
         group_id: str,
         tool_names: list[str] | None,
-    ) -> ExpandToolsOutput:
+    ) -> LoadToolsOutput:
         extra = self._extra_ref()
         group = self._groups.get(group_id)
         if group is None:
-            return ExpandToolsOutput(
+            return LoadToolsOutput(
                 group_id=group_id,
                 expanded=False,
                 tool_names=[],
@@ -115,7 +116,7 @@ class DeferredToolsMiddleware(Middleware):
                 if group_id not in self._loader_cache:
                     self._loader_cache[group_id] = await group.loader()
             except Exception as exc:
-                return ExpandToolsOutput(
+                return LoadToolsOutput(
                     group_id=group_id,
                     expanded=False,
                     tool_names=[],
@@ -199,7 +200,7 @@ class DeferredToolsMiddleware(Middleware):
         else:
             remaining = len(group.tool_names)
 
-        return ExpandToolsOutput(
+        return LoadToolsOutput(
             group_id=group_id,
             expanded=True,
             tool_names=expanded_names,
@@ -232,7 +233,7 @@ class DeferredToolsMiddleware(Middleware):
         group_id: str,
         tool_names: list[str] | None,
         context: AgentContext,
-    ) -> ExpandToolsOutput:
+    ) -> LoadToolsOutput:
         output = await self._expand_callback(group_id, tool_names)
         if output.expanded and context.tools is not None:
             self._drain_pending(context.tools)
@@ -249,7 +250,7 @@ class DeferredToolsMiddleware(Middleware):
         signal: asyncio.Event | None = None,
     ) -> AfterToolCallResult | None:
         del signal
-        if ctx.tool_call.name != "expand_tools":
+        if ctx.tool_call.name != TOOL_NAME:
             return None
         if ctx.is_error:
             return None
@@ -309,22 +310,26 @@ class DeferredToolsMiddleware(Middleware):
         selected tools pre-loaded but stay in remaining (still deferrable).
         Unexpanded groups pass through untouched.
         """
-        pre_loaded: list[AgentTool] = []
+        # Partition groups and load expanded ones concurrently.
         remaining: list[DeferredToolGroup] = []
-        schemas: list[tuple[str, list[ToolSchema]]] = []
-        cache: dict[str, list[AgentTool]] = {}
-
+        to_load: list[tuple[DeferredToolGroup, list[str] | None]] = []
         for group in groups:
             exp = expanded.get(group.group_id)
             if exp is None and group.group_id not in expanded:
-                # Never expanded — stays deferred.
                 remaining.append(group)
-                continue
+            else:
+                to_load.append((group, exp))
 
-            loaded = await group.loader()
+        loaded_results: list[list[AgentTool]] = await asyncio.gather(
+            *(g.loader() for g, _ in to_load)
+        )
+
+        pre_loaded: list[AgentTool] = []
+        schemas: list[tuple[str, list[ToolSchema]]] = []
+        cache: dict[str, list[AgentTool]] = {}
+        for (group, exp), loaded in zip(to_load, loaded_results):
             cache[group.group_id] = loaded
             if exp is None:
-                # Fully expanded (None sentinel) — load all, drop from remaining.
                 pre_loaded.extend(loaded)
                 schemas.append(
                     (
@@ -333,7 +338,6 @@ class DeferredToolsMiddleware(Middleware):
                     )
                 )
             else:
-                # Partially expanded — load selected, keep in remaining.
                 name_set = set(exp)
                 selected = [t for t in loaded if t.name in name_set]
                 pre_loaded.extend(selected)

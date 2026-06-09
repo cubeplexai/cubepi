@@ -15,7 +15,7 @@ catalog, letting the model expand groups on demand.
 
 1. At construction time, the agent's system prompt includes a short
    catalog — one line per group with a description and tool list.
-2. The model sees a built-in `expand_tools` tool it can call to load a
+2. The model sees a built-in `load_tools` tool it can call to load a
    group (or specific tools within a group).
 3. On expansion, the loader runs once, the tools are injected into the
    live tool set, and their schemas are appended to the system prompt.
@@ -23,7 +23,7 @@ catalog, letting the model expand groups on demand.
 ```
 # Deferred tool groups
 
-These tool groups are available but not yet loaded. Call `expand_tools(group_id)`
+These tool groups are available but not yet loaded. Call `load_tools(group_id)`
 to load a group's tools for the rest of this conversation.
 
 - `mcp:github` — GitHub: Issues, PRs, repos, code search (4 tools)
@@ -68,22 +68,22 @@ agent = Agent(
 
 | Field | Type | Description |
 |---|---|---|
-| `group_id` | `str` | Unique identifier the model uses in `expand_tools` calls (e.g. `"mcp:github"`) |
+| `group_id` | `str` | Unique identifier the model uses in `load_tools` calls (e.g. `"mcp:github"`) |
 | `display_name` | `str` | Human-readable label shown in the catalog |
 | `description` | `str` | One-line summary of the group's capabilities |
 | `tool_names` | `list[str]` | Tool names shown in the catalog |
 | `loader` | `async () -> list[AgentTool]` | Callback that returns the full tool set for this group |
 
-## The `expand_tools` tool
+## The `load_tools` tool
 
-The model calls `expand_tools` to load a group's tools. Two modes:
+The model calls `load_tools` to load a group's tools. Two modes:
 
 ```
 # Expand everything in the group
-expand_tools(group_id="mcp:github")
+load_tools(group_id="mcp:github")
 
 # Expand specific tools only
-expand_tools(group_id="mcp:github", tool_names=["create_issue", "search_repos"])
+load_tools(group_id="mcp:github", tool_names=["create_issue", "search_repos"])
 ```
 
 The tool returns a structured result:
@@ -106,11 +106,11 @@ The model can expand a group incrementally — requesting one or two tools
 now and more later:
 
 ```
-expand_tools(group_id="mcp:github", tool_names=["create_issue"])
+load_tools(group_id="mcp:github", tool_names=["create_issue"])
 # → remaining: 3
 
 # later...
-expand_tools(group_id="mcp:github", tool_names=["search_repos"])
+load_tools(group_id="mcp:github", tool_names=["search_repos"])
 # → remaining: 2
 ```
 
@@ -119,7 +119,7 @@ Already-expanded tools are idempotent — re-requesting them is a no-op.
 ### Loader caching
 
 The `loader` callback is invoked exactly **once per group per run**.
-The first `expand_tools` call triggers it; subsequent selective
+The first `load_tools` call triggers it; subsequent selective
 expansions filter from the cached result. If the loader fails, the
 error is returned to the model and the group remains unexpanded.
 
@@ -130,7 +130,7 @@ The system prompt is designed for prompt-cache prefix stability:
 - **Catalog** is sorted by `group_id` alphabetically — input order
   doesn't matter, the rendered text is byte-stable.
 - **Expanded schemas** are appended in expansion order (the order the
-  model called `expand_tools`), never reordered. Each new expansion
+  model called `load_tools`), never reordered. Each new expansion
   appends to the end, preserving the existing prefix.
 
 This means the LLM API's prompt cache remains valid across turns: the
@@ -219,7 +219,7 @@ from cubepi.deferred import DeferredToolsMiddleware
 mw = DeferredToolsMiddleware(
     groups=[github_group, linear_group],
     extra_ref=lambda: agent_extra,
-    catalog_header="# Available integrations\n\nExpand with expand_tools().",
+    catalog_header="# Available integrations\n\nExpand with load_tools().",
     resumed_schemas=None,  # or pass schemas from a previous run
 )
 
@@ -255,7 +255,7 @@ is automatically bound to `self._extra`.
 **Skip it when:**
 
 - The agent has only a few tools — the overhead of the catalog and
-  `expand_tools` call isn't worth it.
+  `load_tools` call isn't worth it.
 - All tools are needed on every turn — deferring just adds a round trip.
 - Tool schemas are small — the context savings are minimal.
 
