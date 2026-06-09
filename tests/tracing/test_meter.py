@@ -348,3 +348,47 @@ class TestNoMetricsWithoutListeners:
 
         points = _all_metric_points(reader)
         assert _by_name(points, "gen_ai.client.operation.duration") == []
+
+
+class TestFallbackChainCoverage:
+    """Issue #167 — Meter.attach() should subscribe to every chain provider."""
+
+    async def test_attach_subscribes_to_every_chain_provider(self):
+        from cubepi.providers.fallback import FallbackBoundModel
+
+        primary = FauxProvider(provider_id="primary")
+        secondary = FauxProvider(provider_id="secondary")
+        chain_model = FallbackBoundModel(
+            chain=(primary.model(MODEL.id), secondary.model(MODEL.id)),
+        )
+        agent = Agent(model=chain_model, system_prompt="s")
+        meter, _ = _build_meter()
+        detach = meter.attach(agent)
+
+        # Both providers have request listeners registered.
+        assert len(getattr(primary, "_request_listeners", [])) == 1
+        assert len(getattr(secondary, "_request_listeners", [])) == 1
+
+        detach()
+
+        # Detach clears them.
+        assert len(getattr(primary, "_request_listeners", [])) == 0
+        assert len(getattr(secondary, "_request_listeners", [])) == 0
+
+    async def test_attach_dedupes_shared_provider_across_chain(self):
+        from cubepi.providers.fallback import FallbackBoundModel
+
+        shared = FauxProvider(provider_id="shared")
+        chain_model = FallbackBoundModel(
+            chain=(shared.model("m1"), shared.model("m2")),
+        )
+        agent = Agent(model=chain_model, system_prompt="s")
+        meter, _ = _build_meter()
+        detach = meter.attach(agent)
+
+        # Shared provider gets one listener of each kind, not two.
+        assert len(getattr(shared, "_request_listeners", [])) == 1
+        assert len(getattr(shared, "_chunk_listeners", [])) == 1
+        assert len(getattr(shared, "_response_listeners", [])) == 1
+
+        detach()

@@ -153,6 +153,7 @@ class Meter:
         before its response landed).
         """
         from cubepi.providers.base import BaseProvider
+        from cubepi.providers.fallback import chain_providers
 
         state = _MeterState()
 
@@ -175,16 +176,21 @@ class Meter:
 
         unsub_agent = agent.subscribe(_on_agent_event)
         agent_model = getattr(agent, "_model", None)
-        provider = (
-            agent_model.provider
-            if agent_model is not None
-            else getattr(agent, "provider", None)
-        )
+        # When the bound model is a FallbackBoundModel, subscribe to every
+        # unique provider in the chain so post-failover token usage / cost
+        # / cache-hit metrics are emitted for chain[1..] calls the same way
+        # as chain[0]. Non-fallback models yield a single-entry list.
+        agent_providers: list[Any] = chain_providers(agent_model)
+        if not agent_providers:
+            legacy = getattr(agent, "provider", None)
+            if legacy is not None:
+                agent_providers = [legacy]
         detachers: list[Callable[[], None]] = []
-        if isinstance(provider, BaseProvider):
-            detachers.append(provider.subscribe_request(_on_request))
-            detachers.append(provider.subscribe_chunk(_on_chunk))
-            detachers.append(provider.subscribe_response(_on_response))
+        for provider in agent_providers:
+            if isinstance(provider, BaseProvider):
+                detachers.append(provider.subscribe_request(_on_request))
+                detachers.append(provider.subscribe_chunk(_on_chunk))
+                detachers.append(provider.subscribe_response(_on_response))
 
         def detach() -> None:
             unsub_agent()

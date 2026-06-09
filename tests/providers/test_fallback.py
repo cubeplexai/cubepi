@@ -372,3 +372,53 @@ async def test_generate_error_assistant_message_triggers_failover() -> None:
 
     assert result.provider_id == "fallback"
     assert result.stop_reason != "error"
+
+
+# ---------------------------------------------------------------------------
+# chain_providers helper — used by Recorder / Meter to subscribe to every
+# unique provider in a fallback chain (issue #167).
+# ---------------------------------------------------------------------------
+
+
+def test_chain_providers_for_fallback_returns_unique_providers_in_order() -> None:
+    """FallbackBoundModel chain → list of unique providers, primary first."""
+    from cubepi.providers.fallback import chain_providers
+
+    p1 = FauxProvider(provider_id="p1")
+    p2 = FauxProvider(provider_id="p2")
+    p3 = FauxProvider(provider_id="p3")
+    fbm = FallbackBoundModel(chain=(p1.model("a"), p2.model("b"), p3.model("c")))
+
+    out = chain_providers(fbm)
+    assert out == [p1, p2, p3]
+
+
+def test_chain_providers_dedupes_shared_provider_across_legs() -> None:
+    """Two chain entries on the same provider instance → single entry in output."""
+    from cubepi.providers.fallback import chain_providers
+
+    shared = FauxProvider(provider_id="shared")
+    other = FauxProvider(provider_id="other")
+    # primary + tertiary share the same provider; secondary differs.
+    fbm = FallbackBoundModel(
+        chain=(shared.model("a"), other.model("b"), shared.model("c"))
+    )
+
+    out = chain_providers(fbm)
+    assert out == [shared, other]
+
+
+def test_chain_providers_for_plain_bound_model_returns_single_entry() -> None:
+    """A plain BoundModel → single-entry list with its provider."""
+    from cubepi.providers.fallback import chain_providers
+
+    p = FauxProvider(provider_id="plain")
+    out = chain_providers(p.model("x"))
+    assert out == [p]
+
+
+def test_chain_providers_for_none_returns_empty() -> None:
+    """None model → empty list (used by attach()'s legacy fallback path)."""
+    from cubepi.providers.fallback import chain_providers
+
+    assert chain_providers(None) == []

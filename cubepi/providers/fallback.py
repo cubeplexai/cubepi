@@ -53,11 +53,11 @@ class FallbackBoundModel:
     provider and spec proxy chain[0] so tracing/billing code that reads
     agent._model.provider / agent._model.spec continues to work unchanged.
 
-    Known limitation: Tracer.attach() and Meter.attach() subscribe only to
-    chain[0].provider. Successful fallback calls (chain[1..]) are invisible to
-    provider-level observability (chat spans, token/cost metrics). Tracked as a
-    follow-up: update recorder.py and meter.py to iterate chain and subscribe
-    to every unique BaseProvider.
+    Tracer / Meter coverage: Recorder.attach() and Meter.attach() detect
+    FallbackBoundModel and subscribe to every unique BaseProvider in the
+    chain (via chain_providers() below), so post-failover chat spans and
+    provider metrics land in the trace / metric stream like primary-leg
+    calls do.
     """
 
     chain: tuple[BoundModel, ...]
@@ -230,3 +230,34 @@ class FallbackBoundModel:
         raise ProviderUnavailable(
             f"all providers exhausted; last error: {last_error!r}"
         )
+
+
+def chain_providers(model: object) -> list[Any]:
+    """Return the unique BaseProvider instances backing a bound model.
+
+    For :class:`FallbackBoundModel`, iterates ``chain`` and dedupes providers
+    by identity. For a plain :class:`BoundModel` returns ``[model.provider]``.
+    For anything else (or ``None``) returns ``[]``.
+
+    Used by :meth:`cubepi.tracing.recorder.Recorder.attach` and
+    :meth:`cubepi.tracing.meter.Meter.attach` to subscribe to every leg of a
+    fallback chain so post-failover provider events land in the trace /
+    metric stream.
+    """
+    from cubepi.providers.base import BaseProvider
+
+    if model is None:
+        return []
+    if isinstance(model, FallbackBoundModel):
+        seen: set[int] = set()
+        out: list[Any] = []
+        for bm in model.chain:
+            p = bm.provider
+            if isinstance(p, BaseProvider) and id(p) not in seen:
+                seen.add(id(p))
+                out.append(p)
+        return out
+    provider = getattr(model, "provider", None)
+    if isinstance(provider, BaseProvider):
+        return [provider]
+    return []

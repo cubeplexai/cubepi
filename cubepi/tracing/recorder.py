@@ -233,6 +233,7 @@ class Recorder:
 
     def attach(self, agent: "Agent") -> Callable[[], None]:
         from cubepi.providers.base import BaseProvider
+        from cubepi.providers.fallback import chain_providers
 
         self._agent = agent
         unsub_agent = agent.subscribe(self._on_agent_event)
@@ -240,11 +241,19 @@ class Recorder:
         # reached via ``_model.provider``. Fall back to a public ``provider``
         # alias should one be added later.
         agent_model = getattr(agent, "_model", None)
-        provider = (
-            agent_model.provider
-            if agent_model is not None
-            else getattr(agent, "provider", None)
-        )
+        # When the bound model is a FallbackBoundModel, subscribe to every
+        # unique provider in the chain so post-failover provider events
+        # (chat spans, token usage, errors) land in the trace tree like
+        # primary-leg events do. Non-fallback models yield a single-entry
+        # list with the only provider.
+        agent_providers: list[Any] = chain_providers(agent_model)
+        if not agent_providers:
+            # Legacy / unusual agents may expose ``provider`` directly on
+            # the Agent instead of via ``_model``; preserve the fallback.
+            legacy = getattr(agent, "provider", None)
+            if legacy is not None:
+                agent_providers = [legacy]
+        provider = agent_providers[0] if agent_providers else None
         provider_detachers: list[Callable[[], None]] = []
 
         def _subscribe(p: Any) -> None:
@@ -259,7 +268,8 @@ class Recorder:
         # so a failed attach() leaves no dangling listeners. The caller never
         # gets a ``detach`` callable on this path, so we cannot defer cleanup.
         try:
-            _subscribe(provider)
+            for p in agent_providers:
+                _subscribe(p)
             # Middlewares may drive their own LLM calls (e.g.
             # ``CompactionMiddleware``'s summarizer). For each declared
             # (provider, model) pair: (a) subscribe the provider if we
@@ -288,7 +298,10 @@ class Recorder:
                 if agent_model is not None
                 else None
             )
-            seen: set[int] = {id(provider)} if provider is not None else set()
+            # Pre-seed `seen` with every chain provider already subscribed
+            # above so a middleware that reuses one of them isn't
+            # double-subscribed.
+            seen: set[int] = {id(p) for p in agent_providers}
             for mw in getattr(agent, "_middleware", []) or []:
                 try:
                     extra = list(mw.extra_llm_calls())

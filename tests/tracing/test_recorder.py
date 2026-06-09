@@ -1522,3 +1522,55 @@ class TestJsonlExporter:
             d = _json.loads(line)
             assert "name" in d
             assert "context" in d
+
+
+class TestFallbackChainCoverage:
+    """Issue #167 — Tracer/Meter should subscribe to every chain provider."""
+
+    async def test_attach_subscribes_to_every_chain_provider(self):
+        """When agent.model is a FallbackBoundModel, attach() should listen
+        on each unique provider in chain — not just chain[0]."""
+        from cubepi.providers.fallback import FallbackBoundModel
+
+        primary = FauxProvider(provider_id="primary")
+        secondary = FauxProvider(provider_id="secondary")
+        chain_model = FallbackBoundModel(
+            chain=(primary.model(MODEL.id), secondary.model(MODEL.id)),
+        )
+        agent = Agent(model=chain_model, system_prompt="t")
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="t", agent_name="a", exporters=[exporter]
+        )
+        tracer.attach(agent)
+
+        recorder = _find_attached_recorder(primary)
+        assert recorder is not None, "primary leg must be subscribed"
+        recorder_2 = _find_attached_recorder(secondary)
+        assert recorder_2 is not None, "secondary leg must be subscribed"
+        # Both legs share the same Recorder instance.
+        assert recorder is recorder_2
+
+        await tracer.shutdown()
+
+    async def test_attach_dedupes_shared_provider_across_chain(self):
+        """If chain[0] and chain[1] share the same provider instance,
+        attach() must register listeners on it only once."""
+        from cubepi.providers.fallback import FallbackBoundModel
+
+        shared = FauxProvider(provider_id="shared")
+        chain_model = FallbackBoundModel(
+            chain=(shared.model("m1"), shared.model("m2")),
+        )
+        agent = Agent(model=chain_model, system_prompt="t")
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="t", agent_name="a", exporters=[exporter]
+        )
+        tracer.attach(agent)
+
+        # Each event type registered exactly once on the shared provider.
+        request_listeners = list(getattr(shared, "_request_listeners", []))
+        assert len(request_listeners) == 1, request_listeners
+
+        await tracer.shutdown()
