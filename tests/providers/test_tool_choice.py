@@ -10,7 +10,6 @@ methods and ``tool_choice`` parameter are implemented (TDD red phase).
 
 from __future__ import annotations
 
-import pytest
 
 from cubepi.providers.anthropic import AnthropicProvider
 from cubepi.providers.base import Model, UserMessage, TextContent

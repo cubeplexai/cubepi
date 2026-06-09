@@ -855,7 +855,9 @@ class BoundModel:
             "Do NOT respond with plain text."
         )
         full_system = (
-            f"{system_prompt}\n\n{default_hint}".strip() if system_prompt else default_hint
+            f"{system_prompt}\n\n{default_hint}".strip()
+            if system_prompt
+            else default_hint
         )
 
         attempt_messages = list(messages)

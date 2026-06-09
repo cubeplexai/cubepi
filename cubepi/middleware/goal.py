@@ -96,9 +96,7 @@ class GoalMiddleware(Middleware):
         self._condition = condition
         self._evaluations = 0
 
-        rewritten = last.model_copy(
-            update={"content": [TextContent(text=condition)]}
-        )
+        rewritten = last.model_copy(update={"content": [TextContent(text=condition)]})
         # Mutate ctx.messages so the stripped form is what gets stored in
         # agent state — the /goal prefix is a one-way control signal that
         # should not persist in the conversation history.
