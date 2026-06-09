@@ -51,7 +51,7 @@ def _make_expand_tools(
         text = json.dumps(output.model_dump(), ensure_ascii=False)
         return AgentToolResult(
             content=[TextContent(text=text)],
-            is_error=bool(output.error),
+            is_error=not output.expanded,
         )
 
     return AgentTool(

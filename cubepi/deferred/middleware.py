@@ -176,7 +176,7 @@ class DeferredToolsMiddleware(Middleware):
                 self._expanded_schemas.append((group_id, new_schemas))
 
         # Stage newly expanded tools for injection by after_tool_call.
-        self._pending_injection = newly_expanded
+        self._pending_injection.extend(newly_expanded)
 
         # Calculate remaining count.
         current_expanded = expanded_groups.get(group_id)
@@ -207,8 +207,8 @@ class DeferredToolsMiddleware(Middleware):
     ) -> ExpandToolsOutput:
         output = await self._expand_callback(group_id, tool_names)
         if output.expanded and self._pending_injection:
-            newly_expanded = self._pending_injection
-            self._pending_injection = []
+            newly_expanded = list(self._pending_injection)
+            self._pending_injection.clear()
             if context.tools is not None:
                 existing_names = {t.name for t in context.tools}
                 for tool in newly_expanded:
@@ -233,8 +233,8 @@ class DeferredToolsMiddleware(Middleware):
             return None
 
         if self._pending_injection:
-            newly_expanded = self._pending_injection
-            self._pending_injection = []
+            newly_expanded = list(self._pending_injection)
+            self._pending_injection.clear()
             if ctx.context.tools is not None:
                 existing_names = {t.name for t in ctx.context.tools}
                 for tool in newly_expanded:
