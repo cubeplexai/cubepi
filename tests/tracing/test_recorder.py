@@ -1570,3 +1570,57 @@ class TestFallbackChainCoverage:
         assert len(request_listeners) == 1, request_listeners
 
         await tracer.shutdown()
+
+    async def test_attach_excludes_every_chain_leg_key_from_extra_call_models(
+        self,
+    ):
+        """Regression for the failover-first-call root attribution suppression
+        bug. If a middleware declares an extra_llm_call whose ``.spec`` matches
+        chain[1+] of a FallbackBoundModel, the recorder must NOT register that
+        spec key in ``_extra_call_models`` — otherwise when chain[0] fails
+        before emission and chain[1] fires for the agent's own request, the
+        recorder treats it as a middleware-owned call and skips root
+        attribution, leaving the run attributed to the ``cubepi`` placeholder.
+
+        Build a chain ``[primary, secondary]`` + a stub middleware whose
+        ``extra_llm_calls()`` returns a BoundModel using secondary's spec,
+        attach, then verify secondary's spec key is absent from the recorder's
+        ``_extra_call_models`` set.
+        """
+        from cubepi.providers.fallback import FallbackBoundModel
+
+        primary = FauxProvider(provider_id="primary")
+        secondary = FauxProvider(provider_id="secondary")
+        primary_bound = primary.model("m-primary")
+        secondary_bound = secondary.model("m-secondary")
+
+        # Minimal duck-typed middleware: only ``extra_llm_calls()`` is read
+        # by attach(). The middleware "extra" intentionally reuses
+        # secondary's spec — a legitimate pattern when a middleware wants
+        # to share the fallback's secondary model.
+        class _FakeMiddleware:
+            def extra_llm_calls(self) -> list[Any]:
+                return [secondary_bound]
+
+        chain_model = FallbackBoundModel(chain=(primary_bound, secondary_bound))
+        agent = Agent(
+            model=chain_model,
+            system_prompt="t",
+            middleware=[_FakeMiddleware()],  # type: ignore[list-item]
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
+        tracer.attach(agent)
+
+        recorder = _find_attached_recorder(primary)
+        assert recorder is not None
+        secondary_key = (secondary_bound.spec.provider_id, secondary_bound.spec.id)
+        assert secondary_key not in recorder._extra_call_models, (
+            "secondary leg's spec must NOT be in _extra_call_models — otherwise "
+            "failover to chain[1] would suppress root attribution"
+        )
+        # Primary's key must also not be flagged as extra (it was never extra).
+        primary_key = (primary_bound.spec.provider_id, primary_bound.spec.id)
+        assert primary_key not in recorder._extra_call_models
+
+        await tracer.shutdown()
