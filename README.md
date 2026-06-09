@@ -223,11 +223,11 @@ The model sees a compact catalog in the system prompt instead of full schemas:
   create_issue, search_repos, create_pr, list_comments
 ```
 
-When the model needs a group, it calls the built-in `expand_tools` tool:
+When the model needs a group, it calls the built-in `load_tools` tool:
 
 ```
-expand_tools(group_id="mcp:github")                        # expand all
-expand_tools(group_id="mcp:github", tool_names=["create_issue"])  # or just one
+load_tools(group_id="mcp:github")                        # load all
+load_tools(group_id="mcp:github", tool_names=["create_issue"])  # or just one
 ```
 
 The loader is called once per group per run; subsequent selective expansions

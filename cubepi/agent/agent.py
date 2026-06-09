@@ -216,7 +216,9 @@ class Agent(Generic[TMessage]):
             deferred_mw = DeferredToolsMiddleware(
                 groups=deferred_tool_groups,
                 extra_ref=lambda: self._extra,
-                on_tools_expanded=lambda tools: self._state._tools.extend(tools),
+                on_tools_expanded=lambda new: self._state._tools.extend(
+                    t for t in new if t.name not in {e.name for e in self._state._tools}
+                ),
             )
             middleware = [*(middleware or []), deferred_mw]
         middleware = middleware or []

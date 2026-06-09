@@ -46,12 +46,12 @@ def _make_group(
 
 
 class TestMiddlewareConstruction:
-    def test_tools_attribute_contains_expand_tools(self) -> None:
+    def test_tools_attribute_contains_load_tools(self) -> None:
         extra: dict = {}
         group = _make_group("mcp:a", ["t1"])
         mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
         assert len(mw.tools) == 1
-        assert mw.tools[0].name == "expand_tools"
+        assert mw.tools[0].name == "load_tools"
 
 
 class TestTransformSystemPrompt:
@@ -108,7 +108,7 @@ class TestAfterToolCallExpansion:
         assert output.expanded is True
         assert len(output.tool_names) == 2
         assert output.remaining == 0
-        assert len(context_tools) == 3  # expand_tools + 2 new
+        assert len(context_tools) == 3  # load_tools + 2 new
         assert extra["expanded_groups"] == {"mcp:github": None}
 
     async def test_expand_selective_injects_only_requested(self) -> None:
@@ -135,7 +135,7 @@ class TestAfterToolCallExpansion:
         assert output.expanded is True
         assert output.tool_names == ["create_issue"]
         assert output.remaining == 2
-        assert len(context_tools) == 2  # expand_tools + 1 new
+        assert len(context_tools) == 2  # load_tools + 1 new
         assert extra["expanded_groups"] == {"mcp:github": ["create_issue"]}
 
     async def test_incremental_expand_same_group(self) -> None:

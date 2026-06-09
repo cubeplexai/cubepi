@@ -10,18 +10,20 @@ from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 from cubepi.types import StructuredValue
 
+TOOL_NAME = "load_tools"
 
-class ExpandToolsInput(BaseModel):
+
+class LoadToolsInput(BaseModel):
     group_id: str = Field(
         description="The group_id from your 'Deferred tool groups' catalog.",
     )
     tool_names: list[str] | None = Field(
         default=None,
-        description="Specific tools to expand. Omit to expand all tools in the group.",
+        description="Specific tools to load. Omit to load all tools in the group.",
     )
 
 
-class ExpandToolsOutput(BaseModel):
+class LoadToolsOutput(BaseModel):
     group_id: str
     expanded: bool
     tool_names: list[str]
@@ -29,25 +31,25 @@ class ExpandToolsOutput(BaseModel):
     error: str | None = None
 
 
-ExpandCallback = Callable[
+LoadCallback = Callable[
     [str, list[str] | None],
-    Awaitable[ExpandToolsOutput],
+    Awaitable[LoadToolsOutput],
 ]
 
 
-def _make_expand_tools(
+def _make_load_tools(
     *,
-    expand_callback: ExpandCallback,
-) -> AgentTool[ExpandToolsInput]:
+    load_callback: LoadCallback,
+) -> AgentTool[LoadToolsInput]:
     async def _execute(
         tool_call_id: str,
-        args: ExpandToolsInput,
+        args: LoadToolsInput,
         *,
         signal: asyncio.Event | None = None,
         on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         del signal, on_update
-        output = await expand_callback(args.group_id, args.tool_names)
+        output = await load_callback(args.group_id, args.tool_names)
         text = json.dumps(output.model_dump(), ensure_ascii=False)
         return AgentToolResult(
             content=[TextContent(text=text)],
@@ -55,12 +57,12 @@ def _make_expand_tools(
         )
 
     return AgentTool(
-        name="expand_tools",
+        name=TOOL_NAME,
         description=(
-            "Expand a deferred tool group to make its tools available. "
+            "Load a deferred tool group to make its tools available. "
             "Call with a group_id from the 'Deferred tool groups' catalog. "
-            "Optionally pass tool_names to expand specific tools only."
+            "Optionally pass tool_names to load specific tools only."
         ),
-        parameters=ExpandToolsInput,
+        parameters=LoadToolsInput,
         execute=_execute,
     )

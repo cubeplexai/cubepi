@@ -7,9 +7,9 @@ from cubepi.deferred.types import DeferredToolGroup
 DEFAULT_CATALOG_HEADER = (
     "# Deferred tool groups\n"
     "\n"
-    "These tool groups are available but not yet loaded. Call `expand_tools(group_id)`\n"
+    "These tool groups are available but not yet loaded. Call `load_tools(group_id)`\n"
     "to load a group's tools for the rest of this conversation.\n"
-    "You can also call `expand_tools(group_id, tool_names=[...])` to load specific tools only."
+    "You can also call `load_tools(group_id, tool_names=[...])` to load specific tools only."
 )
 
 
