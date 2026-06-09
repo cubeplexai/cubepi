@@ -5,6 +5,20 @@ All notable changes to CubePi are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`Recorder.attach()` and `Meter.attach()` now subscribe to every provider in
+  a `FallbackBoundModel` chain** (closes #167). Previously they only listened
+  to `chain[0].provider`, so post-failover calls executed against `chain[1..]`
+  were invisible to provider-level observability — chat spans, token usage,
+  cache metrics, and cost telemetry were missing for fallback legs. Adds a
+  new `cubepi.providers.fallback.chain_providers()` helper used by both
+  attach paths to walk and dedupe the chain. Agent-event-driven observability
+  (e.g. cost middleware reading `MessageEvent`) was already correct and is
+  unchanged.
+
 ## [0.9.0] - 2026-06-08
 
 ### Added

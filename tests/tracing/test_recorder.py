@@ -1539,9 +1539,7 @@ class TestFallbackChainCoverage:
         )
         agent = Agent(model=chain_model, system_prompt="t")
         exporter = InMemoryExporter()
-        tracer = Tracer(
-            service_name="t", agent_name="a", exporters=[exporter]
-        )
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)
 
         recorder = _find_attached_recorder(primary)
@@ -1564,9 +1562,7 @@ class TestFallbackChainCoverage:
         )
         agent = Agent(model=chain_model, system_prompt="t")
         exporter = InMemoryExporter()
-        tracer = Tracer(
-            service_name="t", agent_name="a", exporters=[exporter]
-        )
+        tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])
         tracer.attach(agent)
 
         # Each event type registered exactly once on the shared provider.
