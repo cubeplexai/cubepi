@@ -208,3 +208,100 @@ def test_extra_llm_calls_declares_evaluator() -> None:
 
     assert len(calls) == 1
     assert calls[0] is evaluator_model
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Empty goal condition is treated as no-op
+# ---------------------------------------------------------------------------
+
+
+async def test_empty_goal_condition_transparent() -> None:
+    """/goal with only whitespace after prefix is treated as no goal — transparent pass-through."""
+    worker = FauxProvider(provider_id="worker")
+    worker.set_responses([faux_assistant_message("done")])
+
+    evaluator_provider = FauxProvider(provider_id="evaluator")
+    evaluator_provider.set_responses([])
+
+    goal = GoalMiddleware(evaluator=evaluator_provider.model("eval"))
+    agent = Agent(model=worker.model("test"), middleware=[goal])
+
+    await agent.prompt("/goal ")
+
+    assert worker.call_count == 1
+    assert evaluator_provider.call_count == 0
+    assert "goal" not in agent.state.extra
+
+
+# ---------------------------------------------------------------------------
+# Test 8: Goal state restored from ctx.extra after checkpoint
+# ---------------------------------------------------------------------------
+
+
+async def test_goal_state_restored_from_extra() -> None:
+    """If middleware instance lost state but ctx.extra has active goal, restore and continue."""
+    worker = FauxProvider(provider_id="worker")
+    worker.set_responses(
+        [
+            faux_assistant_message("first attempt"),
+            faux_assistant_message("second attempt"),
+        ]
+    )
+
+    evaluator_provider = FauxProvider(provider_id="evaluator")
+    evaluator_provider.set_responses(
+        [
+            faux_assistant_message(
+                faux_tool_call(
+                    "structured_output",
+                    {"achieved": False, "reason": "not done yet"},
+                )
+            ),
+            faux_assistant_message(
+                faux_tool_call(
+                    "structured_output",
+                    {"achieved": True, "reason": "all done"},
+                )
+            ),
+        ]
+    )
+
+    goal = GoalMiddleware(evaluator=evaluator_provider.model("eval"))
+    agent = Agent(model=worker.model("test"), middleware=[goal])
+
+    await agent.prompt("/goal all tests pass")
+
+    assert agent.state.extra["goal"]["status"] == "achieved"
+    assert agent.state.extra["goal"]["evaluations"] == 2
+
+    # Simulate checkpoint restore: new middleware instance, same agent state
+    goal2 = GoalMiddleware(evaluator=evaluator_provider.model("eval"))
+    assert goal2._condition is None  # fresh instance has no state
+
+    # Seed extra with an "active" goal as if mid-evaluation was checkpointed
+    agent2 = Agent(model=worker.model("test"), middleware=[goal2])
+    agent2._extra["goal"] = {
+        "status": "active",
+        "condition": "all tests pass",
+        "evaluations": 1,
+        "max_evaluations": 10,
+        "last_reason": "2 tests still failing",
+    }
+
+    worker.set_responses([faux_assistant_message("third attempt")])
+    evaluator_provider.set_responses(
+        [
+            faux_assistant_message(
+                faux_tool_call(
+                    "structured_output",
+                    {"achieved": True, "reason": "all pass now"},
+                )
+            )
+        ]
+    )
+
+    # Normal prompt (no /goal prefix) — middleware should restore from extra
+    await agent2.prompt("continue working")
+
+    assert agent2.state.extra["goal"]["status"] == "achieved"
+    assert agent2.state.extra["goal"]["evaluations"] == 2

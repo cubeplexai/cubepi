@@ -93,6 +93,8 @@ class GoalMiddleware(Middleware):
             return messages
 
         condition = first_block.text[len(_GOAL_PREFIX) :].strip()
+        if not condition:
+            return messages
         self._condition = condition
         self._evaluations = 0
 
@@ -110,7 +112,11 @@ class GoalMiddleware(Middleware):
         signal: asyncio.Event | None = None,
     ) -> list[Message] | None:
         if self._condition is None:
-            return None
+            saved = ctx.extra.get("goal")
+            if not isinstance(saved, dict) or saved.get("status") != "active":
+                return None
+            self._condition = saved["condition"]
+            self._evaluations = saved.get("evaluations", 0)
 
         self._evaluations += 1
 
