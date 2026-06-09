@@ -247,6 +247,7 @@ class TestAnthropicStreamToolChoice:
 
         call_kwargs = mock_client.messages.stream.call_args[1]
         assert "tool_choice" not in call_kwargs
+        assert "tools" not in call_kwargs
 
 
 # ---------------------------------------------------------------------------

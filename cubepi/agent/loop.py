@@ -30,6 +30,8 @@ from cubepi.providers.base import (
 if TYPE_CHECKING:
     from cubepi.providers.fallback import FallbackBoundModel
 
+_MAX_ON_RUN_END_CYCLES = 100
+
 
 async def run_agent_loop(
     *,
@@ -475,6 +477,8 @@ async def _run_loop_inner(
                 current_context.messages.append(msg)
                 new_messages.append(msg)
 
+    on_run_end_cycles = 0
+
     while True:
         has_more_tool_calls = True
 
@@ -663,6 +667,9 @@ async def _run_loop_inner(
         if on_run_end:
             inject = await on_run_end(current_context, signal=opts.signal)
             if inject:
+                on_run_end_cycles += 1
+                if on_run_end_cycles > _MAX_ON_RUN_END_CYCLES:
+                    break
                 for msg in inject:
                     await emit_event(emit, MessageStartEvent(message=msg))
                     await emit_event(emit, MessageEndEvent(message=msg))

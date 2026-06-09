@@ -878,16 +878,19 @@ class BoundModel:
                         return output_type.model_validate(block.arguments)
                     except Exception as exc:
                         last_error = exc
+                        error_text = (
+                            f"Validation error: {exc}. Fix the data and try again."
+                        )
                         attempt_messages = [
                             *attempt_messages,
                             response,
-                            UserMessage(
-                                content=[
-                                    TextContent(
-                                        text=f"Validation error: {exc}. Fix the data and try again."
-                                    )
-                                ]
+                            ToolResultMessage(
+                                tool_call_id=block.id,
+                                tool_name=block.name,
+                                content=[TextContent(text=error_text)],
+                                is_error=True,
                             ),
+                            UserMessage(content=[TextContent(text=error_text)]),
                         ]
                         break
             else:
