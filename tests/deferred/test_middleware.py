@@ -414,6 +414,123 @@ class TestOnToolsExpandedCallback:
         assert call_count[0] == 1  # no new tools, no callback
 
 
+class TestAfterToolCallHook:
+    """Tests that exercise the after_tool_call hook directly (not via _expand)."""
+
+    async def test_drains_pending_on_load_tools_call(self) -> None:
+        from cubepi.agent.types import AfterToolCallContext
+        from cubepi.deferred._expand_tool import TOOL_NAME
+        from cubepi.providers.base import AssistantMessage, ToolCall
+
+        extra: dict = {}
+        group = _make_group("mcp:github", ["t1", "t2"])
+        mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
+
+        context_tools: list[AgentTool] = [mw.tools[0]]
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=context_tools,
+            extra=extra,
+        )
+
+        await mw._expand_callback("mcp:github", None)
+        assert len(mw._pending_injection) == 2
+
+        atc_ctx = AfterToolCallContext(
+            assistant_message=AssistantMessage(content=[]),
+            tool_call=ToolCall(id="c1", name=TOOL_NAME, arguments={}),
+            args={},
+            result=AgentToolResult(content=[TextContent(text="ok")]),
+            is_error=False,
+            context=ctx,
+        )
+        await mw.after_tool_call(atc_ctx)
+        assert len(context_tools) == 3
+        assert len(mw._pending_injection) == 0
+
+    async def test_skips_non_load_tools_call(self) -> None:
+        from cubepi.agent.types import AfterToolCallContext
+        from cubepi.providers.base import AssistantMessage, ToolCall
+
+        extra: dict = {}
+        group = _make_group("mcp:github", ["t1"])
+        mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
+        mw._pending_injection.append(_dummy_tool("t1"))
+
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=list(mw.tools),
+            extra=extra,
+        )
+        atc_ctx = AfterToolCallContext(
+            assistant_message=AssistantMessage(content=[]),
+            tool_call=ToolCall(id="c1", name="other_tool", arguments={}),
+            args={},
+            result=AgentToolResult(content=[TextContent(text="ok")]),
+            is_error=False,
+            context=ctx,
+        )
+        await mw.after_tool_call(atc_ctx)
+        assert len(mw._pending_injection) == 1  # not drained
+
+    async def test_skips_error_result(self) -> None:
+        from cubepi.agent.types import AfterToolCallContext
+        from cubepi.deferred._expand_tool import TOOL_NAME
+        from cubepi.providers.base import AssistantMessage, ToolCall
+
+        extra: dict = {}
+        group = _make_group("mcp:github", ["t1"])
+        mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
+        mw._pending_injection.append(_dummy_tool("t1"))
+
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=list(mw.tools),
+            extra=extra,
+        )
+        atc_ctx = AfterToolCallContext(
+            assistant_message=AssistantMessage(content=[]),
+            tool_call=ToolCall(id="c1", name=TOOL_NAME, arguments={}),
+            args={},
+            result=AgentToolResult(content=[TextContent(text="err")], is_error=True),
+            is_error=True,
+            context=ctx,
+        )
+        await mw.after_tool_call(atc_ctx)
+        assert len(mw._pending_injection) == 1  # not drained
+
+
+class TestSelectiveExpandAfterFullExpand:
+    async def test_selective_after_full_is_noop(self) -> None:
+        """Selective expand on a fully-expanded group is a no-op (L158 coverage)."""
+        extra: dict = {}
+        group = _make_group("mcp:github", ["t1", "t2"])
+        mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
+        context_tools: list[AgentTool] = [mw.tools[0]]
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=context_tools,
+            extra=extra,
+        )
+        await mw._expand(group_id="mcp:github", tool_names=None, context=ctx)
+        assert extra["expanded_groups"]["mcp:github"] is None
+        assert len(context_tools) == 3
+
+        output = await mw._expand(
+            group_id="mcp:github",
+            tool_names=["t1"],
+            context=ctx,
+        )
+        assert output.expanded is True
+        assert output.remaining == 0
+        assert extra["expanded_groups"]["mcp:github"] is None
+        assert len(context_tools) == 3
+
+
 class TestExpandedGroupsDictStability:
     async def test_shared_dict_mutated_in_place(self) -> None:
         """expanded_groups dict in extra is mutated in place, not replaced."""

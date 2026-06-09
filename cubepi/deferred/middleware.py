@@ -195,10 +195,9 @@ class DeferredToolsMiddleware(Middleware):
         current_expanded = expanded_groups.get(group_id)
         if current_expanded is None and group_id in expanded_groups:
             remaining = 0
-        elif isinstance(current_expanded, list):
-            remaining = len(group.tool_names) - len(current_expanded)
         else:
-            remaining = len(group.tool_names)
+            assert isinstance(current_expanded, list)
+            remaining = len(group.tool_names) - len(current_expanded)
 
         return LoadToolsOutput(
             group_id=group_id,
