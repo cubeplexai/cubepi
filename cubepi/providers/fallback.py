@@ -25,6 +25,7 @@ from cubepi.providers.base import (
     ThinkingLevel,
     ToolDefinition,
     Usage,
+    chain_providers,  # re-exported for back-compat; canonical home is base.py
 )
 
 try:
@@ -241,32 +242,12 @@ class FallbackBoundModel:
         )
 
 
-def chain_providers(model: object) -> list[Any]:
-    """Return the unique BaseProvider instances backing a bound model.
-
-    For :class:`FallbackBoundModel`, iterates ``chain`` and dedupes providers
-    by identity. For a plain :class:`BoundModel` returns ``[model.provider]``.
-    For anything else (or ``None``) returns ``[]``.
-
-    Used by :meth:`cubepi.tracing.recorder.Recorder.attach` and
-    :meth:`cubepi.tracing.meter.Meter.attach` to subscribe to every leg of a
-    fallback chain so post-failover provider events land in the trace /
-    metric stream.
-    """
-    from cubepi.providers.base import BaseProvider
-
-    if model is None:
-        return []
-    if isinstance(model, FallbackBoundModel):
-        seen: set[int] = set()
-        out: list[Any] = []
-        for bm in model.chain:
-            p = bm.provider
-            if isinstance(p, BaseProvider) and id(p) not in seen:
-                seen.add(id(p))
-                out.append(p)
-        return out
-    provider = getattr(model, "provider", None)
-    if isinstance(provider, BaseProvider):
-        return [provider]
-    return []
+# ``chain_providers`` lives in :mod:`cubepi.providers.base` so the tracing /
+# meter modules can import it without pulling in this fallback module. The
+# import above re-exports it under ``cubepi.providers.fallback.chain_providers``
+# for back-compat with existing call sites.
+__all__ = [
+    "DEFAULT_TRIGGER_ERRORS",
+    "FallbackBoundModel",
+    "chain_providers",
+]

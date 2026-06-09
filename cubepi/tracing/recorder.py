@@ -42,10 +42,12 @@ from cubepi.agent.types import (
     ToolExecutionStartEvent,
 )
 from cubepi.providers.base import (
+    BaseProvider,
     StreamEvent,
     ToolCall,
     ToolResultMessage,
     UserMessage,
+    chain_providers,
 )
 from cubepi.tracing.content import (
     messages_to_semconv,
@@ -232,9 +234,6 @@ class Recorder:
     # ------------------------------------------------------------------
 
     def attach(self, agent: "Agent") -> Callable[[], None]:
-        from cubepi.providers.base import BaseProvider
-        from cubepi.providers.fallback import chain_providers
-
         self._agent = agent
         unsub_agent = agent.subscribe(self._on_agent_event)
         # ``Agent`` holds the bound model on ``_model``; the provider is

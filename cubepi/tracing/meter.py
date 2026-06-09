@@ -152,8 +152,7 @@ class Meter:
         overwrote the first agent's ``_chat_open_ns`` / ``_chat_attrs``
         before its response landed).
         """
-        from cubepi.providers.base import BaseProvider
-        from cubepi.providers.fallback import chain_providers
+        from cubepi.providers.base import BaseProvider, chain_providers
 
         state = _MeterState()
 

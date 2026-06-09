@@ -813,3 +813,75 @@ class BaseProvider:
         ms.push(event)
         if model is not None and self._chunk_listeners:
             await _fire_chunk_listeners(self._chunk_listeners, event, model)
+
+
+def _log_chain_skip(idx: int, provider_type: str) -> None:
+    """Warn that a chain leg's provider isn't a BaseProvider and was skipped.
+
+    Tries loguru first (matches the rest of ``cubepi.providers``) and falls
+    back to stdlib logging so the warning is never silently lost when loguru
+    isn't installed.
+    """
+    try:
+        from loguru import logger
+
+        logger.warning(
+            "cubepi.providers.base.chain_providers: chain[{}] provider {} is not "
+            "a BaseProvider; tracing/metrics will skip this leg",
+            idx,
+            provider_type,
+        )
+    except ImportError:
+        import logging
+
+        logging.getLogger("cubepi.providers.base").warning(
+            "cubepi.providers.base.chain_providers: chain[%d] provider %s is not "
+            "a BaseProvider; tracing/metrics will skip this leg",
+            idx,
+            provider_type,
+        )
+
+
+def chain_providers(model: object) -> list["BaseProvider"]:
+    """Return the unique BaseProvider instances backing a bound model.
+
+    Walks a model's ``chain`` (FallbackBoundModel-like) or its single
+    ``.provider`` (plain BoundModel-like). Uses duck typing on ``.chain`` to
+    avoid importing :mod:`cubepi.providers.fallback` into this base module —
+    ``fallback`` already depends on ``base``, so the reverse import would
+    cycle.
+
+    For ``FallbackBoundModel``-like inputs, iterates the chain and dedupes
+    providers by identity. Chain entries whose ``.provider`` isn't a
+    ``BaseProvider`` are logged at WARNING via :func:`_log_chain_skip` and
+    skipped — tracing / metrics need the ``subscribe_request`` /
+    ``subscribe_chunk`` / ``subscribe_response`` interface that only
+    ``BaseProvider`` exposes.
+
+    For plain bound models, returns ``[model.provider]`` if it is a
+    ``BaseProvider``. For ``None`` or any other input, returns ``[]``.
+
+    Used by :meth:`cubepi.tracing.recorder.Recorder.attach` and
+    :meth:`cubepi.tracing.meter.Meter.attach` to subscribe to every leg of a
+    fallback chain so post-failover provider events land in the trace /
+    metric stream.
+    """
+    if model is None:
+        return []
+    chain = getattr(model, "chain", None)
+    if chain is not None:
+        seen: set[int] = set()
+        out: list[BaseProvider] = []
+        for idx, bm in enumerate(chain):
+            p = getattr(bm, "provider", None)
+            if not isinstance(p, BaseProvider):
+                _log_chain_skip(idx, type(p).__name__)
+                continue
+            if id(p) not in seen:
+                seen.add(id(p))
+                out.append(p)
+        return out
+    provider = getattr(model, "provider", None)
+    if isinstance(provider, BaseProvider):
+        return [provider]
+    return []
