@@ -243,6 +243,9 @@ class TestPrepareResumedState:
         )
         assert len(resumed.pre_loaded_tools) == 2
         assert len(resumed.remaining_groups) == 0
+        assert len(resumed.expanded_schemas) == 1
+        assert resumed.expanded_schemas[0][0] == "mcp:github"
+        assert len(resumed.expanded_schemas[0][1]) == 2
 
     async def test_partially_expanded_group(self) -> None:
         group = _make_group("mcp:github", ["t1", "t2", "t3"])
@@ -253,6 +256,8 @@ class TestPrepareResumedState:
         assert len(resumed.pre_loaded_tools) == 1
         assert resumed.pre_loaded_tools[0].name == "t1"
         assert len(resumed.remaining_groups) == 1
+        assert len(resumed.expanded_schemas) == 1
+        assert len(resumed.expanded_schemas[0][1]) == 1
 
     async def test_unexpanded_group_stays_deferred(self) -> None:
         group = _make_group("mcp:github", ["t1"])
@@ -262,3 +267,31 @@ class TestPrepareResumedState:
         )
         assert len(resumed.pre_loaded_tools) == 0
         assert len(resumed.remaining_groups) == 1
+        assert len(resumed.expanded_schemas) == 0
+
+    async def test_resumed_schemas_seed_middleware(self) -> None:
+        group_a = _make_group("mcp:github", ["t1", "t2"])
+        group_b = _make_group("mcp:slack", ["s1"])
+        expanded: dict[str, list[str] | None] = {
+            "mcp:github": None,
+            "mcp:slack": ["s1"],
+        }
+        resumed = await DeferredToolsMiddleware.prepare_resumed_state(
+            groups=[group_a, group_b], expanded=expanded,
+        )
+        extra: dict[str, object] = {"expanded_groups": dict(expanded)}
+        mw = DeferredToolsMiddleware(
+            groups=resumed.remaining_groups,
+            extra_ref=lambda: extra,
+            resumed_schemas=resumed.expanded_schemas,
+        )
+        ctx = AgentContext(
+            system_prompt="base",
+            messages=[],
+            tools=list(mw.tools) + resumed.pre_loaded_tools,
+            extra=extra,
+        )
+        prompt = await mw.transform_system_prompt("base", ctx=ctx)
+        assert "mcp:github" in prompt
+        assert "mcp:slack" in prompt
+        assert "t1" in prompt
