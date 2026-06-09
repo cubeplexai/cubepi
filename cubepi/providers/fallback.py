@@ -69,6 +69,15 @@ class FallbackBoundModel:
         | None
     ) = None
 
+    def __post_init__(self) -> None:
+        # An empty chain is a configuration mistake: provider/spec proxy,
+        # stream(), and generate() would all IndexError or silently exhaust
+        # without ever attempting a call. Fail fast at construction time.
+        if not self.chain:
+            raise ValueError(
+                "FallbackBoundModel.chain must contain at least one BoundModel"
+            )
+
     @property
     def provider(self) -> Provider:
         return self.chain[0].provider

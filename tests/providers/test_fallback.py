@@ -95,6 +95,12 @@ def test_default_trigger_errors_composition() -> None:
     assert ProviderBadRequest not in DEFAULT_TRIGGER_ERRORS
 
 
+def test_empty_chain_raises_value_error() -> None:
+    """FallbackBoundModel rejects an empty chain at construction time."""
+    with pytest.raises(ValueError, match="must contain at least one"):
+        FallbackBoundModel(chain=())
+
+
 # ---------------------------------------------------------------------------
 # stream() tests
 # ---------------------------------------------------------------------------
