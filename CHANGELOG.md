@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`DeferredToolGroup` / `DeferredToolsMiddleware`** — progressive tool
+  disclosure primitive. Hides MCP tool schemas from the model by default,
+  injecting a compact catalog into the system prompt instead. The model
+  expands groups on demand via the built-in `expand_tools` tool (full or
+  selective). Key properties:
+  - Catalog sorted by `group_id` for byte-stable system prompt prefix.
+  - Expanded schemas append-only (expansion order, never reordered) for
+    prompt-cache prefix stability across turns.
+  - Loader called once per group per run; selective expansions filter from
+    the cached result.
+  - `Agent(deferred_tool_groups=[...])` — primary API. Middleware is
+    auto-created internally with `extra_ref` bound to `self._extra`.
+  - Cross-run replay via `DeferredToolsMiddleware.prepare_resumed_state()`,
+    which returns pre-loaded tools, remaining groups, and expanded schemas
+    for prompt-cache continuity.
+  - Exported from `cubepi.deferred` as `DeferredToolGroup`,
+    `DeferredToolsMiddleware`, and `ResumedState`.
+
 ### Fixed
 
 - **`Recorder.attach()` and `Meter.attach()` now subscribe to every provider in

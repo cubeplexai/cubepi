@@ -189,6 +189,69 @@ hooks = compose_middleware([LoggingMiddleware(), SafetyMiddleware()])
 | `should_stop_after_turn` | Any true stops |
 | `on_run_end` | Messages concatenate; non-empty result triggers one extra model turn |
 
+### Deferred Tool Groups
+
+When an agent has access to many MCP servers, their combined tool schemas can
+consume significant context. Deferred tool groups hide schemas by default and
+let the model expand them on demand:
+
+```python
+from cubepi import Agent
+from cubepi.deferred import DeferredToolGroup
+
+github_group = DeferredToolGroup(
+    group_id="mcp:github",
+    display_name="GitHub",
+    description="Issues, PRs, repos, code search",
+    tool_names=["create_issue", "search_repos", "create_pr", "list_comments"],
+    loader=github_mcp.load_tools,  # async () -> list[AgentTool]
+)
+
+agent = Agent(
+    model=provider.model("claude-sonnet-4-6"),
+    tools=[get_weather],                     # always-available tools
+    deferred_tool_groups=[github_group],      # hidden until requested
+)
+```
+
+The model sees a compact catalog in the system prompt instead of full schemas:
+
+```
+# Deferred tool groups
+
+- `mcp:github` — GitHub: Issues, PRs, repos, code search (4 tools)
+  create_issue, search_repos, create_pr, list_comments
+```
+
+When the model needs a group, it calls the built-in `expand_tools` tool:
+
+```
+expand_tools(group_id="mcp:github")                        # expand all
+expand_tools(group_id="mcp:github", tool_names=["create_issue"])  # or just one
+```
+
+The loader is called once per group per run; subsequent selective expansions
+filter from the cached result. Expanded tool schemas are appended to the system
+prompt in expansion order (append-only) for prompt-cache prefix stability.
+
+For advanced use (custom catalog header, cross-run replay), construct
+`DeferredToolsMiddleware` directly:
+
+```python
+from cubepi.deferred import DeferredToolsMiddleware
+
+# Replay expansion state from a previous run
+resumed = await DeferredToolsMiddleware.prepare_resumed_state(
+    groups=all_groups,
+    expanded=saved_extra["expanded_groups"],
+)
+agent = Agent(
+    model=model,
+    tools=[*builtins, *resumed.pre_loaded_tools],
+    deferred_tool_groups=resumed.remaining_groups,
+)
+```
+
 ### Checkpointer
 
 Persist conversation state with append-only semantics:
