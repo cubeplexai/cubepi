@@ -23,6 +23,7 @@ const sidebars: SidebarsConfig = {
           'guides/agents/multi-turn',
           'guides/agents/streaming',
           'guides/agents/forking',
+          'guides/agents/prompt-caching',
         ]},
         { type: 'category', label: 'Providers', items: [
           'guides/providers/overview',

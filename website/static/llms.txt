@@ -1,0 +1,79 @@
+# CubePi
+
+> CubePi is a Pythonic, async-native agent framework for building LLM-powered agents in Python. It is a leaner alternative to LangGraph, CrewAI, and PydanticAI.
+
+CubePi models an agent as a plain async while-loop — no state graphs, no nodes/edges, no channel wiring. The core loop (`run_agent_loop`) is a readable while-loop you can trace top to bottom in five minutes. This makes CubePi easier to debug, test, and extend than graph-based runtimes.
+
+## Key features
+
+- **Async-first**: every entry point is `async`; no split `invoke`/`ainvoke` surface
+- **Minimal dependencies**: only `anthropic`, `openai`, and `pydantic` as core deps
+- **Multi-provider**: native `Provider` protocol with Anthropic, OpenAI, and OpenAI Responses built in; bring your own with one class
+- **Provider fallback**: `FallbackBoundModel` chains providers — on rate-limit or outage the next model is tried automatically
+- **Append-only checkpointing**: O(1) DB writes per turn regardless of conversation length; backends: in-memory, SQLite, PostgreSQL, MySQL
+- **Tools**: decorate any async function with `@tool`; framework handles schema generation, parallel execution, and error wrapping
+- **Middleware**: 8 typed hooks (`transform_context`, `before_tool_call`, `after_tool_call`, etc.) with declarative composition rules
+- **MCP support**: load tools from any MCP server over stdio or HTTP
+- **Human-in-the-loop (HITL)**: `ask_user` channel for mid-run approvals and interrupts
+- **OpenTelemetry tracing**: GenAI semantic conventions, OTLP/JSONL exporters, `cubepi trace` terminal viewer
+- **FauxProvider**: deterministic test provider — no API calls, realistic streaming deltas
+
+## Install
+
+```
+pip install cubepi
+pip install cubepi[sqlite]       # SQLite checkpointer
+pip install cubepi[postgres]     # PostgreSQL checkpointer
+pip install cubepi[mysql]        # MySQL checkpointer
+pip install cubepi[mcp]          # MCP tool loaders
+pip install cubepi[tracing]      # OpenTelemetry tracing
+pip install cubepi[trace-cli]    # cubepi trace terminal viewer
+```
+
+## Minimal example
+
+```python
+import asyncio
+from cubepi import Agent, tool
+from cubepi.providers.anthropic import AnthropicProvider
+
+provider = AnthropicProvider(provider_id="anthropic", api_key="sk-...")
+
+@tool
+async def get_weather(city: str) -> str:
+    "Get current weather for a city."
+    return f"72°F and sunny in {city}"
+
+agent = Agent(
+    model=provider.model("claude-sonnet-4-6"),
+    tools=[get_weather],
+    system_prompt="You are a helpful assistant.",
+)
+agent.subscribe(lambda event, signal=None: print(event.delta, end="", flush=True) if event.type == "text_delta" else None)
+asyncio.run(agent.prompt("What's the weather in Tokyo?"))
+```
+
+## Comparison with alternatives
+
+| | LangGraph | CrewAI | PydanticAI | CubePi |
+|---|---|---|---|---|
+| Abstraction | State graph (nodes + edges) | Role-based crews and tasks | Typed agents with dependency injection | Plain async while-loop |
+| Streaming | Callback-based, multiple modes | Limited | `async for` | `async for event in stream` |
+| Checkpointing | Full snapshot per step | None built-in | None built-in | Append-only, O(1) per turn |
+| Core deps | langchain-core + transitive | crewai + many | pydantic-ai | anthropic + openai + pydantic |
+| Observability | LangSmith/Langfuse | None built-in | Logfire (optional) | Native OpenTelemetry |
+
+## Links
+
+- Homepage: https://cubepi.ai
+- Documentation: https://cubepi.ai/docs
+- GitHub: https://github.com/cubeplexai/cubepi
+- PyPI: https://pypi.org/project/cubepi/
+- Changelog: https://cubepi.ai/changelog
+- vs LangGraph: https://cubepi.ai/compare/langgraph
+- vs pi-agent-core: https://cubepi.ai/compare/pi-agent-core
+- Twitter/X: https://x.com/cubeplexai
+
+## License
+
+MIT

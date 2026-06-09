@@ -23,7 +23,8 @@
             "guides/agents/tool-use",
             "guides/agents/multi-turn",
             "guides/agents/streaming",
-            "guides/agents/forking"
+            "guides/agents/forking",
+            "guides/agents/prompt-caching"
           ]
         },
         {
