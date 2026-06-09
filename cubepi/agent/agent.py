@@ -190,6 +190,7 @@ class Agent(Generic[TMessage]):
             deferred_mw = DeferredToolsMiddleware(
                 groups=deferred_tool_groups,
                 extra_ref=lambda: self._extra,
+                on_tools_expanded=lambda tools: self._state._tools.extend(tools),
             )
             middleware = [*(middleware or []), deferred_mw]
         middleware = middleware or []
@@ -535,10 +536,17 @@ class Agent(Generic[TMessage]):
         # as explicit args means we pass middleware=[] to avoid composing
         # middleware twice — the parent's composed result already lives on
         # self.transform_context etc.
+        #
+        # Strip middleware-owned tools (e.g. expand_tools) — their execute
+        # callbacks close over the parent's state and would corrupt it.
+        _mw_tool_ids = {
+            id(t) for mw in self._middleware for t in getattr(mw, "tools", []) or []
+        }
+        fork_tools = [t for t in self._state.tools if id(t) not in _mw_tool_ids]
         child: Agent = Agent(
             model=self._model,
             system_prompt=self._state.system_prompt,
-            tools=list(self._state.tools),
+            tools=fork_tools,
             thinking=self._state.thinking,
             convert_to_llm=self.convert_to_llm,
             transform_context=self.transform_context,

@@ -330,3 +330,106 @@ class TestPrepareResumedState:
         assert "mcp:github" in prompt
         assert "mcp:slack" in prompt
         assert "t1" in prompt
+
+    async def test_loader_cache_populated(self) -> None:
+        group = _make_group("mcp:github", ["t1", "t2"])
+        expanded: dict[str, list[str] | None] = {"mcp:github": None}
+        resumed = await DeferredToolsMiddleware.prepare_resumed_state(
+            groups=[group],
+            expanded=expanded,
+        )
+        assert "mcp:github" in resumed.loader_cache
+        assert len(resumed.loader_cache["mcp:github"]) == 2
+
+    async def test_resumed_loader_cache_skips_reload(self) -> None:
+        call_count = [0]
+        group = _make_group("mcp:github", ["t1"], loader_call_count=call_count)
+        expanded: dict[str, list[str] | None] = {"mcp:github": ["t1"]}
+        resumed = await DeferredToolsMiddleware.prepare_resumed_state(
+            groups=[group],
+            expanded=expanded,
+        )
+        assert call_count[0] == 1
+
+        extra: dict = {"expanded_groups": dict(expanded)}
+        mw = DeferredToolsMiddleware(
+            groups=resumed.remaining_groups,
+            extra_ref=lambda: extra,
+            resumed_schemas=resumed.expanded_schemas,
+            resumed_loader_cache=resumed.loader_cache,
+        )
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=list(mw.tools) + resumed.pre_loaded_tools,
+            extra=extra,
+        )
+        # Expanding remaining tools should NOT call loader again.
+        await mw._expand(group_id="mcp:github", tool_names=None, context=ctx)
+        assert call_count[0] == 1  # still 1, not 2
+
+
+class TestOnToolsExpandedCallback:
+    async def test_callback_invoked_on_expansion(self) -> None:
+        expanded_tools: list[AgentTool] = []
+        extra: dict = {}
+        group = _make_group("mcp:github", ["t1", "t2"])
+        mw = DeferredToolsMiddleware(
+            groups=[group],
+            extra_ref=lambda: extra,
+            on_tools_expanded=lambda tools: expanded_tools.extend(tools),
+        )
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=list(mw.tools),
+            extra=extra,
+        )
+        await mw._expand(group_id="mcp:github", tool_names=None, context=ctx)
+        assert len(expanded_tools) == 2
+        assert {t.name for t in expanded_tools} == {"t1", "t2"}
+
+    async def test_callback_not_invoked_on_idempotent(self) -> None:
+        call_count = [0]
+
+        def _on_expanded(tools: list[AgentTool]) -> None:
+            call_count[0] += 1
+
+        extra: dict = {}
+        group = _make_group("mcp:github", ["t1"])
+        mw = DeferredToolsMiddleware(
+            groups=[group],
+            extra_ref=lambda: extra,
+            on_tools_expanded=_on_expanded,
+        )
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=list(mw.tools),
+            extra=extra,
+        )
+        await mw._expand(group_id="mcp:github", tool_names=None, context=ctx)
+        assert call_count[0] == 1
+        await mw._expand(group_id="mcp:github", tool_names=None, context=ctx)
+        assert call_count[0] == 1  # no new tools, no callback
+
+
+class TestExpandedGroupsDictStability:
+    async def test_shared_dict_mutated_in_place(self) -> None:
+        """expanded_groups dict in extra is mutated in place, not replaced."""
+        extra: dict = {}
+        g1 = _make_group("mcp:a", ["t1"])
+        g2 = _make_group("mcp:b", ["t2"])
+        mw = DeferredToolsMiddleware(groups=[g1, g2], extra_ref=lambda: extra)
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=list(mw.tools),
+            extra=extra,
+        )
+        await mw._expand(group_id="mcp:a", tool_names=None, context=ctx)
+        dict_ref = extra["expanded_groups"]
+        await mw._expand(group_id="mcp:b", tool_names=None, context=ctx)
+        # Same dict object, not a new one.
+        assert extra["expanded_groups"] is dict_ref
+        assert set(dict_ref.keys()) == {"mcp:a", "mcp:b"}

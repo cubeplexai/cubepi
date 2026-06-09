@@ -120,3 +120,35 @@ class TestAgentDeferredToolGroups:
         assert not any(
             isinstance(mw, DeferredToolsMiddleware) for mw in agent._middleware
         )
+
+    def test_on_tools_expanded_wired(self) -> None:
+        model = _make_faux_model()
+        group = _make_group("mcp:github", ["t1"])
+        agent = Agent(
+            model=model,
+            tools=[_dummy_tool("builtin")],
+            deferred_tool_groups=[group],
+        )
+        deferred_mw = next(
+            mw for mw in agent._middleware if isinstance(mw, DeferredToolsMiddleware)
+        )
+        assert deferred_mw._on_tools_expanded is not None
+
+
+class TestForkOnceStripsMiddlewareTools:
+    def test_fork_tools_exclude_expand_tools(self) -> None:
+        model = _make_faux_model()
+        group = _make_group("mcp:github", ["t1", "t2"])
+        agent = Agent(
+            model=model,
+            tools=[_dummy_tool("builtin")],
+            deferred_tool_groups=[group],
+        )
+        # Collect middleware tool ids.
+        mw_tool_ids = {
+            id(t) for mw in agent._middleware for t in getattr(mw, "tools", []) or []
+        }
+        fork_tools = [t for t in agent._state.tools if id(t) not in mw_tool_ids]
+        fork_tool_names = [t.name for t in fork_tools]
+        assert "builtin" in fork_tool_names
+        assert "expand_tools" not in fork_tool_names

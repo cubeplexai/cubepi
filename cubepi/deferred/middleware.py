@@ -43,6 +43,7 @@ class ResumedState:
     pre_loaded_tools: list[AgentTool]
     remaining_groups: list[DeferredToolGroup]
     expanded_schemas: list[tuple[str, list[ToolSchema]]]
+    loader_cache: dict[str, list[AgentTool]]
 
 
 class DeferredToolsMiddleware(Middleware):
@@ -59,13 +60,18 @@ class DeferredToolsMiddleware(Middleware):
         extra_ref: Callable[[], dict[str, Any]],
         catalog_header: str = DEFAULT_CATALOG_HEADER,
         resumed_schemas: list[tuple[str, list[ToolSchema]]] | None = None,
+        resumed_loader_cache: dict[str, list[AgentTool]] | None = None,
+        on_tools_expanded: Callable[[list[AgentTool]], None] | None = None,
     ) -> None:
         self._groups: dict[str, DeferredToolGroup] = {g.group_id: g for g in groups}
         self._extra_ref = extra_ref
         self._catalog_header = catalog_header
+        self._on_tools_expanded = on_tools_expanded
 
         # Loader called exactly once per group per run.
-        self._loader_cache: dict[str, list[AgentTool]] = {}
+        self._loader_cache: dict[str, list[AgentTool]] = (
+            dict(resumed_loader_cache) if resumed_loader_cache else {}
+        )
         # Append-only, expansion order for cache stability.
         self._expanded_schemas: list[tuple[str, list[ToolSchema]]] = (
             list(resumed_schemas) if resumed_schemas else []
@@ -115,11 +121,10 @@ class DeferredToolsMiddleware(Middleware):
 
         all_loaded = self._loader_cache[group_id]
 
-        # Determine what is already expanded.
-        expanded_groups: dict[str, list[str] | None] = extra.get(
-            "expanded_groups",
-            {},
-        )
+        # Use the shared dict in extra — never replace it, only mutate in place.
+        if "expanded_groups" not in extra:
+            extra["expanded_groups"] = {}
+        expanded_groups: dict[str, list[str] | None] = extra["expanded_groups"]
         already_val = expanded_groups.get(group_id)
         if group_id in expanded_groups and already_val is None:
             # Fully expanded (None sentinel) — everything already injected.
@@ -154,7 +159,6 @@ class DeferredToolsMiddleware(Middleware):
                         merged.append(name)
                         merged_set.add(name)
                 expanded_groups[group_id] = merged
-        extra["expanded_groups"] = expanded_groups
 
         # Record schemas for expanded tools (append-only).
         if newly_expanded:
@@ -178,6 +182,9 @@ class DeferredToolsMiddleware(Middleware):
 
         # Stage newly expanded tools for injection by after_tool_call.
         self._pending_injection.extend(newly_expanded)
+        # Persist to the agent's canonical tool list for cross-prompt() use.
+        if newly_expanded and self._on_tools_expanded:
+            self._on_tools_expanded(newly_expanded)
 
         # Calculate remaining count.
         current_expanded = expanded_groups.get(group_id)
@@ -196,6 +203,22 @@ class DeferredToolsMiddleware(Middleware):
         )
 
     # ------------------------------------------------------------------
+    # Drain pending injection into a tools list (shared by _expand and
+    # after_tool_call so the dedup logic lives in one place).
+    # ------------------------------------------------------------------
+
+    def _drain_pending(self, tools: list[AgentTool]) -> None:
+        if not self._pending_injection:
+            return
+        pending = list(self._pending_injection)
+        self._pending_injection.clear()
+        existing_names = {t.name for t in tools}
+        for tool in pending:
+            if tool.name not in existing_names:
+                tools.append(tool)
+                existing_names.add(tool.name)
+
+    # ------------------------------------------------------------------
     # Combined expand + inject (for testing without the full agent loop)
     # ------------------------------------------------------------------
 
@@ -207,14 +230,8 @@ class DeferredToolsMiddleware(Middleware):
         context: AgentContext,
     ) -> ExpandToolsOutput:
         output = await self._expand_callback(group_id, tool_names)
-        if output.expanded and self._pending_injection:
-            newly_expanded = list(self._pending_injection)
-            self._pending_injection.clear()
-            if context.tools is not None:
-                existing_names = {t.name for t in context.tools}
-                for tool in newly_expanded:
-                    if tool.name not in existing_names:
-                        context.tools.append(tool)
+        if output.expanded and context.tools is not None:
+            self._drain_pending(context.tools)
         return output
 
     # ------------------------------------------------------------------
@@ -232,16 +249,8 @@ class DeferredToolsMiddleware(Middleware):
             return None
         if ctx.is_error:
             return None
-
-        if self._pending_injection:
-            newly_expanded = list(self._pending_injection)
-            self._pending_injection.clear()
-            if ctx.context.tools is not None:
-                existing_names = {t.name for t in ctx.context.tools}
-                for tool in newly_expanded:
-                    if tool.name not in existing_names:
-                        ctx.context.tools.append(tool)
-
+        if ctx.context.tools is not None:
+            self._drain_pending(ctx.context.tools)
         return None
 
     # ------------------------------------------------------------------
@@ -299,6 +308,7 @@ class DeferredToolsMiddleware(Middleware):
         pre_loaded: list[AgentTool] = []
         remaining: list[DeferredToolGroup] = []
         schemas: list[tuple[str, list[ToolSchema]]] = []
+        cache: dict[str, list[AgentTool]] = {}
 
         for group in groups:
             exp = expanded.get(group.group_id)
@@ -308,6 +318,7 @@ class DeferredToolsMiddleware(Middleware):
                 continue
 
             loaded = await group.loader()
+            cache[group.group_id] = loaded
             if exp is None:
                 # Fully expanded (None sentinel) — load all, drop from remaining.
                 pre_loaded.extend(loaded)
@@ -334,4 +345,5 @@ class DeferredToolsMiddleware(Middleware):
             pre_loaded_tools=pre_loaded,
             remaining_groups=remaining,
             expanded_schemas=schemas,
+            loader_cache=cache,
         )
