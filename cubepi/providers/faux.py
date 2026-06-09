@@ -19,6 +19,7 @@ from cubepi.providers.base import (
     TextContent,
     ThinkingContent,
     ToolCall,
+    ToolChoice,
     ToolDefinition,
     Usage,
     _fire_request_listeners,
@@ -271,6 +272,7 @@ class FauxProvider(BaseProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         opts = options or StreamOptions()

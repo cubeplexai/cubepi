@@ -20,6 +20,8 @@ from cubepi.types import JsonObject, StructuredValue
 
 ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 
+ToolChoice = Literal["auto", "required", "none"] | str
+
 
 class ThinkingBudgets(BaseModel):
     """Token budgets for each thinking level."""
@@ -101,6 +103,7 @@ class BoundModel:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         # Forward ``model`` and ``messages`` positionally so a custom
@@ -114,6 +117,7 @@ class BoundModel:
             messages,
             system_prompt=system_prompt,
             tools=tools,
+            tool_choice=tool_choice,
             options=options,
         )
 
@@ -123,6 +127,7 @@ class BoundModel:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
@@ -135,6 +140,7 @@ class BoundModel:
             messages,
             system_prompt=system_prompt,
             tools=tools,
+            tool_choice=tool_choice,
             options=options,
             max_output_tokens=max_output_tokens,
             temperature=temperature,
@@ -632,6 +638,7 @@ class Provider(Protocol):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream: ...
 
@@ -642,6 +649,7 @@ class Provider(Protocol):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
@@ -710,6 +718,7 @@ class BaseProvider:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         raise NotImplementedError
@@ -721,6 +730,7 @@ class BaseProvider:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
@@ -750,6 +760,7 @@ class BaseProvider:
             messages=messages,
             system_prompt=system_prompt,
             tools=tools,
+            tool_choice=tool_choice,
             options=options,
         )
         async for event in stream:

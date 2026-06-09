@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any
 
 import pytest
 
@@ -312,9 +313,10 @@ class _RecordingProvider(BaseProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
-        del messages, system_prompt, tools
+        del messages, system_prompt, tools, tool_choice
         self.call_count += 1
         self.seen_model = model
         self.seen_options = options

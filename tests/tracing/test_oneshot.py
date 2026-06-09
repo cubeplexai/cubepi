@@ -698,13 +698,14 @@ class _GenerateOnlyProvider(FauxProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
         thinking=None,
         thinking_budgets=None,
     ) -> AssistantMessage:
-        del model, messages, system_prompt, tools, temperature, thinking
+        del model, messages, system_prompt, tools, tool_choice, temperature, thinking
         del thinking_budgets
         self.seen_max_output_tokens = max_output_tokens
         self.seen_options = options
@@ -717,7 +718,8 @@ class _GenerateOnlyProvider(FauxProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
-        del model, messages, system_prompt, tools, options
+        del model, messages, system_prompt, tools, tool_choice, options
         raise AssertionError("Tracer.oneshot must call provider.generate()")

@@ -26,6 +26,7 @@ from cubepi.providers.base import (
     TextContent,
     ThinkingContent,
     ToolCall,
+    ToolChoice,
     ToolDefinition,
     ToolResultMessage,
     Usage,
@@ -76,6 +77,12 @@ class OpenAIProvider(BaseProvider):
     def _resolve_capability(self, model_id: str) -> CapabilityDescriptor:
         return self._model_overrides.get(model_id, self._capability)
 
+    @staticmethod
+    def _map_tool_choice(choice: str) -> str | dict:
+        if choice in ("auto", "required", "none"):
+            return choice
+        return {"type": "function", "function": {"name": choice}}
+
     async def stream(
         self,
         model: Model,
@@ -83,6 +90,7 @@ class OpenAIProvider(BaseProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         opts = options or StreamOptions()
@@ -105,6 +113,9 @@ class OpenAIProvider(BaseProvider):
         }
         if tools:
             kwargs["tools"] = [self._convert_tool(t) for t in tools]
+
+        if tool_choice is not None:
+            kwargs["tool_choice"] = self._map_tool_choice(tool_choice)
 
         async def _produce() -> None:
             body: dict | None = None

@@ -18,6 +18,7 @@ from cubepi.providers.base import (
     TextContent,
     ThinkingContent,
     ToolCall,
+    ToolChoice,
     ToolDefinition,
     ToolResultMessage,
     Usage,
@@ -138,6 +139,16 @@ class AnthropicProvider(BaseProvider):
     def _resolve_capability(self, model_id: str) -> CapabilityDescriptor:
         return self._model_overrides.get(model_id, self._capability)
 
+    @staticmethod
+    def _map_tool_choice(choice: str) -> dict[str, str] | None:
+        if choice == "auto":
+            return {"type": "auto"}
+        if choice == "required":
+            return {"type": "any"}
+        if choice == "none":
+            return None
+        return {"type": "tool", "name": choice}
+
     async def stream(
         self,
         model: Model,
@@ -145,6 +156,7 @@ class AnthropicProvider(BaseProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         opts = options or StreamOptions()
@@ -185,6 +197,11 @@ class AnthropicProvider(BaseProvider):
             if cache_control and api_tools and self._cache_policy.mark_last_tool():
                 api_tools[-1]["cache_control"] = cache_control
             kwargs["tools"] = api_tools
+
+        if tool_choice is not None and tool_choice != "none":
+            mapped = self._map_tool_choice(tool_choice)
+            if mapped is not None:
+                kwargs["tool_choice"] = mapped
 
         # Capability-driven thinking + temperature. The default capability
         # (capability=None) reproduces today's wire bytes:

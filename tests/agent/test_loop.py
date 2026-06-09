@@ -609,6 +609,7 @@ class _NoFinalEventProvider:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         self.call_count += 1
@@ -664,6 +665,7 @@ class _NoFinalEventNoPartialProvider:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         self.call_count += 1

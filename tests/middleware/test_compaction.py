@@ -42,6 +42,7 @@ class _FakeSummaryProvider:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,

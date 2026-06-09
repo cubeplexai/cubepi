@@ -19,6 +19,7 @@ from cubepi.providers.base import (
     ThinkingContent,
     ThinkingLevel,
     ToolCall,
+    ToolChoice,
     ToolDefinition,
     ToolResultMessage,
     Usage,
@@ -89,6 +90,12 @@ class OpenAIResponsesProvider(BaseProvider):
         return self._model_overrides.get(model_id, self._capability)
 
     @staticmethod
+    def _map_tool_choice(choice: str) -> str | dict:
+        if choice in ("auto", "required", "none"):
+            return choice
+        return {"type": "function", "name": choice}
+
+    @staticmethod
     def _assemble_response(resp: Any) -> dict[str, Any] | None:
         """Convert the OpenAI Responses SDK Response object to its canonical
         dict shape (same as a non-streaming Responses.create() return value).
@@ -106,6 +113,7 @@ class OpenAIResponsesProvider(BaseProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         opts = options or StreamOptions()
@@ -126,6 +134,9 @@ class OpenAIResponsesProvider(BaseProvider):
 
         if tools:
             kwargs["tools"] = [self._convert_tool(t) for t in tools]
+
+        if tool_choice is not None:
+            kwargs["tool_choice"] = self._map_tool_choice(tool_choice)
 
         async def _produce() -> None:
             body: dict | None = None

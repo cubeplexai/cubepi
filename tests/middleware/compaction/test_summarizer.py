@@ -33,6 +33,7 @@ class _FakeProvider:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
@@ -106,13 +107,14 @@ async def test_summarize_raises_on_provider_error_message() -> None:
             *,
             system_prompt: str = "",
             tools: list[ToolDefinition] | None = None,
+            tool_choice: Any = None,
             options: StreamOptions | None = None,
             max_output_tokens: int | None = None,
             temperature: float | None = None,
             thinking=None,
             thinking_budgets=None,
         ) -> AssistantMessage:
-            del model, messages, system_prompt, tools, options
+            del model, messages, system_prompt, tools, tool_choice, options
             del max_output_tokens, temperature, thinking, thinking_budgets
             return AssistantMessage(
                 content=[],

@@ -45,6 +45,7 @@ class _RaisingProvider(BaseProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         raise self._error
@@ -56,6 +57,7 @@ class _RaisingProvider(BaseProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
@@ -275,6 +277,7 @@ class _EmptyStreamProvider(BaseProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         ms = MessageStream()
@@ -312,6 +315,7 @@ class _MidStreamErrorProvider(BaseProvider):
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         ms = MessageStream()
