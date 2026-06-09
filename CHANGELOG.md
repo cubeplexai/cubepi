@@ -27,6 +27,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Exported from `cubepi.deferred` as `DeferredToolGroup`,
     `DeferredToolsMiddleware`, and `ResumedState`.
 
+- **`tool_choice` on Provider** — new `tool_choice: ToolChoice | None`
+  parameter on `BoundModel.stream()`, `BoundModel.generate()`, and the
+  `Provider` protocol. Accepts `"auto"`, `"required"`, `"none"`, or a
+  specific tool name string. Each built-in provider maps the value to its
+  native wire format (Anthropic: `{"type": "any"}` for `"required"`,
+  OpenAI: `"required"`, etc.). `FauxProvider` accepts and ignores the
+  parameter. Type alias: `ToolChoice = Literal["auto", "required",
+  "none"] | str`, exported from `cubepi.providers.base`.
+
+- **`BoundModel.generate_structured()`** — tool-based structured output.
+  Pass a Pydantic `BaseModel` subclass and get a validated instance back:
+
+  ```python
+  from pydantic import BaseModel
+
+  class Sentiment(BaseModel):
+      label: str
+      confidence: float
+
+  result = await model.generate_structured(
+      Sentiment,
+      messages=[UserMessage(content=[TextContent(text="Great product!")])],
+  )
+  ```
+
+  Injects a synthetic tool from the model's JSON schema, forces the call
+  via `tool_choice`, and validates the response with
+  `output_type.model_validate()`. Retries on validation failure (configurable
+  `max_retries`, default 1). Raises `StructuredOutputError` on no tool call
+  or validation exhaustion.
+
+- **`GoalMiddleware`** — autonomous goal-driven agent runs. A separate
+  evaluator model judges whether a `/goal` condition has been met after
+  each worker run (dual-model architecture — the agent isn't grading its
+  own homework). Continues until the evaluator confirms or
+  `max_evaluations` is hit. Outcome in `agent.state.extra["goal"]`.
+
+  ```python
+  from cubepi.middleware.goal import GoalMiddleware
+
+  goal = GoalMiddleware(
+      evaluator=provider.model("claude-haiku-4-5-20251001"),
+      max_evaluations=10,
+  )
+  agent = Agent(model=provider.model("claude-sonnet-4-6"), middleware=[goal])
+  await agent.prompt("/goal all tests pass")
+  ```
+
+  Exported from `cubepi.middleware` as `GoalMiddleware`.
+
+### Changed
+
+- **`on_run_end` fires on every outer-loop iteration** instead of once per
+  `prompt()` call. The `_reflection_fired` single-fire guard has been
+  removed. Existing middlewares that return `None` after one injection are
+  unaffected. This enables evaluation loops like `GoalMiddleware`.
+
 ### Fixed
 
 - **`Recorder.attach()` and `Meter.attach()` now subscribe to every provider in
