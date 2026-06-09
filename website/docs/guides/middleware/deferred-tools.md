@@ -180,6 +180,7 @@ agent = Agent(
 | `pre_loaded_tools` | Tools from previously-expanded groups, ready to use |
 | `remaining_groups` | Groups that were never expanded or only partially expanded |
 | `expanded_schemas` | Schema data for the system prompt (pass to `resumed_schemas` for advanced use) |
+| `loader_cache` | Pre-loaded tool cache (pass to `resumed_loader_cache` to avoid redundant loader calls) |
 
 Fully expanded groups are loaded and removed from the deferred set.
 Partially expanded groups load the selected tools but stay deferrable
@@ -197,6 +198,7 @@ mw = DeferredToolsMiddleware(
     groups=resumed.remaining_groups,
     extra_ref=lambda: agent_extra,
     resumed_schemas=resumed.expanded_schemas,
+    resumed_loader_cache=resumed.loader_cache,
 )
 
 agent = Agent(
@@ -236,6 +238,8 @@ agent = Agent(
 | `extra_ref` | `() -> dict` | required | Returns the live `ctx.extra` dict |
 | `catalog_header` | `str` | *(built-in)* | Header text for the catalog section |
 | `resumed_schemas` | `list[tuple[str, list[dict]]] \| None` | `None` | Schema data to seed from a previous run |
+| `resumed_loader_cache` | `dict[str, list[AgentTool]] \| None` | `None` | Pre-loaded tool cache from a previous run (avoids re-calling loaders on resume) |
+| `on_tools_expanded` | `(list[AgentTool]) -> None \| None` | `None` | Called after new tools are expanded (used internally for cross-turn persistence) |
 
 When using the `Agent(deferred_tool_groups=...)` shorthand, `extra_ref`
 is automatically bound to `self._extra`.
