@@ -112,15 +112,11 @@ class TestAgentDeferredToolGroups:
             deferred_tool_groups=[group],
         )
         assert agent._middleware[0] is marker
-        assert any(
-            isinstance(mw, DeferredToolsMiddleware)
-            for mw in agent._middleware
-        )
+        assert any(isinstance(mw, DeferredToolsMiddleware) for mw in agent._middleware)
 
     def test_empty_deferred_groups_no_middleware(self) -> None:
         model = _make_faux_model()
         agent = Agent(model=model, deferred_tool_groups=[])
         assert not any(
-            isinstance(mw, DeferredToolsMiddleware)
-            for mw in agent._middleware
+            isinstance(mw, DeferredToolsMiddleware) for mw in agent._middleware
         )

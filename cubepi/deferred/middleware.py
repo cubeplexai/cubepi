@@ -60,9 +60,7 @@ class DeferredToolsMiddleware(Middleware):
         catalog_header: str = DEFAULT_CATALOG_HEADER,
         resumed_schemas: list[tuple[str, list[ToolSchema]]] | None = None,
     ) -> None:
-        self._groups: dict[str, DeferredToolGroup] = {
-            g.group_id: g for g in groups
-        }
+        self._groups: dict[str, DeferredToolGroup] = {g.group_id: g for g in groups}
         self._extra_ref = extra_ref
         self._catalog_header = catalog_header
 
@@ -119,7 +117,8 @@ class DeferredToolsMiddleware(Middleware):
 
         # Determine what is already expanded.
         expanded_groups: dict[str, list[str] | None] = extra.get(
-            "expanded_groups", {},
+            "expanded_groups",
+            {},
         )
         already_val = expanded_groups.get(group_id)
         if group_id in expanded_groups and already_val is None:
@@ -159,9 +158,7 @@ class DeferredToolsMiddleware(Middleware):
 
         # Record schemas for expanded tools (append-only).
         if newly_expanded:
-            new_schemas = [
-                t.to_definition().model_dump() for t in newly_expanded
-            ]
+            new_schemas = [t.to_definition().model_dump() for t in newly_expanded]
             existing_idx = next(
                 (
                     i
@@ -261,7 +258,8 @@ class DeferredToolsMiddleware(Middleware):
         del signal
         extra = self._extra_ref()
         expanded: dict[str, list[str] | None] = extra.get(
-            "expanded_groups", {},
+            "expanded_groups",
+            {},
         )
 
         catalog = render_catalog(
@@ -313,19 +311,23 @@ class DeferredToolsMiddleware(Middleware):
             if exp is None:
                 # Fully expanded (None sentinel) — load all, drop from remaining.
                 pre_loaded.extend(loaded)
-                schemas.append((
-                    group.group_id,
-                    [t.to_definition().model_dump() for t in loaded],
-                ))
+                schemas.append(
+                    (
+                        group.group_id,
+                        [t.to_definition().model_dump() for t in loaded],
+                    )
+                )
             else:
                 # Partially expanded — load selected, keep in remaining.
                 name_set = set(exp)
                 selected = [t for t in loaded if t.name in name_set]
                 pre_loaded.extend(selected)
-                schemas.append((
-                    group.group_id,
-                    [t.to_definition().model_dump() for t in selected],
-                ))
+                schemas.append(
+                    (
+                        group.group_id,
+                        [t.to_definition().model_dump() for t in selected],
+                    )
+                )
                 remaining.append(group)
 
         return ResumedState(

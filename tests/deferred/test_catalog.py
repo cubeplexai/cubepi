@@ -47,7 +47,11 @@ class TestRenderCatalog:
         assert result == ""
 
     def test_single_group_no_expansion(self) -> None:
-        groups = [_make_group("mcp:github", "GitHub", "Code hosting", ["create_issue", "search_repos"])]
+        groups = [
+            _make_group(
+                "mcp:github", "GitHub", "Code hosting", ["create_issue", "search_repos"]
+            )
+        ]
         result = render_catalog(groups=groups, expanded={})
         assert "mcp:github" in result
         assert "GitHub" in result
@@ -75,7 +79,9 @@ class TestRenderCatalog:
 
     def test_fully_expanded_group_omitted(self) -> None:
         groups = [
-            _make_group("mcp:github", "GitHub", "Code hosting", ["create_issue", "search_repos"]),
+            _make_group(
+                "mcp:github", "GitHub", "Code hosting", ["create_issue", "search_repos"]
+            ),
             _make_group("mcp:linear", "Linear", "Issues", ["create_issue"]),
         ]
         expanded: dict[str, list[str] | None] = {"mcp:github": None}
@@ -86,7 +92,10 @@ class TestRenderCatalog:
     def test_partially_expanded_shows_remaining(self) -> None:
         groups = [
             _make_group(
-                "mcp:github", "GitHub", "Code hosting", ["create_issue", "search_repos", "create_pr"]
+                "mcp:github",
+                "GitHub",
+                "Code hosting",
+                ["create_issue", "search_repos", "create_pr"],
             )
         ]
         expanded: dict[str, list[str] | None] = {"mcp:github": ["create_issue"]}
@@ -142,7 +151,9 @@ class TestRenderExpandedSchemas:
         assert linear_pos < github_pos
 
     def test_append_only_prefix_stable(self) -> None:
-        schemas_v1 = [("mcp:linear", [{"name": "t1", "description": "d1", "parameters": {}}])]
+        schemas_v1 = [
+            ("mcp:linear", [{"name": "t1", "description": "d1", "parameters": {}}])
+        ]
         schemas_v2 = [
             ("mcp:linear", [{"name": "t1", "description": "d1", "parameters": {}}]),
             ("mcp:github", [{"name": "t2", "description": "d2", "parameters": {}}]),
