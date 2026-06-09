@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from cubepi.deferred._expand_tool import (
     ExpandToolsInput,
     ExpandToolsOutput,
@@ -88,7 +86,7 @@ class TestMakeExpandTools:
             )
 
         tool = _make_expand_tools(expand_callback=_callback)
-        result = await tool.execute(
+        await tool.execute(
             "call-2",
             ExpandToolsInput(group_id="mcp:github", tool_names=["create_issue"]),
         )

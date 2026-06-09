@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from cubepi.deferred._catalog import render_catalog, render_expanded_schemas
 from cubepi.deferred.types import DeferredToolGroup
 
