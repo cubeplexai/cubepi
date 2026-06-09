@@ -246,6 +246,11 @@ class Recorder:
         provider_detachers: list[Callable[[], None]] = []
 
         def _subscribe(p: Any) -> None:
+            # ``collect_agent_providers`` already filters to ``BaseProvider``,
+            # so this isinstance guard is redundant on the chain/legacy path.
+            # It stays as belt-and-suspenders for the middleware-extras loop
+            # below, which passes ``model.provider`` directly — a duck-typed
+            # Provider-protocol object could slip past static typing there.
             if not isinstance(p, BaseProvider):
                 return
             provider_detachers.append(p.subscribe_request(self._on_provider_request))
