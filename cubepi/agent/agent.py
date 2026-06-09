@@ -135,6 +135,7 @@ class AgentState:
     error_message: str | None = None
     active_run_id: str | None = None
     last_outcome: RunOutcome | None = None
+    extra: JsonObject = field(default_factory=dict)
     _tools: list[AgentTool] = field(default_factory=list)
     _messages: list[Message] = field(default_factory=list)
     _pending_tool_calls: set[str] = field(default_factory=set)
@@ -268,7 +269,9 @@ class Agent(Generic[TMessage]):
             channel._bind_emit(lambda e: self._process_event(e))
         self._run_lock = asyncio.Lock()
 
-        self._extra: JsonObject = {}
+        # Share the same dict so agent.state.extra reflects mutations made via
+        # AgentContext.extra during middleware hooks.
+        self._extra: JsonObject = self._state.extra
 
         self._steering_queue = _MessageQueue(steering_mode)
         self._follow_up_queue = _MessageQueue(follow_up_mode)
@@ -484,7 +487,8 @@ class Agent(Generic[TMessage]):
                     if data:
                         if data.messages:
                             self._state._messages = list(data.messages)
-                        self._extra = dict(data.extra)
+                        self._extra.clear()
+                        self._extra.update(data.extra)
 
                 await self._run_prompt(messages)
         except BaseException:
@@ -818,7 +822,8 @@ class Agent(Generic[TMessage]):
                 data = await self.checkpointer.load(self.thread_id)
                 if data:
                     self._state._messages = list(data.messages or [])
-                    self._extra = dict(data.extra or {})
+                    self._extra.clear()
+                    self._extra.update(data.extra or {})
 
             loaded = await load_pending(self.thread_id)
             if loaded is None:
