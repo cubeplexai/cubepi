@@ -9,6 +9,19 @@ interface FaqItem {
   a: React.ReactNode;
 }
 
+/** Recursively extract plain text from a React node for use in JSON-LD. */
+function reactNodeToText(node: React.ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(reactNodeToText).join('');
+  // React element
+  const el = node as React.ReactElement;
+  if (el && typeof el === 'object' && 'props' in el) {
+    return reactNodeToText(el.props.children);
+  }
+  return '';
+}
+
 const EN_ITEMS: FaqItem[] = [
   {
     q: 'What is CubePi?',
@@ -389,8 +402,7 @@ export default function FAQ(): React.ReactElement {
       name: item.q,
       acceptedAnswer: {
         '@type': 'Answer',
-        // Strip JSX to plain text for structured data — good enough for schema.org
-        text: typeof item.a === 'string' ? item.a : String(item.q),
+        text: reactNodeToText(item.a),
       },
     })),
   };
