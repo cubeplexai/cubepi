@@ -29,6 +29,7 @@ const sidebars: SidebarsConfig = {
           'guides/providers/overview',
           'guides/providers/anthropic',
           'guides/providers/openai',
+          'guides/providers/structured-output',
           'guides/providers/custom',
           'guides/providers/image-generation',
         ]},
@@ -46,6 +47,7 @@ const sidebars: SidebarsConfig = {
           'guides/middleware/subagents',
           'guides/middleware/todo',
           'guides/middleware/deferred-tools',
+          'guides/middleware/goal',
         ]},
         { type: 'category', label: 'Human-in-the-Loop', items: [
           'guides/hitl/overview',

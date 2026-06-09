@@ -207,14 +207,16 @@ async def on_run_end(
     ...
 ```
 
-Fires **once per `prompt()` call**, after all turns and tool calls
-complete, before `AgentEndEvent` is emitted. Return a non-empty
-`list[Message]` to inject those messages into context and run **one
-extra model turn** (the run-end pass). Return `None` or `[]` to do
-nothing.
+Fires **after each outer-loop iteration** — i.e. after all turns and
+tool calls complete before the loop would normally exit. Return a
+non-empty `list[Message]` to inject those messages into context and
+continue the loop (the agent runs again). Return `None` or `[]` to do
+nothing (the loop exits).
 
-The extra turn fires exactly once — a `_reflection_fired` guard in the
-loop prevents the injected turn from triggering another `on_run_end`.
+This hook can fire **multiple times** per `prompt()` call. Each time
+the middleware returns messages, the worker gets another run. Return
+`None` to stop the cycle. This makes `on_run_end` suitable for
+evaluation loops — see [GoalMiddleware](./goal) for an example.
 
 **When it fires:**
 - Normal completion (loop breaks naturally after all turns).
@@ -226,11 +228,12 @@ loop prevents the injected turn from triggering another `on_run_end`.
 - HITL interruption (`HitlDetached` / `HitlAborted`) — the run is
   paused, not finished.
 
-Use for: post-run memory consolidation, conversation summarisation,
-audit logging that needs the full turn context.
+Use for: goal evaluation loops, post-run memory consolidation,
+conversation summarisation, audit logging that needs the full turn
+context.
 
 Composition: messages from all middleware **concatenate** into a single
-list; all are injected together before the extra model turn.
+list; all are injected together before the next model turn.
 
 ## Anatomy of a middleware
 
