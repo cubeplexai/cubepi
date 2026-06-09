@@ -243,7 +243,6 @@ class Recorder:
         # Legacy agents that expose ``provider`` directly (instead of via
         # ``_model``) are handled inside the helper.
         agent_providers: list[BaseProvider] = collect_agent_providers(agent)
-        provider = agent_providers[0] if agent_providers else None
         provider_detachers: list[Callable[[], None]] = []
 
         def _subscribe(p: Any) -> None:
