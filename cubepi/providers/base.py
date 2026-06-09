@@ -885,3 +885,21 @@ def chain_providers(model: object) -> list["BaseProvider"]:
     if isinstance(provider, BaseProvider):
         return [provider]
     return []
+
+
+def collect_agent_providers(agent: Any) -> list["BaseProvider"]:
+    """Return the unique BaseProvider instances backing an agent.
+
+    Walks ``agent._model`` via :func:`chain_providers` and falls back to a
+    public ``provider`` attribute on the agent for legacy code paths. Used
+    by both :meth:`cubepi.tracing.recorder.Recorder.attach` and
+    :meth:`cubepi.tracing.meter.Meter.attach` to dedupe the prelude that
+    finds providers to subscribe to.
+    """
+    model = getattr(agent, "_model", None)
+    providers = chain_providers(model)
+    if not providers:
+        legacy = getattr(agent, "provider", None)
+        if isinstance(legacy, BaseProvider):
+            providers = [legacy]
+    return providers

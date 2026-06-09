@@ -152,7 +152,7 @@ class Meter:
         overwrote the first agent's ``_chat_open_ns`` / ``_chat_attrs``
         before its response landed).
         """
-        from cubepi.providers.base import BaseProvider, chain_providers
+        from cubepi.providers.base import BaseProvider, collect_agent_providers
 
         state = _MeterState()
 
@@ -174,18 +174,16 @@ class Meter:
             self._handle_provider_response(state, body, model, exc)
 
         unsub_agent = agent.subscribe(_on_agent_event)
-        agent_model = getattr(agent, "_model", None)
-        # When the bound model is a FallbackBoundModel, subscribe to every
-        # unique provider in the chain so post-failover token usage / cost
-        # / cache-hit metrics are emitted for chain[1..] calls the same way
-        # as chain[0]. Non-fallback models yield a single-entry list.
-        agent_providers: list[Any] = chain_providers(agent_model)
-        if not agent_providers:
-            legacy = getattr(agent, "provider", None)
-            if legacy is not None:
-                agent_providers = [legacy]
+        # When the bound model is a FallbackBoundModel, ``collect_agent_providers``
+        # returns every unique BaseProvider in the chain so post-failover token
+        # usage / cost / cache-hit metrics are emitted for chain[1..] calls the
+        # same way as chain[0]. Non-fallback models yield a single-entry list.
+        agent_providers: list[BaseProvider] = collect_agent_providers(agent)
         detachers: list[Callable[[], None]] = []
         for provider in agent_providers:
+            # Defensive guard: collect_agent_providers already filters to
+            # BaseProvider, but the isinstance check is cheap and protects
+            # against a future helper change that loosens the contract.
             if isinstance(provider, BaseProvider):
                 detachers.append(provider.subscribe_request(_on_request))
                 detachers.append(provider.subscribe_chunk(_on_chunk))
