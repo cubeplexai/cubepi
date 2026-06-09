@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from cubepi.agent.agent import Agent
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware

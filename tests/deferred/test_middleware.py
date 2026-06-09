@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import json
-
-import pytest
-
-from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult, AfterToolCallContext
-from cubepi.deferred.middleware import DeferredToolsMiddleware, ResumedState
+from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult
+from cubepi.deferred.middleware import DeferredToolsMiddleware
 from cubepi.deferred.types import DeferredToolGroup
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
+from cubepi.providers.base import TextContent
 
 
 def _dummy_tool(name: str, description: str = "dummy") -> AgentTool:
