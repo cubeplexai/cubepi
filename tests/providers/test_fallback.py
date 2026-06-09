@@ -507,3 +507,31 @@ def test_collect_agent_providers_empty_when_no_model_or_legacy_provider() -> Non
         pass
 
     assert collect_agent_providers(_BlankAgent()) == []
+
+
+# ---------------------------------------------------------------------------
+# tool_choice forwarding
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stream_forwards_tool_choice() -> None:
+    """stream() accepts and forwards tool_choice to inner BoundModel."""
+    primary = _faux("primary", "hello")
+    fbm = FallbackBoundModel(chain=(primary,))
+
+    stream = await fbm.stream(_messages(), tool_choice="required")
+    result = await stream.result()
+
+    assert result.provider_id == "primary"
+
+
+@pytest.mark.asyncio
+async def test_generate_forwards_tool_choice() -> None:
+    """generate() accepts and forwards tool_choice to inner BoundModel."""
+    primary = _faux("primary", "hello")
+    fbm = FallbackBoundModel(chain=(primary,))
+
+    result = await fbm.generate(_messages(), tool_choice="required")
+
+    assert result.provider_id == "primary"

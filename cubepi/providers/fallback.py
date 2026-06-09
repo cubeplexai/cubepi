@@ -23,6 +23,7 @@ from cubepi.providers.base import (
     StreamOptions,
     ThinkingBudgets,
     ThinkingLevel,
+    ToolChoice,
     ToolDefinition,
     Usage,
     chain_providers,  # re-exported for back-compat; canonical home is base.py
@@ -126,6 +127,7 @@ class FallbackBoundModel:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
         last_error: BaseException | str = "no providers in chain"
@@ -139,6 +141,7 @@ class FallbackBoundModel:
                     messages,
                     system_prompt=system_prompt,
                     tools=tools,
+                    tool_choice=tool_choice,
                     options=options,
                 )
             except trigger as exc:
@@ -200,6 +203,7 @@ class FallbackBoundModel:
         *,
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
+        tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
@@ -217,6 +221,7 @@ class FallbackBoundModel:
                     messages,
                     system_prompt=system_prompt,
                     tools=tools,
+                    tool_choice=tool_choice,
                     options=options,
                     max_output_tokens=max_output_tokens,
                     temperature=temperature,
