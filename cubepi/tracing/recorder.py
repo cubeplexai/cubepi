@@ -280,13 +280,31 @@ class Recorder:
             # behaviour. The configuration is self-defeating anyway —
             # compaction with the same model gives no cost / context
             # benefit — but the recorder still produces a usable trace.
-            agent_state = getattr(agent, "_state", None)
-            agent_model = getattr(agent_state, "model", None) if agent_state else None
-            agent_key: tuple[str, str] | None = (
-                (agent_model.provider_id, agent_model.id)
-                if agent_model is not None
-                else None
-            )
+            #
+            # FallbackBoundModel wrinkle: ``_state.model.spec`` only surfaces
+            # chain[0] (the proxy property), so a middleware extra that
+            # legitimately matches a fallback-leg spec (chain[1+]) would
+            # poison ``_extra_call_models`` with the leg's key. Then on
+            # actual failover — chain[0] fails before emission, chain[1]
+            # fires — ``_on_provider_request`` would see the leg's key in
+            # ``_extra_call_models`` and suppress root attribution, leaving
+            # the run attributed to the ``cubepi`` placeholder. Collect
+            # every chain leg's (provider_id, model_id) into ``agent_keys``
+            # so middleware-extras that match any leg are correctly excluded.
+            agent_keys: set[tuple[str, str]] = set()
+            top_model = getattr(agent, "_model", None)
+            chain = getattr(top_model, "chain", None)
+            if chain is not None:
+                for bm in chain:
+                    spec = bm.spec
+                    agent_keys.add((spec.provider_id, spec.id))
+            else:
+                agent_state = getattr(agent, "_state", None)
+                agent_model = (
+                    getattr(agent_state, "model", None) if agent_state else None
+                )
+                if agent_model is not None:
+                    agent_keys.add((agent_model.provider_id, agent_model.id))
             # Pre-seed `seen` with every chain provider already subscribed
             # above so a middleware that reuses one of them isn't
             # double-subscribed.
@@ -299,7 +317,7 @@ class Recorder:
                 for model in extra:
                     spec = model.spec
                     key = (spec.provider_id, spec.id)
-                    if key != agent_key:
+                    if key not in agent_keys:
                         self._extra_call_models.add(key)
                     provider = model.provider
                     if id(provider) in seen:
