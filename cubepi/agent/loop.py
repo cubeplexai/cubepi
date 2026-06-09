@@ -464,7 +464,6 @@ async def _run_loop_inner(
 ) -> None:
     opts = stream_options or StreamOptions()
     first_turn = True
-    _reflection_fired = False
 
     # Poll for steering messages at start (user may have typed while waiting)
     if get_steering_messages:
@@ -661,12 +660,7 @@ async def _run_loop_inner(
                 first_turn = False
                 continue
 
-        # on_run_end fires exactly once per prompt() call, after all normal
-        # turns and follow-ups are drained. _reflection_fired prevents the
-        # reflection pass itself from triggering another reflection.
-        # Skipped for error/aborted runs (those return early before reaching here).
-        if on_run_end and not _reflection_fired:
-            _reflection_fired = True
+        if on_run_end:
             inject = await on_run_end(current_context, signal=opts.signal)
             if inject:
                 for msg in inject:
