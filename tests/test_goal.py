@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
 
 from cubepi import Agent
 from cubepi.middleware.goal import GoalMiddleware
-from cubepi.providers.base import TextContent, UserMessage
+from cubepi.providers.base import UserMessage
 from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 
@@ -47,7 +46,8 @@ async def test_goal_achieved_first_eval() -> None:
         [
             faux_assistant_message(
                 faux_tool_call(
-                    "structured_output", {"achieved": True, "reason": "All tests passing"}
+                    "structured_output",
+                    {"achieved": True, "reason": "All tests passing"},
                 )
             )
         ]

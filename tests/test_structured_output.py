@@ -28,7 +28,11 @@ async def test_generate_structured_happy_path() -> None:
             faux_assistant_message(
                 faux_tool_call(
                     "structured_output",
-                    {"title": "Inception", "rating": 9, "summary": "Mind-bending heist film."},
+                    {
+                        "title": "Inception",
+                        "rating": 9,
+                        "summary": "Mind-bending heist film.",
+                    },
                 ),
                 stop_reason="tool_use",
             )
@@ -49,9 +53,7 @@ async def test_generate_structured_no_tool_call_raises() -> None:
     provider = FauxProvider()
     model = provider.model("faux-1")
     provider.set_responses(
-        [
-            faux_assistant_message("Here is my review: it was great.", stop_reason="stop")
-        ]
+        [faux_assistant_message("Here is my review: it was great.", stop_reason="stop")]
     )
 
     messages = [UserMessage(content=[TextContent(text="Review a movie")])]
@@ -87,7 +89,11 @@ async def test_generate_structured_custom_tool_name() -> None:
             faux_assistant_message(
                 faux_tool_call(
                     "my_output",
-                    {"title": "The Matrix", "rating": 10, "summary": "Reality-bending classic."},
+                    {
+                        "title": "The Matrix",
+                        "rating": 10,
+                        "summary": "Reality-bending classic.",
+                    },
                 ),
                 stop_reason="tool_use",
             )
@@ -95,7 +101,9 @@ async def test_generate_structured_custom_tool_name() -> None:
     )
 
     messages = [UserMessage(content=[TextContent(text="Review The Matrix")])]
-    result = await model.generate_structured(MovieReview, messages, tool_name="my_output")
+    result = await model.generate_structured(
+        MovieReview, messages, tool_name="my_output"
+    )
 
     assert isinstance(result, MovieReview)
     assert result.title == "The Matrix"
