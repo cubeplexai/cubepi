@@ -104,25 +104,29 @@ await agent.prompt("Summarise the document")
 
 last_msg = agent.state.messages[-1]   # AssistantMessage
 usage = last_msg.usage
-print(usage.input_tokens)        # total prompt tokens (inclusive of cache_read)
+print(usage.input_tokens)        # uncached prompt tokens (excludes cache_read)
 print(usage.cache_read_tokens)   # tokens served from cache  ← savings here
 print(usage.cache_write_tokens)  # tokens written to cache this turn
 ```
 
-Cache hit rate for a turn: `cache_read_tokens / input_tokens`.
+Cache hit rate for a turn:
+`cache_read_tokens / (input_tokens + cache_read_tokens + cache_write_tokens)`.
 
 :::tip
-`input_tokens` in CubePi's `Usage` is the **inclusive** total (prompt
-= input + cache_read + cache_creation). Do **not** add `cache_read_tokens`
-to the denominator — you would be double-counting.
+`input_tokens` in CubePi's `Usage` is the **uncached** portion — tokens that
+were actually processed by the model this turn. The full prompt token count is
+`input_tokens + cache_read_tokens + cache_write_tokens`. On a 100 % cache hit,
+`input_tokens` is 0.
 :::
 
 You can also see these fields in the `cubepi trace` CLI output and in
-the OTel spans emitted by `Tracer`:
+the OTel spans emitted by `Tracer`. Note that the OTel span attribute
+`gen_ai.usage.input_tokens` follows the GenAI Semantic Convention and reports
+the **inclusive** total (uncached + cached):
 
 ```
-gen_ai.usage.input_tokens          = 8 420   (inclusive)
-gen_ai.usage.cache_read.input_tokens = 7 980  (subset)
+gen_ai.usage.input_tokens          = 8 420   (inclusive: uncached + cached)
+gen_ai.usage.cache_read.input_tokens = 7 980  (cached subset)
 ```
 
 ---
