@@ -136,22 +136,26 @@ class DeferredToolsMiddleware(Middleware):
 `agent.state.tools` automatically (agent.py:191-195).
 
 **`transform_system_prompt`:**
-1. Append **catalog section** — sorted by `group_id` for byte-stability. Lists each non-expanded
-   group with display_name, description, tool_names, and count. Groups already expanded are omitted
-   from the catalog (they are callable directly).
+1. Append **catalog section** — sorted by `group_id` for byte-stability. For each group, shows only
+   the **not-yet-expanded** tool names. A fully expanded group is omitted entirely; a partially
+   expanded group shows only remaining tools with an updated count.
 2. Append **expanded schema section** — for each expanded group, **in expansion order** (not
-   sorted), append its tools' full definitions (name + description + parameters JSON). Expansion
-   order is append-only: a newly expanded group always lands after every already-rendered block,
-   preserving earlier cache segments byte-identical.
+   sorted), append the **expanded tools'** full definitions (name + description + parameters JSON).
+   When a group is partially expanded, only the selected tools' schemas appear. Expansion order is
+   append-only: a newly expanded group (or newly expanded tools within a group) always lands after
+   every already-rendered block, preserving earlier cache segments byte-identical.
 
 Why expansion order, not sorted? Groups expand incrementally mid-conversation. Sorting could insert
 a later expansion before an already-cached block and invalidate the prompt-cache prefix.
 
 **`after_tool_call`:**
 - Fires on every tool call. Checks: is the tool name `expand_tools`? Did it succeed?
-- If yes: parse the result to get the `group_id`. Look up the group. Call `loader()`. Append the
-  returned `AgentTool`s to `ctx.context.tools` (the live list reference — next iteration sees them).
-  Record the group_id in `extra["expanded_groups"]` (ordered list, dedup, first-expanded-first).
+- If yes: parse the result to get the `group_id` and optional `tool_names`. Look up the group.
+  On first access to a group, call `loader()` and **cache the full result** (the loader is invoked
+  exactly once per group per run regardless of how many selective expansions follow). Filter the
+  cached tools by `tool_names` (or take all if `tool_names` is None). Append the filtered
+  `AgentTool`s to `ctx.context.tools` (the live list reference — next iteration sees them).
+  Record the expansion in `extra["expanded_groups"]`.
 - Store the loaded tools' definitions for `transform_system_prompt` to render in the expanded
   schema section.
 
@@ -162,18 +166,34 @@ class ExpandToolsInput(BaseModel):
     group_id: str = Field(
         description="The group_id from your 'Deferred tool groups' catalog."
     )
+    tool_names: list[str] | None = Field(
+        default=None,
+        description="Specific tools to expand. Omit to expand all tools in the group.",
+    )
 
 class ExpandToolsOutput(BaseModel):
     group_id: str
     expanded: bool
-    tool_names: list[str]
+    tool_names: list[str]       # the tools that were actually expanded this call
+    remaining: int              # tools still deferred in this group
     error: str | None = None
 ```
 
 Behavior:
-- Valid group_id → call `loader()`, return `expanded=True` + tool names list.
+- Valid group_id, no tool_names → expand all tools, return full list.
+- Valid group_id + tool_names → expand only those tools, return them. Unknown names within the
+  list are silently ignored (the rest still expand).
 - Unknown group_id → return `is_error=True` + error message.
-- Already-expanded group_id → return `expanded=True` + tool names (idempotent, no re-load).
+- Already-expanded tools → idempotent (no re-inject, no duplicate in context.tools). The response
+  still lists them as expanded.
+
+**Incremental expansion.** The model can call `expand_tools` multiple times for the same group with
+different `tool_names`. Each call adds only the newly requested tools. Example flow:
+```
+expand_tools("mcp:github", tool_names=["create_issue"])       → 1 tool loaded, 11 remaining
+expand_tools("mcp:github", tool_names=["search_repos"])       → 1 more loaded, 10 remaining
+expand_tools("mcp:github")                                     → remaining 10 loaded, 0 remaining
+```
 
 The tool result contains tool names + descriptions only, **not** full schemas. The middleware
 injects schema text into the system-prompt suffix (matching the skills pattern where content goes
@@ -197,12 +217,19 @@ to load a group's tools for the rest of this conversation.
 ```
 
 Properties:
-- Sorted by `group_id` → byte-identical every turn (for groups that haven't been expanded yet).
-- Only non-expanded groups appear (expanded groups are callable directly and show in the expanded
-  schema section).
+- Sorted by `group_id` → byte-identical every turn (for the non-expanded portion).
+- Fully expanded groups are omitted. Partially expanded groups show only the remaining
+  (not-yet-expanded) tool names with an updated count.
 - Tool names listed without descriptions or schemas — tool names in MCP/plugin conventions
   (`verb_noun`) are self-descriptive. ~40 tokens per group of 12 tools.
 - `catalog_header` is customizable via constructor for host apps with different wording needs.
+
+Example after partial expansion of `mcp:github` (`create_issue` already expanded):
+```
+- `mcp:github` — Code hosting (11 remaining tools)
+  search_repos, create_pr, list_pull_requests, merge_pull_request,
+  search_code, list_commits, create_comment, ...
+```
 
 ### Expanded schema rendering
 
@@ -234,8 +261,19 @@ Properties:
 When `after_tool_call` fires for a successful `expand_tools`:
 
 ```python
-loaded_tools = await group.loader()
-ctx.context.tools.extend(loaded_tools)   # visible next iteration
+# First access to this group: call loader, cache the full result
+if group_id not in self._loader_cache:
+    self._loader_cache[group_id] = await group.loader()
+
+all_tools = self._loader_cache[group_id]
+
+# Filter by requested tool_names (or take all)
+selected = [t for t in all_tools if t.name in requested_names] if requested_names else all_tools
+
+# Only inject tools not already in context (idempotent)
+existing_names = {t.name for t in ctx.context.tools}
+new_tools = [t for t in selected if t.name not in existing_names]
+ctx.context.tools.extend(new_tools)   # visible next iteration
 ```
 
 This works because `current_context.tools` in `_run_loop` is a reference to the same list — the
@@ -248,36 +286,54 @@ docs), not the mechanism that makes tools callable.
 ### Expansion state persistence
 
 ```python
-extra["expanded_groups"]  # list[str], ordered, e.g. ["mcp:linear", "mcp:gdrive"]
+extra["expanded_groups"]
+# Ordered dict: group_id → list[str] | None
+# None = all tools expanded; list = specific tool names
+# Ordering = expansion order (first group expanded first)
+#
+# Example:
+# {
+#     "mcp:github": ["create_issue", "search_repos"],  # partial
+#     "mcp:linear": null,                                # all expanded
+# }
 ```
 
-- Written by `after_tool_call` on each new expansion.
-- Read by `transform_system_prompt` to decide what to render.
+- Written by `after_tool_call` on each new expansion (append new group, or extend existing
+  group's tool list).
+- Read by `transform_system_prompt` to decide what to render in catalog vs expanded sections.
 - Persisted by the host application's checkpointer (same mechanism as TodoListMiddleware's todos).
-- **Must be serialized as an ordered list.** If a checkpointer deserializes it as an unordered set,
+- **Must be serialized as an ordered dict.** If a checkpointer deserializes it as an unordered map,
   the expansion-order invariant breaks and the prompt-cache prefix becomes unstable across turns.
+  Python `dict` preserves insertion order since 3.7, so standard JSON round-tripping is safe.
 
 ### Replay on subsequent runs
 
 When the host application creates a new run (next user turn), it should:
 
-1. Read persisted `extra["expanded_groups"]` from the checkpointer.
-2. Pre-load those groups' tools (call each loader).
+1. Read persisted `extra["expanded_groups"]` from the checkpointer (an ordered dict of
+   `group_id → list[str] | None`).
+2. Pre-load the expanded tools: for each group with expanded tools, call loader and filter to the
+   expanded tool names (or take all if `None`).
 3. Pass the pre-loaded tools as regular `tools` to `Agent(tools=[...builtins, ...pre_loaded])`.
-4. Construct `DeferredToolsMiddleware` with only the **remaining** (non-expanded) groups.
-5. Set `extra["expanded_groups"]` on the agent so `transform_system_prompt` renders the expanded
-   schema section correctly.
+4. Construct `DeferredToolsMiddleware` with the original groups list — the middleware reads
+   `extra["expanded_groups"]` to know which tools are already expanded and adjusts the catalog
+   accordingly.
 
 This is the host application's responsibility, not the middleware's — the middleware only handles
-within-a-single-run expansion. cubepi provides a helper for step 2-5:
+within-a-single-run expansion. cubepi provides a helper for step 2-3:
 
 ```python
+@dataclass
+class ResumedState:
+    pre_loaded_tools: list[AgentTool]       # tools to pass as Agent(tools=...)
+    remaining_groups: list[DeferredToolGroup]  # groups still fully/partially deferred
+
 @staticmethod
-def prepare_resumed_state(
+async def prepare_resumed_state(
     groups: list[DeferredToolGroup],
-    expanded_ids: list[str],
+    expanded: dict[str, list[str] | None],
 ) -> ResumedState:
-    """Split groups into already-expanded (need pre-loading) and still-deferred."""
+    """Call loaders for expanded groups, filter to expanded tools, return split."""
     ...
 ```
 
@@ -340,21 +396,25 @@ No registration method on Agent — follows the existing pattern where middlewar
 Unit tests (no real LLM, no MCP server):
 
 1. **Catalog rendering** — sorted by group_id, byte-stable across input orderings, no schemas,
-   expanded groups omitted.
+   fully expanded groups omitted, partially expanded groups show only remaining tools.
 2. **Expanded schema rendering** — expansion order preserved, append-only (second expansion's text
-   starts with first expansion's text), JSON keys sorted for byte stability.
+   starts with first expansion's text), JSON keys sorted for byte stability. Partial expansion
+   renders only the selected tools' schemas.
 3. **expand_tools builtin** — valid group → expanded=True + tool names; unknown group → error;
-   already-expanded → idempotent.
-4. **Mid-run injection** — after expand_tools fires, `ctx.context.tools` contains the new tools;
+   already-expanded → idempotent; with tool_names → selective expansion.
+4. **Incremental expansion** — expand one tool, then another from same group; loader called only
+   once; both tools in context; catalog shows remaining.
+5. **Mid-run injection** — after expand_tools fires, `ctx.context.tools` contains the new tools;
    simulate a second `_stream_assistant_response` call and verify `tools_defs` includes them.
-5. **Expansion state** — after_tool_call writes to extra["expanded_groups"] in order; duplicate
-   expansion doesn't add twice; transform_system_prompt uses the stored order.
-6. **Loader failure** — if loader raises, expand_tools returns is_error=True, no tools injected,
+6. **Expansion state** — after_tool_call writes to extra["expanded_groups"] correctly; duplicate
+   tool names not added twice; transform_system_prompt uses the stored order.
+7. **Loader failure** — if loader raises, expand_tools returns is_error=True, no tools injected,
    no state change.
+8. **Loader caching** — two selective expands on the same group call loader exactly once.
 
 Integration test (with Agent, mock provider):
 
-7. **Full round-trip** — Agent with DeferredToolsMiddleware, mock provider that calls expand_tools
+9. **Full round-trip** — Agent with DeferredToolsMiddleware, mock provider that calls expand_tools
    then uses an expanded tool. Assert: first model call sees expand_tools but not deferred tools;
    after expansion, next iteration sees deferred tools in tools_defs.
 
