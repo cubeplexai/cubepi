@@ -50,6 +50,7 @@ from cubepi.types import JsonObject, StructuredValue
 TMessage = TypeVar("TMessage")
 
 if TYPE_CHECKING:
+    from cubepi.deferred.types import DeferredToolGroup
     from cubepi.providers.fallback import FallbackBoundModel
 
 
@@ -161,6 +162,7 @@ class Agent(Generic[TMessage]):
         checkpointer: Checkpointer | None = None,
         thread_id: str | None = None,
         middleware: list[Middleware] | None = None,
+        deferred_tool_groups: list[DeferredToolGroup] | None = None,
         channel: HitlChannel | None = None,
         messages: Sequence[Message] | None = None,
     ) -> None:
@@ -182,6 +184,14 @@ class Agent(Generic[TMessage]):
             self._state.messages = list(seeded)
         if tools:
             self._state.tools = tools
+        if deferred_tool_groups:
+            from cubepi.deferred.middleware import DeferredToolsMiddleware
+
+            deferred_mw = DeferredToolsMiddleware(
+                groups=deferred_tool_groups,
+                extra_ref=lambda: self._extra,
+            )
+            middleware = [*(middleware or []), deferred_mw]
         middleware = middleware or []
         # Retain the list so observers (e.g. cubepi.tracing.Recorder) can
         # walk it after construction — they need to reach attributes like
