@@ -23,12 +23,14 @@ themselves.
 
 ## Goals
 
-- Provide a `DeferredToolGroup` dataclass that host apps use to register groups of tools that start
+- Provide a `DeferredToolGroup` dataclass that host apps use to declare groups of tools that start
   collapsed.
-- Provide a `DeferredToolsMiddleware` that handles everything: catalog rendering in the system
-  prompt, an `expand_tools` builtin, mid-run tool injection on expand, expansion-order tracking.
-- **Zero changes to Agent or loop.py.** The mechanism works entirely through the existing middleware
-  system.
+- `Agent(deferred_tool_groups=[...])` as the primary API — declare deferred groups alongside
+  regular tools; Agent handles all internal wiring. No middleware assembly required from the user.
+- `DeferredToolsMiddleware` available as a lower-level API for advanced customization (custom
+  catalog header, custom middleware ordering).
+- **Minimal changes to Agent, zero changes to loop.py.** Agent gains one optional parameter;
+  internally it creates the middleware and binds `extra_ref` automatically.
 - Expansion-order-preserving, append-only system-prompt growth for prompt-cache stability.
 - Tool-source-agnostic: cubepi knows about "groups with loaders", not about MCP or any specific
   tool source.
@@ -37,7 +39,6 @@ themselves.
 
 - No MCP-specific integration in v1 (convenience bridge from `MCPDiscoveryResult` →
   `DeferredToolGroup` is a later recipe, not core API).
-- No per-tool (sub-group) disclosure — the unit is a whole group.
 - No semantic / embedding retrieval — the catalog is designed to be small enough for the model to
   read directly.
 - No "code mode" (tools as a callable API the model writes code against).
@@ -72,7 +73,7 @@ themselves.
 
 **Key insight:** because `current_context.tools` is a reference to the same list object, appending
 to it from an `after_tool_call` hook makes new tools visible to the model on the **next iteration
-of the same run**. No changes to Agent or loop.py are needed for mid-run tool injection.
+of the same run**. No changes to loop.py are needed for mid-run tool injection.
 
 ### Middleware hooks (used by this feature)
 
@@ -88,6 +89,41 @@ of the same run**. No changes to Agent or loop.py are needed for mid-run tool in
 `Agent._extra` is a `JsonObject` dict shared with `AgentContext.extra`. Middlewares write state
 into it (e.g. TodoListMiddleware writes todos). Host applications persist it via checkpointers.
 DeferredToolGroup uses this for expansion state (`extra["expanded_groups"]`).
+
+### Agent-level `deferred_tool_groups` parameter
+
+`Agent.__init__` gains an optional `deferred_tool_groups: list[DeferredToolGroup] | None`
+parameter. When provided, Agent automatically creates a `DeferredToolsMiddleware` and appends it
+to the middleware chain — no manual middleware assembly from the caller.
+
+```python
+class Agent:
+    def __init__(
+        self,
+        *,
+        model: BoundModel,
+        tools: list[AgentTool] | None = None,
+        middleware: list[Middleware] | None = None,
+        deferred_tool_groups: list[DeferredToolGroup] | None = None,  # NEW
+        ...
+    ) -> None:
+        ...
+        if deferred_tool_groups:
+            from cubepi.deferred import DeferredToolsMiddleware
+            deferred_mw = DeferredToolsMiddleware(
+                groups=deferred_tool_groups,
+                extra_ref=lambda: self._extra,
+            )
+            middleware = [*(middleware or []), deferred_mw]
+        ...
+```
+
+This follows the same principle as other Agent conveniences: the user declares intent
+(`deferred_tool_groups=[...]`) and Agent handles the wiring. The `extra_ref` binding to
+`self._extra` is automatic — the caller never needs to think about it.
+
+Users who need custom `catalog_header` or non-default middleware ordering can still construct
+`DeferredToolsMiddleware` directly and pass it via `middleware=[...]`.
 
 ## Design
 
@@ -314,18 +350,18 @@ When the host application creates a new run (next user turn), it should:
    `group_id → list[str] | None`).
 2. Pre-load the expanded tools: for each group with expanded tools, call loader and filter to the
    expanded tool names (or take all if `None`).
-3. Pass the pre-loaded tools as regular `tools` to `Agent(tools=[...builtins, ...pre_loaded])`.
-4. Construct `DeferredToolsMiddleware` with the original groups list — the middleware reads
-   `extra["expanded_groups"]` to know which tools are already expanded and adjusts the catalog
-   accordingly.
+3. Pass the pre-loaded tools as regular `tools` to
+   `Agent(tools=[...builtins, ...pre_loaded], deferred_tool_groups=groups)`.
+4. Agent creates the middleware internally; the middleware reads `extra["expanded_groups"]` to know
+   which tools are already expanded and adjusts the catalog accordingly.
 
 This is the host application's responsibility, not the middleware's — the middleware only handles
-within-a-single-run expansion. cubepi provides a helper for step 2-3:
+within-a-single-run expansion. cubepi provides a helper for step 2:
 
 ```python
 @dataclass
 class ResumedState:
-    pre_loaded_tools: list[AgentTool]       # tools to pass as Agent(tools=...)
+    pre_loaded_tools: list[AgentTool]         # merge into Agent(tools=...)
     remaining_groups: list[DeferredToolGroup]  # groups still fully/partially deferred
 
 @staticmethod
@@ -337,12 +373,26 @@ async def prepare_resumed_state(
     ...
 ```
 
+Usage with Agent-level API:
+
+```python
+resumed = await DeferredToolsMiddleware.prepare_resumed_state(groups, saved_extra["expanded_groups"])
+agent = Agent(
+    model=model,
+    tools=[*builtins, *resumed.pre_loaded_tools],
+    deferred_tool_groups=resumed.remaining_groups,
+    extra=saved_extra,
+)
+```
+
 ## File layout
 
 ```
 cubepi/
+  agent/
+    agent.py             # +deferred_tool_groups parameter, auto-creates middleware (~10 lines)
   deferred/
-    __init__.py          # public exports
+    __init__.py          # public exports: DeferredToolGroup, DeferredToolsMiddleware
     types.py             # DeferredToolGroup dataclass
     middleware.py         # DeferredToolsMiddleware
     _catalog.py          # catalog + expanded schema rendering (pure functions)
@@ -356,40 +406,55 @@ tests/
 ```
 
 New `cubepi/deferred/` package — does not import from `cubepi/mcp/` (tool-source-agnostic).
+`agent.py` change is small: accept the parameter, lazy-import `DeferredToolsMiddleware`, create
+and append to middleware list.
 
 ## Public API surface
 
+**Primary API — Agent-level parameter:**
+
 ```python
-# cubepi.deferred
-from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
-
-# Construction
-groups = [
-    DeferredToolGroup(
-        group_id="mcp:github",
-        display_name="GitHub",
-        description="Code hosting: issues, PRs, repos",
-        tool_names=["create_issue", "search_repos", "create_pr", ...],
-        loader=lambda: load_my_github_tools(),
-    ),
-]
-
-middleware = DeferredToolsMiddleware(
-    groups=groups,
-    extra_ref=lambda: agent._extra,
-)
+from cubepi.deferred import DeferredToolGroup
 
 agent = Agent(
     model=model,
     system_prompt="...",
-    tools=[...builtins],
-    middleware=[middleware, ...other_middleware],
+    tools=[t1, t2],                             # always-visible tools
+    deferred_tool_groups=[                       # groups that start collapsed
+        DeferredToolGroup(
+            group_id="mcp:github",
+            display_name="GitHub",
+            description="Code hosting: issues, PRs, repos",
+            tool_names=["create_issue", "search_repos", "create_pr", ...],
+            loader=lambda: load_my_github_tools(),
+        ),
+    ],
 )
 ```
 
-Two exports. `DeferredToolGroup` is a plain dataclass, `DeferredToolsMiddleware` is the middleware.
-No registration method on Agent — follows the existing pattern where middlewares are passed to
-`Agent(middleware=[...])`.
+Agent creates the middleware internally, binds `extra_ref` to `self._extra`, and appends
+`expand_tools` to the tool set. The caller never touches `DeferredToolsMiddleware`.
+
+**Advanced API — direct middleware construction:**
+
+```python
+from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
+
+middleware = DeferredToolsMiddleware(
+    groups=groups,
+    extra_ref=lambda: agent._extra,
+    catalog_header="Custom header...",           # override default catalog text
+)
+
+agent = Agent(
+    model=model,
+    tools=[...builtins],
+    middleware=[middleware, ...other_middleware],  # explicit ordering control
+)
+```
+
+Use when you need custom `catalog_header` text, specific middleware ordering, or other
+customization that the Agent-level shorthand does not expose.
 
 ## Testing strategy
 
@@ -414,9 +479,11 @@ Unit tests (no real LLM, no MCP server):
 
 Integration test (with Agent, mock provider):
 
-9. **Full round-trip** — Agent with DeferredToolsMiddleware, mock provider that calls expand_tools
-   then uses an expanded tool. Assert: first model call sees expand_tools but not deferred tools;
-   after expansion, next iteration sees deferred tools in tools_defs.
+9. **Full round-trip** — Agent with `deferred_tool_groups=[...]`, mock provider that calls
+   expand_tools then uses an expanded tool. Assert: first model call sees expand_tools but not
+   deferred tools; after expansion, next iteration sees deferred tools in tools_defs.
+10. **Agent-level wiring** — `Agent(deferred_tool_groups=[...])` automatically creates the
+    middleware, binds extra_ref, and merges expand_tools into the tool set.
 
 ## Open questions
 
@@ -437,8 +504,9 @@ Integration test (with Agent, mock provider):
 
 **v1:**
 - `DeferredToolGroup` dataclass.
-- `DeferredToolsMiddleware` with catalog rendering, `expand_tools` builtin, mid-run injection,
-  expansion-order tracking, expanded schema rendering.
+- `Agent(deferred_tool_groups=[...])` parameter (primary API).
+- `DeferredToolsMiddleware` with catalog rendering, `expand_tools` builtin (with selective
+  `tool_names`), mid-run injection, expansion-order tracking, expanded schema rendering.
 - `prepare_resumed_state` helper for cross-run replay.
 - Unit + integration tests.
 
@@ -446,5 +514,4 @@ Integration test (with Agent, mock provider):
 - MCP convenience bridge (`deferred_group_from_mcp_server`).
 - Auto-mode threshold (context-window-percentage gate).
 - Unify with skills disclosure under a shared primitive.
-- Per-tool (sub-group) disclosure.
 - Semantic / embedding retrieval for very large catalogs.
