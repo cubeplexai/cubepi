@@ -78,6 +78,8 @@ class DeferredToolsMiddleware(Middleware):
         )
         # Staging area: expand_callback queues, after_tool_call drains.
         self._pending_injection: list[AgentTool] = []
+        # Per-group lock to prevent concurrent loader invocations.
+        self._loader_locks: dict[str, asyncio.Lock] = {}
 
         self.tools: list[AgentTool] = [
             _make_expand_tools(expand_callback=self._expand_callback)
@@ -106,18 +108,20 @@ class DeferredToolsMiddleware(Middleware):
                 ),
             )
 
-        # Load once per group per run.
-        try:
-            if group_id not in self._loader_cache:
-                self._loader_cache[group_id] = await group.loader()
-        except Exception as exc:
-            return ExpandToolsOutput(
-                group_id=group_id,
-                expanded=False,
-                tool_names=[],
-                remaining=len(group.tool_names),
-                error=f"Loader failed: {exc}",
-            )
+        # Load once per group per run (lock prevents duplicate under parallel).
+        lock = self._loader_locks.setdefault(group_id, asyncio.Lock())
+        async with lock:
+            try:
+                if group_id not in self._loader_cache:
+                    self._loader_cache[group_id] = await group.loader()
+            except Exception as exc:
+                return ExpandToolsOutput(
+                    group_id=group_id,
+                    expanded=False,
+                    tool_names=[],
+                    remaining=len(group.tool_names),
+                    error=f"Loader failed: {exc}",
+                )
 
         all_loaded = self._loader_cache[group_id]
 

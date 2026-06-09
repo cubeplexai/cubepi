@@ -32,7 +32,8 @@ def render_catalog(
             continue
 
         if expanded_names is not None:
-            remaining = [n for n in group.tool_names if n not in set(expanded_names)]
+            expanded_set = set(expanded_names)
+            remaining = [n for n in group.tool_names if n not in expanded_set]
         else:
             remaining = list(group.tool_names)
 
