@@ -45,6 +45,7 @@ const sidebars: SidebarsConfig = {
           'guides/middleware/compaction',
           'guides/middleware/subagents',
           'guides/middleware/todo',
+          'guides/middleware/deferred-tools',
         ]},
         { type: 'category', label: 'Human-in-the-Loop', items: [
           'guides/hitl/overview',
