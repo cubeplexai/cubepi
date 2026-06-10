@@ -39,15 +39,15 @@ const sidebars: SidebarsConfig = {
           'guides/checkpointing/mysql',
           'guides/checkpointing/custom',
         ]},
-        { type: 'category', label: 'Middleware', items: [
+        { type: 'category', label: 'Middlewares', items: [
           'guides/middleware/hooks',
           'guides/middleware/composition',
-          'guides/middleware/examples',
           'guides/middleware/compaction',
           'guides/middleware/subagents',
           'guides/middleware/todo',
           'guides/middleware/deferred-tools',
           'guides/middleware/goal',
+          'guides/middleware/examples',
         ]},
         { type: 'category', label: 'Human-in-the-Loop', items: [
           'guides/hitl/overview',

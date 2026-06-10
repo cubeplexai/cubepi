@@ -23,9 +23,9 @@
     "message": "检查点",
     "description": "The label for category 'Checkpointing' in sidebar 'docs'"
   },
-  "sidebar.docs.category.Middleware": {
+  "sidebar.docs.category.Middlewares": {
     "message": "中间件",
-    "description": "The label for category 'Middleware' in sidebar 'docs'"
+    "description": "The label for category 'Middlewares' in sidebar 'docs'"
   },
   "sidebar.docs.category.Human-in-the-Loop": {
     "message": "人机协同",
