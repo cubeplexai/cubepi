@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (BREAKING)
+
+- **Deferred tool groups default to the new `dispatch` strategy.** Tool
+  schemas are delivered through `load_tools` results and invoked via the
+  `deferred_tool_call` dispatcher; the tools array and system prompt stay
+  byte-stable, so expansions no longer invalidate the prompt cache.
+  Restore the v0.10 behavior with `Agent(deferred_tool_strategy="inject")`
+  / `DeferredToolsMiddleware(strategy="inject")`.
+- **`DeferredToolsMiddleware(resumed_schemas=...)` and
+  `ResumedState.expanded_schemas` are removed**; `prepare_resumed_state`
+  takes a **required** `strategy` keyword (a default could silently resume
+  an inject-mode host with hidden tools).
+- **Inject mode no longer renders expanded schemas into the system
+  prompt.** The definitions were already in the tools array — the
+  duplicate rendering (double token billing per turn) is gone.
+
+### Added
+
+- **`resolve_tool_call` middleware hook** — rewrite a tool call before
+  validation, `before_tool_call`, execution, events, and tracing see it.
+  Composition is first-non-None-wins. Powers the deferred dispatcher;
+  also usable for tool aliasing/redirection.
+- **`AgentTool.expose_to_model`** — when `False`, the tool is resolvable
+  and executable by the engine but its definition is never sent to the
+  provider. Dispatch-mode deferred tools use this.
+- **`Agent(deferred_tool_strategy=...)`** and
+  `DeferredToolsMiddleware(strategy=...)` — choose `"dispatch"` (default)
+  or `"inject"`.
+- Resolved dispatcher calls that fail argument validation get the tool's
+  **full schema appended to the error result**, so the model can
+  self-correct in one round trip.
+
 ## [0.10.0] - 2026-06-10
 
 ### Removed (BREAKING)

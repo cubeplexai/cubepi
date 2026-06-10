@@ -249,9 +249,7 @@ class Agent(Generic[TMessage]):
             "after_model_response"
         )
         self.before_tool_call = before_tool_call or _mw_hooks.get("before_tool_call")
-        self.resolve_tool_call = resolve_tool_call or _mw_hooks.get(
-            "resolve_tool_call"
-        )
+        self.resolve_tool_call = resolve_tool_call or _mw_hooks.get("resolve_tool_call")
         self.after_tool_call = after_tool_call or _mw_hooks.get("after_tool_call")
         self.should_stop_after_turn = should_stop_after_turn or _mw_hooks.get(
             "should_stop_after_turn"
