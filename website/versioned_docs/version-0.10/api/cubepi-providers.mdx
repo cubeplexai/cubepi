@@ -56,7 +56,7 @@ Per-call mutators (`StreamOptions.on_payload`,
 semantics and fire independently of the persistent listener registry
 below.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L611)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L639)
 
 
 **Attributes**
@@ -72,7 +72,7 @@ below.
 model(id: str, *, api: str = '', reasoning: bool = False, context_window: int = 200000, max_tokens: int = 8192, temperature: float = 0.7, cost: ModelCost | None = None, thinking_level_map: dict[str, str | None] | None = None) -> BoundModel
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L637)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L665)
 
 
 #### `stream` {#baseprovider-stream}
@@ -81,7 +81,7 @@ model(id: str, *, api: str = '', reasoning: bool = False, context_window: int = 
 stream(model: Model, messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefinition] | None = None, tool_choice: ToolChoice | None = None, options: StreamOptions | None = None) -> MessageStream
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L664)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L692)
 
 
 #### `generate` {#baseprovider-generate}
@@ -92,7 +92,7 @@ generate(model: Model, messages: list[Message], *, system_prompt: str = '', tool
 
 Run a single provider call and return the final assistant message.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L676)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L704)
 
 
 #### `subscribe_request` {#baseprovider-subscribe-request}
@@ -105,7 +105,7 @@ Register a persistent observer for request payloads.
 
 Returns a detach callable that removes this specific subscription.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L729)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L757)
 
 
 #### `subscribe_chunk` {#baseprovider-subscribe-chunk}
@@ -118,7 +118,7 @@ Register a persistent observer for stream chunks.
 
 Returns a detach callable.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L737)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L765)
 
 
 #### `subscribe_response` {#baseprovider-subscribe-response}
@@ -131,7 +131,7 @@ Register a persistent observer for assembled responses.
 
 Returns a detach callable.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L745)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L773)
 
 
 
@@ -144,7 +144,7 @@ BoundModel(self, provider: Provider, spec: Model)
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L779)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L807)
 
 
 **Attributes**
@@ -161,7 +161,7 @@ BoundModel(self, provider: Provider, spec: Model)
 stream(messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefinition] | None = None, tool_choice: ToolChoice | None = None, options: StreamOptions | None = None) -> MessageStream
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L784)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L812)
 
 
 #### `generate` {#boundmodel-generate}
@@ -170,7 +170,7 @@ stream(messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefi
 generate(messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefinition] | None = None, tool_choice: ToolChoice | None = None, options: StreamOptions | None = None, max_output_tokens: int | None = None, temperature: float | None = None, thinking: ThinkingLevel | None = None, thinking_budgets: ThinkingBudgets | None = None) -> AssistantMessage
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L808)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L836)
 
 
 #### `generate_structured` {#boundmodel-generate-structured}
@@ -179,7 +179,7 @@ generate(messages: list[Message], *, system_prompt: str = '', tools: list[ToolDe
 generate_structured(output_type: type[BaseModelT], messages: list[Message], *, system_prompt: str = '', tool_name: str = 'structured_output', tool_description: str = 'Return the structured output', max_output_tokens: int | None = None, temperature: float | None = None, max_retries: int = 1) -> BaseModelT
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L835)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L863)
 
 
 
@@ -231,7 +231,7 @@ MessageStream(self)
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L223)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L260)
 
 
 **Methods**
@@ -242,7 +242,7 @@ MessageStream(self)
 attach_task(task: asyncio.Task) -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L231)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L268)
 
 
 #### `push` {#messagestream-push}
@@ -251,7 +251,7 @@ attach_task(task: asyncio.Task) -> None
 push(event: StreamEvent) -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L243)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L280)
 
 
 #### `set_result` {#messagestream-set-result}
@@ -260,7 +260,7 @@ push(event: StreamEvent) -> None
 set_result(message: AssistantMessage) -> None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L248)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L285)
 
 
 #### `result` {#messagestream-result}
@@ -279,7 +279,7 @@ teardown could exit before async response listeners have run.
 Producer exceptions are NOT re-raised here; they were already
 surfaced via the result future or the stream's error events.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L261)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L298)
 
 
 
@@ -333,7 +333,7 @@ Persistent observer. Fires for every StreamEvent pushed onto the stream
 Heavy listeners should early-return on irrelevant event types — this hook
 fires hot. Return value is ignored.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L315)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L352)
 
 
 ### OnPayloadCallback {#onpayloadcallback}
@@ -347,7 +347,7 @@ OnPayloadCallback = Callable[[dict, Model], Awaitable[dict | None] | dict | None
 Optional callback for inspecting/replacing provider payloads before sending.
 Return a dict to replace the payload, or None to keep unchanged.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L302)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L339)
 
 
 ### OnRequestCallback {#onrequestcallback}
@@ -362,7 +362,7 @@ Persistent observer. Fires just before HTTP send, after any per-call
 `StreamOptions.on_payload` mutation has been applied. Receives the final
 wire payload dict and the Model. Return value is ignored.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L310)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L347)
 
 
 ### OnResponseBodyCallback {#onresponsebodycallback}
@@ -383,7 +383,7 @@ finally block, after the stream terminates.
   `asyncio.CancelledError`), or None on normal completion.
 Return value is ignored.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L321)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L358)
 
 
 ### OnResponseCallback {#onresponsecallback}
@@ -396,7 +396,7 @@ OnResponseCallback = Callable[['ProviderResponse', Model], Awaitable[None] | Non
 
 Optional callback invoked after an HTTP response is received.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L306)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L343)
 
 
 ### Provider {#provider}
@@ -404,7 +404,7 @@ Optional callback invoked after an HTTP response is received.
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L582)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L610)
 
 
 **Methods**
@@ -415,7 +415,7 @@ _class_
 stream(model: Model, messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefinition] | None = None, tool_choice: ToolChoice | None = None, options: StreamOptions | None = None) -> MessageStream
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L584)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L612)
 
 
 #### `generate` {#provider-generate}
@@ -424,7 +424,7 @@ stream(model: Model, messages: list[Message], *, system_prompt: str = '', tools:
 generate(model: Model, messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefinition] | None = None, tool_choice: ToolChoice | None = None, options: StreamOptions | None = None, max_output_tokens: int | None = None, temperature: float | None = None, thinking: ThinkingLevel | None = None, thinking_budgets: ThinkingBudgets | None = None) -> AssistantMessage
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L595)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L623)
 
 
 
@@ -438,7 +438,7 @@ ProviderResponse(self, status: int, headers: dict[str, str] = dict())
 
 HTTP response metadata exposed to on_response callbacks.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L294)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L331)
 
 
 **Attributes**
@@ -452,7 +452,7 @@ HTTP response metadata exposed to on_response callbacks.
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L171)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L208)
 
 
 **Attributes**
@@ -470,7 +470,7 @@ _class_
 
 Options bag for Provider.stream(), transparent to the agent loop.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L543)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L571)
 
 
 **Attributes**
@@ -503,12 +503,11 @@ _class_
 
 Token budgets for each thinking level.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L29)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L30)
 
 
 **Attributes**
 
-- `minimal`: `int`
 - `low`: `int`
 - `medium`: `int`
 - `high`: `int`
@@ -533,11 +532,11 @@ _class_
 _attribute_
 
 ```python
-ThinkingLevel = Literal['off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+ThinkingLevel = Literal['off', 'low', 'medium', 'high', 'xhigh']
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L24)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L25)
 
 
 ### ToolCall {#toolcall}
@@ -561,7 +560,7 @@ _class_
 _class_
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L165)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L202)
 
 
 **Attributes**
@@ -625,6 +624,38 @@ _class_
 - `run_id`: `str | None`
 
 
+### is_synthetic_message {#is-synthetic-message}
+
+_function_
+
+```python
+is_synthetic_message(message: Message) -> bool
+```
+
+True if `message` was injected by the framework rather than a human.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L197)
+
+
+### synthetic_user_message {#synthetic-user-message}
+
+_function_
+
+```python
+synthetic_user_message(text: str, *, source: str) -> UserMessage
+```
+
+Build a user-role message injected by the framework, not typed by a human.
+
+All injected user-role messages MUST be created through this factory so
+downstream consumers can branch on a single marker
+(`metadata["synthetic"] is True`). `source` (e.g. `"todo_guard"`,
+`"goal_continuation"`) is for tracing/debugging only — UI behavior
+should never depend on it.
+
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L179)
+
+
 ### adjust_max_tokens_for_thinking {#adjust-max-tokens-for-thinking}
 
 _function_
@@ -680,7 +711,7 @@ Used by `cubepi.tracing.recorder.Recorder.attach` and
 fallback chain so post-failover provider events land in the trace /
 metric stream.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L907)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L937)
 
 
 ### collect_agent_providers {#collect-agent-providers}
@@ -699,7 +730,7 @@ by both `cubepi.tracing.recorder.Recorder.attach` and
 `cubepi.tracing.meter.Meter.attach` to dedupe the prelude that
 finds providers to subscribe to.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L960)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/base.py#L988)
 
 
 ### FauxProvider {#fauxprovider}
@@ -819,7 +850,7 @@ DEFAULT_TRIGGER_ERRORS: frozenset[type[ProviderError]] = frozenset({RateLimited,
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/fallback.py#L40)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/fallback.py#L36)
 
 
 ### FallbackBoundModel {#fallbackboundmodel}
@@ -847,7 +878,7 @@ chain (via chain_providers() below), so post-failover chat spans and
 provider metrics land in the trace / metric stream like primary-leg
 calls do.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/fallback.py#L45)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/fallback.py#L41)
 
 
 **Attributes**
@@ -867,7 +898,7 @@ calls do.
 stream(messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefinition] | None = None, tool_choice: ToolChoice | None = None, options: StreamOptions | None = None) -> MessageStream
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/fallback.py#L124)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/fallback.py#L120)
 
 
 #### `generate` {#fallbackboundmodel-generate}
@@ -876,7 +907,7 @@ stream(messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefi
 generate(messages: list[Message], *, system_prompt: str = '', tools: list[ToolDefinition] | None = None, tool_choice: ToolChoice | None = None, options: StreamOptions | None = None, max_output_tokens: int | None = None, temperature: float | None = None, thinking: ThinkingLevel | None = None, thinking_budgets: ThinkingBudgets | None = None) -> AssistantMessage
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/fallback.py#L200)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/fallback.py#L196)
 
 
 
@@ -885,7 +916,7 @@ generate(messages: list[Message], *, system_prompt: str = '', tools: list[ToolDe
 _attribute_
 
 ```python
-THINKING_LEVELS: list[ThinkingLevel] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+THINKING_LEVELS: list[ThinkingLevel] = ['off', 'low', 'medium', 'high', 'xhigh']
 ```
 
 
@@ -906,7 +937,7 @@ If *level* is already supported, return it unchanged.  Otherwise search
 upward first (higher intensity), then downward, through the ordered level
 list to find the closest available level.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/models.py#L54)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/models.py#L53)
 
 
 ### get_supported_thinking_levels {#get-supported-thinking-levels}
@@ -925,7 +956,7 @@ Return the thinking levels supported by *model*.
   `"xhigh"` is only included when it has an explicit (non-None) mapping.
   All other levels are included by default when the map omits them.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/models.py#L22)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/models.py#L21)
 
 
 ### models_are_equal {#models-are-equal}
@@ -941,7 +972,7 @@ Return `True` if *a* and *b* refer to the same model.
 Comparison is by `id` and `provider_id`.  Returns `False` when either
 argument is `None`.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/models.py#L87)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/models.py#L86)
 
 
 

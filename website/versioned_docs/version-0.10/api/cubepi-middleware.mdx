@@ -232,7 +232,7 @@ GoalMiddleware(self, evaluator: BoundModel, max_evaluations: int = 10)
 ```
 
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/goal.py#L72)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/goal.py#L73)
 
 
 **Methods**
@@ -243,7 +243,7 @@ GoalMiddleware(self, evaluator: BoundModel, max_evaluations: int = 10)
 extra_llm_calls() -> Iterable[BoundModel]
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/goal.py#L83)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/goal.py#L84)
 
 
 #### `transform_context` {#goalmiddleware-transform-context}
@@ -252,7 +252,7 @@ extra_llm_calls() -> Iterable[BoundModel]
 transform_context(messages: list[Message], *, ctx: AgentContext, signal: asyncio.Event | None = None) -> list[Message]
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/goal.py#L86)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/goal.py#L87)
 
 
 #### `on_run_end` {#goalmiddleware-on-run-end}
@@ -261,7 +261,7 @@ transform_context(messages: list[Message], *, ctx: AgentContext, signal: asyncio
 on_run_end(ctx: AgentContext, *, signal: asyncio.Event | None = None) -> list[Message] | None
 ```
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/goal.py#L121)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/goal.py#L122)
 
 
 
@@ -350,7 +350,7 @@ _class_
 
 A single todo item with content and status.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L131)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L132)
 
 
 **Attributes**
@@ -365,7 +365,7 @@ _class_
 
 A guard escalation payload carried across the forced end turn.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L148)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L149)
 
 
 **Attributes**
@@ -435,7 +435,7 @@ Hooks:
     * finalization hard guard → loop_to_model with correction message
     * otherwise → return None (natural flow)
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L465)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L466)
 
 
 **Attributes**
@@ -453,7 +453,7 @@ transform_system_prompt(system_prompt: str, *, ctx: AgentContext, signal: asynci
 
 Append the write_todos system instructions.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L507)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L508)
 
 
 #### `transform_context` {#todolistmiddleware-transform-context}
@@ -470,7 +470,7 @@ context to ensure the model always sees the current todo list.
 
 When no todos are set, messages are returned unchanged (no injection).
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L522)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L523)
 
 
 #### `after_tool_call` {#todolistmiddleware-after-tool-call}
@@ -489,7 +489,7 @@ in extra["_todos_snapshot"].  Each duplicate write_todos call's result is
 replaced with an error here, and extra["todos"] is restored to the snapshot
 so the turn leaves the checklist unchanged.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L556)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L557)
 
 
 #### `after_model_response` {#todolistmiddleware-after-model-response}
@@ -504,7 +504,7 @@ Inspects the latest assistant message, transitions the blocked /
 stale-iteration state stored in `extra`, and returns a
 `TurnAction` when the loop needs an injected nudge or hard stop.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L647)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L653)
 
 
 
@@ -514,7 +514,7 @@ _class_
 
 Input schema for the `write_todos` tool.
 
-[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L261)
+[source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/middleware/todo.py#L262)
 
 
 **Attributes**

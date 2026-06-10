@@ -160,14 +160,21 @@ async def after_model_response(
 
 ```python
 from cubepi.middleware.base import TurnAction
-from cubepi.providers.base import UserMessage, TextContent
+from cubepi.providers.base import synthetic_user_message
 
 TurnAction(
     response=modified_message,            # 替换消息；None 则保留原消息
-    inject_messages=[UserMessage(...)],   # 在下一轮之前追加的额外消息
+    inject_messages=[                     # 在下一轮之前追加的额外消息
+        synthetic_user_message("…", source="my_middleware"),
+    ],
     decision="natural",                   # "natural" | "stop" | "loop_to_model"
 )
 ```
+
+注入的 user 角色消息**必须**用 `synthetic_user_message(text, source=...)`
+构造，不要直接 `UserMessage(...)`。工厂会写入 `metadata["synthetic"] = True`，
+下游消费者（重放历史的 UI）就能把框架插入的提示和用户真正输入的区分开来；
+`source` 是个自由格式标签，只用于 trace。判断可用 `is_synthetic_message(msg)`。
 
 三个控制流旋钮：
 
@@ -194,12 +201,13 @@ async def on_run_end(
     ...
 ```
 
-**每次 `prompt()` 调用结束时触发一次**——所有轮次和工具调用完成后、
-`AgentEndEvent` 发出前。返回非空 `list[Message]` 会将这些消息注入上下文
-并运行**一轮额外的模型调用**（run-end pass）。返回 `None` 或 `[]` 不做任何操作。
+**每次外层循环迭代后触发**——所有轮次和工具调用完成、循环本应退出之前。
+返回非空 `list[Message]` 会将这些消息注入上下文并继续循环（agent 再跑一次）。
+返回 `None` 或 `[]` 什么也不做（循环退出）。和 `inject_messages` 一样，
+返回的 user 角色消息要用 `synthetic_user_message(...)` 构造，让它们带上
+synthetic 标记。
 
-额外轮次只触发一次——循环内的 `_reflection_fired` 标志阻止注入轮次再次触发
-`on_run_end`。
+每次 `prompt()` 内**可以多次触发**。中间件每次返回消息，worker 就再跑一轮。
 
 **何时触发：**
 - 正常完成（所有轮次结束后循环自然 break）。
