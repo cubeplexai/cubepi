@@ -51,7 +51,7 @@ from cubepi.types import JsonObject, StructuredValue
 TMessage = TypeVar("TMessage")
 
 if TYPE_CHECKING:
-    from cubepi.deferred.types import DeferredToolGroup
+    from cubepi.deferred.types import DeferredStrategy, DeferredToolGroup
     from cubepi.providers.fallback import FallbackBoundModel
 
 
@@ -191,6 +191,7 @@ class Agent(Generic[TMessage]):
         thread_id: str | None = None,
         middleware: list[Middleware] | None = None,
         deferred_tool_groups: list[DeferredToolGroup] | None = None,
+        deferred_tool_strategy: DeferredStrategy = "dispatch",
         channel: HitlChannel | None = None,
         messages: Sequence[Message] | None = None,
     ) -> None:
@@ -218,6 +219,7 @@ class Agent(Generic[TMessage]):
             deferred_mw = DeferredToolsMiddleware(
                 groups=deferred_tool_groups,
                 extra_ref=lambda: self._extra,
+                strategy=deferred_tool_strategy,
                 on_tools_expanded=lambda new: self._state._tools.extend(
                     t for t in new if t.name not in {e.name for e in self._state._tools}
                 ),
