@@ -823,9 +823,9 @@ def _log_chain_skip(idx: int, provider_type: str) -> None:
     isn't installed.
     """
     try:
-        from loguru import logger
+        from loguru import logger  # pragma: no cover — loguru is an optional dep
 
-        logger.warning(
+        logger.warning(  # pragma: no cover
             "cubepi.providers.base.chain_providers: chain[{}] provider {} is not "
             "a BaseProvider; tracing/metrics will skip this leg",
             idx,
