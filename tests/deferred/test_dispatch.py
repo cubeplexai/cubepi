@@ -227,3 +227,145 @@ class TestDispatchResume:
             [group], {"g": None}, strategy="dispatch"
         )
         assert [g.group_id for g in state.remaining_groups] == ["g"]
+
+
+class _CapturingFaux:
+    """FauxProvider subclass recording every request's (system_prompt, tools)."""
+
+    def __new__(cls, **kwargs):
+        from cubepi.providers.faux import FauxProvider
+
+        class _Capturing(FauxProvider):
+            def __init__(self, **kw):
+                super().__init__(**kw)
+                self.captured: list[tuple[str, list[dict] | None]] = []
+
+            async def stream(
+                self,
+                model,
+                messages,
+                *,
+                system_prompt="",
+                tools=None,
+                tool_choice=None,
+                options=None,
+            ):
+                self.captured.append(
+                    (
+                        system_prompt,
+                        [t.model_dump() for t in tools] if tools else None,
+                    )
+                )
+                return await super().stream(
+                    model,
+                    messages,
+                    system_prompt=system_prompt,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    options=options,
+                )
+
+        return _Capturing(**kwargs)
+
+
+class TestByteStability:
+    async def test_prefix_static_across_load_and_dispatch(self) -> None:
+        from cubepi.agent.agent import Agent
+        from cubepi.providers.faux import faux_assistant_message, faux_tool_call
+
+        provider = _CapturingFaux()
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    faux_tool_call("load_tools", {"group_id": "g"}, id="tc-1"),
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message(
+                    faux_tool_call(
+                        "deferred_tool_call",
+                        {"tool_name": "t1", "arguments": {"value": "hi"}},
+                        id="tc-2",
+                    ),
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("done"),
+            ]
+        )
+        agent = Agent(
+            model=provider.model("faux"),
+            system_prompt="base prompt",
+            deferred_tool_groups=[_make_group("g", ["t1", "t2"])],
+        )
+        await agent.prompt("go")
+
+        assert len(provider.captured) == 3
+        systems = {c[0] for c in provider.captured}
+        assert len(systems) == 1  # system prompt byte-identical every turn
+
+        tool_payloads = {
+            json.dumps(c[1], sort_keys=True) for c in provider.captured
+        }
+        assert len(tool_payloads) == 1  # tools param byte-identical every turn
+
+        # And the dispatched tool actually ran, keyed to the dispatcher's id
+        # but carrying the real tool's output.
+        result_texts = [
+            m.content[0].text
+            for m in agent._state.messages
+            if getattr(m, "tool_call_id", None) == "tc-2"
+        ]
+        assert result_texts == ["echo:hi"]
+
+
+class TestDispatchFork:
+    async def test_fork_dispatches_loaded_tool(self) -> None:
+        """Forks forward the resolver, so deferred_tool_call works on tools
+        the parent already loaded (regression guard: v1 forks could call
+        expanded tools natively)."""
+        from cubepi.agent.agent import Agent
+        from cubepi.checkpointer.memory import MemoryCheckpointer
+        from cubepi.providers.faux import (
+            FauxProvider,
+            faux_assistant_message,
+            faux_tool_call,
+        )
+
+        cp = MemoryCheckpointer()
+        provider = FauxProvider()
+        provider.set_responses(
+            [
+                # parent run R1: load the group, then finish
+                faux_assistant_message(
+                    faux_tool_call("load_tools", {"group_id": "g"}, id="tc-1"),
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("loaded"),
+                # fork probe: dispatch the loaded tool, then finish
+                faux_assistant_message(
+                    faux_tool_call(
+                        "deferred_tool_call",
+                        {"tool_name": "t1", "arguments": {"value": "fork"}},
+                        id="tc-2",
+                    ),
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("fork-done"),
+            ]
+        )
+        agent = Agent(
+            model=provider.model("faux"),
+            deferred_tool_groups=[_make_group("g", ["t1"])],
+            checkpointer=cp,
+            thread_id="src",
+        )
+        await agent.prompt("load it", run_id="R1")
+
+        result = await agent.fork_once("src", "use t1", after_run_id="R1")
+        assert result.text == "fork-done"
+        # The dispatched tool really executed inside the fork.
+        echo_results = [
+            m.content[0].text
+            for m in result.messages
+            if getattr(m, "tool_call_id", None) == "tc-2"
+        ]
+        assert echo_results == ["echo:fork"]
