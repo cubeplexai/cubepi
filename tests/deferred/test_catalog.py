@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from cubepi.deferred._catalog import render_catalog, render_expanded_schemas
+from cubepi.deferred._catalog import (
+    render_catalog,
+    render_expanded_schemas,
+    render_static_catalog,
+)
 from cubepi.deferred.types import DeferredToolGroup
 
 
@@ -161,3 +165,34 @@ class TestRenderExpandedSchemas:
         result_v1 = render_expanded_schemas(expanded_schemas=schemas_v1)
         result_v2 = render_expanded_schemas(expanded_schemas=schemas_v2)
         assert result_v2.startswith(result_v1)
+
+
+class TestStaticCatalog:
+    def test_lists_all_tools_sorted_by_group_id(self) -> None:
+        out = render_static_catalog(
+            groups=[
+                _make_group("b", "B", "b tools", ["t2"]),
+                _make_group("a", "A", "a tools", ["t1"]),
+            ],
+            header="HDR",
+        )
+        assert out.index("`a`") < out.index("`b`")
+        assert "t1" in out and "t2" in out
+
+    def test_no_remaining_counts(self) -> None:
+        out = render_static_catalog(
+            groups=[_make_group("a", "A", "a tools", ["t1", "t2"])], header="HDR"
+        )
+        assert "remaining" not in out
+
+    def test_deterministic(self) -> None:
+        groups = [
+            _make_group("a", "A", "a tools", ["t1"]),
+            _make_group("b", "B", "b tools", ["t2"]),
+        ]
+        assert render_static_catalog(groups=groups, header="HDR") == (
+            render_static_catalog(groups=list(reversed(groups)), header="HDR")
+        )
+
+    def test_no_groups_returns_empty(self) -> None:
+        assert render_static_catalog(groups=[], header="HDR") == ""

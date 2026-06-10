@@ -13,7 +13,37 @@ DEFAULT_CATALOG_HEADER = (
 )
 
 
+DEFAULT_DISPATCH_CATALOG_HEADER = (
+    "# Deferred tool groups\n"
+    "\n"
+    "These tool groups are available but not yet loaded. Call `load_tools(group_id)`\n"
+    "to get their full schemas, then invoke them via\n"
+    "`deferred_tool_call(tool_name=..., arguments=...)`.\n"
+    "If you already know the right arguments from the names below, you may call\n"
+    "`deferred_tool_call` directly — the tool loads on demand."
+)
+
+
 ToolSchema = dict[str, object]
+
+
+def render_static_catalog(
+    *,
+    groups: list[DeferredToolGroup],
+    header: str = DEFAULT_DISPATCH_CATALOG_HEADER,
+) -> str:
+    """Dispatch-mode catalog: byte-stable, independent of expansion state."""
+    lines: list[str] = []
+    for group in sorted(groups, key=lambda g: g.group_id):
+        count = len(group.tool_names)
+        lines.append(
+            f"- `{group.group_id}` — {group.display_name}: "
+            f"{group.description} ({count} tools)"
+        )
+        lines.append(f"  {', '.join(group.tool_names)}")
+    if not lines:
+        return ""
+    return header + "\n\n" + "\n".join(lines)
 
 
 def render_catalog(
