@@ -46,7 +46,6 @@ CubePi 把 `ThinkingLevel` 枚举映射到 Anthropic 的 `budget_tokens`:
 | Level | 默认 budget |
 |---|---|
 | `"off"` | 关闭思考 |
-| `"minimal"` | 1024 |
 | `"low"` | 2048 |
 | `"medium"` | 8192 |
 | `"high"` | 16384 |

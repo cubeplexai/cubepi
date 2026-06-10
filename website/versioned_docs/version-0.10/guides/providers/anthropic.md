@@ -49,7 +49,6 @@ CubePi maps a `ThinkingLevel` enum onto Anthropic's `budget_tokens`:
 | Level | Default budget |
 |---|---|
 | `"off"` | thinking disabled |
-| `"minimal"` | 1024 |
 | `"low"` | 2048 |
 | `"medium"` | 8192 |
 | `"high"` | 16384 |
@@ -78,7 +77,7 @@ provider = AnthropicProvider(
         reasoning_level=ReasoningLevelSpec(
             path="thinking.budget_tokens",
             kind="int_budget",
-            level_budgets={"off": 0, "minimal": 1024, "low": 4096,
+            level_budgets={"off": 0, "low": 4096,
                            "medium": 12288, "high": 16384, "xhigh": 16384},
         ),
     ),

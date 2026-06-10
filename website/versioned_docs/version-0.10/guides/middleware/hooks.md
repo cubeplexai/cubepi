@@ -170,14 +170,23 @@ hook returns a `TurnAction`:
 
 ```python
 from cubepi.middleware.base import TurnAction
-from cubepi.providers.base import UserMessage, TextContent
+from cubepi.providers.base import synthetic_user_message
 
 TurnAction(
     response=modified_message,            # replace the message; None to keep
-    inject_messages=[UserMessage(...)],   # extra messages to append before next turn
+    inject_messages=[                     # extra messages to append before next turn
+        synthetic_user_message("…", source="my_middleware"),
+    ],
     decision="natural",                   # "natural" | "stop" | "loop_to_model"
 )
 ```
+
+Injected user-role messages **must** be built with
+`synthetic_user_message(text, source=...)`, never with a bare
+`UserMessage`. The factory stamps `metadata["synthetic"] = True` so
+downstream consumers (UIs replaying history) can tell framework nudges
+apart from messages the human actually typed; `source` is a free-form
+tag for traces only. Check with `is_synthetic_message(msg)`.
 
 Three control-flow knobs:
 
@@ -211,7 +220,9 @@ Fires **after each outer-loop iteration** — i.e. after all turns and
 tool calls complete before the loop would normally exit. Return a
 non-empty `list[Message]` to inject those messages into context and
 continue the loop (the agent runs again). Return `None` or `[]` to do
-nothing (the loop exits).
+nothing (the loop exits). As with `inject_messages`, build returned
+user-role messages with `synthetic_user_message(...)` so they carry
+the synthetic marker.
 
 This hook can fire **multiple times** per `prompt()` call. Each time
 the middleware returns messages, the worker gets another run. Return

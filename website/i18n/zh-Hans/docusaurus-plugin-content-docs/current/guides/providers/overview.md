@@ -72,7 +72,7 @@ provider = OpenAIProvider(
 
 - `reasoning_on_payload / reasoning_off_payload` — 在 reasoning 开/关时，深度
   合并到最终 payload。
-- `reasoning_level`（`ReasoningLevelSpec`）— 将 `off`/`minimal`/... 映射到后端字段。
+- `reasoning_level`（`ReasoningLevelSpec`）— 将 `off`/`low`/... 映射到后端字段。
 - `temperature`（`TemperatureSpec`）— 裁剪、固定或去掉温度参数。
 - `max_tokens_field` — 选 `max_tokens` 或 `max_completion_tokens`。
 - `supports_tools` / `supports_images` / `supports_streaming` — 供宿主应用或前端消费的能力元数据。
@@ -161,12 +161,12 @@ CapabilityDescriptor(
 
 ### 推理级别：`reasoning_level`（三种形状）
 
-在开/关之外，CubePi 将 `ThinkingLevel`（`off`/`minimal`/`low`/`medium`/`high`/`xhigh`）映射到通过点路径 `path` 写入的具体 wire 值。`kind` 决定形状：
+在开/关之外，CubePi 将 `ThinkingLevel`（`off`/`low`/`medium`/`high`/`xhigh`）映射到通过点路径 `path` 写入的具体 wire 值。`kind` 决定形状：
 
-`ReasoningLevelSpec` 只负责「`thinking`/`minimal`/`low`/... 具体映射成后端字段」；要真正生效，还要配两个参数：
+`ReasoningLevelSpec` 只负责「`thinking`/`low`/... 具体映射成后端字段」；要真正生效，还要配两个参数：
 
 - 在 `provider.model(...)` 时把 `reasoning=True`（把这个模型设为推理模型）
-- 在 `Agent(...)` 初始化时把 `thinking` 设成 `off|minimal|low|medium|high|xhigh`（默认 `off`）
+- 在 `Agent(...)` 初始化时把 `thinking` 设成 `off|low|medium|high|xhigh`（默认 `off`）
 
 ```python
 from cubepi import Agent, CapabilityDescriptor, ReasoningLevelSpec
@@ -181,7 +181,6 @@ provider = OpenAIProvider(
             kind="effort",
             level_to_effort={
                 "off": "low",
-                "minimal": "low",
                 "low": "low",
                 "medium": "medium",
                 "high": "high",
@@ -200,15 +199,15 @@ from cubepi import ReasoningLevelSpec
 # int_budget — a token budget (Anthropic).
 ReasoningLevelSpec(
     path="thinking.budget_tokens", kind="int_budget",
-    level_budgets={"off": 0, "minimal": 1024, "low": 2048,
+    level_budgets={"off": 0, "low": 2048,
                    "medium": 8192, "high": 16384, "xhigh": 16384},
 )
 
 # effort — an effort string (OpenAI Responses).
 ReasoningLevelSpec(
     path="reasoning.effort", kind="effort",
-    level_to_effort={"minimal": "minimal", "low": "low",
-                     "medium": "medium", "high": "high", "xhigh": "high"},
+    level_to_effort={"low": "low", "medium": "medium",
+                     "high": "high", "xhigh": "high"},
 )
 
 # enum — a vendor-specific state (Doubao's 3-state thinking).

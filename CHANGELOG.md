@@ -9,7 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.0] - 2026-06-10
 
+### Removed (BREAKING)
+
+- **`"minimal"` removed from `ThinkingLevel`.** `ThinkingLevel` now reads
+  `Literal["off", "low", "medium", "high", "xhigh"]`; the `.minimal` field
+  is gone from `ThinkingBudgets`; `THINKING_LEVELS` no longer contains it;
+  Anthropic's default `level_budgets` and OpenAI Responses' `_THINKING_TO_EFFORT`
+  no longer map it. **Callers that previously passed `thinking="minimal"`
+  must switch to `thinking="low"` (or `"off"`).** Rationale: DeepSeek's
+  Anthropic-shape endpoint rejects `effort=minimal` on `output_config`,
+  and OpenAI's `reasoning.effort` path rewrote it to `"low"` downstream
+  anyway — keeping it was a footgun that surfaced as a 400 + fallback.
+
 ### Added
+
+- **`synthetic_user_message(text, *, source) -> UserMessage`** and
+  **`is_synthetic_message(message) -> bool`** — public marker for
+  framework-injected user-role messages. Middleware-injected nudges
+  (todo guard errors, goal continuations, compaction summaries,
+  `generate_structured` retry feedback) now stamp
+  `metadata["synthetic"] = True` so downstream UIs can tell internal
+  scaffolding apart from real human input. Real `Agent.prompt()` /
+  `Agent.steer()` messages remain unmarked. Closes #171. Exported from
+  `cubepi` and `cubepi.providers`. Use this factory (not bare
+  `UserMessage`) when returning messages from `TurnAction.inject_messages`
+  or `on_run_end`.
 
 - **`DeferredToolGroup` / `DeferredToolsMiddleware`** — progressive tool
   disclosure primitive. Hides MCP tool schemas from the model by default,

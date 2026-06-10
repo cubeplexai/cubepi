@@ -107,7 +107,7 @@ provider = OpenAIProvider(
 
 - `reasoning_on_payload / reasoning_off_payload` — payload merged when
   reasoning is on/off.
-- `reasoning_level` (`ReasoningLevelSpec`) — map `off`/`minimal`/... to backend
+- `reasoning_level` (`ReasoningLevelSpec`) — map `off`/`low`/... to backend
   payload paths.
 - `temperature` (`TemperatureSpec`) — clip, force, or strip temperature.
 - `max_tokens_field` — pick `max_tokens` or `max_completion_tokens`.
@@ -225,14 +225,14 @@ the capability value wins.
 ### Reasoning level: `reasoning_level` (three shapes)
 
 Beyond on/off, CubePi maps a `ThinkingLevel`
-(`off`/`minimal`/`low`/`medium`/`high`/`xhigh`) onto a concrete wire value
+(`off`/`low`/`medium`/`high`/`xhigh`) onto a concrete wire value
 written at a dotted `path`. `kind` picks the shape:
 
 `ReasoningLevelSpec` only changes how that level is serialized. You still need
 two call-site controls:
 
 - set `reasoning=True` when binding the model (enable reasoning for that model)
-- set the Agent's `thinking` argument to one of `off|minimal|low|medium|high|xhigh`
+- set the Agent's `thinking` argument to one of `off|low|medium|high|xhigh`
   (defaults to `off`).
 
 ```python
@@ -249,7 +249,6 @@ provider = OpenAIProvider(
             kind="effort",
             level_to_effort={
                 "off": "low",
-                "minimal": "low",
                 "low": "low",
                 "medium": "medium",
                 "high": "high",
@@ -268,15 +267,15 @@ from cubepi import ReasoningLevelSpec
 # int_budget — a token budget (Anthropic).
 ReasoningLevelSpec(
     path="thinking.budget_tokens", kind="int_budget",
-    level_budgets={"off": 0, "minimal": 1024, "low": 2048,
+    level_budgets={"off": 0, "low": 2048,
                    "medium": 8192, "high": 16384, "xhigh": 16384},
 )
 
 # effort — an effort string (OpenAI Responses).
 ReasoningLevelSpec(
     path="reasoning.effort", kind="effort",
-    level_to_effort={"minimal": "minimal", "low": "low",
-                     "medium": "medium", "high": "high", "xhigh": "high"},
+    level_to_effort={"low": "low", "medium": "medium",
+                     "high": "high", "xhigh": "high"},
 )
 
 # enum — a vendor-specific state (Doubao's 3-state thinking).
