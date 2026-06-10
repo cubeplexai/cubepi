@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+
 from pydantic import BaseModel
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
+from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult
+from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
+from cubepi.providers.base import TextContent, ToolCall
 
 
 class _Empty(BaseModel):
@@ -35,13 +38,6 @@ class TestExposeToModel:
         tools = [_dummy_tool("visible"), _dummy_tool("hidden", expose=False)]
         visible = [t.to_definition() for t in tools if t.expose_to_model]
         assert [d.name for d in visible] == ["visible"]
-
-
-import json
-
-from cubepi.agent.types import AgentContext
-from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
-from cubepi.providers.base import ToolCall
 
 
 class _EchoArgs(BaseModel):
@@ -302,9 +298,7 @@ class TestByteStability:
         systems = {c[0] for c in provider.captured}
         assert len(systems) == 1  # system prompt byte-identical every turn
 
-        tool_payloads = {
-            json.dumps(c[1], sort_keys=True) for c in provider.captured
-        }
+        tool_payloads = {json.dumps(c[1], sort_keys=True) for c in provider.captured}
         assert len(tool_payloads) == 1  # tools param byte-identical every turn
 
         # And the dispatched tool actually ran, keyed to the dispatcher's id

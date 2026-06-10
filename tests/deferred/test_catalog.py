@@ -117,7 +117,6 @@ class TestRenderCatalog:
         assert "Custom header text" in result
 
 
-
 class TestStaticCatalog:
     def test_lists_all_tools_sorted_by_group_id(self) -> None:
         out = render_static_catalog(
