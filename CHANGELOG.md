@@ -86,7 +86,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed. Existing middlewares that return `None` after one injection are
   unaffected. This enables evaluation loops like `GoalMiddleware`.
 
+### Changed
+
+- **Internal logging now uses stdlib `logging` exclusively.** Previously
+  `FallbackBoundModel` and the provider listener-exception path tried to
+  import `loguru` first and fell back to stdlib. The loguru path was
+  silently incorrect — loguru does not perform `%s` argument substitution,
+  so failover warnings rendered literal `%s` placeholders instead of the
+  resolved labels. cubepi has never declared loguru as a dependency; hosts
+  that prefer loguru should intercept stdlib logging records into it. No
+  public API change.
+
 ### Fixed
+
+- **`FallbackBoundModel` failover log line now substitutes its placeholders.**
+  Before the loguru removal above, the WARNING emitted on every failover
+  read `failed=%s  →  next=%s  reason=%s  attempt=%s/%s` literally because
+  the loguru-backed logger ignored the positional args. Now renders as
+  `failed=anthropic/claude-opus-4-5  →  next=openai/gpt-5  reason=…  attempt=1/2`.
 
 - **`Recorder.attach()` and `Meter.attach()` now subscribe to every provider in
   a `FallbackBoundModel` chain** (closes #167). Previously they only listened

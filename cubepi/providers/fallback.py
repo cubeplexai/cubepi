@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -29,12 +30,7 @@ from cubepi.providers.base import (
     chain_providers,  # re-exported for back-compat; canonical home is base.py
 )
 
-try:
-    from loguru import logger as _log
-except ImportError:  # pragma: no cover
-    import logging as _logging
-
-    _log = _logging.getLogger("cubepi.providers.fallback")
+_log = logging.getLogger("cubepi.providers.fallback")
 
 
 DEFAULT_TRIGGER_ERRORS: frozenset[type[ProviderError]] = frozenset(
