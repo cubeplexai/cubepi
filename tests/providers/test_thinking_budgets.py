@@ -4,14 +4,13 @@ from cubepi.providers.base import ThinkingBudgets, adjust_max_tokens_for_thinkin
 class TestThinkingBudgets:
     def test_defaults(self):
         b = ThinkingBudgets()
-        assert b.minimal == 1024
         assert b.low == 2048
         assert b.medium == 8192
         assert b.high == 16384
 
     def test_custom_values(self):
-        b = ThinkingBudgets(minimal=512, low=1024, medium=4096, high=8192)
-        assert b.minimal == 512
+        b = ThinkingBudgets(low=1024, medium=4096, high=8192)
+        assert b.low == 1024
         assert b.high == 8192
 
 
@@ -24,15 +23,6 @@ class TestAdjustMaxTokensForThinking:
         )
         assert max_tokens == 8192
         assert budget == 0
-
-    def test_minimal_adds_1024(self):
-        max_tokens, budget = adjust_max_tokens_for_thinking(
-            base_max_tokens=8192,
-            model_max_tokens=128_000,
-            reasoning_level="minimal",
-        )
-        assert budget == 1024
-        assert max_tokens == 8192 + 1024
 
     def test_low_adds_2048(self):
         max_tokens, budget = adjust_max_tokens_for_thinking(
@@ -105,7 +95,7 @@ class TestAdjustMaxTokensForThinking:
         assert budget == 0
 
     def test_custom_budgets_override_defaults(self):
-        custom = ThinkingBudgets(minimal=256, low=512, medium=2048, high=4096)
+        custom = ThinkingBudgets(low=512, medium=2048, high=4096)
         max_tokens, budget = adjust_max_tokens_for_thinking(
             base_max_tokens=8192,
             model_max_tokens=128_000,
@@ -128,26 +118,27 @@ class TestAdjustMaxTokensForThinking:
 
     def test_exact_model_cap_equals_budget(self):
         # Edge case: model cap exactly equals the budget
-        # max_tokens = min(8192 + 1024, 1024) = 1024
-        # 1024 <= 1024 so budget = max(0, 1024 - 1024) = 0
+        # max_tokens = min(8192 + 2048, 2048) = 2048
+        # 2048 - 2048 = 0 < min_output_tokens(1024), budget = max(0, 2048 - 1024) = 1024
         max_tokens, budget = adjust_max_tokens_for_thinking(
             base_max_tokens=8192,
-            model_max_tokens=1024,
-            reasoning_level="minimal",
+            model_max_tokens=2048,
+            reasoning_level="low",
         )
-        assert max_tokens == 1024
-        assert budget == 0
+        assert max_tokens == 2048
+        assert budget == 1024
 
     def test_model_cap_just_above_budget(self):
-        # max_tokens = min(8192 + 1024, 1025) = 1025
-        # 1025 - 1024 = 1 < min_output_tokens(1024), so budget reduced
+        # base=8192, model=2049, low budget=2048
+        # max_tokens = min(8192 + 2048, 2049) = 2049
+        # 2049 - 2048 = 1 < min_output_tokens(1024), budget = max(0, 2049 - 1024) = 1025
         max_tokens, budget = adjust_max_tokens_for_thinking(
             base_max_tokens=8192,
-            model_max_tokens=1025,
-            reasoning_level="minimal",
+            model_max_tokens=2049,
+            reasoning_level="low",
         )
-        assert max_tokens == 1025
-        assert budget == 1  # max(0, 1025 - 1024)
+        assert max_tokens == 2049
+        assert budget == 1025
 
     def test_output_tokens_minimum_guaranteed(self):
         # Bug case: base=8192, model=9000, medium budget=8192

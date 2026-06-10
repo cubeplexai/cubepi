@@ -21,7 +21,7 @@ from cubepi.types import JsonObject, StructuredValue
 
 BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
 
-ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
+ThinkingLevel = Literal["off", "low", "medium", "high", "xhigh"]
 
 ToolChoice = Literal["auto", "required", "none"] | str
 
@@ -29,7 +29,6 @@ ToolChoice = Literal["auto", "required", "none"] | str
 class ThinkingBudgets(BaseModel):
     """Token budgets for each thinking level."""
 
-    minimal: int = 1024
     low: int = 2048
     medium: int = 8192
     high: int = 16384

@@ -11,7 +11,6 @@ from cubepi.providers.base import Model, ThinkingLevel
 # Ordered list of all thinking levels from lowest to highest.
 THINKING_LEVELS: list[ThinkingLevel] = [
     "off",
-    "minimal",
     "low",
     "medium",
     "high",

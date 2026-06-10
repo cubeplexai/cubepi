@@ -44,7 +44,6 @@ class TestGetSupportedThinkingLevels:
         model = _model(reasoning=True)
         assert get_supported_thinking_levels(model) == [
             "off",
-            "minimal",
             "low",
             "medium",
             "high",
@@ -58,7 +57,7 @@ class TestGetSupportedThinkingLevels:
         levels = get_supported_thinking_levels(model)
         assert "xhigh" in levels
         # All standard levels should still be present
-        for lvl in ("off", "minimal", "low", "medium", "high"):
+        for lvl in ("off", "low", "medium", "high"):
             assert lvl in levels
 
     def test_xhigh_mapped_to_none_is_excluded(self):
@@ -71,10 +70,9 @@ class TestGetSupportedThinkingLevels:
     def test_level_mapped_to_none_is_excluded(self):
         model = _model(
             reasoning=True,
-            thinking_level_map={"minimal": None, "low": None},
+            thinking_level_map={"low": None},
         )
         levels = get_supported_thinking_levels(model)
-        assert "minimal" not in levels
         assert "low" not in levels
         # Others remain
         assert "off" in levels
@@ -84,13 +82,12 @@ class TestGetSupportedThinkingLevels:
     def test_empty_map_same_as_no_map(self):
         model = _model(reasoning=True, thinking_level_map={})
         levels = get_supported_thinking_levels(model)
-        assert levels == ["off", "minimal", "low", "medium", "high"]
+        assert levels == ["off", "low", "medium", "high"]
 
     def test_all_levels_disabled_except_off(self):
         model = _model(
             reasoning=True,
             thinking_level_map={
-                "minimal": None,
                 "low": None,
                 "medium": None,
                 "high": None,
@@ -126,10 +123,10 @@ class TestClampThinkingLevel:
         """When a level is disabled, search downward first (prefer cheaper)."""
         model = _model(
             reasoning=True,
-            thinking_level_map={"low": None},
+            thinking_level_map={"medium": None},
         )
-        # "low" disabled -> next down is "minimal"
-        assert clamp_thinking_level(model, "low") == "minimal"
+        # "medium" disabled -> next down is "low"
+        assert clamp_thinking_level(model, "medium") == "low"
 
     def test_clamp_down_when_nothing_above(self):
         """When all higher levels are disabled, clamp down."""
@@ -150,7 +147,6 @@ class TestClampThinkingLevel:
         model = _model(
             reasoning=True,
             thinking_level_map={
-                "minimal": None,
                 "low": None,
                 "medium": None,
                 "high": None,
@@ -209,7 +205,6 @@ class TestThinkingLevelsOrdering:
     def test_correct_order(self):
         assert THINKING_LEVELS == [
             "off",
-            "minimal",
             "low",
             "medium",
             "high",
@@ -217,5 +212,5 @@ class TestThinkingLevelsOrdering:
         ]
 
     def test_all_levels_present(self):
-        expected = {"off", "minimal", "low", "medium", "high", "xhigh"}
+        expected = {"off", "low", "medium", "high", "xhigh"}
         assert set(THINKING_LEVELS) == expected

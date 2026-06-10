@@ -49,7 +49,7 @@ CacheRetention = Literal["short", "long", "none"]
 #  - reasoning_on_payload writes {"thinking": {"type": "enabled"}}, then
 #    reasoning_level adds budget_tokens at thinking.budget_tokens.
 #  - level_budgets mirrors cubepi.providers.base.ThinkingBudgets defaults
-#    (minimal=1024, low=2048, medium=8192, high=16384). xhigh clamps to high
+#    (low=2048, medium=8192, high=16384). xhigh clamps to high
 #    to match adjust_max_tokens_for_thinking's "xhigh -> high" mapping.
 #    "off" is included for completeness but reasoning_level is never written
 #    on the off-branch.
@@ -65,7 +65,6 @@ _ANTHROPIC_DEFAULT_CAPABILITY = CapabilityDescriptor(
         kind="int_budget",
         level_budgets={
             "off": 0,
-            "minimal": 1024,
             "low": 2048,
             "medium": 8192,
             "high": 16384,

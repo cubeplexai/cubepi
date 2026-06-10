@@ -38,10 +38,8 @@ from cubepi.providers.capability import (
 
 # Map cubepi ThinkingLevel to OpenAI reasoning.effort values.
 # "off" means no reasoning parameter is sent.
-# "minimal" is not a valid OpenAI effort level, so we map it to "low".
 _THINKING_TO_EFFORT: dict[ThinkingLevel, str | None] = {
     "off": None,
-    "minimal": "low",
     "low": "low",
     "medium": "medium",
     "high": "high",
