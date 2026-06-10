@@ -29,6 +29,11 @@ class LoadToolsOutput(BaseModel):
     tool_names: list[str]
     remaining: int
     error: str | None = None
+    # Dispatch mode only: full schemas, delivered in the tool result so they
+    # live in message history (append-only, cache-safe). The calling
+    # convention lives once in the static catalog header and the dispatcher
+    # description — not repeated per result.
+    schemas: list[dict[str, object]] | None = None
 
 
 LoadCallback = Callable[

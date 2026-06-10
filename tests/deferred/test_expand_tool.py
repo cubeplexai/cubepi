@@ -118,3 +118,15 @@ async def _noop_callback(
     group_id: str, tool_names: list[str] | None
 ) -> LoadToolsOutput:
     return LoadToolsOutput(group_id=group_id, expanded=True, tool_names=[], remaining=0)
+
+
+def test_load_tools_output_carries_schemas() -> None:
+    out = LoadToolsOutput(
+        group_id="g",
+        expanded=True,
+        tool_names=["t"],
+        remaining=0,
+        schemas=[{"name": "t", "description": "d", "parameters": {}}],
+    )
+    dumped = out.model_dump()
+    assert dumped["schemas"][0]["name"] == "t"
