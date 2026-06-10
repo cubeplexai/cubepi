@@ -212,6 +212,44 @@ async def submit_final_answer(tool_call_id, params, *, signal=None, on_update=No
 CubePi 仅在当前批次中 *每个* 工具结果都是 `terminate=True` 时才终止。
 然后循环发 `turn_end`、`agent_end`,退出。
 
+## 工具很多？把 schema 延迟加载
+
+工具集变大——通常是因为你接了好几个 MCP server——所有 JSON schema
+合起来每一轮都会吃掉几千 token 的 system prompt，即使模型这一回合只
+需要其中一两组。这些 schema 还是 prompt cache 的雷区：任何 tool 改动
+都会让之后每一轮的 cache 失效。
+
+`DeferredToolGroup` 的解法是用一份紧凑的目录替代完整 schema。模型看到
+每个组一行描述，需要时通过内置的 `load_tools` 工具按需展开——loader
+跑一次，工具被注入到运行中的 tool 集，schema 追加到 system prompt 末尾
+（append-only，保持 cache 稳定）。
+
+```python
+from cubepi import Agent
+from cubepi.deferred import DeferredToolGroup
+
+github_group = DeferredToolGroup(
+    group_id="mcp:github",
+    display_name="GitHub",
+    description="Issues, PRs, repos, code search",
+    tool_names=["create_issue", "search_repos", "create_pr"],
+    loader=github_mcp.load_tools,
+)
+
+agent = Agent(
+    model=provider.model("claude-sonnet-4-6"),
+    tools=[search_tool, calculator],     # 始终可用
+    deferred_tool_groups=[github_group], # 按需展开
+)
+```
+
+适合 ≥ 5 个工具组、但每次对话通常只用一两组的场景，或者 schema 大到
+足以明显撑大每一轮 system prompt 的情况。每一轮都要全部 tool 的话就
+别用，延迟反而多一次往返。
+
+完整 API、跨 run 恢复以及高级中间件构造器见
+[延迟工具组](../middleware/deferred-tools)。
+
 ## 常见坑
 
 - **忘了 keyword-only 参数** —— 开发时 `execute(tool_call_id, params)`
@@ -236,6 +274,3 @@ CubePi 仅在当前批次中 *每个* 工具结果都是 `terminate=True` 时才
   HTTP 请求的工具,端到端。
 - [MCP 加载](../mcp/loading) —— 一次性把一个 MCP server 的整套工具
   拉下来。
-- [延迟工具组](../middleware/deferred-tools) —— 当多个 MCP server 加起来
-  有几十上百个工具时，可以把 schema 藏在目录后面，让模型通过内置的
-  `load_tools` 工具按需展开。

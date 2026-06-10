@@ -227,6 +227,48 @@ CubePi only terminates if *every* tool result in the current batch is
 `terminate=True`. The agent loop emits `turn_end`, then `agent_end`,
 and exits.
 
+## Many tools? Defer their schemas
+
+When the toolbelt grows — usually because you've wired up several MCP
+servers — the combined JSON schemas can consume thousands of tokens of
+system prompt on every turn, even though the model only needs one or
+two groups for the current task. The schemas are also a prompt-cache
+landmine: any tool change anywhere invalidates the cache for every
+turn that follows.
+
+`DeferredToolGroup` solves this by replacing the full schemas with a
+compact catalog. The model sees a one-line description per group and
+expands a group on demand via the built-in `load_tools` tool — the
+loader runs once, the tools are injected into the live tool set, and
+their schemas are appended (append-only, for cache stability).
+
+```python
+from cubepi import Agent
+from cubepi.deferred import DeferredToolGroup
+
+github_group = DeferredToolGroup(
+    group_id="mcp:github",
+    display_name="GitHub",
+    description="Issues, PRs, repos, code search",
+    tool_names=["create_issue", "search_repos", "create_pr"],
+    loader=github_mcp.load_tools,
+)
+
+agent = Agent(
+    model=provider.model("claude-sonnet-4-6"),
+    tools=[search_tool, calculator],     # always-available
+    deferred_tool_groups=[github_group], # expanded on demand
+)
+```
+
+Good fit when you have ≥5 tool groups but typically only use one or
+two per conversation, or when schemas are large enough to noticeably
+inflate every system prompt. Skip it when all the tools are needed on
+every turn — deferring just adds a round trip.
+
+See [Deferred Tool Groups](../middleware/deferred-tools) for the full
+API, cross-run replay, and the advanced middleware constructor.
+
 ## Common pitfalls
 
 - **Forgetting the keyword-only args** — `execute(tool_call_id,
@@ -255,7 +297,3 @@ and exits.
   HTTP-calling tool, end-to-end.
 - [MCP Loading](../mcp/loading) — pull an entire toolset off an MCP
   server in one call.
-- [Deferred Tool Groups](../middleware/deferred-tools) — when the
-  combined tool list across several MCP servers is dozens or hundreds
-  of tools, hide the schemas behind a catalog and let the model expand
-  groups on demand via the built-in `load_tools` tool.
