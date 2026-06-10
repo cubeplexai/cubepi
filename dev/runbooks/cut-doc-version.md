@@ -225,6 +225,41 @@ After the snapshot, open the new `version-X.Y.json` and update:
 Once this version is later demoted (at X+1.Y), change the message to just
 `"X.Y"` (drop "（最新）") to match the EN config pattern.
 
+### 11. Add the `[X.Y.0]` CHANGELOG reference-link and bump `[Unreleased]`
+
+`CHANGELOG.md` follows Keep a Changelog with reference-style links — the
+`## [X.Y.0] - YYYY-MM-DD` heading only renders as a link to the compare
+view when there is a matching `[X.Y.0]: https://...compare/v(X.Y-1).0...vX.Y.0`
+entry in the link block at the bottom of the file. The `[Unreleased]`
+entry must also be re-pointed each release.
+
+The 0.9 and 0.10 cuts both shipped with `## [X.Y.0]` rendering as plain
+text because the link block wasn't bumped. The `/changelog` docs page
+and the GitHub blob view both make the broken reference visually
+obvious — readers expect the prior-version pattern.
+
+When promoting `[Unreleased]` → `[X.Y.0] - YYYY-MM-DD`, also patch the
+link block at the bottom of `CHANGELOG.md`:
+
+```diff
+-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v(X.Y-1).0...HEAD
++[Unreleased]: https://github.com/cubeplexai/cubepi/compare/vX.Y.0...HEAD
++[X.Y.0]: https://github.com/cubeplexai/cubepi/compare/v(X.Y-1).0...vX.Y.0
+ [(X.Y-1).0]: https://github.com/cubeplexai/cubepi/compare/v(X.Y-2).0...v(X.Y-1).0
+```
+
+Verify before commit — every `## [N.M.0]` heading must have a matching
+`[N.M.0]:` reference. Use a subset check, not a strict equality diff,
+because reference IDs are also reused inline (e.g. `**[0.4.0]**` in the
+"Earlier releases" prose):
+
+```bash
+# Lists any version heading missing a reference target. Empty output = clean.
+comm -23 \
+  <(grep -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | tr -d '# ' | sort -u) \
+  <(grep -oE '^\[[0-9]+\.[0-9]+\.[0-9]+\]'    CHANGELOG.md | sort -u)
+```
+
 ## Post-cut verification
 
 After committing the cut, before opening the PR / tagging:
@@ -234,6 +269,12 @@ cd website
 pnpm apiref               # regenerate (idempotent)
 pnpm build                # must pass with no broken-link errors
 pnpm test                 # vitest suite covers the version-aware nav
+cd ..
+# CHANGELOG link sanity (see gotcha #11). Empty output = every
+# "## [N.M.0]" heading has a matching reference target.
+comm -23 \
+  <(grep -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | tr -d '# ' | sort -u) \
+  <(grep -oE '^\[[0-9]+\.[0-9]+\.[0-9]+\]'    CHANGELOG.md | sort -u)
 ```
 
 Then in the rendered site (`pnpm start` or the preview deploy):
