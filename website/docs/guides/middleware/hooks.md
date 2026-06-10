@@ -1,11 +1,11 @@
 ---
-title: The 8 Hooks
-description: "Reference for the 8 middleware hooks in CubePi — transform_context, convert_to_llm, before_tool_call, after_tool_call, on_run_end, and more."
+title: The 9 Hooks
+description: "Reference for the 9 middleware hooks in CubePi — transform_context, convert_to_llm, resolve_tool_call, before_tool_call, after_tool_call, on_run_end, and more."
 ---
 
-# The 8 Hooks
+# The 9 Hooks
 
-`Middleware` is a class with up to eight optional async methods. Each
+`Middleware` is a class with up to nine optional async methods. Each
 hook fires at a precise point in the agent loop. Implement only the
 ones you need — CubePi only wires in the ones you override.
 
@@ -89,6 +89,30 @@ Fires **before each model call**, on the system prompt string. Use to:
 - A/B test prompt variants.
 
 Composition: chained.
+
+## `resolve_tool_call`
+
+```python
+async def resolve_tool_call(self, tool_call: ToolCall, *, context: AgentContext, signal=None) -> ToolCall | None:
+    ...
+```
+
+Fires **per tool call, before everything else** — argument validation,
+`before_tool_call`, execution, events, and tracing all operate on
+whatever this hook returns. Return a rewritten `ToolCall` to redirect
+the call, or `None` to pass through unchanged.
+
+The returned `ToolCall` **must keep the original `id`** — the tool
+result message is keyed by it on the wire.
+
+Use for: dispatcher unwrapping (this is how
+[deferred tool groups](./deferred-tools) route `deferred_tool_call` to
+the real tool), tool aliasing, version redirection.
+
+Composition: **first non-`None` wins** — the first middleware to return
+a rewritten call short-circuits the chain. This differs from
+`before_tool_call`, which chains sequentially; a resolver never sees
+another resolver's output.
 
 ## `before_tool_call`
 

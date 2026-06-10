@@ -1,6 +1,6 @@
 ---
 title: Deferred Tool Groups
-description: "Hide MCP tool schemas from the model by default, expanding them on demand to reduce context bloat."
+description: "Hide MCP tool schemas from the model by default, expanding them on demand — without invalidating the prompt cache."
 ---
 
 # Deferred Tool Groups
@@ -9,28 +9,71 @@ When an agent connects to many MCP servers, their combined tool schemas
 can consume thousands of tokens of context on every turn — even if the
 model only needs one or two groups for the current task.
 `DeferredToolGroup` solves this by replacing full schemas with a compact
-catalog, letting the model expand groups on demand.
+catalog, letting the model load groups on demand.
 
-## How it works
+## Two strategies
 
-1. At construction time, the agent's system prompt includes a short
-   catalog — one line per group with a description and tool list.
-2. The model sees a built-in `load_tools` tool it can call to load a
-   group (or specific tools within a group).
-3. On expansion, the loader runs once, the tools are injected into the
-   live tool set, and their schemas are appended to the system prompt.
+Deferred tools support two strategies, chosen with
+`deferred_tool_strategy` (default: `"dispatch"`):
+
+| | `tools` param | system prompt | cache cost per expansion | calling path |
+|---|---|---|---|---|
+| **`dispatch`** (default) | static | static | **zero** — schemas are message-suffix appends | `deferred_tool_call` dispatcher, engine-unwrapped |
+| **`inject`** | grows per expansion | catalog counts change | full re-read of system + history | native tool calls |
+
+**Why dispatch is the default.** Tool definitions render at the very
+front of the prompt on every prefix-cached provider. Injecting a tool
+mid-conversation inserts bytes *before* the entire history, so each
+expansion re-reads the whole conversation at uncached rates. Dispatch
+mode never touches the tools array or the system prompt after the first
+request — schemas travel in `load_tools` tool results, which append to
+the end of the message history and cache incrementally like any other
+turn.
+
+**When to pick `inject`.** Native tool calls get provider-side schema
+validation and the calling ergonomics models are trained on. If your
+tool arguments are complex and your conversations are short (so the
+per-expansion cache cost is small), `inject` trades cache efficiency for
+calling reliability.
+
+## How dispatch mode works
+
+1. The system prompt carries a short, **static** catalog — one line per
+   group with a description and tool names. It never changes.
+2. The model calls the built-in `load_tools(group_id)` and receives the
+   group's **full schemas in the tool result**.
+3. The model invokes a loaded tool through the built-in dispatcher:
+   `deferred_tool_call(tool_name=..., arguments=...)`.
+4. The engine unwraps the dispatcher call before anything else sees it:
+   validation, `before_tool_call`/`after_tool_call` hooks, permission
+   systems, emitted events, and tracing all observe the **real** tool
+   name and arguments — never the envelope.
 
 ```
 # Deferred tool groups
 
 These tool groups are available but not yet loaded. Call `load_tools(group_id)`
-to load a group's tools for the rest of this conversation.
+to get their full schemas, then invoke them via
+`deferred_tool_call(tool_name=..., arguments=...)`.
 
 - `mcp:github` — GitHub: Issues, PRs, repos, code search (4 tools)
   create_issue, search_repos, create_pr, list_comments
 - `mcp:linear` — Linear: Project management and issue tracking (6 tools)
   create_issue, update_issue, list_projects, ...
 ```
+
+A few properties worth knowing:
+
+- **Implicit loading.** If the model calls `deferred_tool_call` for a
+  tool it never explicitly loaded, the middleware loads it on the fly
+  and validates the arguments. On a validation failure the error result
+  includes the full schema, so the model self-corrects in one round
+  trip.
+- **Compaction self-rescue.** `load_tools` is idempotent — if context
+  compaction drops an old result, the model can simply call it again
+  and get byte-identical schemas back.
+- **Forks.** Forked agents (`fork_once`) inherit the dispatch resolver,
+  so tools the parent loaded remain invocable inside forks.
 
 ## Basic setup
 
@@ -65,6 +108,7 @@ agent = Agent(
     model=provider.model("claude-sonnet-4-6"),
     tools=[search_tool, calculator],              # always-available tools
     deferred_tool_groups=[github_group, linear_group],
+    # deferred_tool_strategy="inject",            # opt into v1 behavior
 )
 ```
 
@@ -156,83 +200,62 @@ unexpanded.
 The model calls `load_tools` to load a group's tools. Two modes:
 
 ```
-# Expand everything in the group
+# Load everything in the group
 load_tools(group_id="mcp:github")
 
-# Expand specific tools only
+# Load specific tools only
 load_tools(group_id="mcp:github", tool_names=["create_issue", "search_repos"])
 ```
 
-The tool returns a structured result:
+In dispatch mode the result carries the full schemas:
 
 ```json
 {
   "group_id": "mcp:github",
   "expanded": true,
-  "tool_names": ["create_issue", "search_repos", "create_pr", "list_comments"],
-  "remaining": 0
+  "tool_names": ["create_issue", "search_repos"],
+  "remaining": 2,
+  "schemas": [
+    {"name": "create_issue", "description": "...", "parameters": {"...": "..."}},
+    {"name": "search_repos", "description": "...", "parameters": {"...": "..."}}
+  ]
 }
 ```
 
-After expansion, the tools are immediately available for the model to
-call in the same turn (via the `after_tool_call` hook).
+(In `inject` mode `schemas` is omitted — the definitions join the
+model-visible tools array instead.)
 
-### Selective expansion
-
-The model can expand a group incrementally — requesting one or two tools
-now and more later:
-
-```
-load_tools(group_id="mcp:github", tool_names=["create_issue"])
-# → remaining: 3
-
-# later...
-load_tools(group_id="mcp:github", tool_names=["search_repos"])
-# → remaining: 2
-```
-
-Already-expanded tools are idempotent — re-requesting them is a no-op.
+After loading, the tools are immediately available in the same turn.
 
 ### Loader caching
 
 The `loader` callback is invoked exactly **once per group per run**.
-The first `load_tools` call triggers it; subsequent selective
-expansions filter from the cached result. If the loader fails, the
-error is returned to the model and the group remains unexpanded.
-
-## Prompt-cache stability
-
-The system prompt is designed for prompt-cache prefix stability:
-
-- **Catalog** is sorted by `group_id` alphabetically — input order
-  doesn't matter, the rendered text is byte-stable.
-- **Expanded schemas** are appended in expansion order (the order the
-  model called `load_tools`), never reordered. Each new expansion
-  appends to the end, preserving the existing prefix.
-
-This means the LLM API's prompt cache remains valid across turns: the
-system prompt only grows, and only at the end.
+The first load triggers it; subsequent selective loads filter from the
+cached result. If the loader fails, the error is returned to the model
+and the group remains unloaded. Already-loaded tools are idempotent —
+re-requesting them is a no-op (and in dispatch mode re-serves the same
+schemas).
 
 ## Expansion state
 
-The middleware tracks which groups are expanded in `ctx.extra`:
+The middleware tracks which groups are loaded in `ctx.extra`:
 
 ```python
 ctx.extra["expanded_groups"] = {
-    "mcp:github": None,                    # fully expanded (None = all tools)
-    "mcp:linear": ["create_issue"],        # partially expanded
-    # mcp:slack not present = unexpanded
+    "mcp:github": None,                    # fully loaded (None = all tools)
+    "mcp:linear": ["create_issue"],        # partially loaded
+    # mcp:slack not present = unloaded
 }
 ```
 
-This state survives checkpointing and can be used for cross-run replay
-(see below).
+This state survives checkpointing and drives cross-run replay.
 
 ## Cross-run replay
 
-When resuming a conversation from a previous run, you need to restore
-the expansion state so the model has the same tools available.
-`prepare_resumed_state` handles this:
+When resuming a conversation from a previous run, restore the expansion
+state so dispatched calls resolve immediately. `prepare_resumed_state`
+handles this — the `strategy` argument is **required** and must match
+the middleware's strategy:
 
 ```python
 from cubepi.deferred import DeferredToolsMiddleware
@@ -241,6 +264,7 @@ from cubepi.deferred import DeferredToolsMiddleware
 resumed = await DeferredToolsMiddleware.prepare_resumed_state(
     groups=all_groups,
     expanded=saved_extra["expanded_groups"],
+    strategy="dispatch",
 )
 
 agent = Agent(
@@ -254,41 +278,19 @@ agent = Agent(
 
 | Field | Description |
 |---|---|
-| `pre_loaded_tools` | Tools from previously-expanded groups, ready to use |
-| `remaining_groups` | Groups that were never expanded or only partially expanded |
-| `expanded_schemas` | Schema data for the system prompt (pass to `resumed_schemas` for advanced use) |
+| `pre_loaded_tools` | Tools from previously-loaded groups, ready to resolve (hidden from the payload in dispatch mode) |
+| `remaining_groups` | Groups still loadable via `load_tools` |
 | `loader_cache` | Pre-loaded tool cache (pass to `resumed_loader_cache` to avoid redundant loader calls) |
 
-Fully expanded groups are loaded and removed from the deferred set.
-Partially expanded groups load the selected tools but stay deferrable
-(the model can still expand the rest).
-
-### Restoring schema text
-
-The `Agent(deferred_tool_groups=...)` shorthand handles the common case.
-For full prompt-cache continuity — where the resumed run's system prompt
-must match the previous run's final state byte-for-byte — construct the
-middleware directly with `resumed_schemas`:
-
-```python
-mw = DeferredToolsMiddleware(
-    groups=resumed.remaining_groups,
-    extra_ref=lambda: agent_extra,
-    resumed_schemas=resumed.expanded_schemas,
-    resumed_loader_cache=resumed.loader_cache,
-)
-
-agent = Agent(
-    model=model,
-    tools=[*builtin_tools, *resumed.pre_loaded_tools],
-    middleware=[mw],
-)
-```
+In dispatch mode there is nothing else to restore: the schemas the model
+saw live in the message history, and the checkpointer brings them back
+with the conversation. In `inject` mode, fully loaded groups leave the
+deferred set (as in v1).
 
 ## Advanced: constructing the middleware directly
 
-For full control over the catalog header, cross-run schema seeding, or
-other middleware options, construct `DeferredToolsMiddleware` yourself:
+For full control over the catalog header or resume seeding, construct
+`DeferredToolsMiddleware` yourself:
 
 ```python
 from cubepi.deferred import DeferredToolsMiddleware
@@ -296,8 +298,8 @@ from cubepi.deferred import DeferredToolsMiddleware
 mw = DeferredToolsMiddleware(
     groups=[github_group, linear_group],
     extra_ref=lambda: agent_extra,
-    catalog_header="# Available integrations\n\nExpand with load_tools().",
-    resumed_schemas=None,  # or pass schemas from a previous run
+    strategy="dispatch",
+    catalog_header="# Available integrations\n\nLoad with load_tools().",
 )
 
 agent = Agent(
@@ -313,13 +315,31 @@ agent = Agent(
 |---|---|---|---|
 | `groups` | `list[DeferredToolGroup]` | required | Groups to defer |
 | `extra_ref` | `() -> dict` | required | Returns the live `ctx.extra` dict |
-| `catalog_header` | `str` | *(built-in)* | Header text for the catalog section |
-| `resumed_schemas` | `list[tuple[str, list[dict]]] \| None` | `None` | Schema data to seed from a previous run |
+| `strategy` | `"dispatch" \| "inject"` | `"dispatch"` | Disclosure strategy (see above) |
+| `catalog_header` | `str \| None` | *(strategy-specific built-in)* | Header text for the catalog section |
 | `resumed_loader_cache` | `dict[str, list[AgentTool]] \| None` | `None` | Pre-loaded tool cache from a previous run (avoids re-calling loaders on resume) |
-| `on_tools_expanded` | `(list[AgentTool]) -> None \| None` | `None` | Called after new tools are expanded (used internally for cross-turn persistence) |
+| `on_tools_expanded` | `(list[AgentTool]) -> None \| None` | `None` | Called after new tools are loaded (used internally for cross-turn persistence) |
 
 When using the `Agent(deferred_tool_groups=...)` shorthand, `extra_ref`
 is automatically bound to `self._extra`.
+
+## Migrating from 0.10
+
+Deferred tool groups shipped in CubePi 0.10 with what is now the
+`inject` strategy. Upgrading changes behavior:
+
+- **The default strategy is now `dispatch`.** The catalog wording
+  changes, a `deferred_tool_call` builtin appears, and loaded tools no
+  longer join the model-visible tools array. Restore the 0.10 behavior
+  with `Agent(deferred_tool_strategy="inject")` or
+  `DeferredToolsMiddleware(strategy="inject")`.
+- **`inject` mode no longer renders schemas into the system prompt.**
+  The definitions were already in the tools array; the duplicate
+  rendering (and its double token billing) is gone. As a consequence,
+  the `resumed_schemas` constructor parameter and
+  `ResumedState.expanded_schemas` no longer exist.
+- **`prepare_resumed_state` requires `strategy=`** so a resume can't
+  silently mismatch the middleware's strategy.
 
 ## When to use it
 
@@ -340,7 +360,7 @@ is automatically bound to `self._extra`.
 
 - [Loading MCP Tools](../mcp/loading) — how to get `AgentTool` lists from
   MCP servers.
-- [The 8 Hooks](./hooks) — the middleware hooks that power deferred tools
-  (`transform_system_prompt`, `after_tool_call`).
+- [The 9 Hooks](./hooks) — the middleware hooks that power deferred tools
+  (`transform_system_prompt`, `after_tool_call`, `resolve_tool_call`).
 - [Composition](./composition) — how middleware composes when stacked with
   other middleware.

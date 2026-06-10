@@ -181,5 +181,5 @@ their relative order within the injected list.
 
 ## See also
 
-- [The 8 Hooks](./hooks) — what each hook does and when it fires.
+- [The 9 Hooks](./hooks) — what each hook does and when it fires.
 - [Examples](./examples) — composition in practice.

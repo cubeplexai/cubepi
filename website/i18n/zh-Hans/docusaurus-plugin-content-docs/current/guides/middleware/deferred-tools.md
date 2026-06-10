@@ -1,29 +1,53 @@
 ---
 title: 延迟工具组
-description: "默认对模型隐藏 MCP 工具 schema，按需展开，减少上下文膨胀。"
+description: "默认对模型隐藏 MCP 工具 schema，按需加载——且不破坏 prompt 缓存。"
 ---
 
 # 延迟工具组
 
 当一个 agent 接入多个 MCP 服务器时，它们合起来的 tool schema 在每一轮都
 能吃掉数千个 token 上下文——即使模型这一回合只需要其中一两组。
-`DeferredToolGroup` 用一份紧凑的目录替代完整 schema，让模型按需展开
+`DeferredToolGroup` 用一份紧凑的目录替代完整 schema，让模型按需加载
 工具组。
 
-## 工作方式
+## 两种策略
 
-1. 构造时，agent 的 system prompt 里包含一份简短目录——每个组一行，
-   带描述和工具列表。
-2. 模型看到一个内置的 `load_tools` 工具，可以调用它来加载一组（或
-   组内的某些工具）。
-3. 展开时，loader 跑一次，工具被注入到运行中的 tool 集，schema 被
-   追加到 system prompt 末尾。
+延迟工具支持两种策略，由 `deferred_tool_strategy` 选择（默认
+`"dispatch"`）：
+
+| | `tools` 参数 | system prompt | 每次加载的缓存代价 | 调用路径 |
+|---|---|---|---|---|
+| **`dispatch`**（默认） | 静态 | 静态 | **零**——schema 以消息尾部追加交付 | `deferred_tool_call` 转发器，引擎解包 |
+| **`inject`** | 随加载增长 | 目录计数变化 | system + 全部历史重读一次 | 原生工具调用 |
+
+**为什么默认 dispatch。** 在所有前缀缓存的 provider 上，工具定义渲染在
+prompt 最前端。会话中途注入工具等于在整个历史**之前**插入字节，每次加载
+都要按未缓存价重读全部对话。dispatch 模式在首个请求之后再不触碰 tools
+数组和 system prompt——schema 通过 `load_tools` 的工具结果交付，追加在
+消息历史末尾，像普通轮次一样增量缓存。
+
+**何时选 `inject`。** 原生工具调用享有 provider 侧 schema 校验，也是模型
+训练中最熟悉的调用方式。如果你的工具参数复杂、会话较短（单次加载的缓存
+代价小），`inject` 用缓存效率换取调用可靠性。
+
+## dispatch 模式如何工作
+
+1. system prompt 携带一份简短的**静态**目录——每组一行，含描述和工具
+   名。它永不改变。
+2. 模型调用内置的 `load_tools(group_id)`，在**工具结果里**拿到该组的
+   完整 schema。
+3. 模型通过内置转发器调用已加载的工具：
+   `deferred_tool_call(tool_name=..., arguments=...)`。
+4. 引擎在一切流程之前解包转发调用：参数校验、
+   `before_tool_call`/`after_tool_call` 钩子、权限系统、事件和 tracing
+   看到的都是**真实**工具名和参数——而非信封。
 
 ```
 # Deferred tool groups
 
 These tool groups are available but not yet loaded. Call `load_tools(group_id)`
-to load a group's tools for the rest of this conversation.
+to get their full schemas, then invoke them via
+`deferred_tool_call(tool_name=..., arguments=...)`.
 
 - `mcp:github` — GitHub: Issues, PRs, repos, code search (4 tools)
   create_issue, search_repos, create_pr, list_comments
@@ -31,10 +55,19 @@ to load a group's tools for the rest of this conversation.
   create_issue, update_issue, list_projects, ...
 ```
 
-## 基础用法
+几个值得了解的性质：
 
-把 `deferred_tool_groups` 传给 `Agent`。中间件会自动创建——不需要手动
-拼装：
+- **隐式加载。** 模型对从未显式加载的工具直接调用
+  `deferred_tool_call` 时，中间件会即时加载并校验参数。校验失败时，
+  错误结果附带完整 schema，模型一个来回即可自我纠正。
+- **压缩自救。** `load_tools` 幂等——若上下文压缩丢掉了旧结果，模型
+  再调一次即可拿回字节相同的 schema。
+- **Fork。** fork 出的 agent（`fork_once`）继承 dispatch resolver，
+  父 agent 已加载的工具在 fork 内仍可调用。
+
+## 基本用法
+
+向 `Agent` 传入 `deferred_tool_groups`，中间件自动创建，无需手动接线：
 
 ```python
 from cubepi import Agent
@@ -62,8 +95,9 @@ linear_group = DeferredToolGroup(
 
 agent = Agent(
     model=provider.model("claude-sonnet-4-6"),
-    tools=[search_tool, calculator],              # 始终可用的 tool
+    tools=[search_tool, calculator],              # 始终可用的工具
     deferred_tool_groups=[github_group, linear_group],
+    # deferred_tool_strategy="inject",            # 选用 v1 行为
 )
 ```
 
@@ -71,11 +105,11 @@ agent = Agent(
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `group_id` | `str` | 模型在 `load_tools` 调用里使用的唯一 ID（如 `"mcp:github"`） |
-| `display_name` | `str` | 目录里展示的人类可读名称 |
+| `group_id` | `str` | 模型在 `load_tools` 调用中使用的唯一标识（如 `"mcp:github"`） |
+| `display_name` | `str` | 目录中展示的人类可读标签 |
 | `description` | `str` | 该组能力的一行摘要 |
 | `tool_names` | `list[str]` | 目录里列出的 tool 名。**必须和 loader 返回的每个工具的 `AgentTool.name` 完全一致** —— 选择性展开（`load_tools(group_id, tool_names=[…])`）就靠这个字段匹配。 |
-| `loader` | `async () -> list[AgentTool]` | 返回该组完整 tool 集的回调 |
+| `loader` | `async () -> list[AgentTool]` | 返回该组完整工具集的回调 |
 
 ### 编写 loader
 
@@ -148,88 +182,70 @@ github_group = DeferredToolGroup(
 
 ## `load_tools` 工具
 
-模型通过 `load_tools` 加载一组的 tool。两种模式：
+模型调用 `load_tools` 加载一组工具，两种模式：
 
 ```
-# 展开整组
+# 加载整组
 load_tools(group_id="mcp:github")
 
-# 只展开指定的 tool
+# 只加载指定工具
 load_tools(group_id="mcp:github", tool_names=["create_issue", "search_repos"])
 ```
 
-工具返回结构化结果：
+dispatch 模式下结果携带完整 schema：
 
 ```json
 {
   "group_id": "mcp:github",
   "expanded": true,
-  "tool_names": ["create_issue", "search_repos", "create_pr", "list_comments"],
-  "remaining": 0
+  "tool_names": ["create_issue", "search_repos"],
+  "remaining": 2,
+  "schemas": [
+    {"name": "create_issue", "description": "...", "parameters": {"...": "..."}},
+    {"name": "search_repos", "description": "...", "parameters": {"...": "..."}}
+  ]
 }
 ```
 
-展开后这些 tool 同一轮就可以被模型调用（通过 `after_tool_call` hook）。
+（`inject` 模式下省略 `schemas`——定义直接加入模型可见的 tools 数组。）
 
-### 选择性展开
-
-模型可以分批次展开一个组——现在要一两个，稍后再要更多：
-
-```
-load_tools(group_id="mcp:github", tool_names=["create_issue"])
-# → remaining: 3
-
-# 稍后……
-load_tools(group_id="mcp:github", tool_names=["search_repos"])
-# → remaining: 2
-```
-
-已经展开过的 tool 是幂等的——再请求一次是 no-op。
+加载后工具在同一轮内即刻可用。
 
 ### Loader 缓存
 
-`loader` 回调在**每个组、每次 run** 里只会被调用**一次**。第一次
-`load_tools` 调用触发它；后续的选择性展开从缓存结果里筛选。如果 loader
-失败，错误会回给模型，组保持未展开。
+`loader` 回调每组每 run 恰好调用**一次**。首次加载触发；后续的选择性
+加载从缓存结果中过滤。loader 失败时错误返回给模型，该组保持未加载。
+已加载的工具幂等——重复请求是 no-op（dispatch 模式下会重新返回相同的
+schema）。
 
-## Prompt 缓存稳定性
+## 加载状态
 
-System prompt 的设计目标是 prompt 缓存的前缀稳定：
-
-- **目录**按 `group_id` 字典序排序——输入顺序无关，渲染出来的文本
-  字节稳定。
-- **展开后的 schema** 按展开顺序（模型调用 `load_tools` 的顺序）追加
-  到末尾，从不重排。每次新展开只在尾部追加，保留已有的前缀。
-
-这意味着 LLM API 的 prompt 缓存在轮次间一直有效：system prompt 只增长，
-而且只在末尾增长。
-
-## 展开状态
-
-中间件把哪些组已展开记录在 `ctx.extra` 里：
+中间件在 `ctx.extra` 里记录各组的加载情况：
 
 ```python
 ctx.extra["expanded_groups"] = {
-    "mcp:github": None,                    # 完全展开（None = 全部 tool）
-    "mcp:linear": ["create_issue"],        # 部分展开
-    # mcp:slack 不在 = 未展开
+    "mcp:github": None,                    # 全量加载（None = 全部工具）
+    "mcp:linear": ["create_issue"],        # 部分加载
+    # mcp:slack 不存在 = 未加载
 }
 ```
 
-这份状态会跟着 checkpoint 一起持久化，可用于跨 run 恢复（见下文）。
+该状态随 checkpoint 持久化，驱动跨 run 重放。
 
-## 跨 run 恢复
+## 跨 run 重放
 
-从上一次 run 恢复对话时，你需要把展开状态还原，让模型有相同的工具
-可用。`prepare_resumed_state` 负责这件事：
+从上一个 run 恢复会话时，需要还原加载状态，让转发调用立即可解析。
+`prepare_resumed_state` 负责这件事——`strategy` 参数**必填**，且必须与
+中间件的 strategy 一致：
 
 ```python
 from cubepi.deferred import DeferredToolsMiddleware
 
-# saved_extra 是上一次 run 持久化下来的 ctx.extra
+# saved_extra 是上一个 run 持久化的 ctx.extra
 resumed = await DeferredToolsMiddleware.prepare_resumed_state(
     groups=all_groups,
     expanded=saved_extra["expanded_groups"],
+    strategy="dispatch",
 )
 
 agent = Agent(
@@ -239,42 +255,21 @@ agent = Agent(
 )
 ```
 
-`prepare_resumed_state` 返回一个 `ResumedState`：
+`prepare_resumed_state` 返回的 `ResumedState` 包含：
 
 | 字段 | 说明 |
 |---|---|
-| `pre_loaded_tools` | 此前已展开组的 tool，已就绪可用 |
-| `remaining_groups` | 未展开或部分展开的组 |
-| `expanded_schemas` | 用于 system prompt 的 schema 数据（高级用法时传入 `resumed_schemas`） |
-| `loader_cache` | 已加载的 tool 缓存（传给 `resumed_loader_cache` 可避免重复调用 loader） |
+| `pre_loaded_tools` | 之前已加载组的工具，随时可被解析（dispatch 模式下对 payload 隐藏） |
+| `remaining_groups` | 仍可通过 `load_tools` 加载的组 |
+| `loader_cache` | 预载的工具缓存（传给 `resumed_loader_cache` 避免重复调用 loader） |
 
-完全展开的组会被加载并从延迟集合中移除。部分展开的组会加载已选择的
-tool，但仍保留为可延迟（模型仍可展开余下部分）。
-
-### 还原 schema 文本
-
-`Agent(deferred_tool_groups=...)` 这种简写覆盖常见用例。如果要做完整的
-prompt 缓存连续性——也就是恢复后的 run 的 system prompt 必须和上一次
-最终状态字节一致——直接构造中间件并传 `resumed_schemas`：
-
-```python
-mw = DeferredToolsMiddleware(
-    groups=resumed.remaining_groups,
-    extra_ref=lambda: agent_extra,
-    resumed_schemas=resumed.expanded_schemas,
-    resumed_loader_cache=resumed.loader_cache,
-)
-
-agent = Agent(
-    model=model,
-    tools=[*builtin_tools, *resumed.pre_loaded_tools],
-    middleware=[mw],
-)
-```
+dispatch 模式下没有其他要恢复的东西：模型见过的 schema 留在消息历史
+里，由 checkpointer 随会话带回。`inject` 模式下，全量加载的组退出延迟
+集合（与 v1 相同）。
 
 ## 进阶：直接构造中间件
 
-如果要完全控制目录头、跨 run schema 种子或其他中间件参数，直接构造
+需要完全控制目录 header 或恢复种子时，自行构造
 `DeferredToolsMiddleware`：
 
 ```python
@@ -283,8 +278,8 @@ from cubepi.deferred import DeferredToolsMiddleware
 mw = DeferredToolsMiddleware(
     groups=[github_group, linear_group],
     extra_ref=lambda: agent_extra,
-    catalog_header="# Available integrations\n\nExpand with load_tools().",
-    resumed_schemas=None,  # 或者传入上一次 run 的 schema
+    strategy="dispatch",
+    catalog_header="# Available integrations\n\nLoad with load_tools().",
 )
 
 agent = Agent(
@@ -296,36 +291,51 @@ agent = Agent(
 
 ### 构造参数
 
-| 参数 | 类型 | 默认 | 说明 |
+| 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `groups` | `list[DeferredToolGroup]` | 必填 | 要延迟的组 |
-| `extra_ref` | `() -> dict` | 必填 | 返回当前的 `ctx.extra` dict |
-| `catalog_header` | `str` | *(内置)* | 目录区段的头文本 |
-| `resumed_schemas` | `list[tuple[str, list[dict]]] \| None` | `None` | 用于种子的 schema 数据 |
-| `resumed_loader_cache` | `dict[str, list[AgentTool]] \| None` | `None` | 上一次 run 的 tool 缓存（恢复时避免重复调 loader） |
-| `on_tools_expanded` | `(list[AgentTool]) -> None \| None` | `None` | 新 tool 展开后回调（内部用于跨轮持久化） |
+| `extra_ref` | `() -> dict` | 必填 | 返回实时的 `ctx.extra` 字典 |
+| `strategy` | `"dispatch" \| "inject"` | `"dispatch"` | 披露策略（见上文） |
+| `catalog_header` | `str \| None` | *（按策略内置）* | 目录段的 header 文本 |
+| `resumed_loader_cache` | `dict[str, list[AgentTool]] \| None` | `None` | 上一个 run 的工具缓存（避免恢复时重复调用 loader） |
+| `on_tools_expanded` | `(list[AgentTool]) -> None \| None` | `None` | 新工具加载后回调（内部用于跨轮持久化） |
 
-使用 `Agent(deferred_tool_groups=...)` 这种简写时，`extra_ref` 会自动
-绑到 `self._extra`。
+使用 `Agent(deferred_tool_groups=...)` 简写时，`extra_ref` 自动绑定到
+`self._extra`。
+
+## 从 0.10 迁移
+
+延迟工具组在 CubePi 0.10 发布时的行为即现在的 `inject` 策略。升级后
+行为变化：
+
+- **默认策略现在是 `dispatch`。** 目录措辞改变，出现 `deferred_tool_call`
+  内置工具，加载的工具不再加入模型可见的 tools 数组。用
+  `Agent(deferred_tool_strategy="inject")` 或
+  `DeferredToolsMiddleware(strategy="inject")` 恢复 0.10 行为。
+- **`inject` 模式不再把 schema 渲染进 system prompt。** 定义本来就在
+  tools 数组里；重复渲染（及其双倍 token 计费）已移除。因此
+  `resumed_schemas` 构造参数和 `ResumedState.expanded_schemas` 不复存在。
+- **`prepare_resumed_state` 要求显式传 `strategy=`**，避免恢复时与中间件
+  的策略静默错配。
 
 ## 何时使用
 
-**适用：**
+**适合：**
 
-- Agent 接入 5+ 个 MCP 服务器，但每次对话通常只用 1–2 组。
-- Tool schema 很大（参数多、描述长）。
+- agent 接入 5 个以上 MCP 服务器，但每次会话通常只用 1–2 个。
+- tool schema 很大（参数多、描述长）。
 - 你希望跨轮保持高 prompt 缓存命中率。
 
-**不适用：**
+**不适合：**
 
-- Agent 只有少量 tool——目录和 `load_tools` 调用的开销不划算。
-- 每一轮都要全部 tool——延迟只多一次往返。
-- Tool schema 本身很小——上下文节省微乎其微。
+- agent 只有少量工具——目录和 `load_tools` 调用的开销不值得。
+- 每一轮都需要全部工具——延迟只是徒增一个来回。
+- tool schema 很小——上下文节省微乎其微。
 
-## 参见
+## 另请参阅
 
-- [加载 MCP 工具](../mcp/loading)——如何从 MCP 服务器拿到
-  `AgentTool` 列表。
-- [8 个 Hook](./hooks)——驱动延迟工具的两个中间件 hook
-  （`transform_system_prompt`、`after_tool_call`）。
-- [组合](./composition)——多个中间件叠加时怎么组合。
+- [加载 MCP 工具](../mcp/loading)——如何从 MCP 服务器获得 `AgentTool`
+  列表。
+- [9 个 Hook](./hooks)——驱动延迟工具的中间件 hook
+  （`transform_system_prompt`、`after_tool_call`、`resolve_tool_call`）。
+- [组合](./composition)——与其他中间件叠加时的组合行为。

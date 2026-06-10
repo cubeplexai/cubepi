@@ -1,11 +1,11 @@
 ---
-title: 8 个 Hook
-description: "CubePi 的 8 个中间件 hook 参考——transform_context、before_tool_call、after_tool_call、on_run_end 等。"
+title: 9 个 Hook
+description: "CubePi 的 9 个中间件 hook 参考——transform_context、resolve_tool_call、before_tool_call、after_tool_call、on_run_end 等。"
 ---
 
-# 8 个 Hook
+# 9 个 Hook
 
-`Middleware` 是一个最多包含八个可选异步方法的类。每个 hook 在 agent
+`Middleware` 是一个最多包含九个可选异步方法的类。每个 hook 在 agent
 循环中的精确位置触发。只实现你需要的——CubePi 只会连接你重写了的方法。
 
 ```python
@@ -83,6 +83,26 @@ async def transform_system_prompt(
 - A/B 测试 prompt 变体。
 
 组合方式：链式。
+
+## `resolve_tool_call`
+
+```python
+async def resolve_tool_call(self, tool_call: ToolCall, *, context: AgentContext, signal=None) -> ToolCall | None:
+    ...
+```
+
+**每个工具调用时、先于其他一切**触发——参数校验、`before_tool_call`、
+执行、事件和 tracing 都基于这个 hook 的返回值运作。返回改写后的
+`ToolCall` 以重定向调用，返回 `None` 则原样通过。
+
+返回的 `ToolCall` **必须保留原始 `id`**——工具结果消息在线上以它为键。
+
+用于：dispatcher 解包（[延迟工具组](./deferred-tools) 正是用它把
+`deferred_tool_call` 路由到真实工具）、工具别名、版本重定向。
+
+组合方式：**第一个非 `None` 返回值胜出**——第一个返回改写结果的中间件
+会短路整个链。这与顺序链式的 `before_tool_call` 不同；一个 resolver
+永远看不到另一个 resolver 的输出。
 
 ## `before_tool_call`
 

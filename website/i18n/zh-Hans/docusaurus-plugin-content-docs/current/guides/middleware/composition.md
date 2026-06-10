@@ -160,5 +160,5 @@ class JustTransform(Middleware):
 
 ## 另请参阅
 
-- [8 个 Hook](./hooks) —— 每个 hook 的作用及触发时机。
+- [9 个 Hook](./hooks) —— 每个 hook 的作用及触发时机。
 - [示例](./examples) —— 组合在实践中的应用。
