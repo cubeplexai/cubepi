@@ -17,7 +17,7 @@ const EN: CompareContent = {
   tableHeading: 'Side-by-side',
   rows: [
     { label: 'Core abstraction', them: 'Typed Agent[OutputType] with dependency injection', us: 'Stateful Agent with a while-loop core — composable via middleware' },
-    { label: 'Structured output', them: 'First-class — result_type enforces Pydantic model output', us: 'Via tool return types; use a "final answer" tool for structured output' },
+    { label: 'Structured output', them: 'Agent-level — Agent[Deps, OutputType] types every run; NativeOutput / PromptedOutput / ToolOutput modes', us: 'Call-level — BoundModel.generate_structured(Pydantic, …) returns a validated instance; tool-output mode under the hood (same as pydantic-ai default)' },
     { label: 'Dependency injection', them: 'RunContext[Deps] — deps injected at run time', us: 'Pass context through tool closures or middleware; no DI container' },
     { label: 'Checkpointing', them: 'No built-in persistence layer', us: 'Append-only — O(1) DB I/O; backends: memory, SQLite, Postgres, MySQL' },
     { label: 'Streaming', them: 'async for chunk in agent.run_stream()', us: 'async for event in stream — 11 typed event types including tool lifecycle' },
@@ -70,10 +70,11 @@ await agent.prompt("What's the weather in Tokyo?")
   },
   sections: [
     {
-      h2: 'Structured output vs persistent conversation',
+      h2: 'Where structured output sits in the API',
       body: [
-        'PydanticAI\'s standout feature is `result_type`: you declare the Pydantic model you want back and the framework forces the model to return it. This is excellent for batch extraction pipelines and single-turn tasks where the output shape matters more than the conversation.',
-        'CubePi optimises for the other axis — multi-turn conversations that survive restarts. Append-only checkpointing means a thread\'s write cost does not grow with conversation length, which matters when you have thousands of concurrent long-lived sessions. For structured output in CubePi, define a tool whose return value IS the structured result and instruct the model to call it when done.',
+        'Both frameworks ship first-class structured output backed by Pydantic. CubePi 0.10 added `BoundModel.generate_structured(Pydantic, ...)`, which injects a synthetic tool from the model\'s JSON schema, forces the call via `tool_choice`, and validates the response through `output_type.model_validate()` — the same `ToolOutput` mode PydanticAI uses by default.',
+        'Where the two diverge is which abstraction owns the contract. PydanticAI lifts the output type up to the agent itself: `Agent[Deps, Sentiment].run(...)` types the whole run as `Sentiment`, and the framework offers `NativeOutput` (provider `response_format` / JSON-schema endpoints) and `PromptedOutput` as alternative modes alongside `ToolOutput`. CubePi keeps the agent loop as free-form text plus tool calls and exposes structured output as a one-shot `BoundModel` call you reach for when you need it — well-suited for extraction subroutines inside a larger multi-turn agent.',
+        'CubePi optimises a different primary axis: multi-turn conversations that survive restarts. Append-only checkpointing keeps a thread\'s write cost flat regardless of conversation length, which matters when you have thousands of concurrent long-lived sessions.',
       ],
     },
     {
@@ -92,7 +93,7 @@ await agent.prompt("What's the weather in Tokyo?")
     {
       h2: 'When PydanticAI is the better fit',
       body: [
-        'PydanticAI is the stronger choice for single-turn structured extraction pipelines where you need guaranteed output schemas, or if you are already using Logfire and want tight integration. Choose CubePi when you need production-grade multi-turn persistence, composable middleware, provider failover, or vendor-neutral observability.',
+        'PydanticAI is the stronger choice when you want the agent itself typed by its output (`Agent[Deps, OutputType]`), when you need provider-native JSON-schema endpoints (`NativeOutput`) instead of the tool-output mode CubePi uses, or if you are already on Logfire and want tight integration. Choose CubePi when you need production-grade multi-turn persistence, composable middleware, provider failover, or vendor-neutral observability — and you are happy to reach for `BoundModel.generate_structured(...)` as a one-shot when you do need a validated Pydantic instance.',
       ],
     },
   ],
@@ -117,7 +118,7 @@ const ZH: CompareContent = {
   tableHeading: '并排对比',
   rows: [
     { label: '核心抽象', them: '带依赖注入的类型化 Agent[OutputType]', us: '有状态 Agent，核心为 while 循环 —— 通过中间件可组合' },
-    { label: '结构化输出', them: '一等公民 —— result_type 强制 Pydantic 模型输出', us: '通过工具返回类型；用"最终答案"工具实现结构化输出' },
+    { label: '结构化输出', them: 'Agent 级 —— Agent[Deps, OutputType] 把整个 run 类型化；支持 NativeOutput / PromptedOutput / ToolOutput 三种模式', us: '调用级 —— BoundModel.generate_structured(Pydantic, …) 返回已校验的实例；底层走 tool-output 模式（与 pydantic-ai 默认相同）' },
     { label: '依赖注入', them: 'RunContext[Deps] —— 运行时注入依赖', us: '通过工具闭包或中间件传递上下文；无 DI 容器' },
     { label: 'Checkpointing', them: '无内置持久化层', us: '追加式 —— O(1) DB I/O；后端：memory、SQLite、Postgres、MySQL' },
     { label: '流式输出', them: 'async for chunk in agent.run_stream()', us: 'async for event in stream —— 11 种类型化事件，含工具生命周期' },
@@ -130,10 +131,11 @@ const ZH: CompareContent = {
   ],
   sections: [
     {
-      h2: '结构化输出 vs 持久化对话',
+      h2: '结构化输出在 API 里的位置',
       body: [
-        'PydanticAI 的核心亮点是 `result_type`：你声明想要返回的 Pydantic 模型，框架强制模型输出它。对于输出格式比对话更重要的批量提取流水线和单轮任务，这非常出色。',
-        'CubePi 在另一个轴上优化 —— 能在重启后存活的多轮对话。追加式 checkpointing 意味着线程的写入成本不会随对话长度增长，当你有数千个并发长存会话时，这一点至关重要。在 CubePi 中实现结构化输出，可以定义一个返回值即为结构化结果的工具，并指示模型在完成时调用它。',
+        '两者都把结构化输出做成一等公民、并以 Pydantic 为校验后端。CubePi 0.10 加了 `BoundModel.generate_structured(Pydantic, ...)`：它从模型的 JSON schema 注入一个合成 tool、通过 `tool_choice` 强制调用、再用 `output_type.model_validate()` 校验回来——这正是 PydanticAI 默认的 `ToolOutput` 模式。',
+        '真正的差异是「契约绑在哪个抽象上」。PydanticAI 把输出类型抬到 Agent 本身：`Agent[Deps, Sentiment].run(...)` 把整个 run 的类型签到 `Sentiment`，且除了 `ToolOutput` 之外还提供 `NativeOutput`（Provider 的 `response_format` / JSON schema 端点）和 `PromptedOutput` 两种备选。CubePi 保持 agent 循环为自由文本 + 工具调用，把结构化输出做成一次性的 `BoundModel` 调用——适合作为多轮 agent 里的「抽取子例程」按需取用。',
+        'CubePi 的主轴在另一边：可在重启后存活的多轮对话。追加式 checkpointing 让单线程的写入成本不随对话长度增长，在你有数千个并发长存会话时尤其重要。',
       ],
     },
     {
@@ -152,7 +154,7 @@ const ZH: CompareContent = {
     {
       h2: 'PydanticAI 更适合的场景',
       body: [
-        '如果你需要保证输出 schema 的单轮结构化提取流水线，或者你已经在使用 Logfire 并希望紧密集成，PydanticAI 是更强的选择。当你需要生产级多轮持久化、可组合中间件、Provider 故障转移或厂商中立可观测性时，选择 CubePi。',
+        '如果你希望 agent 本身被它的输出类型化（`Agent[Deps, OutputType]`）、需要 Provider 原生 JSON-schema 端点（`NativeOutput`）而不是 CubePi 现在用的 tool-output 模式、或者你已经在 Logfire 上希望紧密集成，那么 PydanticAI 是更强的选择。当你需要生产级多轮持久化、可组合中间件、Provider 故障转移或厂商中立可观测性，并且能接受用 `BoundModel.generate_structured(...)` 作为一次性子例程获取已校验的 Pydantic 实例时，选择 CubePi。',
       ],
     },
   ],
