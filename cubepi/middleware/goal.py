@@ -22,6 +22,7 @@ from cubepi.providers.base import (
     ToolCall,
     ToolResultMessage,
     UserMessage,
+    synthetic_user_message,
 )
 
 _GOAL_PREFIX = "/goal "
@@ -169,11 +170,8 @@ class GoalMiddleware(Middleware):
         goal_state["status"] = "active"
         ctx.extra["goal"] = goal_state
         return [
-            UserMessage(
-                content=[
-                    TextContent(
-                        text=f"Goal not yet met: {result.reason}. Continue working."
-                    )
-                ]
+            synthetic_user_message(
+                f"Goal not yet met: {result.reason}. Continue working.",
+                source="goal_continuation",
             )
         ]

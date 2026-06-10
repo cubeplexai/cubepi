@@ -39,6 +39,7 @@ from cubepi.agent.types import (
 )
 from cubepi.middleware.base import Middleware, TurnAction
 from cubepi.providers.base import (
+    synthetic_user_message,
     AssistantMessage,
     Message,
     TextContent,
@@ -357,9 +358,9 @@ def _todo_validation_errors_local(
 # ---------------------------------------------------------------------------
 
 
-def _make_user_message(text: str) -> UserMessage:
-    """Wrap plain text in a cubepi UserMessage for injection."""
-    return UserMessage(content=[TextContent(text=text)])
+def _make_user_message(text: str, *, source: str) -> UserMessage:
+    """Wrap plain text in a synthetic UserMessage for injection."""
+    return synthetic_user_message(text, source=source)
 
 
 # ---------------------------------------------------------------------------
@@ -546,7 +547,7 @@ class TodoListMiddleware(Middleware):
                 "All todo items are complete. Do a quick final check before responding."
             )
         todo_text = "[Current todo list]\n" + json.dumps(payload, ensure_ascii=False)
-        todo_msg = UserMessage(content=[TextContent(text=todo_text)])
+        todo_msg = synthetic_user_message(todo_text, source="todo_list_view")
         return list(messages) + [todo_msg]
 
     # ------------------------------------------------------------------
@@ -609,7 +610,10 @@ class TodoListMiddleware(Middleware):
             "in parallel. Please call it only once per model invocation to update "
             "the todo list."
         )
-        return [_make_user_message(error_text) for _ in write_todos_calls]
+        return [
+            _make_user_message(error_text, source="todo_parallel_error")
+            for _ in write_todos_calls
+        ]
 
     def _guard_response(
         self,
@@ -634,13 +638,15 @@ class TodoListMiddleware(Middleware):
                 f"could not continue safely because: {message}"
             )
             return TurnAction(
-                inject_messages=[_make_user_message(inject_text)],
+                inject_messages=[
+                    _make_user_message(inject_text, source="todo_blocked")
+                ],
                 decision="loop_to_model",
             )
 
         extra["todo_finalization_correction"] = True
         return TurnAction(
-            inject_messages=[_make_user_message(message)],
+            inject_messages=[_make_user_message(message, source="todo_guard")],
             decision="loop_to_model",
         )
 
@@ -685,7 +691,10 @@ class TodoListMiddleware(Middleware):
             extra["todo_finalization_correction"] = None
             return TurnAction(
                 inject_messages=[
-                    _make_user_message(_blocked_todo_guard_message(blocked_guard))
+                    _make_user_message(
+                        _blocked_todo_guard_message(blocked_guard),
+                        source="todo_blocked",
+                    )
                 ],
                 decision="loop_to_model",
             )
@@ -715,7 +724,8 @@ class TodoListMiddleware(Middleware):
         )
         if validation_errors:
             inject: list[Any] = [
-                _make_user_message(e["error"]) for e in validation_errors
+                _make_user_message(e["error"], source="todo_validation_error")
+                for e in validation_errors
             ]
             return TurnAction(inject_messages=inject)
 
@@ -733,7 +743,11 @@ class TodoListMiddleware(Middleware):
                 (stale_count_new - STALE_REMINDER_THRESHOLD) % STALE_REMINDER_INTERVAL
                 == 0
             ):
-                stale_injections.append(_make_user_message(_STALE_REMINDER_TEXT))
+                stale_injections.append(
+                    _make_user_message(
+                        _STALE_REMINDER_TEXT, source="todo_stale_reminder"
+                    )
+                )
         elif has_write_todos or not has_non_todo_tools:
             # Any write_todos call or non-tool turn resets the counter.
             stale_count_new = 0
