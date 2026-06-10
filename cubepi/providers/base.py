@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import inspect
+import logging
 from dataclasses import dataclass, field
 from typing import (
     Any,
@@ -519,18 +520,9 @@ async def _safe_run_coroutine(cb: Callable, coro: Any) -> None:
 
 
 def _log_listener_exception(cb: Callable, exc: BaseException) -> None:
-    try:
-        from loguru import logger
-
-        logger.opt(exception=exc).warning(
-            "cubepi provider listener {} raised; swallowed", cb
-        )
-    except ImportError:
-        import logging
-
-        logging.getLogger("cubepi.providers").warning(
-            "cubepi provider listener %r raised; swallowed", cb, exc_info=exc
-        )
+    logging.getLogger("cubepi.providers").warning(
+        "cubepi provider listener %r raised; swallowed", cb, exc_info=exc
+    )
 
 
 def _detach(listeners: list, cb: Callable) -> None:
@@ -929,8 +921,6 @@ def chain_providers(model: object) -> list["BaseProvider"]:
     fallback chain so post-failover provider events land in the trace /
     metric stream.
     """
-    import logging
-
     if model is None:
         return []
     chain = getattr(model, "chain", None)
