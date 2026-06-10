@@ -455,51 +455,14 @@ def test_chain_providers_warns_when_chain_leg_is_not_base_provider(caplog) -> No
     duck_bound = BoundModel(provider=duck, spec=real.model("m").spec)  # type: ignore[arg-type]
     fbm = FallbackBoundModel(chain=(real.model("m"), duck_bound))
 
-    # loguru bridges into stdlib logging if a propagation handler is set;
-    # to keep the test independent of optional loguru config, just assert
-    # the dropped leg is absent from the output and accept either backend.
     with caplog.at_level(logging.WARNING, logger="cubepi.providers.base"):
         out = chain_providers(fbm)
 
     assert out == [real], "duck-typed leg should be dropped"
-    # Warning is emitted either via loguru or stdlib logging. Don't pin
-    # the backend; just check at least one of them carries the message.
-    warned = any(
+    assert any(
         "chain[1]" in record.message and "_DuckProvider" in record.message
         for record in caplog.records
-    )
-    # If loguru is installed it may not propagate to caplog; in that case
-    # we accept the assertion-free path (we already verified the leg was
-    # dropped above). Treat this as best-effort signal.
-    if not warned:
-        try:
-            import loguru  # noqa: F401
-
-            # loguru is installed → message went to loguru, not caplog;
-            # the drop assertion above is sufficient evidence the warning
-            # branch executed.
-        except ImportError:
-            raise AssertionError(
-                "expected a WARNING-level log mentioning chain[1] / _DuckProvider"
-            )
-
-
-def test_log_chain_skip_loguru_branch_invokable_directly() -> None:
-    """Cover the loguru happy-path inside _log_chain_skip.
-
-    The standard chain_providers warn-path test uses caplog (stdlib
-    logging). When loguru is installed (the default test environment),
-    the loguru branch fires but caplog cannot capture loguru messages
-    without bridge configuration. Call _log_chain_skip directly so the
-    loguru `logger.warning(...)` lines execute and the code path is
-    recorded by coverage.
-    """
-    from cubepi.providers.base import _log_chain_skip
-
-    # No assertion needed — just exercising the path. If loguru is
-    # absent (extreme edge case), the stdlib fallback runs instead and
-    # still covers the function body.
-    _log_chain_skip(0, "object")
+    ), "expected a WARNING-level log mentioning chain[1] / _DuckProvider"
 
 
 def test_chain_providers_returns_empty_for_object_without_provider_or_chain() -> None:
