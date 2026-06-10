@@ -22,8 +22,7 @@ from cubepi.middleware.compaction.tokens import approx_tokens
 from cubepi.providers.base import (
     BoundModel,
     Message,
-    TextContent,
-    UserMessage,
+    synthetic_user_message,
 )
 
 SUMMARY_PREFIX = (
@@ -47,8 +46,9 @@ def _compressed_view(
     boundary: int | None,
 ) -> list[Message]:
     if state and boundary and boundary > 0:
-        summary = UserMessage(
-            content=[TextContent(text=SUMMARY_PREFIX + state.summary)],
+        summary = synthetic_user_message(
+            SUMMARY_PREFIX + state.summary,
+            source="compaction_summary",
         )
         return [summary, *messages[boundary:]]
     return list(messages)

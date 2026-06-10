@@ -37,6 +37,8 @@ from cubepi.providers import (
     ToolDefinition,
     ToolResultMessage,
     UserMessage,
+    is_synthetic_message,
+    synthetic_user_message,
     adjust_max_tokens_for_thinking,
 )
 from cubepi.errors import (
@@ -114,6 +116,8 @@ __all__ = [
     "ToolDefinition",
     "ToolResultMessage",
     "UserMessage",
+    "is_synthetic_message",
+    "synthetic_user_message",
     "adjust_max_tokens_for_thinking",
     "compose_middleware",
     "run_agent_loop",

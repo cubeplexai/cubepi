@@ -162,6 +162,43 @@ class ToolResultMessage(BaseModel):
 Message = UserMessage | AssistantMessage | ToolResultMessage
 
 
+# --- Synthetic message marker (issue #171) ---
+#
+# Middleware and the framework itself sometimes inject user-role messages
+# into the conversation (todo guard nudges, goal continuations, …). Without
+# a marker these are indistinguishable from messages a human typed, so
+# downstream UIs render internal scaffolding as user chat bubbles. The
+# marker lives in ``metadata`` (not a subclass) because class identity does
+# not survive the checkpointer/API round-trip — persisted messages are
+# revalidated into the plain union types.
+
+SYNTHETIC_METADATA_KEY = "synthetic"
+SYNTHETIC_SOURCE_METADATA_KEY = "synthetic_source"
+
+
+def synthetic_user_message(text: str, *, source: str) -> UserMessage:
+    """Build a user-role message injected by the framework, not typed by a human.
+
+    All injected user-role messages MUST be created through this factory so
+    downstream consumers can branch on a single marker
+    (``metadata["synthetic"] is True``). ``source`` (e.g. ``"todo_guard"``,
+    ``"goal_continuation"``) is for tracing/debugging only — UI behavior
+    should never depend on it.
+    """
+    return UserMessage(
+        content=[TextContent(text=text)],
+        metadata={
+            SYNTHETIC_METADATA_KEY: True,
+            SYNTHETIC_SOURCE_METADATA_KEY: source,
+        },
+    )
+
+
+def is_synthetic_message(message: Message) -> bool:
+    """True if ``message`` was injected by the framework rather than a human."""
+    return message.metadata.get(SYNTHETIC_METADATA_KEY) is True
+
+
 class ToolDefinition(BaseModel):
     name: str
     description: str
@@ -890,7 +927,9 @@ class BoundModel:
                                 content=[TextContent(text=error_text)],
                                 is_error=True,
                             ),
-                            UserMessage(content=[TextContent(text=error_text)]),
+                            synthetic_user_message(
+                                error_text, source="structured_output_retry"
+                            ),
                         ]
                         break
             else:
