@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -139,12 +140,37 @@ def _make_tool_result_message(finalized: _FinalizedOutcome) -> ToolResultMessage
     )
 
 
+async def _resolve_tool_call(
+    tool_call: ToolCall,
+    context: AgentContext,
+    resolve_tool_call: Callable | None,
+    signal: asyncio.Event | None,
+) -> tuple[ToolCall, bool] | _ImmediateOutcome:
+    """Give the resolve hook a chance to rewrite the call before anything
+    else sees it — events, validation, before/after hooks, and tracing all
+    operate on the rewritten call. Returns ``(call, was_resolved)``, or an
+    immediate error outcome if the resolver raised."""
+    if not resolve_tool_call:
+        return tool_call, False
+    try:
+        rewritten = await resolve_tool_call(tool_call, context=context, signal=signal)
+    except HitlControlException:
+        raise
+    except Exception as exc:
+        return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
+    if rewritten is None:
+        return tool_call, False
+    return rewritten, True
+
+
 async def _prepare_tool_call(
     context: AgentContext,
     assistant_message: AssistantMessage,
     tool_call: ToolCall,
     before_tool_call: Callable | None,
     signal: asyncio.Event | None,
+    *,
+    resolved: bool = False,
 ) -> _PreparedToolCall | _ImmediateOutcome:
     tool = None
     if context.tools:
@@ -162,8 +188,19 @@ async def _prepare_tool_call(
     try:
         validated_args = tool.parameters.model_validate(tool_call.arguments)
     except ValidationError as exc:
+        message = _format_validation_error(exc, tool.name)
+        if resolved:
+            # The model never saw a resolved tool's schema in the tools
+            # block — append it so a bad call self-corrects in one round
+            # trip instead of a blind retry.
+            schema = json.dumps(
+                tool.parameters.model_json_schema(),
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+            message = f"{message}\n\nFull schema for '{tool.name}':\n{schema}"
         return _ImmediateOutcome(
-            result=_error_result(_format_validation_error(exc, tool.name)),
+            result=_error_result(message),
             is_error=True,
         )
     except Exception as exc:  # pragma: no cover — defensive
@@ -321,6 +358,7 @@ async def execute_tool_calls(
     *,
     tool_execution: str = "parallel",
     before_tool_call: Callable | None = None,
+    resolve_tool_call: Callable | None = None,
     after_tool_call: Callable | None = None,
     signal: asyncio.Event | None = None,
     emit: Callable,
@@ -341,6 +379,7 @@ async def execute_tool_calls(
             assistant_message,
             tool_calls,
             before_tool_call,
+            resolve_tool_call,
             after_tool_call,
             signal,
             emit,
@@ -350,6 +389,7 @@ async def execute_tool_calls(
         assistant_message,
         tool_calls,
         before_tool_call,
+        resolve_tool_call,
         after_tool_call,
         signal,
         emit,
@@ -361,6 +401,7 @@ async def _execute_sequential(
     assistant_message: AssistantMessage,
     tool_calls: list[ToolCall],
     before_tool_call: Callable | None,
+    resolve_tool_call: Callable | None,
     after_tool_call: Callable | None,
     signal: asyncio.Event | None,
     emit_fn: Callable,
@@ -369,20 +410,36 @@ async def _execute_sequential(
     messages: list[ToolResultMessage] = []
 
     for tc in tool_calls:
+        resolution = await _resolve_tool_call(tc, context, resolve_tool_call, signal)
+        was_resolved = False
+        if isinstance(resolution, _ImmediateOutcome):
+            rtc = tc
+        else:
+            rtc, was_resolved = resolution
+
         await emit_event(
             emit_fn,
             ToolExecutionStartEvent(
-                tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
+                tool_call_id=rtc.id, tool_name=rtc.name, args=rtc.arguments
             ),
         )
 
-        preparation = await _prepare_tool_call(
-            context, assistant_message, tc, before_tool_call, signal
-        )
+        preparation: _PreparedToolCall | _ImmediateOutcome
+        if isinstance(resolution, _ImmediateOutcome):
+            preparation = resolution
+        else:
+            preparation = await _prepare_tool_call(
+                context,
+                assistant_message,
+                rtc,
+                before_tool_call,
+                signal,
+                resolved=was_resolved,
+            )
 
         if isinstance(preparation, _ImmediateOutcome):
             finalized = _FinalizedOutcome(
-                tool_call=tc,
+                tool_call=rtc,
                 result=preparation.result,
                 is_error=preparation.is_error,
                 blocked_by_hook=preparation.blocked_by_hook,
@@ -404,8 +461,8 @@ async def _execute_sequential(
         await emit_event(
             emit_fn,
             ToolExecutionEndEvent(
-                tool_call_id=tc.id,
-                tool_name=tc.name,
+                tool_call_id=rtc.id,
+                tool_name=rtc.name,
                 result=finalized.result,
                 is_error=finalized.is_error,
                 terminate=bool(finalized.result.terminate),
@@ -427,6 +484,7 @@ async def _execute_parallel(
     assistant_message: AssistantMessage,
     tool_calls: list[ToolCall],
     before_tool_call: Callable | None,
+    resolve_tool_call: Callable | None,
     after_tool_call: Callable | None,
     signal: asyncio.Event | None,
     emit_fn: Callable,
@@ -442,9 +500,21 @@ async def _execute_parallel(
     #     and trace spans permanently open.
     entries: list[_FinalizedOutcome | _PreparedToolCall] = []
     for tc in tool_calls:
-        preparation = await _prepare_tool_call(
-            context, assistant_message, tc, before_tool_call, signal
-        )
+        resolution = await _resolve_tool_call(tc, context, resolve_tool_call, signal)
+        was_resolved = False
+        if isinstance(resolution, _ImmediateOutcome):
+            rtc = tc
+            preparation: _PreparedToolCall | _ImmediateOutcome = resolution
+        else:
+            rtc, was_resolved = resolution
+            preparation = await _prepare_tool_call(
+                context,
+                assistant_message,
+                rtc,
+                before_tool_call,
+                signal,
+                resolved=was_resolved,
+            )
 
         if isinstance(preparation, _ImmediateOutcome):
             # Immediate outcomes get a paired Start+End right here (the
@@ -454,11 +524,11 @@ async def _execute_parallel(
             await emit_event(
                 emit_fn,
                 ToolExecutionStartEvent(
-                    tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
+                    tool_call_id=rtc.id, tool_name=rtc.name, args=rtc.arguments
                 ),
             )
             finalized = _FinalizedOutcome(
-                tool_call=tc,
+                tool_call=rtc,
                 result=preparation.result,
                 is_error=preparation.is_error,
                 blocked_by_hook=preparation.blocked_by_hook,
@@ -468,8 +538,8 @@ async def _execute_parallel(
             await emit_event(
                 emit_fn,
                 ToolExecutionEndEvent(
-                    tool_call_id=tc.id,
-                    tool_name=tc.name,
+                    tool_call_id=rtc.id,
+                    tool_name=rtc.name,
                     result=finalized.result,
                     is_error=finalized.is_error,
                     terminate=bool(finalized.result.terminate),
