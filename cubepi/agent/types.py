@@ -40,6 +40,9 @@ class AgentTool(Generic[TParams]):
     execution_mode: Literal["sequential", "parallel"] | None = None
     hitl_builtin: bool = False
     hitl: HitlBinding | None = None
+    # When False the tool is resolvable/executable by the engine but its
+    # definition is never sent to the provider (deferred dispatch mode).
+    expose_to_model: bool = True
 
     def to_definition(self) -> ToolDefinition:
         schema = self.parameters.model_json_schema()
