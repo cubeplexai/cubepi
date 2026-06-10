@@ -704,7 +704,9 @@ async def _stream_assistant_response(
 
     tools_defs = None
     if context.tools:
-        tools_defs = [t.to_definition() for t in context.tools]
+        visible = [t for t in context.tools if t.expose_to_model]
+        if visible:
+            tools_defs = [t.to_definition() for t in visible]
 
     sp = context.system_prompt
     if transform_system_prompt:
