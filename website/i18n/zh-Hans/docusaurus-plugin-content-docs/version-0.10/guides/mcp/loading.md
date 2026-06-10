@@ -103,6 +103,14 @@ agent = Agent(
 
 模型看到的是合并后的统一 JSON Schema；循环会将每次调用分发给对应的实现。
 
+:::tip MCP server 很多？延迟加载它们
+如果你接了好几个 MCP server、但每次对话只用到其中一两个，把每个 server
+的 schema 全部塞进 system prompt 就成了主要的上下文成本。把每组 tool
+包成一个 [`DeferredToolGroup`](../middleware/deferred-tools)——CubePi 会把
+完整 schema 换成一份紧凑目录，让模型通过内置的 `load_tools` 工具按需
+展开。
+:::
+
 ## 按次连接与复用连接
 
 CubePi 每次 `execute` 调用都会建立新的传输连接。这样做：
@@ -131,3 +139,6 @@ CubePi 每次 `execute` 调用都会建立新的传输连接。这样做：
 - [MCP 认证](./auth) —— Bearer token、请求头、基于环境变量的凭据。
 - [工具使用](../agents/tool-use) —— 工具（MCP 或其他）的分发机制。
 - [`make_mcp_agent_tool` 源码](https://github.com/cubeplexai/cubepi/blob/main/cubepi/mcp/_adapter.py) —— schema → Pydantic 适配器，如需自定义可参考。
+- [延迟工具组](../middleware/deferred-tools) —— 把 MCP schema 从 system
+  prompt 里藏起来，让模型按需展开。当多个 MCP server 加起来构成一个
+  上下文沉重的工具集时很有用。

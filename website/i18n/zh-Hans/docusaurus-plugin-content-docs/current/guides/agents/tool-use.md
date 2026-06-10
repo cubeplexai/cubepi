@@ -236,3 +236,6 @@ CubePi 仅在当前批次中 *每个* 工具结果都是 `terminate=True` 时才
   HTTP 请求的工具,端到端。
 - [MCP 加载](../mcp/loading) —— 一次性把一个 MCP server 的整套工具
   拉下来。
+- [延迟工具组](../middleware/deferred-tools) —— 当多个 MCP server 加起来
+  有几十上百个工具时，可以把 schema 藏在目录后面，让模型通过内置的
+  `load_tools` 工具按需展开。

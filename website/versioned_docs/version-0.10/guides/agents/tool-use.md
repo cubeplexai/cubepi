@@ -255,3 +255,7 @@ and exits.
   HTTP-calling tool, end-to-end.
 - [MCP Loading](../mcp/loading) — pull an entire toolset off an MCP
   server in one call.
+- [Deferred Tool Groups](../middleware/deferred-tools) — when the
+  combined tool list across several MCP servers is dozens or hundreds
+  of tools, hide the schemas behind a catalog and let the model expand
+  groups on demand via the built-in `load_tools` tool.

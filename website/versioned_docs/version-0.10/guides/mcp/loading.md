@@ -119,6 +119,15 @@ agent = Agent(
 The model sees one combined JSON Schema; the loop dispatches each
 call to the right implementation.
 
+:::tip Many MCP servers? Defer them.
+If you wire up several MCP servers and only a few are needed per
+conversation, eagerly loading every schema into the system prompt
+becomes the dominant context cost. Wrap each server's tools in a
+[`DeferredToolGroup`](../middleware/deferred-tools) — CubePi replaces
+the full schemas with a compact catalog and lets the model expand a
+group on demand via the built-in `load_tools` tool.
+:::
+
 ## Per-call vs reusable connections
 
 CubePi opens a new transport per `execute` call. That's:
@@ -166,3 +175,7 @@ downstream programmatic access, but not shown to the model.
   dispatched.
 - [`make_mcp_agent_tool` source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/mcp/_adapter.py)
   — the schema → Pydantic adapter, if you need to customise.
+- [Deferred Tool Groups](../middleware/deferred-tools) — hide MCP
+  schemas from the system prompt and let the model expand them on
+  demand. Useful when several MCP servers add up to a context-heavy
+  toolbelt.
