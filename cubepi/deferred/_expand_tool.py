@@ -55,7 +55,10 @@ def _make_load_tools(
     ) -> AgentToolResult:
         del signal, on_update
         output = await load_callback(args.group_id, args.tool_names)
-        text = json.dumps(output.model_dump(), ensure_ascii=False)
+        # sort_keys: the rendered result becomes part of the cached prompt
+        # prefix on later turns and must serialize byte-identically across
+        # repeat calls (compaction self-rescue).
+        text = json.dumps(output.model_dump(), ensure_ascii=False, sort_keys=True)
         return AgentToolResult(
             content=[TextContent(text=text)],
             is_error=not output.expanded,

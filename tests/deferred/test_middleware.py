@@ -4,45 +4,7 @@ from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult
 from cubepi.deferred.middleware import DeferredToolsMiddleware
 from cubepi.deferred.types import DeferredToolGroup
 from cubepi.providers.base import TextContent
-
-
-def _dummy_tool(name: str, description: str = "dummy") -> AgentTool:
-    from pydantic import BaseModel
-
-    class _Empty(BaseModel):
-        pass
-
-    async def _exec(tool_call_id, args, *, signal=None, on_update=None):
-        return AgentToolResult(content=[TextContent(text="ok")])
-
-    return AgentTool(
-        name=name, description=description, parameters=_Empty, execute=_exec
-    )
-
-
-def _make_group(
-    group_id: str,
-    tool_names: list[str],
-    *,
-    display_name: str = "Test",
-    description: str = "desc",
-    loader_tools: list[AgentTool] | None = None,
-    loader_call_count: list[int] | None = None,
-) -> DeferredToolGroup:
-    tools = loader_tools or [_dummy_tool(n) for n in tool_names]
-    call_count = loader_call_count if loader_call_count is not None else [0]
-
-    async def _loader() -> list[AgentTool]:
-        call_count[0] += 1
-        return list(tools)
-
-    return DeferredToolGroup(
-        group_id=group_id,
-        display_name=display_name,
-        description=description,
-        tool_names=tool_names,
-        loader=_loader,
-    )
+from tests.deferred._helpers import _dummy_tool, _make_group
 
 
 class TestMiddlewareConstruction:

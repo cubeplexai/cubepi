@@ -1,43 +1,15 @@
 from __future__ import annotations
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
-from cubepi.providers.base import TextContent
-from cubepi.middleware.base import Middleware
 from pydantic import BaseModel
+
+from cubepi.agent.agent import Agent
+from cubepi.deferred import DeferredToolsMiddleware
+from cubepi.middleware.base import Middleware
+from tests.deferred._helpers import _dummy_tool, _make_faux_model, _make_group
 
 
 class _Empty(BaseModel):
     pass
-
-
-def _dummy_tool(name: str) -> AgentTool:
-    async def _exec(tool_call_id, args, *, signal=None, on_update=None):
-        return AgentToolResult(content=[TextContent(text="ok")])
-
-    return AgentTool(name=name, description="dummy", parameters=_Empty, execute=_exec)
-
-
-def _make_group(group_id: str, tool_names: list[str]) -> DeferredToolGroup:
-    async def _loader():
-        return [_dummy_tool(n) for n in tool_names]
-
-    return DeferredToolGroup(
-        group_id=group_id,
-        display_name="Test",
-        description="desc",
-        tool_names=tool_names,
-        loader=_loader,
-    )
-
-
-def _make_faux_model():
-    """Create a minimal BoundModel for Agent construction."""
-    from cubepi.providers.faux import FauxProvider
-
-    provider = FauxProvider()
-    return provider.model("faux")
 
 
 class TestAgentDeferredToolGroups:

@@ -1,29 +1,22 @@
 from __future__ import annotations
 
+import functools
 import json
 
 from pydantic import BaseModel
 
 from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult
-from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
 from cubepi.providers.base import TextContent, ToolCall
+from cubepi.deferred import DeferredToolsMiddleware
+from tests.deferred._helpers import _dummy_tool, _echo_tool, _mw
+from tests.deferred._helpers import _make_group as _make_group_base
+
+# Dispatch tests exercise real argument round-trips — echo tools throughout.
+_make_group = functools.partial(_make_group_base, tool_factory=_echo_tool)
 
 
 class _Empty(BaseModel):
     pass
-
-
-def _dummy_tool(name: str, *, expose: bool = True) -> AgentTool:
-    async def _exec(tool_call_id, args, *, signal=None, on_update=None):
-        return AgentToolResult(content=[TextContent(text="ok")])
-
-    return AgentTool(
-        name=name,
-        description="dummy",
-        parameters=_Empty,
-        execute=_exec,
-        expose_to_model=expose,
-    )
 
 
 class TestExposeToModel:
@@ -38,37 +31,6 @@ class TestExposeToModel:
         tools = [_dummy_tool("visible"), _dummy_tool("hidden", expose=False)]
         visible = [t.to_definition() for t in tools if t.expose_to_model]
         assert [d.name for d in visible] == ["visible"]
-
-
-class _EchoArgs(BaseModel):
-    value: str
-
-
-def _echo_tool(name: str) -> AgentTool:
-    async def _exec(tool_call_id, args, *, signal=None, on_update=None):
-        return AgentToolResult(content=[TextContent(text=f"echo:{args.value}")])
-
-    return AgentTool(name=name, description="echo", parameters=_EchoArgs, execute=_exec)
-
-
-def _make_group(gid: str, names: list[str]) -> DeferredToolGroup:
-    async def _loader():
-        return [_echo_tool(n) for n in names]
-
-    return DeferredToolGroup(
-        group_id=gid,
-        display_name="Test",
-        description="desc",
-        tool_names=names,
-        loader=_loader,
-    )
-
-
-def _mw(groups, *, strategy="dispatch", extra=None):
-    extra = extra if extra is not None else {}
-    return DeferredToolsMiddleware(
-        groups=groups, extra_ref=lambda: extra, strategy=strategy
-    )
 
 
 class TestDispatchStrategy:

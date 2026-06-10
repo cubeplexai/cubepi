@@ -145,22 +145,29 @@ async def _resolve_tool_call(
     context: AgentContext,
     resolve_tool_call: Callable | None,
     signal: asyncio.Event | None,
-) -> tuple[ToolCall, bool] | _ImmediateOutcome:
+) -> tuple[ToolCall, bool, _ImmediateOutcome | None]:
     """Give the resolve hook a chance to rewrite the call before anything
     else sees it — events, validation, before/after hooks, and tracing all
-    operate on the rewritten call. Returns ``(call, was_resolved)``, or an
-    immediate error outcome if the resolver raised."""
+    operate on the rewritten call.
+
+    Returns ``(call, was_resolved, resolver_error)``; ``resolver_error`` is
+    an immediate error outcome (with the original call for attribution)
+    when the resolver raised."""
     if not resolve_tool_call:
-        return tool_call, False
+        return tool_call, False, None
     try:
         rewritten = await resolve_tool_call(tool_call, context=context, signal=signal)
     except HitlControlException:
         raise
     except Exception as exc:
-        return _ImmediateOutcome(result=_error_result(str(exc)), is_error=True)
+        return (
+            tool_call,
+            False,
+            _ImmediateOutcome(result=_error_result(str(exc)), is_error=True),
+        )
     if rewritten is None:
-        return tool_call, False
-    return rewritten, True
+        return tool_call, False, None
+    return rewritten, True, None
 
 
 async def _prepare_tool_call(
@@ -410,12 +417,9 @@ async def _execute_sequential(
     messages: list[ToolResultMessage] = []
 
     for tc in tool_calls:
-        resolution = await _resolve_tool_call(tc, context, resolve_tool_call, signal)
-        was_resolved = False
-        if isinstance(resolution, _ImmediateOutcome):
-            rtc = tc
-        else:
-            rtc, was_resolved = resolution
+        rtc, was_resolved, resolver_error = await _resolve_tool_call(
+            tc, context, resolve_tool_call, signal
+        )
 
         await emit_event(
             emit_fn,
@@ -424,18 +428,14 @@ async def _execute_sequential(
             ),
         )
 
-        preparation: _PreparedToolCall | _ImmediateOutcome
-        if isinstance(resolution, _ImmediateOutcome):
-            preparation = resolution
-        else:
-            preparation = await _prepare_tool_call(
-                context,
-                assistant_message,
-                rtc,
-                before_tool_call,
-                signal,
-                resolved=was_resolved,
-            )
+        preparation = resolver_error or await _prepare_tool_call(
+            context,
+            assistant_message,
+            rtc,
+            before_tool_call,
+            signal,
+            resolved=was_resolved,
+        )
 
         if isinstance(preparation, _ImmediateOutcome):
             finalized = _FinalizedOutcome(
@@ -500,21 +500,17 @@ async def _execute_parallel(
     #     and trace spans permanently open.
     entries: list[_FinalizedOutcome | _PreparedToolCall] = []
     for tc in tool_calls:
-        resolution = await _resolve_tool_call(tc, context, resolve_tool_call, signal)
-        was_resolved = False
-        if isinstance(resolution, _ImmediateOutcome):
-            rtc = tc
-            preparation: _PreparedToolCall | _ImmediateOutcome = resolution
-        else:
-            rtc, was_resolved = resolution
-            preparation = await _prepare_tool_call(
-                context,
-                assistant_message,
-                rtc,
-                before_tool_call,
-                signal,
-                resolved=was_resolved,
-            )
+        rtc, was_resolved, resolver_error = await _resolve_tool_call(
+            tc, context, resolve_tool_call, signal
+        )
+        preparation = resolver_error or await _prepare_tool_call(
+            context,
+            assistant_message,
+            rtc,
+            before_tool_call,
+            signal,
+            resolved=was_resolved,
+        )
 
         if isinstance(preparation, _ImmediateOutcome):
             # Immediate outcomes get a paired Start+End right here (the
