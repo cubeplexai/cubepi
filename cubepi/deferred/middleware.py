@@ -1,6 +1,17 @@
 """DeferredToolsMiddleware — progressive tool disclosure for large tool sets.
 
-Two-phase expansion:
+Two strategies:
+
+* ``dispatch`` (default) — the tools array and system prompt are byte-stable
+  for the whole run (zero prompt-cache invalidation). ``load_tools`` returns
+  full schemas in its tool result; calls route through the
+  ``deferred_tool_call`` dispatcher, which the engine's ``resolve_tool_call``
+  hook rewrites to the real tool before validation/hooks/tracing. Loaded
+  tools live in ``context.tools`` with ``expose_to_model=False``.
+* ``inject`` — v1 behavior: loaded tools join the model-visible tools array
+  (native tool calling; each expansion re-reads the prompt cache).
+
+Two-phase expansion (both strategies):
 1. ``_expand_callback`` runs inside ``load_tools`` execute (no AgentContext).
    Validates, invokes the loader (cached), updates state, queues pending tools.
 2. ``after_tool_call`` fires after execute and injects pending tools into
@@ -13,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from cubepi.agent.types import (
@@ -24,17 +35,22 @@ from cubepi.agent.types import (
 )
 from cubepi.deferred._catalog import (
     DEFAULT_CATALOG_HEADER,
-    ToolSchema,
+    DEFAULT_DISPATCH_CATALOG_HEADER,
     render_catalog,
-    render_expanded_schemas,
+    render_static_catalog,
+)
+from cubepi.deferred._dispatch_tool import (
+    DISPATCH_TOOL_NAME,
+    _make_deferred_tool_call,
 )
 from cubepi.deferred._expand_tool import (
     TOOL_NAME,
     LoadToolsOutput,
     _make_load_tools,
 )
-from cubepi.deferred.types import DeferredToolGroup
+from cubepi.deferred.types import DeferredStrategy, DeferredToolGroup
 from cubepi.middleware.base import Middleware
+from cubepi.providers.base import ToolCall
 
 
 @dataclass
@@ -43,7 +59,6 @@ class ResumedState:
 
     pre_loaded_tools: list[AgentTool]
     remaining_groups: list[DeferredToolGroup]
-    expanded_schemas: list[tuple[str, list[ToolSchema]]]
     loader_cache: dict[str, list[AgentTool]]
 
 
@@ -51,7 +66,8 @@ class DeferredToolsMiddleware(Middleware):
     """Middleware that manages deferred tool groups via progressive disclosure.
 
     Attributes:
-        tools: ``[load_tools]`` — merged into agent state at construction.
+        tools: ``[load_tools]`` (+ ``[deferred_tool_call]`` in dispatch mode)
+            — merged into agent state at construction.
     """
 
     def __init__(
@@ -59,23 +75,27 @@ class DeferredToolsMiddleware(Middleware):
         *,
         groups: list[DeferredToolGroup],
         extra_ref: Callable[[], dict[str, Any]],
-        catalog_header: str = DEFAULT_CATALOG_HEADER,
-        resumed_schemas: list[tuple[str, list[ToolSchema]]] | None = None,
+        strategy: DeferredStrategy = "dispatch",
+        catalog_header: str | None = None,
         resumed_loader_cache: dict[str, list[AgentTool]] | None = None,
         on_tools_expanded: Callable[[list[AgentTool]], None] | None = None,
     ) -> None:
         self._groups: dict[str, DeferredToolGroup] = {g.group_id: g for g in groups}
         self._extra_ref = extra_ref
-        self._catalog_header = catalog_header
+        self._strategy: DeferredStrategy = strategy
+        self._catalog_header = catalog_header or (
+            DEFAULT_DISPATCH_CATALOG_HEADER
+            if strategy == "dispatch"
+            else DEFAULT_CATALOG_HEADER
+        )
         self._on_tools_expanded = on_tools_expanded
+        self._tool_to_group: dict[str, str] = {
+            name: g.group_id for g in groups for name in g.tool_names
+        }
 
         # Loader called exactly once per group per run.
         self._loader_cache: dict[str, list[AgentTool]] = (
             dict(resumed_loader_cache) if resumed_loader_cache else {}
-        )
-        # Append-only, expansion order for cache stability.
-        self._expanded_schemas: list[tuple[str, list[ToolSchema]]] = (
-            list(resumed_schemas) if resumed_schemas else []
         )
         # Staging area: expand_callback queues, after_tool_call drains.
         self._pending_injection: list[AgentTool] = []
@@ -85,9 +105,26 @@ class DeferredToolsMiddleware(Middleware):
         self.tools: list[AgentTool] = [
             _make_load_tools(load_callback=self._expand_callback)
         ]
+        if strategy == "dispatch":
+            self.tools.append(
+                _make_deferred_tool_call(
+                    known_tool_names=lambda: list(self._tool_to_group)
+                )
+            )
+
+        # Dispatch catalog is expansion-independent — render once, serve
+        # byte-identical every turn.
+        self._static_catalog: str = (
+            render_static_catalog(
+                groups=list(self._groups.values()),
+                header=self._catalog_header,
+            )
+            if strategy == "dispatch"
+            else ""
+        )
 
     # ------------------------------------------------------------------
-    # Phase 1: expand callback (called from expand_tools execute)
+    # Phase 1: expand callback (called from load_tools execute)
     # ------------------------------------------------------------------
 
     async def _expand_callback(
@@ -165,31 +202,16 @@ class DeferredToolsMiddleware(Middleware):
                         merged_set.add(name)
                 expanded_groups[group_id] = merged
 
-        # Record schemas for expanded tools (append-only).
-        if newly_expanded:
-            new_schemas = [t.to_definition().model_dump() for t in newly_expanded]
-            existing_idx = next(
-                (
-                    i
-                    for i, (gid, _) in enumerate(self._expanded_schemas)
-                    if gid == group_id
-                ),
-                None,
-            )
-            if existing_idx is not None:
-                prev_schemas = self._expanded_schemas[existing_idx][1]
-                self._expanded_schemas[existing_idx] = (
-                    group_id,
-                    prev_schemas + new_schemas,
-                )
-            else:
-                self._expanded_schemas.append((group_id, new_schemas))
-
         # Stage newly expanded tools for injection by after_tool_call.
-        self._pending_injection.extend(newly_expanded)
+        # Dispatch mode hides them from the provider payload — the engine
+        # still resolves them by name.
+        staged = newly_expanded
+        if self._strategy == "dispatch":
+            staged = [replace(t, expose_to_model=False) for t in newly_expanded]
+        self._pending_injection.extend(staged)
         # Persist to the agent's canonical tool list for cross-prompt() use.
-        if newly_expanded and self._on_tools_expanded:
-            self._on_tools_expanded(newly_expanded)
+        if staged and self._on_tools_expanded:
+            self._on_tools_expanded(staged)
 
         # Calculate remaining count.
         current_expanded = expanded_groups.get(group_id)
@@ -199,11 +221,18 @@ class DeferredToolsMiddleware(Middleware):
             assert isinstance(current_expanded, list)
             remaining = len(group.tool_names) - len(current_expanded)
 
+        schemas: list[dict[str, object]] | None = None
+        if self._strategy == "dispatch":
+            # Full set for the request — idempotent across repeat calls
+            # (compaction self-rescue: re-calling re-serves the schemas).
+            schemas = [t.to_definition().model_dump() for t in requested]
+
         return LoadToolsOutput(
             group_id=group_id,
             expanded=True,
             tool_names=expanded_names,
             remaining=max(remaining, 0),
+            schemas=schemas,
         )
 
     # ------------------------------------------------------------------
@@ -258,7 +287,50 @@ class DeferredToolsMiddleware(Middleware):
         return None
 
     # ------------------------------------------------------------------
-    # System prompt: catalog + expanded schemas
+    # Dispatch: resolve deferred_tool_call to the real tool
+    # ------------------------------------------------------------------
+
+    async def resolve_tool_call(
+        self,
+        tool_call: ToolCall,
+        *,
+        context: AgentContext,
+        signal: asyncio.Event | None = None,
+    ) -> ToolCall | None:
+        del signal
+        if self._strategy != "dispatch" or tool_call.name != DISPATCH_TOOL_NAME:
+            return None
+        args = tool_call.arguments
+        name = args.get("tool_name") if isinstance(args, dict) else None
+        if not isinstance(name, str) or name not in self._tool_to_group:
+            return None  # falls through to the dispatcher's error fallback
+        already_loaded = context.tools is not None and any(
+            t.name == name for t in context.tools
+        )
+        if not already_loaded:
+            await self._ensure_loaded(self._tool_to_group[name], [name], context)
+        inner = args.get("arguments")
+        return ToolCall(
+            id=tool_call.id,
+            name=name,
+            arguments=inner if isinstance(inner, dict) else {},
+        )
+
+    async def _ensure_loaded(
+        self,
+        group_id: str,
+        tool_names: list[str],
+        context: AgentContext,
+    ) -> None:
+        """Implicit load for dispatched calls: reuse the load path, then drain
+        staged tools into the live context immediately (no after_tool_call
+        fires on the dispatcher's behalf for a rewritten call)."""
+        await self._expand_callback(group_id, tool_names)
+        if context.tools is not None:
+            self._drain_pending(context.tools)
+
+    # ------------------------------------------------------------------
+    # System prompt: catalog (static in dispatch mode)
     # ------------------------------------------------------------------
 
     async def transform_system_prompt(
@@ -269,29 +341,21 @@ class DeferredToolsMiddleware(Middleware):
         signal: asyncio.Event | None = None,
     ) -> str:
         del signal
+        if self._strategy == "dispatch":
+            catalog = self._static_catalog
+            return f"{system_prompt}\n\n{catalog}" if catalog else system_prompt
+
         extra = self._extra_ref()
         expanded: dict[str, list[str] | None] = extra.get(
             "expanded_groups",
             {},
         )
-
         catalog = render_catalog(
             groups=list(self._groups.values()),
             expanded=expanded,
             header=self._catalog_header,
         )
-
-        schemas = render_expanded_schemas(
-            expanded_schemas=self._expanded_schemas,
-        )
-
-        parts = [system_prompt]
-        if catalog:
-            parts.append(catalog)
-        if schemas:
-            parts.append(schemas)
-
-        return "\n\n".join(parts)
+        return f"{system_prompt}\n\n{catalog}" if catalog else system_prompt
 
     # ------------------------------------------------------------------
     # Cross-run replay
@@ -301,15 +365,23 @@ class DeferredToolsMiddleware(Middleware):
     async def prepare_resumed_state(
         groups: list[DeferredToolGroup],
         expanded: dict[str, list[str] | None],
+        *,
+        strategy: DeferredStrategy,
     ) -> ResumedState:
         """Replay expansion state from a previous run.
 
-        Fully expanded groups (``None``) get all tools pre-loaded and are
-        removed from the remaining set.  Partially expanded groups get the
-        selected tools pre-loaded but stay in remaining (still deferrable).
-        Unexpanded groups pass through untouched.
+        ``strategy`` is required and must match the middleware's strategy —
+        a default would let an inject-mode host silently resume with hidden
+        tools (invisible to the model, with no dispatcher to reach them).
+
+        Dispatch mode: schemas live in message history (the checkpointer
+        brings them back) — only the loader cache and hidden tool objects
+        need rebuilding, and every loaded group stays in ``remaining`` so
+        ``load_tools`` can re-serve schemas after compaction. Inject mode:
+        tools come back model-visible; fully expanded groups leave the
+        catalog as in v1.
         """
-        # Partition groups and load expanded ones concurrently.
+        hidden = strategy == "dispatch"
         remaining: list[DeferredToolGroup] = []
         to_load: list[tuple[DeferredToolGroup, list[str] | None]] = []
         for group in groups:
@@ -324,33 +396,23 @@ class DeferredToolsMiddleware(Middleware):
         )
 
         pre_loaded: list[AgentTool] = []
-        schemas: list[tuple[str, list[ToolSchema]]] = []
         cache: dict[str, list[AgentTool]] = {}
         for (group, exp), loaded in zip(to_load, loaded_results):
             cache[group.group_id] = loaded
             if exp is None:
-                pre_loaded.extend(loaded)
-                schemas.append(
-                    (
-                        group.group_id,
-                        [t.to_definition().model_dump() for t in loaded],
-                    )
-                )
+                selected = loaded
+                if hidden:
+                    remaining.append(group)
             else:
                 name_set = set(exp)
                 selected = [t for t in loaded if t.name in name_set]
-                pre_loaded.extend(selected)
-                schemas.append(
-                    (
-                        group.group_id,
-                        [t.to_definition().model_dump() for t in selected],
-                    )
-                )
                 remaining.append(group)
+            pre_loaded.extend(
+                replace(t, expose_to_model=False) if hidden else t for t in selected
+            )
 
         return ResumedState(
             pre_loaded_tools=pre_loaded,
             remaining_groups=remaining,
-            expanded_schemas=schemas,
             loader_cache=cache,
         )

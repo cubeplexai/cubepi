@@ -46,10 +46,12 @@ def _make_group(
 
 
 class TestMiddlewareConstruction:
-    def test_tools_attribute_contains_load_tools(self) -> None:
+    def test_inject_tools_attribute_contains_load_tools_only(self) -> None:
         extra: dict = {}
         group = _make_group("mcp:a", ["t1"])
-        mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
+        mw = DeferredToolsMiddleware(
+            groups=[group], extra_ref=lambda: extra, strategy="inject"
+        )
         assert len(mw.tools) == 1
         assert mw.tools[0].name == "load_tools"
 
@@ -68,22 +70,29 @@ class TestTransformSystemPrompt:
     async def test_fully_expanded_group_omitted_from_catalog(self) -> None:
         extra: dict = {"expanded_groups": {"mcp:github": None}}
         group = _make_group("mcp:github", ["t1"])
-        mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
-        ctx = AgentContext(system_prompt="", messages=[])
-        result = await mw.transform_system_prompt("base", ctx=ctx)
-        assert "mcp:github" not in result or "Expanded tool groups" in result
-
-    async def test_expanded_schemas_appended_after_catalog(self) -> None:
-        extra: dict = {"expanded_groups": {"mcp:a": None}}
-        group = _make_group("mcp:a", ["t1"])
-        mw = DeferredToolsMiddleware(groups=[group], extra_ref=lambda: extra)
-        mw._expanded_schemas.append(
-            ("mcp:a", [{"name": "t1", "description": "Tool 1", "parameters": {}}])
+        mw = DeferredToolsMiddleware(
+            groups=[group], extra_ref=lambda: extra, strategy="inject"
         )
         ctx = AgentContext(system_prompt="", messages=[])
         result = await mw.transform_system_prompt("base", ctx=ctx)
-        assert "Expanded tool groups" in result
-        assert "t1" in result
+        assert "mcp:github" not in result
+
+    async def test_inject_system_prompt_has_no_schema_section(self) -> None:
+        """Schemas live solely in the tools array — no double rendering."""
+        extra: dict = {}
+        group = _make_group("mcp:a", ["t1"])
+        mw = DeferredToolsMiddleware(
+            groups=[group], extra_ref=lambda: extra, strategy="inject"
+        )
+        ctx = AgentContext(
+            system_prompt="base", messages=[], tools=list(mw.tools), extra=extra
+        )
+        await mw._expand(group_id="mcp:a", tool_names=None, context=ctx)
+        prompt = await mw.transform_system_prompt("base", ctx=ctx)
+        assert "Expanded tool groups" not in prompt
+        assert '"parameters"' not in prompt
+        # Injection itself still works — tools are model-visible.
+        assert any(t.name == "t1" and t.expose_to_model for t in ctx.tools)
 
 
 class TestAfterToolCallExpansion:
@@ -259,10 +268,8 @@ class TestExpansionOrderPreserved:
         await mw._expand(group_id="mcp:z", tool_names=None, context=ctx)
         await mw._expand(group_id="mcp:a", tool_names=None, context=ctx)
 
+        # Insertion-ordered expansion state survives for resume fidelity.
         assert list(extra["expanded_groups"].keys()) == ["mcp:z", "mcp:a"]
-        assert len(mw._expanded_schemas) == 2
-        assert mw._expanded_schemas[0][0] == "mcp:z"
-        assert mw._expanded_schemas[1][0] == "mcp:a"
 
 
 class TestPrepareResumedState:
@@ -272,12 +279,11 @@ class TestPrepareResumedState:
         resumed = await DeferredToolsMiddleware.prepare_resumed_state(
             groups=[group],
             expanded=expanded,
+            strategy="inject",
         )
         assert len(resumed.pre_loaded_tools) == 2
+        assert all(t.expose_to_model for t in resumed.pre_loaded_tools)
         assert len(resumed.remaining_groups) == 0
-        assert len(resumed.expanded_schemas) == 1
-        assert resumed.expanded_schemas[0][0] == "mcp:github"
-        assert len(resumed.expanded_schemas[0][1]) == 2
 
     async def test_partially_expanded_group(self) -> None:
         group = _make_group("mcp:github", ["t1", "t2", "t3"])
@@ -285,12 +291,11 @@ class TestPrepareResumedState:
         resumed = await DeferredToolsMiddleware.prepare_resumed_state(
             groups=[group],
             expanded=expanded,
+            strategy="inject",
         )
         assert len(resumed.pre_loaded_tools) == 1
         assert resumed.pre_loaded_tools[0].name == "t1"
         assert len(resumed.remaining_groups) == 1
-        assert len(resumed.expanded_schemas) == 1
-        assert len(resumed.expanded_schemas[0][1]) == 1
 
     async def test_unexpanded_group_stays_deferred(self) -> None:
         group = _make_group("mcp:github", ["t1"])
@@ -298,14 +303,14 @@ class TestPrepareResumedState:
         resumed = await DeferredToolsMiddleware.prepare_resumed_state(
             groups=[group],
             expanded=expanded,
+            strategy="inject",
         )
         assert len(resumed.pre_loaded_tools) == 0
         assert len(resumed.remaining_groups) == 1
-        assert len(resumed.expanded_schemas) == 0
 
-    async def test_resumed_schemas_seed_middleware(self) -> None:
+    async def test_resumed_state_seeds_middleware(self) -> None:
         group_a = _make_group("mcp:github", ["t1", "t2"])
-        group_b = _make_group("mcp:slack", ["s1"])
+        group_b = _make_group("mcp:slack", ["s1", "s2"])
         expanded: dict[str, list[str] | None] = {
             "mcp:github": None,
             "mcp:slack": ["s1"],
@@ -313,12 +318,18 @@ class TestPrepareResumedState:
         resumed = await DeferredToolsMiddleware.prepare_resumed_state(
             groups=[group_a, group_b],
             expanded=expanded,
+            strategy="inject",
         )
+        assert {t.name for t in resumed.pre_loaded_tools} == {"t1", "t2", "s1"}
+        # Fully expanded github leaves the catalog; partial slack stays.
+        assert [g.group_id for g in resumed.remaining_groups] == ["mcp:slack"]
+
         extra: dict[str, object] = {"expanded_groups": dict(expanded)}
         mw = DeferredToolsMiddleware(
             groups=resumed.remaining_groups,
             extra_ref=lambda: extra,
-            resumed_schemas=resumed.expanded_schemas,
+            strategy="inject",
+            resumed_loader_cache=resumed.loader_cache,
         )
         ctx = AgentContext(
             system_prompt="base",
@@ -327,9 +338,8 @@ class TestPrepareResumedState:
             extra=extra,
         )
         prompt = await mw.transform_system_prompt("base", ctx=ctx)
-        assert "mcp:github" in prompt
-        assert "mcp:slack" in prompt
-        assert "t1" in prompt
+        assert "s2" in prompt  # remaining tool still advertised
+        assert "Expanded tool groups" not in prompt
 
     async def test_loader_cache_populated(self) -> None:
         group = _make_group("mcp:github", ["t1", "t2"])
@@ -337,6 +347,7 @@ class TestPrepareResumedState:
         resumed = await DeferredToolsMiddleware.prepare_resumed_state(
             groups=[group],
             expanded=expanded,
+            strategy="inject",
         )
         assert "mcp:github" in resumed.loader_cache
         assert len(resumed.loader_cache["mcp:github"]) == 2
@@ -348,6 +359,7 @@ class TestPrepareResumedState:
         resumed = await DeferredToolsMiddleware.prepare_resumed_state(
             groups=[group],
             expanded=expanded,
+            strategy="inject",
         )
         assert call_count[0] == 1
 
@@ -355,7 +367,7 @@ class TestPrepareResumedState:
         mw = DeferredToolsMiddleware(
             groups=resumed.remaining_groups,
             extra_ref=lambda: extra,
-            resumed_schemas=resumed.expanded_schemas,
+            strategy="inject",
             resumed_loader_cache=resumed.loader_cache,
         )
         ctx = AgentContext(
