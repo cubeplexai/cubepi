@@ -199,3 +199,33 @@ class TestForkOnceDeniesMiddlewareTools:
         result = await denied.execute("call-1", _Empty())
         assert result.is_error is True
         assert "not available in a forked agent" in result.content[0].text
+
+
+class TestDeferredStrategyParam:
+    def test_default_strategy_is_dispatch(self) -> None:
+        model = _make_faux_model()
+        agent = Agent(
+            model=model,
+            deferred_tool_groups=[_make_group("g", ["t1"])],
+        )
+        names = [t.name for t in agent._state.tools]
+        assert "deferred_tool_call" in names
+
+    def test_inject_strategy_opt_in(self) -> None:
+        model = _make_faux_model()
+        agent = Agent(
+            model=model,
+            deferred_tool_groups=[_make_group("g", ["t1"])],
+            deferred_tool_strategy="inject",
+        )
+        names = [t.name for t in agent._state.tools]
+        assert "load_tools" in names
+        assert "deferred_tool_call" not in names
+
+    def test_resolve_hook_composed(self) -> None:
+        model = _make_faux_model()
+        agent = Agent(
+            model=model,
+            deferred_tool_groups=[_make_group("g", ["t1"])],
+        )
+        assert agent.resolve_tool_call is not None
