@@ -227,13 +227,21 @@ CubePi 仅在当前批次中 *每个* 工具结果都是 `terminate=True` 时才
 ```python
 from cubepi import Agent
 from cubepi.deferred import DeferredToolGroup
+from cubepi.mcp import load_mcp_tools_stdio
+
+async def load_github_tools():
+    result = await load_mcp_tools_stdio(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-github"],
+    )
+    return result.tools   # list[AgentTool]
 
 github_group = DeferredToolGroup(
     group_id="mcp:github",
     display_name="GitHub",
     description="Issues, PRs, repos, code search",
     tool_names=["create_issue", "search_repos", "create_pr"],
-    loader=github_mcp.load_tools,
+    loader=load_github_tools,
 )
 
 agent = Agent(
@@ -243,11 +251,16 @@ agent = Agent(
 )
 ```
 
+loader 是一个零参 async 可调用对象，返回 `list[AgentTool]` —— 你可以
+像上面这样包一次 MCP discovery，也可以直接返回你自己写的 `@tool` 装饰
+函数。`tool_names` 里的名字必须和返回的每个工具的 `AgentTool.name`
+完全一致，选择性展开才能找到。
+
 适合 ≥ 5 个工具组、但每次对话通常只用一两组的场景，或者 schema 大到
 足以明显撑大每一轮 system prompt 的情况。每一轮都要全部 tool 的话就
 别用，延迟反而多一次往返。
 
-完整 API、跨 run 恢复以及高级中间件构造器见
+完整 API（含手写工具 loader 示例）、跨 run 恢复、高级中间件构造器见
 [延迟工具组](../middleware/deferred-tools)。
 
 ## 常见坑

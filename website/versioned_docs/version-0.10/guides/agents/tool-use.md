@@ -245,13 +245,21 @@ their schemas are appended (append-only, for cache stability).
 ```python
 from cubepi import Agent
 from cubepi.deferred import DeferredToolGroup
+from cubepi.mcp import load_mcp_tools_stdio
+
+async def load_github_tools():
+    result = await load_mcp_tools_stdio(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-github"],
+    )
+    return result.tools   # list[AgentTool]
 
 github_group = DeferredToolGroup(
     group_id="mcp:github",
     display_name="GitHub",
     description="Issues, PRs, repos, code search",
     tool_names=["create_issue", "search_repos", "create_pr"],
-    loader=github_mcp.load_tools,
+    loader=load_github_tools,
 )
 
 agent = Agent(
@@ -261,13 +269,19 @@ agent = Agent(
 )
 ```
 
+The loader is a zero-arg async callable returning `list[AgentTool]` —
+wrap an MCP discovery call (as above), or just return your own
+`@tool`-decorated functions. The names in `tool_names` must match each
+tool's `AgentTool.name` so selective expansion can find them.
+
 Good fit when you have ≥5 tool groups but typically only use one or
 two per conversation, or when schemas are large enough to noticeably
 inflate every system prompt. Skip it when all the tools are needed on
 every turn — deferring just adds a round trip.
 
 See [Deferred Tool Groups](../middleware/deferred-tools) for the full
-API, cross-run replay, and the advanced middleware constructor.
+API (including a hand-written-tools loader example), cross-run replay,
+and the advanced middleware constructor.
 
 ## Common pitfalls
 
