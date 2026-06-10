@@ -155,8 +155,7 @@ carries the schemas instead of the middleware mutating prompt state:
   "schemas": [
     {"name": "create_issue", "description": "...", "parameters": {...}},
     {"name": "list_issues", "description": "...", "parameters": {...}}
-  ],
-  "usage": "Call these via deferred_tool_call(tool_name=..., arguments=...)."
+  ]
 }
 ```
 
@@ -164,6 +163,8 @@ carries the schemas instead of the middleware mutating prompt state:
   cached prefix on subsequent turns).
 - Idempotent: repeat calls return the same payload (compaction self-rescue). Loader still runs
   exactly once per group per run (v1 loader cache + per-group `asyncio.Lock` reused).
+- The calling convention ("invoke via `deferred_tool_call`") lives once in the static catalog
+  header and the dispatcher's description — not repeated in every result.
 
 **`deferred_tool_call(tool_name: str, arguments: dict)`** — the dispatcher. Its `execute` never
 runs; calls are rewritten by the engine before the standard pipeline (next section).
@@ -212,6 +213,26 @@ The middleware's resolver:
 `model_validate`, the error result appends the tool's full schema JSON, so the model retries
 with correct args in one round trip. (Mechanism: the resolver marks the rewritten call;
 `_format_validation_error` gains an optional schema suffix. Exact plumbing settled in the plan.)
+
+### Forks
+
+Forked agents (`fork_once`-style) are built with `middleware=[]` but receive the parent's
+hook callables explicitly. The fork construction must forward `resolve_tool_call` the same
+way it already forwards `before_tool_call` — otherwise dispatch-mode forks cannot invoke any
+loaded deferred tool (the dispatcher's execute is fork-denied, hidden tools are not in the
+payload, and no resolver runs), a regression vs v1 where expanded tools stayed usable in
+forks. `load_tools` remains fork-denied as in v1 (its *execute* is wrapped); the forwarded
+resolver, however, does not go through that execute — so dispatched calls work in forks for
+already-loaded tools, and dispatching an unloaded tool triggers an **implicit load from the
+fork**. This is deliberate: the loader cache and per-group locks live on the shared
+middleware instance, so the loader still runs at most once across parent + forks, loaded
+tools are appended hidden (no cache impact anywhere), and the recorded
+`extra["expanded_groups"]` state simply pre-warms the parent. Deferred loading is
+process-level resource acquisition, not conversation state — sharing it across forks is
+coherent where v1's model-visible injection was not.
+
+`prepare_resumed_state` takes a **required** `strategy` kwarg (no default) so a host cannot
+resume with a strategy that mismatches its middleware construction.
 
 ### State persistence & resume
 

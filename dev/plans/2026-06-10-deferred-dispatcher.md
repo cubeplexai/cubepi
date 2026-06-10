@@ -359,8 +359,33 @@ async def _prepare_tool_call(
     ...
 ```
 
-`resolved` is consumed in Task 3 (keep it assigned-but-unused for now, or fold Task 3's
-two-line change in immediately — see Task 3 Step 1).
+`resolved` is consumed in Task 3 — fold Task 3 Step 1's validation-branch change in
+immediately while editing this function (avoids an assigned-but-unused lint window); Task 3
+then only runs its tests.
+
+**Event naming (review finding).** `ToolExecutionStartEvent` / `ToolExecutionEndEvent` must
+carry the **resolved** name. Check where `_execute_sequential` / `_execute_parallel` emit
+them: if the start event is emitted from the raw `tool_call` before `_prepare_tool_call`
+runs, move the emission after preparation (or emit from `prepared.tool_call`) so tracing's
+`_find_tool(event.tool_name)` (cubepi/tracing/recorder.py ~:832) resolves the real tool.
+Extend `test_resolver_rewrites_call_before_pipeline` with an emit recorder:
+
+```python
+    events: list = []
+    batch = await execute_tool_calls(
+        ctx,
+        _assistant_with(call),
+        before_tool_call=before,
+        resolve_tool_call=resolver,
+        emit=events.append,
+    )
+    from cubepi.agent.types import ToolExecutionStartEvent
+
+    start_names = [e.tool_name for e in events if isinstance(e, ToolExecutionStartEvent)]
+    assert start_names == ["real_tool"]
+```
+
+(Replace the `emit=_noop_emit` in that one test with the recorder above.)
 
 - [ ] **Step 4: Thread through `cubepi/agent/loop.py`**
 
@@ -386,6 +411,11 @@ In `cubepi/middleware/base.py`, add to the `Middleware` base class (next to
 
         The returned ToolCall MUST keep the original ``id`` — the result
         message is keyed by it on the wire.
+
+        Composition is FIRST-NON-NONE-WINS: the first middleware to return a
+        rewritten call short-circuits the chain. This differs from
+        ``before_tool_call``, which chains sequentially. A resolver never sees
+        another resolver's output.
         """
         return None
 ```
@@ -417,6 +447,17 @@ Mirror `before_tool_call` exactly: add `resolve_tool_call: Callable | None = Non
 `self.resolve_tool_call = resolve_tool_call or _mw_hooks.get("resolve_tool_call")` (next to
 :248), and pass `resolve_tool_call=self.resolve_tool_call` at the three loop invocation sites
 (:590, :723, :746).
+
+**Fork wiring (review finding — regression otherwise).** The fork construction in
+`agent.py` (~:581-599) builds the child with `middleware=[]` but forwards hook callables
+explicitly (`before_tool_call` is already passed). Forward the resolver the same way:
+`resolve_tool_call=self.resolve_tool_call` in the fork's `Agent(...)` kwargs. Without this,
+dispatch-mode forks can never invoke loaded deferred tools (the dispatcher's execute is
+denied by `_deny_in_fork`, hidden tools are invisible, and no resolver exists) — a regression
+vs v1 where expanded tools remained usable in forks. Add a test in
+`tests/deferred/test_dispatch.py` that drives a fork the same way
+`tests/agent/test_agent_fork_once.py` does and asserts a `deferred_tool_call` to a
+pre-loaded tool succeeds inside the fork.
 
 - [ ] **Step 7: Run tests**
 
@@ -537,11 +578,9 @@ def test_load_tools_output_carries_schemas() -> None:
         tool_names=["t"],
         remaining=0,
         schemas=[{"name": "t", "description": "d", "parameters": {}}],
-        usage="Call these via deferred_tool_call(tool_name=..., arguments=...).",
     )
     dumped = out.model_dump()
     assert dumped["schemas"][0]["name"] == "t"
-    assert "deferred_tool_call" in dumped["usage"]
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -602,10 +641,11 @@ class LoadToolsOutput(BaseModel):
     tool_names: list[str]
     remaining: int
     error: str | None = None
-    # Dispatch mode only: full schemas + calling hint, delivered in the tool
-    # result so they live in message history (append-only, cache-safe).
+    # Dispatch mode only: full schemas, delivered in the tool result so they
+    # live in message history (append-only, cache-safe). The calling
+    # convention lives once in the static catalog header and the dispatcher
+    # description — not repeated per result.
     schemas: list[dict[str, object]] | None = None
-    usage: str | None = None
 ```
 
 - [ ] **Step 4: Run tests**
@@ -698,16 +738,15 @@ class TestDispatchStrategy:
         assert out.expanded is True
         assert out.schemas is not None
         assert out.schemas[0]["name"] == "t1"
-        assert "deferred_tool_call" in (out.usage or "")
-        # Deterministic parameters serialization.
-        params = out.schemas[0]["parameters"]
-        assert json.dumps(params, sort_keys=True) == json.dumps(params, sort_keys=True)
 
-    async def test_load_tools_idempotent(self) -> None:
+    async def test_load_tools_idempotent_and_deterministic(self) -> None:
         mw = _mw([_make_group("g", ["t1"])])
         first = await mw._expand_callback("g", None)
         second = await mw._expand_callback("g", None)
-        assert first.schemas == second.schemas  # compaction self-rescue
+        # Compaction self-rescue: repeat calls serialize byte-identically.
+        assert json.dumps(first.schemas, sort_keys=True) == json.dumps(
+            second.schemas, sort_keys=True
+        )
 
     async def test_loaded_tools_enter_context_hidden(self) -> None:
         mw = _mw([_make_group("g", ["t1"])])
@@ -848,7 +887,9 @@ def _make_deferred_tool_call(
                 TextContent(
                     text=(
                         f"Unknown deferred tool: {args.tool_name!r}. "
-                        f"Valid names: {', '.join(sorted(names))}"
+                        f"Valid names: {', '.join(sorted(names))}. "
+                        "Call load_tools(group_id=...) to list a group's "
+                        "full schemas."
                     )
                 )
             ],
@@ -918,6 +959,17 @@ name→group index for the resolver:
                     known_tool_names=lambda: list(self._tool_to_group)
                 )
             )
+
+        # Dispatch catalog is expansion-independent — render once, serve
+        # byte-identical every turn.
+        self._static_catalog: str = (
+            render_static_catalog(
+                groups=list(self._groups.values()),
+                header=self._catalog_header,
+            )
+            if strategy == "dispatch"
+            else ""
+        )
 ```
 
 (Note: `resumed_schemas` and `self._expanded_schemas` are gone — Task 6/7 remove their
@@ -937,13 +989,9 @@ result carries schemas:
             self._on_tools_expanded(staged)
 
         schemas: list[dict[str, object]] | None = None
-        usage: str | None = None
         if self._strategy == "dispatch":
-            requested_defs = [t.to_definition().model_dump() for t in requested]
-            schemas = requested_defs  # full set for the request — idempotent
-            usage = (
-                "Call these via deferred_tool_call(tool_name=..., arguments=...)."
-            )
+            # Full set for the request — idempotent across repeat calls.
+            schemas = [t.to_definition().model_dump() for t in requested]
 
         return LoadToolsOutput(
             group_id=group_id,
@@ -951,7 +999,6 @@ result carries schemas:
             tool_names=expanded_names,
             remaining=max(remaining, 0),
             schemas=schemas,
-            usage=usage,
         )
 ```
 
@@ -975,7 +1022,11 @@ so repeat calls return the same `schemas` even when `newly_expanded` is empty.)
         name = args.get("tool_name") if isinstance(args, dict) else None
         if not isinstance(name, str) or name not in self._tool_to_group:
             return None  # falls through to the dispatcher's error fallback
-        await self._ensure_loaded(self._tool_to_group[name], [name], context)
+        already_loaded = context.tools is not None and any(
+            t.name == name for t in context.tools
+        )
+        if not already_loaded:
+            await self._ensure_loaded(self._tool_to_group[name], [name], context)
         inner = args.get("arguments")
         return ToolCall(
             id=tool_call.id,
@@ -1009,10 +1060,7 @@ so repeat calls return the same `schemas` even when `newly_expanded` is empty.)
     ) -> str:
         del signal
         if self._strategy == "dispatch":
-            catalog = render_static_catalog(
-                groups=list(self._groups.values()),
-                header=self._catalog_header,
-            )
+            catalog = self._static_catalog
             return f"{system_prompt}\n\n{catalog}" if catalog else system_prompt
 
         extra = self._extra_ref()
@@ -1181,7 +1229,10 @@ tests call `DeferredToolsMiddleware.prepare_resumed_state`):
         groups: list[DeferredToolGroup],
         expanded: dict[str, list[str] | None],
         *,
-        strategy: DeferredStrategy = "dispatch",
+        strategy: DeferredStrategy,  # REQUIRED — must match the middleware's
+        # strategy. A default would let an inject-mode host silently resume
+        # with hidden tools (invisible to the model, no dispatcher to reach
+        # them). Forcing the kwarg makes the mismatch impossible.
     ) -> ResumedState:
         """Replay expansion state from a previous run.
 
