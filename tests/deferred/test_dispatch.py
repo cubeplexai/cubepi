@@ -35,3 +35,195 @@ class TestExposeToModel:
         tools = [_dummy_tool("visible"), _dummy_tool("hidden", expose=False)]
         visible = [t.to_definition() for t in tools if t.expose_to_model]
         assert [d.name for d in visible] == ["visible"]
+
+
+import json
+
+from cubepi.agent.types import AgentContext
+from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
+from cubepi.providers.base import ToolCall
+
+
+class _EchoArgs(BaseModel):
+    value: str
+
+
+def _echo_tool(name: str) -> AgentTool:
+    async def _exec(tool_call_id, args, *, signal=None, on_update=None):
+        return AgentToolResult(content=[TextContent(text=f"echo:{args.value}")])
+
+    return AgentTool(name=name, description="echo", parameters=_EchoArgs, execute=_exec)
+
+
+def _make_group(gid: str, names: list[str]) -> DeferredToolGroup:
+    async def _loader():
+        return [_echo_tool(n) for n in names]
+
+    return DeferredToolGroup(
+        group_id=gid,
+        display_name="Test",
+        description="desc",
+        tool_names=names,
+        loader=_loader,
+    )
+
+
+def _mw(groups, *, strategy="dispatch", extra=None):
+    extra = extra if extra is not None else {}
+    return DeferredToolsMiddleware(
+        groups=groups, extra_ref=lambda: extra, strategy=strategy
+    )
+
+
+class TestDispatchStrategy:
+    def test_tools_attr_has_both_builtins(self) -> None:
+        mw = _mw([_make_group("g", ["t1"])])
+        names = [t.name for t in mw.tools]
+        assert names == ["load_tools", "deferred_tool_call"]
+
+    def test_inject_strategy_has_only_load_tools(self) -> None:
+        mw = _mw([_make_group("g", ["t1"])], strategy="inject")
+        assert [t.name for t in mw.tools] == ["load_tools"]
+
+    async def test_system_prompt_static_across_expansion(self) -> None:
+        mw = _mw([_make_group("g", ["t1", "t2"])])
+        ctx = AgentContext(system_prompt="base", messages=[], tools=list(mw.tools))
+        before = await mw.transform_system_prompt("base", ctx=ctx)
+        await mw._expand_callback("g", None)
+        after = await mw.transform_system_prompt("base", ctx=ctx)
+        assert before == after  # byte-identical — the headline property
+
+    async def test_load_tools_result_carries_schemas(self) -> None:
+        mw = _mw([_make_group("g", ["t1"])])
+        out = await mw._expand_callback("g", None)
+        assert out.expanded is True
+        assert out.schemas is not None
+        assert out.schemas[0]["name"] == "t1"
+
+    async def test_load_tools_idempotent_and_deterministic(self) -> None:
+        mw = _mw([_make_group("g", ["t1"])])
+        first = await mw._expand_callback("g", None)
+        second = await mw._expand_callback("g", None)
+        # Compaction self-rescue: repeat calls serialize byte-identically.
+        assert json.dumps(first.schemas, sort_keys=True) == json.dumps(
+            second.schemas, sort_keys=True
+        )
+
+    async def test_loaded_tools_enter_context_hidden(self) -> None:
+        mw = _mw([_make_group("g", ["t1"])])
+        ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
+        await mw._expand(group_id="g", tool_names=None, context=ctx)
+        loaded = next(t for t in ctx.tools if t.name == "t1")
+        assert loaded.expose_to_model is False
+
+    async def test_resolver_dispatches_with_implicit_load(self) -> None:
+        mw = _mw([_make_group("g", ["t1"])])
+        ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
+        call = ToolCall(
+            id="tc-1",
+            name="deferred_tool_call",
+            arguments={"tool_name": "t1", "arguments": {"value": "hi"}},
+        )
+        rewritten = await mw.resolve_tool_call(call, context=ctx)
+        assert rewritten is not None
+        assert rewritten.id == "tc-1"
+        assert rewritten.name == "t1"
+        assert rewritten.arguments == {"value": "hi"}
+        # Implicit load appended the hidden tool so the pipeline can find it.
+        assert any(t.name == "t1" and not t.expose_to_model for t in ctx.tools)
+
+    async def test_resolver_ignores_other_tools(self) -> None:
+        mw = _mw([_make_group("g", ["t1"])])
+        ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
+        call = ToolCall(id="tc-2", name="load_tools", arguments={"group_id": "g"})
+        assert await mw.resolve_tool_call(call, context=ctx) is None
+
+    async def test_resolver_unknown_tool_returns_none(self) -> None:
+        mw = _mw([_make_group("g", ["t1"])])
+        ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
+        call = ToolCall(
+            id="tc-3",
+            name="deferred_tool_call",
+            arguments={"tool_name": "nope", "arguments": {}},
+        )
+        assert await mw.resolve_tool_call(call, context=ctx) is None
+
+    async def test_dispatcher_execute_is_error_fallback(self) -> None:
+        mw = _mw([_make_group("g", ["t1"])])
+        dispatcher = next(t for t in mw.tools if t.name == "deferred_tool_call")
+        args = dispatcher.parameters.model_validate(
+            {"tool_name": "nope", "arguments": {}}
+        )
+        result = await dispatcher.execute("tc-4", args)
+        assert result.is_error is True
+        assert "t1" in result.content[0].text  # lists valid names
+        assert "load_tools" in result.content[0].text  # recovery hint
+
+    async def test_direct_native_call_to_hidden_tool_executes(self) -> None:
+        """If the model hallucinates a direct tool_use with the real name,
+        the engine resolves it from context.tools despite expose_to_model=False."""
+        from cubepi.agent.tools import execute_tool_calls
+        from cubepi.providers.faux import faux_assistant_message
+
+        mw = _mw([_make_group("g", ["t1"])])
+        ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
+        await mw._expand(group_id="g", tool_names=None, context=ctx)
+        call = ToolCall(id="tc-direct", name="t1", arguments={"value": "hi"})
+        batch = await execute_tool_calls(
+            ctx,
+            faux_assistant_message(call, stop_reason="tool_use"),
+            emit=lambda e: None,
+        )
+        assert batch.messages[0].content[0].text == "echo:hi"
+
+    async def test_inject_strategy_resolver_is_noop(self) -> None:
+        mw = _mw([_make_group("g", ["t1"])], strategy="inject")
+        ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
+        call = ToolCall(
+            id="tc-5",
+            name="deferred_tool_call",
+            arguments={"tool_name": "t1", "arguments": {"value": "x"}},
+        )
+        assert await mw.resolve_tool_call(call, context=ctx) is None
+
+
+class TestDispatchResume:
+    async def test_resume_restores_loader_cache_and_hidden_tools(self) -> None:
+        group = _make_group("g", ["t1", "t2"])
+        state = await DeferredToolsMiddleware.prepare_resumed_state(
+            [group], {"g": ["t1"]}, strategy="dispatch"
+        )
+        assert [t.name for t in state.pre_loaded_tools] == ["t1"]
+        assert all(not t.expose_to_model for t in state.pre_loaded_tools)
+        assert "g" in state.loader_cache
+        # Partially expanded groups remain deferrable.
+        assert [g.group_id for g in state.remaining_groups] == ["g"]
+
+        extra: dict = {"expanded_groups": {"g": ["t1"]}}
+        mw = DeferredToolsMiddleware(
+            groups=state.remaining_groups,
+            extra_ref=lambda: extra,
+            strategy="dispatch",
+            resumed_loader_cache=state.loader_cache,
+        )
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=[*mw.tools, *state.pre_loaded_tools],
+        )
+        call = ToolCall(
+            id="tc-r1",
+            name="deferred_tool_call",
+            arguments={"tool_name": "t1", "arguments": {"value": "hi"}},
+        )
+        rewritten = await mw.resolve_tool_call(call, context=ctx)
+        assert rewritten is not None and rewritten.name == "t1"
+
+    async def test_resume_dispatch_keeps_fully_expanded_group_loadable(self) -> None:
+        """Fully expanded groups stay in remaining so load_tools can re-serve
+        schemas after compaction."""
+        group = _make_group("g", ["t1"])
+        state = await DeferredToolsMiddleware.prepare_resumed_state(
+            [group], {"g": None}, strategy="dispatch"
+        )
+        assert [g.group_id for g in state.remaining_groups] == ["g"]

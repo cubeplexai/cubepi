@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from cubepi.deferred._catalog import (
-    render_catalog,
-    render_expanded_schemas,
-    render_static_catalog,
-)
+from cubepi.deferred._catalog import render_catalog, render_static_catalog
 from cubepi.deferred.types import DeferredToolGroup
 
 
@@ -120,51 +116,6 @@ class TestRenderCatalog:
         result = render_catalog(groups=groups, expanded={}, header="Custom header text")
         assert "Custom header text" in result
 
-
-class TestRenderExpandedSchemas:
-    def test_no_expansions_returns_empty(self) -> None:
-        result = render_expanded_schemas(expanded_schemas=[])
-        assert result == ""
-
-    def test_single_expansion(self) -> None:
-        schemas = [
-            (
-                "mcp:github",
-                [
-                    {
-                        "name": "create_issue",
-                        "description": "Create an issue",
-                        "parameters": {"type": "object", "properties": {}},
-                    }
-                ],
-            )
-        ]
-        result = render_expanded_schemas(expanded_schemas=schemas)
-        assert "mcp:github" in result
-        assert "create_issue" in result
-        assert "Create an issue" in result
-
-    def test_expansion_order_preserved(self) -> None:
-        schemas = [
-            ("mcp:linear", [{"name": "t1", "description": "d1", "parameters": {}}]),
-            ("mcp:github", [{"name": "t2", "description": "d2", "parameters": {}}]),
-        ]
-        result = render_expanded_schemas(expanded_schemas=schemas)
-        linear_pos = result.index("mcp:linear")
-        github_pos = result.index("mcp:github")
-        assert linear_pos < github_pos
-
-    def test_append_only_prefix_stable(self) -> None:
-        schemas_v1 = [
-            ("mcp:linear", [{"name": "t1", "description": "d1", "parameters": {}}])
-        ]
-        schemas_v2 = [
-            ("mcp:linear", [{"name": "t1", "description": "d1", "parameters": {}}]),
-            ("mcp:github", [{"name": "t2", "description": "d2", "parameters": {}}]),
-        ]
-        result_v1 = render_expanded_schemas(expanded_schemas=schemas_v1)
-        result_v2 = render_expanded_schemas(expanded_schemas=schemas_v2)
-        assert result_v2.startswith(result_v1)
 
 
 class TestStaticCatalog:

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from cubepi.deferred.types import DeferredToolGroup
 
 DEFAULT_CATALOG_HEADER = (
@@ -22,9 +20,6 @@ DEFAULT_DISPATCH_CATALOG_HEADER = (
     "If you already know the right arguments from the names below, you may call\n"
     "`deferred_tool_call` directly — the tool loads on demand."
 )
-
-
-ToolSchema = dict[str, object]
 
 
 def render_static_catalog(
@@ -85,25 +80,3 @@ def render_catalog(
         return ""
 
     return header + "\n\n" + "\n".join(lines)
-
-
-def render_expanded_schemas(
-    *,
-    expanded_schemas: list[tuple[str, list[ToolSchema]]],
-) -> str:
-    if not expanded_schemas:
-        return ""
-
-    sections: list[str] = []
-    for group_id, tool_defs in expanded_schemas:
-        tool_lines: list[str] = []
-        for td in tool_defs:
-            name = td.get("name", "")
-            desc = td.get("description", "")
-            params = td.get("parameters", {})
-            params_json = json.dumps(params, sort_keys=True, ensure_ascii=False)
-            tool_lines.append(f"- **{name}**: {desc}")
-            tool_lines.append(f"  Parameters: {params_json}")
-        sections.append(f"## {group_id}\n\n" + "\n".join(tool_lines))
-
-    return "# Expanded tool groups\n\n" + "\n\n".join(sections)
