@@ -41,12 +41,16 @@ automatically — no manual wiring needed:
 from cubepi import Agent
 from cubepi.deferred import DeferredToolGroup
 
+# load_github_tools / load_linear_tools are zero-arg async callables
+# returning list[AgentTool]. See "Writing a loader" below for the two
+# common shapes (MCP-backed and hand-written @tool functions).
+
 github_group = DeferredToolGroup(
     group_id="mcp:github",
     display_name="GitHub",
     description="Issues, PRs, repos, code search",
     tool_names=["create_issue", "search_repos", "create_pr", "list_comments"],
-    loader=github_mcp.load_tools,  # async () -> list[AgentTool]
+    loader=load_github_tools,
 )
 
 linear_group = DeferredToolGroup(
@@ -54,7 +58,7 @@ linear_group = DeferredToolGroup(
     display_name="Linear",
     description="Project management and issue tracking",
     tool_names=["create_issue", "update_issue", "list_projects"],
-    loader=linear_mcp.load_tools,
+    loader=load_linear_tools,
 )
 
 agent = Agent(
@@ -71,8 +75,81 @@ agent = Agent(
 | `group_id` | `str` | Unique identifier the model uses in `load_tools` calls (e.g. `"mcp:github"`) |
 | `display_name` | `str` | Human-readable label shown in the catalog |
 | `description` | `str` | One-line summary of the group's capabilities |
-| `tool_names` | `list[str]` | Tool names shown in the catalog |
+| `tool_names` | `list[str]` | Tool names shown in the catalog. **Must match the `AgentTool.name` of each tool the loader returns** — selective expansion (`load_tools(group_id, tool_names=[…])`) matches on this. |
 | `loader` | `async () -> list[AgentTool]` | Callback that returns the full tool set for this group |
+
+### Writing a loader
+
+The loader is a zero-argument async callable that returns
+`list[AgentTool]`. CubePi only cares about its return type — where the
+`AgentTool` objects come from is up to you. Two common shapes:
+
+**From an MCP server.** `load_mcp_tools_stdio` / `load_mcp_tools_http`
+return an `MCPDiscoveryResult` whose `.tools` is the `list[AgentTool]`
+you want. Wrap it:
+
+```python
+from cubepi.deferred import DeferredToolGroup
+from cubepi.mcp import load_mcp_tools_stdio
+
+async def load_github_tools():
+    result = await load_mcp_tools_stdio(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-github"],
+        env={"GITHUB_TOKEN": "ghp_…"},
+    )
+    return result.tools   # list[AgentTool]
+
+github_group = DeferredToolGroup(
+    group_id="mcp:github",
+    display_name="GitHub",
+    description="Issues, PRs, repos, code search",
+    tool_names=["create_issue", "search_repos", "create_pr"],
+    loader=load_github_tools,
+)
+```
+
+The names in `tool_names` must match the MCP server's tool names —
+those become `AgentTool.name` after discovery. If the catalog lists
+`create_issue` but the server publishes it as `github_create_issue`,
+selective expansion misses.
+
+**From hand-written `@tool` functions.** Any function decorated with
+`@tool` produces an `AgentTool` (its `.name` defaults to the function
+name, overridable via `@tool(name="…")`). A loader for hand-written
+tools is just `async lambda` over a list:
+
+```python
+from cubepi import tool
+from cubepi.deferred import DeferredToolGroup
+
+@tool
+async def create_issue(*, repo: str, title: str, body: str) -> str:
+    "Open a GitHub issue."
+    ...
+
+@tool
+async def search_repos(*, query: str) -> str:
+    "Search public repos."
+    ...
+
+async def load_github_tools():
+    return [create_issue, search_repos]   # already AgentTools
+
+github_group = DeferredToolGroup(
+    group_id="mcp:github",
+    display_name="GitHub",
+    description="Issues, PRs, repos, code search",
+    tool_names=["create_issue", "search_repos"],
+    loader=load_github_tools,
+)
+```
+
+You can mix the two — return MCP tools and hand-written tools in the
+same list — as long as every name in `tool_names` matches an
+`AgentTool.name` in the returned list. If the loader raises, the
+error is reported to the model as a tool error and the group stays
+unexpanded.
 
 ## The `load_tools` tool
 

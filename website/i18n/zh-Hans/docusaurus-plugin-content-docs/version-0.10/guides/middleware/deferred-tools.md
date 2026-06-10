@@ -40,12 +40,16 @@ to load a group's tools for the rest of this conversation.
 from cubepi import Agent
 from cubepi.deferred import DeferredToolGroup
 
+# load_github_tools / load_linear_tools 是零参 async 可调用对象，
+# 返回 list[AgentTool]。具体怎么写见下面的「编写 loader」一节，
+# 给了 MCP 后端和手写 @tool 函数两种常见形态。
+
 github_group = DeferredToolGroup(
     group_id="mcp:github",
     display_name="GitHub",
     description="Issues, PRs, repos, code search",
     tool_names=["create_issue", "search_repos", "create_pr", "list_comments"],
-    loader=github_mcp.load_tools,  # async () -> list[AgentTool]
+    loader=load_github_tools,
 )
 
 linear_group = DeferredToolGroup(
@@ -53,7 +57,7 @@ linear_group = DeferredToolGroup(
     display_name="Linear",
     description="Project management and issue tracking",
     tool_names=["create_issue", "update_issue", "list_projects"],
-    loader=linear_mcp.load_tools,
+    loader=load_linear_tools,
 )
 
 agent = Agent(
@@ -70,8 +74,77 @@ agent = Agent(
 | `group_id` | `str` | 模型在 `load_tools` 调用里使用的唯一 ID（如 `"mcp:github"`） |
 | `display_name` | `str` | 目录里展示的人类可读名称 |
 | `description` | `str` | 该组能力的一行摘要 |
-| `tool_names` | `list[str]` | 目录里列出的 tool 名 |
+| `tool_names` | `list[str]` | 目录里列出的 tool 名。**必须和 loader 返回的每个工具的 `AgentTool.name` 完全一致** —— 选择性展开（`load_tools(group_id, tool_names=[…])`）就靠这个字段匹配。 |
 | `loader` | `async () -> list[AgentTool]` | 返回该组完整 tool 集的回调 |
+
+### 编写 loader
+
+`loader` 是一个零参 async 可调用对象，返回 `list[AgentTool]`。CubePi
+只看返回类型——里面的 `AgentTool` 怎么来由你决定。两种典型写法：
+
+**从 MCP server 加载。** `load_mcp_tools_stdio` / `load_mcp_tools_http`
+返回 `MCPDiscoveryResult`，里面 `.tools` 字段就是你想要的
+`list[AgentTool]`。包一层：
+
+```python
+from cubepi.deferred import DeferredToolGroup
+from cubepi.mcp import load_mcp_tools_stdio
+
+async def load_github_tools():
+    result = await load_mcp_tools_stdio(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-github"],
+        env={"GITHUB_TOKEN": "ghp_…"},
+    )
+    return result.tools   # list[AgentTool]
+
+github_group = DeferredToolGroup(
+    group_id="mcp:github",
+    display_name="GitHub",
+    description="Issues, PRs, repos, code search",
+    tool_names=["create_issue", "search_repos", "create_pr"],
+    loader=load_github_tools,
+)
+```
+
+`tool_names` 里写的名字必须和 MCP server 公布的工具名一致——这些名字
+discovery 之后会成为 `AgentTool.name`。如果目录里写 `create_issue` 但
+server 发布的是 `github_create_issue`，选择性展开就匹配不到。
+
+**从手写 `@tool` 函数加载。** 任何被 `@tool` 装饰的函数都是一个
+`AgentTool`（`.name` 默认取函数名，可用 `@tool(name="…")` 覆盖）。
+loader 就是一个返回列表的 async 函数：
+
+```python
+from cubepi import tool
+from cubepi.deferred import DeferredToolGroup
+
+@tool
+async def create_issue(*, repo: str, title: str, body: str) -> str:
+    "Open a GitHub issue."
+    ...
+
+@tool
+async def search_repos(*, query: str) -> str:
+    "Search public repos."
+    ...
+
+async def load_github_tools():
+    return [create_issue, search_repos]   # 已经是 AgentTool
+
+github_group = DeferredToolGroup(
+    group_id="mcp:github",
+    display_name="GitHub",
+    description="Issues, PRs, repos, code search",
+    tool_names=["create_issue", "search_repos"],
+    loader=load_github_tools,
+)
+```
+
+两种可以混用——同一个 list 里既有 MCP 工具又有手写工具——只要
+`tool_names` 里每一个名字都能在返回的 list 里找到对应的
+`AgentTool.name` 就行。如果 loader 抛异常，错误会作为 tool error 回给
+模型，组保持未展开。
 
 ## `load_tools` 工具
 
