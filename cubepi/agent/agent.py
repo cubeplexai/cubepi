@@ -178,6 +178,7 @@ class Agent(Generic[TMessage]):
         transform_system_prompt: Callable | None = None,
         after_model_response: Callable | None = None,
         before_tool_call: Callable | None = None,
+        resolve_tool_call: Callable | None = None,
         after_tool_call: Callable | None = None,
         should_stop_after_turn: Callable | None = None,
         on_run_end: Callable | None = None,
@@ -246,6 +247,9 @@ class Agent(Generic[TMessage]):
             "after_model_response"
         )
         self.before_tool_call = before_tool_call or _mw_hooks.get("before_tool_call")
+        self.resolve_tool_call = resolve_tool_call or _mw_hooks.get(
+            "resolve_tool_call"
+        )
         self.after_tool_call = after_tool_call or _mw_hooks.get("after_tool_call")
         self.should_stop_after_turn = should_stop_after_turn or _mw_hooks.get(
             "should_stop_after_turn"
@@ -588,6 +592,10 @@ class Agent(Generic[TMessage]):
             transform_system_prompt=self.transform_system_prompt,
             after_model_response=self.after_model_response,
             before_tool_call=self.before_tool_call,
+            # Without the resolver, dispatch-mode forks could never invoke
+            # loaded deferred tools (the dispatcher's execute is fork-denied
+            # and hidden tools are not in the payload).
+            resolve_tool_call=self.resolve_tool_call,
             after_tool_call=self.after_tool_call,
             should_stop_after_turn=self.should_stop_after_turn,
             on_run_end=self.on_run_end,
@@ -721,6 +729,7 @@ class Agent(Generic[TMessage]):
                 transform_system_prompt=self.transform_system_prompt,
                 after_model_response=self.after_model_response,
                 before_tool_call=self.before_tool_call,
+                resolve_tool_call=self.resolve_tool_call,
                 after_tool_call=self.after_tool_call,
                 should_stop_after_turn=self.should_stop_after_turn,
                 on_run_end=self.on_run_end,
@@ -744,6 +753,7 @@ class Agent(Generic[TMessage]):
                 transform_system_prompt=self.transform_system_prompt,
                 after_model_response=self.after_model_response,
                 before_tool_call=self.before_tool_call,
+                resolve_tool_call=self.resolve_tool_call,
                 after_tool_call=self.after_tool_call,
                 should_stop_after_turn=self.should_stop_after_turn,
                 on_run_end=self.on_run_end,
@@ -1015,6 +1025,7 @@ class Agent(Generic[TMessage]):
                 transform_system_prompt=self.transform_system_prompt,
                 after_model_response=self.after_model_response,
                 before_tool_call=self.before_tool_call,
+                resolve_tool_call=self.resolve_tool_call,
                 after_tool_call=self.after_tool_call,
                 should_stop_after_turn=self.should_stop_after_turn,
                 on_run_end=self.on_run_end,

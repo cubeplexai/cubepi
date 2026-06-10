@@ -13,7 +13,7 @@ from cubepi.agent.types import (
     BeforeToolCallResult,
 )
 from cubepi.hitl.binding import HitlBinding
-from cubepi.providers.base import AssistantMessage, BoundModel, Message
+from cubepi.providers.base import AssistantMessage, BoundModel, Message, ToolCall
 from cubepi.types import JsonObject, StructuredObject
 
 
@@ -62,6 +62,26 @@ class Middleware:
         *,
         signal: asyncio.Event | None = None,
     ) -> AfterToolCallResult | None:
+        raise NotImplementedError
+
+    async def resolve_tool_call(
+        self,
+        tool_call: ToolCall,
+        *,
+        context: AgentContext,
+        signal: asyncio.Event | None = None,
+    ) -> ToolCall | None:
+        """Rewrite a tool call before validation/hooks. Return None to pass
+        through unchanged.
+
+        The returned ToolCall MUST keep the original ``id`` — the result
+        message is keyed by it on the wire.
+
+        Composition is FIRST-NON-NONE-WINS: the first middleware to return a
+        rewritten call short-circuits the chain. This differs from
+        ``before_tool_call``, which chains sequentially. A resolver never
+        sees another resolver's output.
+        """
         raise NotImplementedError
 
     async def transform_system_prompt(
@@ -198,6 +218,20 @@ def compose_middleware(middlewares: list[Middleware]) -> dict[str, Callable]:
             )
 
         hooks["before_tool_call"] = composed_before
+
+    resolve_chain = [m for m in middlewares if _has_method(m, "resolve_tool_call")]
+    if resolve_chain:
+
+        async def composed_resolve(tool_call, *, context, signal=None):
+            for mw in resolve_chain:
+                result = await mw.resolve_tool_call(
+                    tool_call, context=context, signal=signal
+                )
+                if result is not None:
+                    return result
+            return None
+
+        hooks["resolve_tool_call"] = composed_resolve
 
     after_chain = [m for m in middlewares if _has_method(m, "after_tool_call")]
     if after_chain:
