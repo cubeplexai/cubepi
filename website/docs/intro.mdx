@@ -71,10 +71,11 @@ the `main` branch. APIs documented here can still change before they
 ship in a tagged release.
 
 The latest released version is v<PackageVersion /> ([switch to it from the
-version picker, top-right](pathname:///)). CubePi 0.9 adds
-`FallbackBoundModel` for automatic provider failover,
-`BoundModel.generate()` / `.stream()` for direct provider calls, and
-`TodoListMiddleware` for structured task tracking in multi-step agents.
+version picker, top-right](pathname:///)). CubePi 0.10 adds
+`DeferredToolGroup` for progressive MCP tool disclosure,
+`BoundModel.generate_structured()` for typed structured output, a
+`tool_choice` parameter on the `Provider` protocol, and `GoalMiddleware`
+for autonomous goal-driven runs.
 
 Source, issues, and discussion live on
 [GitHub](https://github.com/cubeplexai/cubepi).
