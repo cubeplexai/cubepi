@@ -18,6 +18,7 @@ to remember "before" or "after" precedence guesses.
 | `transform_context` | **Chain** — each sees previous output | Yes |
 | `convert_to_llm` | **Last wins** | Only the last one runs |
 | `transform_system_prompt` | **Chain** | Yes |
+| `resolve_tool_call` | **First non-`None` wins** — rewrites the call before validation | First match short-circuits |
 | `before_tool_call` | **First block stops**; non-block accumulates | Block wins; `edited_args` last-writer-wins; `hitl_trace` merges |
 | `after_tool_call` | **Later overrides earlier** | Last write wins |
 | `should_stop_after_turn` | **Any `True` stops** (OR) | No |
@@ -52,6 +53,18 @@ that the **last** middleware in the list that implements
 If you find yourself needing two `convert_to_llm` middlewares,
 collapse them into one (call site composition: write one that calls
 both).
+
+## `resolve_tool_call`
+
+**First non-`None` wins.** The first middleware to return a rewritten
+`ToolCall` short-circuits the chain — later resolvers never see the
+original call, and no resolver ever sees another resolver's output. If
+every middleware returns `None`, the call proceeds unchanged.
+
+This deliberately differs from `before_tool_call`'s chaining: a
+resolution is a single rewrite (e.g. unwrapping the
+[deferred-tools](./deferred-tools) dispatcher to the real tool), not an
+accumulation.
 
 ## `before_tool_call`
 

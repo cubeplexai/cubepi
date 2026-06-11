@@ -97,13 +97,14 @@ class Provider(Protocol):
 
 ## Middleware
 
-`Middleware` 是有最多八个类型化 hook 的类：
+`Middleware` 是有最多九个类型化 hook 的类：
 
 | Hook | 何时触发 | 组合规则 |
 |---|---|---|
 | `transform_context` | 每次调模型之前,处理消息列表 | 链式 —— 每个收到上一个的输出 |
 | `convert_to_llm` | provider 序列化之前 | 最后一个实现生效 |
 | `transform_system_prompt` | 每次调模型之前,处理 system prompt | 链式 |
+| `resolve_tool_call` | 每个工具调用之前（参数校验之前，可改写调用） | 第一个非 `None` 胜出 |
 | `before_tool_call` | 每个工具调用之前(在参数校验后) | 第一个 `block=True` 短路 |
 | `after_tool_call` | 每个工具调用之后(在 `execute` 之后) | 后写覆盖先写 |
 | `after_model_response` | assistant 消息落定之后 | 返回 `TurnAction` 控制流向 |

@@ -121,13 +121,14 @@ Subscribe to agent events for UI; for low-level token routing dig into
 
 ## Middleware
 
-`Middleware` is a class with up to eight typed hooks:
+`Middleware` is a class with up to nine typed hooks:
 
 | Hook | When it runs | Composition rule |
 |---|---|---|
 | `transform_context` | Before each model call, on the message list | Chained — each receives previous result |
 | `convert_to_llm` | Right before serialisation to the provider | Last implementation wins |
 | `transform_system_prompt` | Before each model call, on the system prompt | Chained |
+| `resolve_tool_call` | Per tool call, before validation — may rewrite the call | First non-`None` wins |
 | `before_tool_call` | Per tool call, after arg validation | First `block=True` short-circuits |
 | `after_tool_call` | Per tool call, after `execute` | Later override earlier |
 | `after_model_response` | After the assistant message lands | Returns a `TurnAction` controlling flow |

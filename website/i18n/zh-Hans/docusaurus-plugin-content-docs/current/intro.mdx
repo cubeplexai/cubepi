@@ -35,10 +35,10 @@ pip install cubepi
   生产环境。
 - **原生多 provider。** Anthropic 和 OpenAI 开箱即用,通过 `Provider`
   Protocol 接入。要新增一个 provider 只需要写一个类。
-- **八个 Hook 的中间件。** `transform_context`、`convert_to_llm`、
-  `transform_system_prompt`、`before_tool_call`、`after_tool_call`、
-  `should_stop_after_turn`、`after_model_response`、`on_run_end`——
-  每一个都有明确的组合规则。没有"节点执行顺序之谜"。
+- **九个 Hook 的中间件。** `transform_context`、`convert_to_llm`、
+  `transform_system_prompt`、`resolve_tool_call`、`before_tool_call`、
+  `after_tool_call`、`should_stop_after_turn`、`after_model_response`、
+  `on_run_end`——每一个都有明确的组合规则。没有"节点执行顺序之谜"。
 - **MCP 加载器。** 指向任意
   [Model Context Protocol](https://modelcontextprotocol.io) 服务器
   （HTTP 或 stdio),就能拿回一组 `AgentTool`。

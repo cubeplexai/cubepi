@@ -182,6 +182,7 @@ hooks = compose_middleware([LoggingMiddleware(), SafetyMiddleware()])
 |------|------|
 | `transform_context` | Chained — each receives previous result |
 | `convert_to_llm` | Last implementation wins |
+| `resolve_tool_call` | First non-`None` rewrite wins (short-circuits) |
 | `before_tool_call` | Any block stops execution |
 | `after_tool_call` | Later overrides earlier |
 | `transform_system_prompt` | Chained — each receives previous result |

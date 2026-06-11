@@ -16,6 +16,7 @@ description: "了解 CubePi 如何通过 per-hook 规则组合多个中间件。
 | `transform_context` | **链式**——每个看到上一个的输出 | 是 |
 | `convert_to_llm` | **最后一个胜出** | 只有一个运行 |
 | `transform_system_prompt` | **链式** | 是 |
+| `resolve_tool_call` | **第一个非 `None` 胜出**——在校验前改写调用 | 第一个命中即短路 |
 | `before_tool_call` | **第一个 block 停止**；非 block 累积 | block 胜出；`edited_args` 最后写入者胜出；`hitl_trace` 合并 |
 | `after_tool_call` | **后面覆盖前面** | 最后写入胜出 |
 | `should_stop_after_turn` | **任一 True 即停止**（OR） | 否 |
@@ -45,6 +46,16 @@ CubePi 强制**列表中的最后一个**实现了 `convert_to_llm` 的中间件
 
 如果你发现自己需要两个 `convert_to_llm` 中间件，将它们合并为一个
 （调用点组合：写一个调用两者的中间件）。
+
+## `resolve_tool_call`
+
+**第一个非 `None` 返回值胜出。** 第一个返回改写后 `ToolCall` 的中间件
+会短路整个链——后面的 resolver 看不到原始调用，任何 resolver 也看不到
+其他 resolver 的输出。全部返回 `None` 时调用原样继续。
+
+这与 `before_tool_call` 的链式组合是刻意不同的：一次 resolution 是
+单一改写（例如把[延迟工具](./deferred-tools)的 dispatcher 解包成
+真实工具），不是累积。
 
 ## `before_tool_call`
 
