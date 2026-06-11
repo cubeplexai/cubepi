@@ -469,3 +469,67 @@ class TestCodexReviewFindings:
         text = msg.content[0].text
         assert "Invalid arguments for tool 'deferred_tool_call'" in text
         assert "dictionary" in text
+
+
+class TestSequentialOrderingPreserved:
+    async def test_sequential_batch_resolves_lazily(self) -> None:
+        """In a batch that is sequential by raw names, a later dispatcher
+        call's loader must NOT run before an earlier sequential tool has
+        executed (the loader may depend on state that tool sets up)."""
+        from cubepi.agent.tools import execute_tool_calls
+        from cubepi.providers.faux import faux_assistant_message
+
+        class _NoArgs(BaseModel):
+            pass
+
+        state: dict = {}
+
+        async def _setup_exec(tool_call_id, args, *, signal=None, on_update=None):
+            state["credentials"] = "ready"
+            return AgentToolResult(content=[TextContent(text="setup done")])
+
+        setup_tool = AgentTool(
+            name="setup_tool",
+            description="d",
+            parameters=_NoArgs,
+            execute=_setup_exec,
+            execution_mode="sequential",
+        )
+
+        loader_saw: list = []
+
+        async def _loader():
+            loader_saw.append(state.get("credentials"))
+            return [_echo_tool("t1")]
+
+        group = DeferredToolGroup(
+            group_id="g",
+            display_name="G",
+            description="d",
+            tool_names=["t1"],
+            loader=_loader,
+        )
+        extra: dict = {}
+        mw = DeferredToolsMiddleware(
+            groups=[group], extra_ref=lambda: extra, strategy="dispatch"
+        )
+        ctx = AgentContext(
+            system_prompt="", messages=[], tools=[*mw.tools, setup_tool], extra=extra
+        )
+        calls = [
+            ToolCall(id="tc-1", name="setup_tool", arguments={}),
+            ToolCall(
+                id="tc-2",
+                name="deferred_tool_call",
+                arguments={"tool_name": "t1", "arguments": {"value": "hi"}},
+            ),
+        ]
+        batch = await execute_tool_calls(
+            ctx,
+            faux_assistant_message(calls, stop_reason="tool_use"),
+            resolve_tool_call=mw.resolve_tool_call,
+            emit=lambda e: None,
+        )
+        # Loader ran AFTER the sequential setup tool executed.
+        assert loader_saw == ["ready"]
+        assert batch.messages[1].content[0].text == "echo:hi"

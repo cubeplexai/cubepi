@@ -167,6 +167,13 @@ async def _resolve_tool_call(
         )
     if rewritten is None:
         return tool_call, False, None
+    if rewritten.id != tool_call.id:
+        # Enforce the resolver contract: the result message is keyed by the
+        # original id on the wire, so a resolver that invents a new id would
+        # desynchronize provider-side tool_result correlation.
+        rewritten = ToolCall(
+            id=tool_call.id, name=rewritten.name, arguments=rewritten.arguments
+        )
     return rewritten, True, None
 
 
@@ -372,17 +379,41 @@ async def execute_tool_calls(
 ) -> ToolCallBatch:
     tool_calls = [c for c in assistant_message.content if isinstance(c, ToolCall)]
 
-    # Resolve up front (in order) so the execution-mode decision below sees
-    # the REAL tool names — a dispatcher call targeting a sequential tool
-    # must route through the sequential executor. Resolution is idempotent,
-    # so hoisting it ahead of execution is safe.
+    has_sequential_raw = any(
+        t.execution_mode == "sequential"
+        for tc in tool_calls
+        if context.tools
+        for t in context.tools
+        if t.name == tc.name
+    )
+
+    if tool_execution == "sequential" or has_sequential_raw:
+        # Already sequential by raw names: resolve lazily, one call at a
+        # time, so a later dispatcher call's side effects (e.g. a deferred
+        # group loader) never run before an earlier sequential tool that
+        # may set up the state they depend on.
+        return await _execute_sequential(
+            context,
+            assistant_message,
+            tool_calls,
+            before_tool_call,
+            resolve_tool_call,
+            after_tool_call,
+            signal,
+            emit,
+        )
+
+    # Would-be-parallel batch: no ordering guarantee exists, so resolution
+    # may run eagerly. It must — the execution-mode decision has to see the
+    # REAL tool names: a dispatcher call targeting a sequential tool routes
+    # the whole batch through the sequential executor.
     resolutions: list[tuple[ToolCall, bool, _ImmediateOutcome | None]] = []
     for tc in tool_calls:
         resolutions.append(
             await _resolve_tool_call(tc, context, resolve_tool_call, signal)
         )
 
-    has_sequential = any(
+    has_sequential_resolved = any(
         t.execution_mode == "sequential"
         for (rtc, _, _) in resolutions
         if context.tools
@@ -390,15 +421,17 @@ async def execute_tool_calls(
         if t.name == rtc.name
     )
 
-    if tool_execution == "sequential" or has_sequential:
+    if has_sequential_resolved:
         return await _execute_sequential(
             context,
             assistant_message,
-            resolutions,
+            tool_calls,
             before_tool_call,
+            resolve_tool_call,
             after_tool_call,
             signal,
             emit,
+            preresolved=resolutions,
         )
     return await _execute_parallel(
         context,
@@ -414,16 +447,28 @@ async def execute_tool_calls(
 async def _execute_sequential(
     context: AgentContext,
     assistant_message: AssistantMessage,
-    resolutions: list[tuple[ToolCall, bool, _ImmediateOutcome | None]],
+    tool_calls: list[ToolCall],
     before_tool_call: Callable | None,
+    resolve_tool_call: Callable | None,
     after_tool_call: Callable | None,
     signal: asyncio.Event | None,
     emit_fn: Callable,
+    *,
+    preresolved: list[tuple[ToolCall, bool, _ImmediateOutcome | None]] | None = None,
 ) -> ToolCallBatch:
     finalized_list: list[_FinalizedOutcome] = []
     messages: list[ToolResultMessage] = []
 
-    for rtc, was_resolved, resolver_error in resolutions:
+    for idx, tc in enumerate(tool_calls):
+        if preresolved is not None:
+            rtc, was_resolved, resolver_error = preresolved[idx]
+        else:
+            # Lazy: resolve only when this call's turn comes, after every
+            # earlier call in the batch has fully executed.
+            rtc, was_resolved, resolver_error = await _resolve_tool_call(
+                tc, context, resolve_tool_call, signal
+            )
+
         await emit_event(
             emit_fn,
             ToolExecutionStartEvent(

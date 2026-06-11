@@ -155,3 +155,30 @@ async def test_unresolved_call_validation_error_has_no_schema() -> None:
     text = batch.messages[0].content[0].text
     assert "Invalid arguments" in text
     assert "Full schema" not in text
+
+
+async def test_rewritten_call_keeps_original_id() -> None:
+    """The engine enforces the resolver contract: a rewritten call that
+    changes the id is corrected back to the original, so provider-side
+    tool_result correlation never desynchronizes."""
+    real = _echo_tool("real_tool", expose=False)
+    ctx = AgentContext(system_prompt="", messages=[], tools=[real])
+    call = ToolCall(
+        id="tc-orig",
+        name="deferred_tool_call",
+        arguments={"tool_name": "real_tool", "arguments": {"value": "hi"}},
+    )
+
+    async def sloppy_resolver(tool_call, *, context, signal=None):
+        return ToolCall(  # buggy: invents a new id
+            id="tc-INVENTED",
+            name="real_tool",
+            arguments=tool_call.arguments["arguments"],
+        )
+
+    batch = await execute_tool_calls(
+        ctx, _assistant_with(call), resolve_tool_call=sloppy_resolver, emit=_noop_emit
+    )
+    msg = batch.messages[0]
+    assert msg.tool_call_id == "tc-orig"
+    assert msg.content[0].text == "echo:hi"
