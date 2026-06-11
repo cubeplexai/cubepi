@@ -372,21 +372,30 @@ async def execute_tool_calls(
 ) -> ToolCallBatch:
     tool_calls = [c for c in assistant_message.content if isinstance(c, ToolCall)]
 
+    # Resolve up front (in order) so the execution-mode decision below sees
+    # the REAL tool names — a dispatcher call targeting a sequential tool
+    # must route through the sequential executor. Resolution is idempotent,
+    # so hoisting it ahead of execution is safe.
+    resolutions: list[tuple[ToolCall, bool, _ImmediateOutcome | None]] = []
+    for tc in tool_calls:
+        resolutions.append(
+            await _resolve_tool_call(tc, context, resolve_tool_call, signal)
+        )
+
     has_sequential = any(
         t.execution_mode == "sequential"
-        for tc in tool_calls
+        for (rtc, _, _) in resolutions
         if context.tools
         for t in context.tools
-        if t.name == tc.name
+        if t.name == rtc.name
     )
 
     if tool_execution == "sequential" or has_sequential:
         return await _execute_sequential(
             context,
             assistant_message,
-            tool_calls,
+            resolutions,
             before_tool_call,
-            resolve_tool_call,
             after_tool_call,
             signal,
             emit,
@@ -394,9 +403,8 @@ async def execute_tool_calls(
     return await _execute_parallel(
         context,
         assistant_message,
-        tool_calls,
+        resolutions,
         before_tool_call,
-        resolve_tool_call,
         after_tool_call,
         signal,
         emit,
@@ -406,9 +414,8 @@ async def execute_tool_calls(
 async def _execute_sequential(
     context: AgentContext,
     assistant_message: AssistantMessage,
-    tool_calls: list[ToolCall],
+    resolutions: list[tuple[ToolCall, bool, _ImmediateOutcome | None]],
     before_tool_call: Callable | None,
-    resolve_tool_call: Callable | None,
     after_tool_call: Callable | None,
     signal: asyncio.Event | None,
     emit_fn: Callable,
@@ -416,11 +423,7 @@ async def _execute_sequential(
     finalized_list: list[_FinalizedOutcome] = []
     messages: list[ToolResultMessage] = []
 
-    for tc in tool_calls:
-        rtc, was_resolved, resolver_error = await _resolve_tool_call(
-            tc, context, resolve_tool_call, signal
-        )
-
+    for rtc, was_resolved, resolver_error in resolutions:
         await emit_event(
             emit_fn,
             ToolExecutionStartEvent(
@@ -482,9 +485,8 @@ async def _execute_sequential(
 async def _execute_parallel(
     context: AgentContext,
     assistant_message: AssistantMessage,
-    tool_calls: list[ToolCall],
+    resolutions: list[tuple[ToolCall, bool, _ImmediateOutcome | None]],
     before_tool_call: Callable | None,
-    resolve_tool_call: Callable | None,
     after_tool_call: Callable | None,
     signal: asyncio.Event | None,
     emit_fn: Callable,
@@ -499,10 +501,7 @@ async def _execute_parallel(
     #     End event when prepare later raised, leaving state.pending_tool_calls
     #     and trace spans permanently open.
     entries: list[_FinalizedOutcome | _PreparedToolCall] = []
-    for tc in tool_calls:
-        rtc, was_resolved, resolver_error = await _resolve_tool_call(
-            tc, context, resolve_tool_call, signal
-        )
+    for rtc, was_resolved, resolver_error in resolutions:
         preparation = resolver_error or await _prepare_tool_call(
             context,
             assistant_message,

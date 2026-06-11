@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent, ToolCall
-from cubepi.deferred import DeferredToolsMiddleware
+from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
 from tests.deferred._helpers import _dummy_tool, _echo_tool, _mw
 from tests.deferred._helpers import _make_group as _make_group_base
 
@@ -325,3 +325,147 @@ class TestDispatchFork:
             if getattr(m, "tool_call_id", None) == "tc-2"
         ]
         assert echo_results == ["echo:fork"]
+
+
+class TestCodexReviewFindings:
+    async def test_dispatched_sequential_tool_runs_in_sequential_mode(self) -> None:
+        """The execution-mode decision must see the RESOLVED tool name —
+        a dispatcher call targeting a sequential tool may not run in the
+        parallel executor."""
+        import asyncio as aio
+
+        from cubepi.agent.tools import execute_tool_calls
+        from cubepi.providers.faux import faux_assistant_message
+
+        order: list[str] = []
+
+        class _NoArgs(BaseModel):
+            pass
+
+        async def _slow_exec(tool_call_id, args, *, signal=None, on_update=None):
+            await aio.sleep(0.05)
+            order.append("seq")
+            return AgentToolResult(content=[TextContent(text="seq")])
+
+        async def _fast_exec(tool_call_id, args, *, signal=None, on_update=None):
+            order.append("fast")
+            return AgentToolResult(content=[TextContent(text="fast")])
+
+        seq_tool = AgentTool(
+            name="seq_tool",
+            description="d",
+            parameters=_NoArgs,
+            execute=_slow_exec,
+            execution_mode="sequential",
+        )
+        fast_tool = AgentTool(
+            name="fast_tool", description="d", parameters=_NoArgs, execute=_fast_exec
+        )
+        group = _make_group_base("g", ["seq_tool"], loader_tools=[seq_tool])
+        extra: dict = {}
+        mw = DeferredToolsMiddleware(
+            groups=[group], extra_ref=lambda: extra, strategy="dispatch"
+        )
+        ctx = AgentContext(
+            system_prompt="", messages=[], tools=[*mw.tools, fast_tool], extra=extra
+        )
+        calls = [
+            ToolCall(
+                id="tc-a",
+                name="deferred_tool_call",
+                arguments={"tool_name": "seq_tool", "arguments": {}},
+            ),
+            ToolCall(id="tc-b", name="fast_tool", arguments={}),
+        ]
+        await execute_tool_calls(
+            ctx,
+            faux_assistant_message(calls, stop_reason="tool_use"),
+            resolve_tool_call=mw.resolve_tool_call,
+            emit=lambda e: None,
+        )
+        assert order == ["seq", "fast"]
+
+    async def test_implicit_load_records_no_state(self) -> None:
+        """Implicit loads are ephemeral: no expanded_groups entry, no
+        on_tools_expanded callback — a fork-forwarded resolver cannot
+        mutate the parent agent."""
+        extra: dict = {}
+        seen: list = []
+        group = _make_group("g", ["t1"])
+        mw = DeferredToolsMiddleware(
+            groups=[group],
+            extra_ref=lambda: extra,
+            strategy="dispatch",
+            on_tools_expanded=seen.append,
+        )
+        ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
+        call = ToolCall(
+            id="tc-1",
+            name="deferred_tool_call",
+            arguments={"tool_name": "t1", "arguments": {"value": "hi"}},
+        )
+        rewritten = await mw.resolve_tool_call(call, context=ctx)
+        assert rewritten is not None and rewritten.name == "t1"
+        assert any(t.name == "t1" and not t.expose_to_model for t in ctx.tools)
+        assert "expanded_groups" not in extra
+        assert seen == []
+
+    async def test_implicit_load_failure_surfaces_loader_error(self) -> None:
+        from cubepi.agent.tools import execute_tool_calls
+        from cubepi.providers.faux import faux_assistant_message
+
+        async def _failing_loader():
+            raise RuntimeError("connection refused")
+
+        group = DeferredToolGroup(
+            group_id="g",
+            display_name="G",
+            description="d",
+            tool_names=["t1"],
+            loader=_failing_loader,
+        )
+        extra: dict = {}
+        mw = DeferredToolsMiddleware(
+            groups=[group], extra_ref=lambda: extra, strategy="dispatch"
+        )
+        ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
+        call = ToolCall(
+            id="tc-f",
+            name="deferred_tool_call",
+            arguments={"tool_name": "t1", "arguments": {}},
+        )
+        batch = await execute_tool_calls(
+            ctx,
+            faux_assistant_message(call, stop_reason="tool_use"),
+            resolve_tool_call=mw.resolve_tool_call,
+            emit=lambda e: None,
+        )
+        msg = batch.messages[0]
+        assert msg.is_error is True
+        assert "connection refused" in msg.content[0].text
+        assert "not found" not in msg.content[0].text
+
+    async def test_dispatcher_rejects_non_dict_arguments(self) -> None:
+        """Garbage inner arguments must hit the dispatcher's own schema
+        validation, not be coerced to {} and silently run the tool."""
+        from cubepi.agent.tools import execute_tool_calls
+        from cubepi.providers.faux import faux_assistant_message
+
+        mw = _mw([_make_group("g", ["t1"])])
+        ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
+        call = ToolCall(
+            id="tc-bad",
+            name="deferred_tool_call",
+            arguments={"tool_name": "t1", "arguments": "oops"},
+        )
+        batch = await execute_tool_calls(
+            ctx,
+            faux_assistant_message(call, stop_reason="tool_use"),
+            resolve_tool_call=mw.resolve_tool_call,
+            emit=lambda e: None,
+        )
+        msg = batch.messages[0]
+        assert msg.is_error is True
+        text = msg.content[0].text
+        assert "Invalid arguments for tool 'deferred_tool_call'" in text
+        assert "dictionary" in text

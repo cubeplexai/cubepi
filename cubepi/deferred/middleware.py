@@ -304,30 +304,60 @@ class DeferredToolsMiddleware(Middleware):
         name = args.get("tool_name") if isinstance(args, dict) else None
         if not isinstance(name, str) or name not in self._tool_to_group:
             return None  # falls through to the dispatcher's error fallback
+        inner = args.get("arguments")
+        if inner is None:
+            inner = {}
+        if not isinstance(inner, dict):
+            # Let the dispatcher's own schema validation reject the call —
+            # coercing to {} would silently run no-arg tools on garbage
+            # input.
+            return None
         already_loaded = context.tools is not None and any(
             t.name == name for t in context.tools
         )
         if not already_loaded:
-            await self._ensure_loaded(self._tool_to_group[name], [name], context)
-        inner = args.get("arguments")
-        return ToolCall(
-            id=tool_call.id,
-            name=name,
-            arguments=inner if isinstance(inner, dict) else {},
-        )
+            error = await self._ensure_loaded(
+                self._tool_to_group[name], [name], context
+            )
+            if error is not None:
+                # The engine converts resolver exceptions into the call's
+                # error result — the model sees WHY the load failed instead
+                # of a misleading "tool not found".
+                raise RuntimeError(error)
+        return ToolCall(id=tool_call.id, name=name, arguments=inner)
 
     async def _ensure_loaded(
         self,
         group_id: str,
         tool_names: list[str],
         context: AgentContext,
-    ) -> None:
-        """Implicit load for dispatched calls: reuse the load path, then drain
-        staged tools into the live context immediately (no after_tool_call
-        fires on the dispatcher's behalf for a rewritten call)."""
-        await self._expand_callback(group_id, tool_names)
+    ) -> str | None:
+        """Ephemeral load for dispatched calls.
+
+        Shares the loader cache and per-group locks (the loader still runs
+        at most once per group per run) but records NO expansion state and
+        never calls ``on_tools_expanded`` — a fork-forwarded resolver must
+        not mutate the parent agent's ``extra`` or tool list. Recording
+        state stays the job of an explicit ``load_tools`` call.
+
+        Returns an error string when the loader failed, ``None`` on
+        success.
+        """
+        group = self._groups[group_id]
+        lock = self._loader_locks.setdefault(group_id, asyncio.Lock())
+        async with lock:
+            try:
+                if group_id not in self._loader_cache:
+                    self._loader_cache[group_id] = await group.loader()
+            except Exception as exc:
+                return f"Loading deferred tool group '{group_id}' failed: {exc}"
+        wanted = set(tool_names)
         if context.tools is not None:
-            self._drain_pending(context.tools)
+            existing = {t.name for t in context.tools}
+            for t in self._loader_cache[group_id]:
+                if t.name in wanted and t.name not in existing:
+                    context.tools.append(replace(t, expose_to_model=False))
+        return None
 
     # ------------------------------------------------------------------
     # System prompt: catalog (static in dispatch mode)

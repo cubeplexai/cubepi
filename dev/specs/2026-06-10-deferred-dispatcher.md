@@ -204,10 +204,14 @@ The middleware's resolver:
 1. `tool_call.name != "deferred_tool_call"` → return `None` (no-op for everything else).
 2. Parse `{tool_name, arguments}`. Unknown `tool_name` (not in any group) → leave the call
    unresolved with a structured error result listing valid names.
-3. **Implicit load**: if `tool_name`'s group isn't loaded, run the loader (cache + lock), append
-   the group's tools to `context.tools` (`expose_to_model=False`), record load state in
-   `extra["expanded_groups"]`.
-4. Return `ToolCall(id=同, name=tool_name, arguments=arguments)`.
+3. **Implicit load** (ephemeral, state-free): if `tool_name` isn't already in
+   `context.tools`, run the loader (shared cache + per-group lock), append the requested
+   tool to `context.tools` (`expose_to_model=False`). No `extra["expanded_groups"]` write,
+   no `on_tools_expanded` — state recording belongs to explicit `load_tools` only
+   (fork-safety; see §Forks). A loader failure raises, which the engine converts into the
+   call's error result.
+4. Non-dict `arguments` → return `None` (the dispatcher's own schema validation rejects the
+   call). Otherwise return `ToolCall(id=同, name=tool_name, arguments=arguments)`.
 
 **Validation failure includes the schema.** When a dispatch-resolved call fails
 `model_validate`, the error result appends the tool's full schema JSON, so the model retries
@@ -224,12 +228,14 @@ payload, and no resolver runs), a regression vs v1 where expanded tools stayed u
 forks. `load_tools` remains fork-denied as in v1 (its *execute* is wrapped); the forwarded
 resolver, however, does not go through that execute — so dispatched calls work in forks for
 already-loaded tools, and dispatching an unloaded tool triggers an **implicit load from the
-fork**. This is deliberate: the loader cache and per-group locks live on the shared
-middleware instance, so the loader still runs at most once across parent + forks, loaded
-tools are appended hidden (no cache impact anywhere), and the recorded
-`extra["expanded_groups"]` state simply pre-warms the parent. Deferred loading is
-process-level resource acquisition, not conversation state — sharing it across forks is
-coherent where v1's model-visible injection was not.
+fork**. Implicit loads are **ephemeral and state-free** (revised per PR codex review): they
+share only the loader cache and per-group locks (the loader still runs at most once across
+parent + forks — process-level resource acquisition), append the hidden tool to the *local*
+context only, and never write `extra["expanded_groups"]` or call `on_tools_expanded` — a
+fork-forwarded resolver therefore cannot mutate the parent agent's state or tool list.
+Recording expansion state stays the job of an explicit `load_tools` call. An implicit load
+whose loader fails surfaces the loader error as the dispatched call's error result (not a
+misleading "tool not found").
 
 `prepare_resumed_state` takes a **required** `strategy` kwarg (no default) so a host cannot
 resume with a strategy that mismatches its middleware construction.
