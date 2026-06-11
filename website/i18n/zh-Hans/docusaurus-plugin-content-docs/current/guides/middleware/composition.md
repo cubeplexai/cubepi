@@ -150,6 +150,12 @@ agent = Agent(
 
 一次性 hook 使用显式形式；当行为是一个连贯的包时使用中间件类。
 
+**例外：`resolve_tool_call` 是组合而非替换。** 显式 resolver 成为链头
+——它先运行，返回 `None` 时中间件 resolver 才运行（first-non-`None`，
+与该 hook 自身的组合规则一致）。如果是替换语义，
+`Agent(deferred_tool_groups=…, resolve_tool_call=…)` 会静默废掉延迟
+工具的 dispatch——那个中间件是框架自动创建的内部接线。
+
 ## 关于 `Middleware` 基类的说明
 
 基类 `Middleware` 中未实现的方法会抛出 `NotImplementedError`。

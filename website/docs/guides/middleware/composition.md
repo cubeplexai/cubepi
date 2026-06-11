@@ -170,6 +170,13 @@ agent = Agent(
 Use the explicit form for one-off hooks; use middleware classes when
 behaviour is a coherent bundle.
 
+**Exception: `resolve_tool_call` composes instead of replacing.** An
+explicit resolver becomes the chain head — it runs first, and middleware
+resolvers run only if it returns `None` (first-non-`None`, matching the
+hook's own composition rule). Replacing would silently disable deferred
+dispatch for `Agent(deferred_tool_groups=…, resolve_tool_call=…)`, where
+the middleware is auto-created internal wiring.
+
 ## A note on `Middleware` base class
 
 The base `Middleware` class's unimplemented methods raise

@@ -201,3 +201,67 @@ class TestDeferredStrategyParam:
             deferred_tool_groups=[_make_group("g", ["t1"])],
         )
         assert agent.resolve_tool_call is not None
+
+
+class TestExplicitResolverComposition:
+    async def test_explicit_resolver_composes_with_deferred(self) -> None:
+        """An explicit resolve_tool_call runs first but does NOT disable the
+        auto-created deferred middleware's resolver (unlike other hooks,
+        resolve_tool_call composes first-non-None)."""
+        from cubepi.agent.types import AgentContext
+        from cubepi.providers.base import ToolCall
+
+        model = _make_faux_model()
+        seen: list[str] = []
+
+        async def my_resolver(tool_call, *, context, signal=None):
+            seen.append(tool_call.name)
+            return None  # unrelated to deferred dispatch
+
+        agent = Agent(
+            model=model,
+            deferred_tool_groups=[_make_group("g", ["t1"])],
+            resolve_tool_call=my_resolver,
+        )
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=list(agent._state.tools),
+            extra=agent._extra,
+        )
+        call = ToolCall(
+            id="tc-1",
+            name="deferred_tool_call",
+            arguments={"tool_name": "t1", "arguments": {}},
+        )
+        rewritten = await agent.resolve_tool_call(call, context=ctx)
+        assert rewritten is not None and rewritten.name == "t1"
+        assert seen == ["deferred_tool_call"]  # explicit resolver ran first
+
+    async def test_explicit_resolver_wins_when_it_rewrites(self) -> None:
+        from cubepi.agent.types import AgentContext
+        from cubepi.providers.base import ToolCall
+
+        model = _make_faux_model()
+
+        async def alias_resolver(tool_call, *, context, signal=None):
+            if tool_call.name == "alias":
+                return ToolCall(id=tool_call.id, name="builtin", arguments={})
+            return None
+
+        agent = Agent(
+            model=model,
+            tools=[_dummy_tool("builtin")],
+            deferred_tool_groups=[_make_group("g", ["t1"])],
+            resolve_tool_call=alias_resolver,
+        )
+        ctx = AgentContext(
+            system_prompt="",
+            messages=[],
+            tools=list(agent._state.tools),
+            extra=agent._extra,
+        )
+        rewritten = await agent.resolve_tool_call(
+            ToolCall(id="x", name="alias", arguments={}), context=ctx
+        )
+        assert rewritten is not None and rewritten.name == "builtin"

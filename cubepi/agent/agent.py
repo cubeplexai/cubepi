@@ -249,7 +249,28 @@ class Agent(Generic[TMessage]):
             "after_model_response"
         )
         self.before_tool_call = before_tool_call or _mw_hooks.get("before_tool_call")
-        self.resolve_tool_call = resolve_tool_call or _mw_hooks.get("resolve_tool_call")
+        # Unlike the other hooks, an explicit resolve_tool_call COMPOSES with
+        # the middleware chain instead of replacing it (first-non-None, with
+        # the explicit callable as chain head). Replacing would silently
+        # disable deferred dispatch for any Agent(deferred_tool_groups=...,
+        # resolve_tool_call=...) — the auto-created middleware is internal
+        # wiring the caller never sees and cannot re-compose by hand.
+        _mw_resolver = _mw_hooks.get("resolve_tool_call")
+        self.resolve_tool_call: Callable | None
+        if resolve_tool_call is not None and _mw_resolver is not None:
+            _explicit_resolver = resolve_tool_call
+
+            async def _composed_resolver(tool_call, *, context, signal=None):
+                result = await _explicit_resolver(
+                    tool_call, context=context, signal=signal
+                )
+                if result is not None:
+                    return result
+                return await _mw_resolver(tool_call, context=context, signal=signal)
+
+            self.resolve_tool_call = _composed_resolver
+        else:
+            self.resolve_tool_call = resolve_tool_call or _mw_resolver
         self.after_tool_call = after_tool_call or _mw_hooks.get("after_tool_call")
         self.should_stop_after_turn = should_stop_after_turn or _mw_hooks.get(
             "should_stop_after_turn"
