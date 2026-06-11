@@ -200,12 +200,14 @@ let the model expand them on demand:
 from cubepi import Agent
 from cubepi.deferred import DeferredToolGroup
 
+# load_github_tools is a zero-arg async callable returning list[AgentTool]
+# (e.g. wrap load_mcp_tools_stdio(...).tools — see the website guide).
 github_group = DeferredToolGroup(
     group_id="mcp:github",
     display_name="GitHub",
     description="Issues, PRs, repos, code search",
     tool_names=["create_issue", "search_repos", "create_pr", "list_comments"],
-    loader=github_mcp.load_tools,  # async () -> list[AgentTool]
+    loader=load_github_tools,
 )
 
 agent = Agent(
@@ -231,9 +233,13 @@ load_tools(group_id="mcp:github")                        # load all
 load_tools(group_id="mcp:github", tool_names=["create_issue"])  # or just one
 ```
 
-The loader is called once per group per run; subsequent selective expansions
-filter from the cached result. Expanded tool schemas are appended to the system
-prompt in expansion order (append-only) for prompt-cache prefix stability.
+The loader is called once per group per run; subsequent selective loads filter
+from the cached result. With the default `dispatch` strategy, `load_tools`
+returns the full schemas in its tool result and loaded tools are invoked via
+the `deferred_tool_call` dispatcher — the tools array and system prompt stay
+byte-stable, so loading never invalidates the prompt cache. The v1 behavior
+(native injection into the model-visible tools array) is available with
+`deferred_tool_strategy="inject"`.
 
 For advanced use (custom catalog header, cross-run replay), construct
 `DeferredToolsMiddleware` directly:
@@ -241,10 +247,12 @@ For advanced use (custom catalog header, cross-run replay), construct
 ```python
 from cubepi.deferred import DeferredToolsMiddleware
 
-# Replay expansion state from a previous run
+# Replay expansion state from a previous run (strategy is required and
+# must match the middleware's strategy)
 resumed = await DeferredToolsMiddleware.prepare_resumed_state(
     groups=all_groups,
     expanded=saved_extra["expanded_groups"],
+    strategy="dispatch",
 )
 agent = Agent(
     model=model,
