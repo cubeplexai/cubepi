@@ -353,7 +353,7 @@ cross-process suspend/resume — are in the [HITL guide](../hitl/overview).
 
 ## See also
 
-- [The 8 Hooks](./hooks) — exact semantics of each hook.
+- [The 9 Hooks](./hooks) — exact semantics of each hook.
 - [Composition Rules](./composition) — how multiple middlewares
   combine.
 - [Recipes](../../recipes/weather-agent) — middleware composed into

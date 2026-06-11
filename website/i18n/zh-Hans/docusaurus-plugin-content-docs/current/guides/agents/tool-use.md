@@ -220,9 +220,11 @@ CubePi 仅在当前批次中 *每个* 工具结果都是 `terminate=True` 时才
 都会让之后每一轮的 cache 失效。
 
 `DeferredToolGroup` 的解法是用一份紧凑的目录替代完整 schema。模型看到
-每个组一行描述，需要时通过内置的 `load_tools` 工具按需展开——loader
-跑一次，工具被注入到运行中的 tool 集，schema 追加到 system prompt 末尾
-（append-only，保持 cache 稳定）。
+每个组一行描述，需要时通过内置的 `load_tools` 工具按需加载——该组的
+完整 schema 随工具结果返回，之后通过 `deferred_tool_call` 转发器调用。
+tools 数组和 system prompt 整个 run 保持字节稳定，加载永不破坏 prompt
+cache。（v1 行为——把加载的工具注入模型可见的 tools 数组、原生调用——
+仍可通过 `deferred_tool_strategy="inject"` 选用。）
 
 ```python
 from cubepi import Agent

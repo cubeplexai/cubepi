@@ -238,9 +238,13 @@ turn that follows.
 
 `DeferredToolGroup` solves this by replacing the full schemas with a
 compact catalog. The model sees a one-line description per group and
-expands a group on demand via the built-in `load_tools` tool — the
-loader runs once, the tools are injected into the live tool set, and
-their schemas are appended (append-only, for cache stability).
+loads a group on demand via the built-in `load_tools` tool, which
+returns the group's full schemas in its tool result; loaded tools are
+then invoked through the `deferred_tool_call` dispatcher. The tools
+array and system prompt stay byte-stable for the whole run, so loading
+never invalidates the prompt cache. (The v1 behavior — injecting loaded
+tools into the model-visible tools array as native tools — remains
+available via `deferred_tool_strategy="inject"`.)
 
 ```python
 from cubepi import Agent

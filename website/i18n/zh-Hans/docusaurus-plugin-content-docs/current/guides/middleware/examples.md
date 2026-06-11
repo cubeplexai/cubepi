@@ -279,6 +279,6 @@ agent = Agent(
 
 ## 另请参阅
 
-- [8 个 Hook](./hooks) —— 每个 hook 的精确语义。
+- [9 个 Hook](./hooks) —— 每个 hook 的精确语义。
 - [组合规则](./composition) —— 多个中间件如何组合。
 - [配方](../../recipes/weather-agent) —— 中间件在真实应用中的组合。
