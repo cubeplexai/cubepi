@@ -209,6 +209,22 @@ async def test_attach_resume_answer_short_circuits_next_call():
     assert ch.pending is None
 
 
+async def test_resume_short_circuit_emits_hitl_answer_event():
+    """Resume short-circuit must emit HitlAnswerEvent so subscribers
+    (e.g. IM outbound tailers) learn the question was answered."""
+    from cubepi.agent.types import HitlAnswerEvent
+
+    emitted: list[object] = []
+    ch = InMemoryChannel()
+    ch._bind_emit(lambda e: emitted.append(e))
+    ch.attach_resume_answer("tc-7", ApproveAnswer(decision="approve"))
+    ans = await ch.approve(tool_name="bash", tool_call_id="tc-7", args={})
+    assert ans.decision == "approve"
+    answer_events = [e for e in emitted if isinstance(e, HitlAnswerEvent)]
+    assert len(answer_events) == 1
+    assert answer_events[0].question_id == "tc-7"
+
+
 async def test_attach_resume_answer_qid_mismatch_keeps_slot():
     """If the next channel call's question_id doesn't match the
     pre-loaded slot, the call proceeds normally (the pre-load is

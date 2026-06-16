@@ -227,6 +227,12 @@ class _BaseChannel:
                     self._resume_slot = None
                     from_resume = True
                     outcome = _outcome_from_answer(kind, ans)
+                    if self._emit is not None:
+                        from cubepi.agent.types import HitlAnswerEvent
+
+                        await self._emit_event(
+                            HitlAnswerEvent(question_id=question_id, answer=ans)
+                        )
                     return ans
 
                 if self._pending is not None:
