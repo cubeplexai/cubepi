@@ -33,6 +33,7 @@ from cubepi.providers.base import (
     UserMessage,
     _fire_request_listeners,
     _fire_response_listeners,
+    apply_sender_attribution,
     invoke_on_payload,
     invoke_on_response,
 )
@@ -630,10 +631,11 @@ class OpenAIProvider(BaseProvider):
     @staticmethod
     def _convert_message(msg: Message) -> dict[str, Any]:
         if isinstance(msg, UserMessage):
-            has_image = any(isinstance(c, ImageContent) for c in msg.content)
+            attributed = apply_sender_attribution(msg, msg.content)
+            has_image = any(isinstance(c, ImageContent) for c in attributed)
             if has_image:
                 parts: list[dict[str, Any]] = []
-                for c in msg.content:
+                for c in attributed:
                     if isinstance(c, TextContent):
                         parts.append({"type": "text", "text": c.text})
                     elif isinstance(c, ImageContent):
@@ -646,7 +648,7 @@ class OpenAIProvider(BaseProvider):
                             }
                         )
                 return {"role": "user", "content": parts}
-            text_parts = [c.text for c in msg.content if isinstance(c, TextContent)]
+            text_parts = [c.text for c in attributed if isinstance(c, TextContent)]
             return {"role": "user", "content": "\n".join(text_parts)}
 
         elif isinstance(msg, AssistantMessage):

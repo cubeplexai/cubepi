@@ -199,6 +199,58 @@ def is_synthetic_message(message: Message) -> bool:
     return message.metadata.get(SYNTHETIC_METADATA_KEY) is True
 
 
+# --- Sender attribution (group chat) ---
+#
+# When multiple humans share one conversation, each user message carries
+# the sender's display name in metadata. Providers render the prefix at
+# call-time rather than callers mutating ``content`` at write-time. This
+# keeps stored messages clean (frontend can show sender via avatar/badge
+# without stripping a prefix), handles attachment-only messages correctly,
+# and concentrates the formatting in one place.
+
+SENDER_DISPLAY_NAME_METADATA_KEY = "sender_display_name"
+SENDER_USER_ID_METADATA_KEY = "sender_user_id"
+
+
+def get_sender_display_name(message: Message) -> str | None:
+    """Return the sender's display name, or None for non-attributed messages."""
+    value = message.metadata.get(SENDER_DISPLAY_NAME_METADATA_KEY)
+    return value if isinstance(value, str) and value else None
+
+
+def apply_sender_attribution(
+    message: UserMessage, content: list[Content]
+) -> list[Content]:
+    """Prefix the first non-empty text block with ``[name]: ``.
+
+    Returns a new list — the original ``content`` is not mutated. If the
+    message has no sender metadata, returns ``content`` unchanged. If the
+    message has sender metadata but no text content (attachment-only),
+    prepends a synthetic text block so the model still knows who sent
+    the attachments.
+    """
+    display_name = get_sender_display_name(message)
+    if not display_name:
+        return content
+
+    prefix = f"[{display_name}]: "
+    out: list[Content] = []
+    applied = False
+    for block in content:
+        if not applied and isinstance(block, TextContent) and block.text:
+            out.append(TextContent(text=prefix + block.text))
+            applied = True
+        else:
+            out.append(block)
+
+    if not applied:
+        # Attachment-only or empty text — prepend a sender announcement so
+        # the agent doesn't see a faceless attachment list in a group chat.
+        out.insert(0, TextContent(text=f"[{display_name}] sent:"))
+
+    return out
+
+
 class ToolDefinition(BaseModel):
     name: str
     description: str
