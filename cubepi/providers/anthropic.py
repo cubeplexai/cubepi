@@ -25,6 +25,7 @@ from cubepi.providers.base import (
     UserMessage,
     _fire_request_listeners,
     _fire_response_listeners,
+    apply_sender_attribution,
     invoke_on_payload,
     invoke_on_response,
 )
@@ -494,7 +495,8 @@ class AnthropicProvider(BaseProvider):
     def _convert_message(msg: Message) -> dict[str, Any]:
         if isinstance(msg, UserMessage):
             user_content: list[dict[str, Any]] = []
-            for user_block in msg.content:
+            attributed = apply_sender_attribution(msg, msg.content)
+            for user_block in attributed:
                 if isinstance(user_block, TextContent):
                     user_content.append({"type": "text", "text": user_block.text})
                 elif isinstance(user_block, ImageContent):

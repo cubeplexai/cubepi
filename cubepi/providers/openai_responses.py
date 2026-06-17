@@ -26,6 +26,7 @@ from cubepi.providers.base import (
     UserMessage,
     _fire_request_listeners,
     _fire_response_listeners,
+    apply_sender_attribution,
     invoke_on_payload,
     invoke_on_response,
 )
@@ -649,7 +650,8 @@ class OpenAIResponsesProvider(BaseProvider):
         for msg in messages:
             if isinstance(msg, UserMessage):
                 content: list[dict[str, Any]] = []
-                for c in msg.content:
+                attributed = apply_sender_attribution(msg, msg.content)
+                for c in attributed:
                     if isinstance(c, TextContent):
                         content.append({"type": "input_text", "text": c.text})
                     elif isinstance(c, ImageContent):
