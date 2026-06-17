@@ -68,10 +68,9 @@ pip install cubepi
 这里描述的 API 在打 tag 发布之前还可能变动。
 
 最新已发布版本是 v<PackageVersion />（[从右上角版本选择器切换](pathname:///)）。
-CubePi 0.10 新增 `DeferredToolGroup`（渐进式 MCP 工具披露）、
-`BoundModel.generate_structured()`（强类型结构化输出）、
-`Provider` 协议上的 `tool_choice` 参数、以及 `GoalMiddleware`
-（自主目标驱动 run）。
+CubePi 0.11 将 deferred tool group 的默认策略切换为 `dispatch`，
+新增 `resolve_tool_call` 中间件 hook，以及 `AgentTool.expose_to_model`
+（隐藏但可解析的工具）。
 
 源代码、Issue 和讨论都在
 [GitHub](https://github.com/cubeplexai/cubepi)。

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-17
+
 ### Changed (BREAKING)
 
 - **Deferred tool groups default to the new `dispatch` strategy.** Tool
@@ -38,6 +40,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resolved dispatcher calls that fail argument validation get the tool's
   **full schema appended to the error result**, so the model can
   self-correct in one round trip.
+
+### Fixed
+
+- **HITL resume short-circuit now emits `HitlAnswerEvent`.** Previously,
+  `_await_answer`'s resume path returned the pre-loaded answer without
+  emitting the event, so subscribers (e.g. IM outbound tailers) never
+  learned the question was answered.
+- **Explicit `resolve_tool_call` composes with middleware resolvers**
+  instead of replacing the chain. An explicit resolver passed to
+  `Agent(resolve_tool_call=...)` becomes the chain head
+  (first-non-None-wins) rather than silently disabling middleware-provided
+  resolvers like the deferred dispatcher.
 
 ## [0.10.0] - 2026-06-10
 
@@ -596,7 +610,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/cubeplexai/cubepi/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/cubeplexai/cubepi/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/cubeplexai/cubepi/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/cubeplexai/cubepi/compare/v0.7.0...v0.8.0

@@ -71,11 +71,10 @@ the `main` branch. APIs documented here can still change before they
 ship in a tagged release.
 
 The latest released version is v<PackageVersion /> ([switch to it from the
-version picker, top-right](pathname:///)). CubePi 0.10 adds
-`DeferredToolGroup` for progressive MCP tool disclosure,
-`BoundModel.generate_structured()` for typed structured output, a
-`tool_choice` parameter on the `Provider` protocol, and `GoalMiddleware`
-for autonomous goal-driven runs.
+version picker, top-right](pathname:///)). CubePi 0.11 switches deferred
+tool groups to the `dispatch` strategy by default, adds the
+`resolve_tool_call` middleware hook, and introduces
+`AgentTool.expose_to_model` for hidden-but-resolvable tools.
 
 Source, issues, and discussion live on
 [GitHub](https://github.com/cubeplexai/cubepi).
