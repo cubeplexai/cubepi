@@ -64,8 +64,11 @@ def _make_deferred_tool_call(
     return AgentTool(
         name=DISPATCH_TOOL_NAME,
         description=(
-            "Invoke a deferred tool by name. Use schemas from load_tools "
-            "results to shape `arguments`. Tools load on demand if needed."
+            "Invoke a deferred tool by name. Place `tool_name` before "
+            "`arguments` in the call's JSON so streaming clients can resolve "
+            "the target tool before its args finish arriving. Use schemas "
+            "from load_tools results to shape `arguments`. Tools load on "
+            "demand if needed."
         ),
         parameters=DeferredToolCallInput,
         execute=_execute,
