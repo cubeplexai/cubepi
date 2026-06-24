@@ -469,9 +469,19 @@ def render_signature(name: str, parameters: list, returns: str | None) -> str:
             rendered += f" = {pdefault}"
         parts.append(rendered)
 
-    sig = f"{name}({', '.join(parts)})"
-    if returns:
-        sig += f" -> {returns}"
+    ret_suffix = f" -> {returns}" if returns else ""
+
+    # Single line when it comfortably fits; otherwise fall back to a
+    # black-style multiline layout (one parameter per indented line) so
+    # wide constructors like Agent(...) stay readable instead of
+    # overflowing as one giant line in the rendered code block.
+    single = f"{name}({', '.join(parts)}){ret_suffix}"
+    if len(single) <= 88 or not parts:
+        sig = single
+    else:
+        body = ",\n".join(f"    {part}" for part in parts)
+        sig = f"{name}(\n{body},\n){ret_suffix}"
+
     return f"```python\n{sig}\n```"
 
 
@@ -651,7 +661,10 @@ def render_symbol(
     if kind == "attribute":
         _render_attribute_symbol(symbol, ref_index, block)
     else:
-        params = _params_of(symbol)
+        # Classes render their __init__ signature; drop the leading
+        # ``self`` just like methods do (users call ``Agent(model=...)``,
+        # never pass ``self``).
+        params = _params_of(symbol, skip_self=(kind == "class"))
         returns = str(symbol.returns) if getattr(symbol, "returns", None) else None
         if params or returns:
             block.append(render_signature(name, params, returns))
