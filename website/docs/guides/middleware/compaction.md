@@ -173,6 +173,78 @@ Note: disabling the pruner raises summariser cost in proportion to historical
 tool-output volume. Pair it with a larger `keep_tail_tokens` if the recent
 tool results are the ones you most want preserved.
 
+## Selective preservation (`tool_result_compressor`)
+
+`prune_tool_outputs=False` is all-or-nothing — it keeps every tool result,
+which can blow up context in long conversations. For finer control, pass a
+`tool_result_compressor` callback that decides per-message how to handle
+each `ToolResultMessage`:
+
+```python
+from cubepi.providers.base import ToolResultMessage
+
+def my_compressor(msg: ToolResultMessage) -> str | None:
+    if msg.tool_name == "chip_metrics":
+        return msg.content[0].text         # preserve full content
+
+    if msg.tool_name == "web_search":
+        text = msg.content[0].text
+        return text[:500]                  # keep first 500 chars
+
+    return None                            # default pruning
+
+agent = Agent(
+    model=model,
+    middleware=[
+        CompactionMiddleware(
+            summary_model=summary_model,
+            max_tokens_before_compact=24_000,
+            tool_result_compressor=my_compressor,
+        ),
+    ],
+)
+```
+
+### Return values
+
+| Return | Behavior |
+|---|---|
+| `str` | Text is **preserved verbatim** — attached to the compaction summary as a reference section the model can cite. The message is excluded from the summarizer input to save budget. |
+| `None` | Falls through to the default pruner: messages over 120 chars are replaced with `[tool_name] N chars`, shorter ones are kept as-is. |
+
+### How preserved results appear
+
+Preserved tool results are appended to the summary message as a clearly
+labeled reference section:
+
+```
+[Conversation summary — ...]
+## Goal
+...
+
+---
+[Preserved tool results — retained verbatim for grounding and citation.
+ Refer to these when the conversation references their data.]
+
+## chip_metrics (tool_call_id: toolu_abc)
+{"ticker": "AAPL", "price": 185.32, ...}
+```
+
+The model sees preserved data as part of the summary context — not as tool
+calls it made — so the conversation's causal structure stays clean.
+
+### Persistence
+
+Preserved results accumulate across compaction rounds and are stored in the
+`CompactionState`. They survive checkpointer round-trips, so a resumed
+conversation still has access to the preserved data from earlier turns.
+
+### When to use what
+
+- **Most agents**: leave both defaults (`prune_tool_outputs=True`, no compressor). The built-in pruner + summarizer handles context well.
+- **Selective preservation**: pass `tool_result_compressor` when specific tool results must survive for grounding, citation, or downstream logic, but the rest can be pruned normally.
+- **Full audit trail**: set `prune_tool_outputs=False` when *every* historical tool result must stay intact (e.g. compliance agents).
+
 ## Failure behavior
 
 If the summary provider fails, CubePi falls back to a deterministic, no-LLM

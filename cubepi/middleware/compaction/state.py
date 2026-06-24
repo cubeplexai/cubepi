@@ -8,6 +8,14 @@ from pydantic import BaseModel, Field
 from cubepi.providers.base import Message
 
 
+class PreservedToolResult(BaseModel):
+    """A tool result preserved verbatim across compaction boundaries."""
+
+    tool_name: str
+    tool_call_id: str
+    text: str
+
+
 class CompactionState(BaseModel):
     """JSON-safe summary state stored in ``AgentContext.extra``."""
 
@@ -16,6 +24,7 @@ class CompactionState(BaseModel):
     summarized_message_refs: list[str] = Field(default_factory=list)
     last_summarized_message_id: str | None = None
     is_fallback: bool = False
+    preserved_tool_results: list[PreservedToolResult] = Field(default_factory=list)
 
 
 def message_ref(message: Message) -> str:

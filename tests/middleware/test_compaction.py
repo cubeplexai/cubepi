@@ -4,8 +4,12 @@ import asyncio
 from typing import Any
 
 from cubepi.agent.types import AgentContext
-from cubepi.middleware.compaction import CompactionMiddleware, CompactionState
-from cubepi.middleware.compaction import _load_state
+from cubepi.middleware.compaction import (
+    CompactionMiddleware,
+    CompactionState,
+    ToolResultCompressor,
+    _load_state,
+)
 from cubepi.middleware.compaction.state import message_ref, message_refs
 from cubepi.providers.base import (
     AssistantMessage,
@@ -941,3 +945,184 @@ async def test_anti_thrash_guard_skip_does_not_silently_prune() -> None:
     # The original big tool result is intact in the returned view.
     tool_result_msg = next(m for m in result if isinstance(m, ToolResultMessage))
     assert tool_result_msg.content[0].text == big_text
+
+
+# --- tool_result_compressor integration tests ---
+
+
+def _make_middleware_with_compressor(
+    provider: _FakeSummaryProvider,
+    compressor: ToolResultCompressor,
+    *,
+    max_tokens_before: int = 20,
+    keep_tail_tokens: int = 8,
+) -> CompactionMiddleware:
+    return CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
+        max_tokens_before_compact=max_tokens_before,
+        keep_tail_tokens=keep_tail_tokens,
+        max_summary_tokens=512,
+        min_compact_messages=2,
+        tool_result_compressor=compressor,
+    )
+
+
+async def test_compressor_preserved_text_appended_to_summary() -> None:
+    """Preserved tool results appear in the summary message text."""
+    from cubepi.providers.base import ToolCall, ToolResultMessage
+
+    provider = _FakeSummaryProvider(reply="conversation summary")
+
+    def compressor(msg: ToolResultMessage) -> str | None:
+        if msg.tool_name == "chip_metrics":
+            return "AAPL: $185.32"
+        return None
+
+    middleware = _make_middleware_with_compressor(provider, compressor)
+    big = "x" * 5000
+    messages: list[Message] = [
+        _user("show me AAPL"),
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="chip_metrics", arguments={})]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="chip_metrics",
+            content=[TextContent(text=big)],
+        ),
+        _user("and MSFT?"),
+        _assistant("looking up"),
+        _user("thanks"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    summary_msg = result[0]
+    assert isinstance(summary_msg, UserMessage)
+    assert "conversation summary" in summary_msg.content[0].text
+    assert "AAPL: $185.32" in summary_msg.content[0].text
+    assert "chip_metrics" in summary_msg.content[0].text
+
+
+async def test_compressor_preserved_excluded_from_summarizer_input() -> None:
+    """Preserved messages are not fed to the summarizer LLM."""
+    from cubepi.providers.base import ToolCall, ToolResultMessage
+
+    provider = _FakeSummaryProvider(reply="summary")
+
+    def compressor(msg: ToolResultMessage) -> str | None:
+        if msg.tool_name == "chip_metrics":
+            return "kept"
+        return None
+
+    middleware = _make_middleware_with_compressor(provider, compressor)
+    big = "x" * 5000
+    messages: list[Message] = [
+        _user("query"),
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="chip_metrics", arguments={})]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="chip_metrics",
+            content=[TextContent(text=big)],
+        ),
+        _user("next"),
+        _assistant("ok"),
+        _user("go"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    await middleware.transform_context(messages, ctx=ctx)
+
+    assert len(provider.calls) == 1
+    transcript_text = provider.calls[0]["messages"][0].content[0].text
+    # The preserved tool result should not appear in the summarizer transcript.
+    assert big not in transcript_text
+
+
+async def test_compressor_none_return_uses_default_pruning() -> None:
+    """When compressor returns None for all messages, behavior is identical
+    to not having a compressor."""
+    from cubepi.providers.base import ToolCall, ToolResultMessage
+
+    provider = _FakeSummaryProvider(reply="summary")
+
+    def compressor(msg: ToolResultMessage) -> str | None:
+        return None
+
+    middleware = _make_middleware_with_compressor(provider, compressor)
+    big = "x" * 5000
+    messages: list[Message] = [
+        _user("q"),
+        AssistantMessage(content=[ToolCall(id="c1", name="bash", arguments={})]),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="bash",
+            content=[TextContent(text=big)],
+        ),
+        _user("next"),
+        _assistant("ok"),
+        _user("go"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    summary_msg = result[0]
+    assert isinstance(summary_msg, UserMessage)
+    # No preserved section in the summary
+    assert "Preserved tool results" not in summary_msg.content[0].text
+
+
+async def test_compressor_preserved_persists_across_compaction_rounds() -> None:
+    """Preserved results from earlier rounds survive in subsequent compressed views."""
+    from cubepi.providers.base import ToolCall, ToolResultMessage
+
+    provider = _FakeSummaryProvider(reply="round 1 summary")
+
+    def compressor(msg: ToolResultMessage) -> str | None:
+        if msg.tool_name == "chip_metrics":
+            return "preserved data"
+        return None
+
+    middleware = _make_middleware_with_compressor(
+        provider, compressor, max_tokens_before=20, keep_tail_tokens=4
+    )
+
+    # Round 1
+    messages: list[Message] = [
+        _user("q1"),
+        AssistantMessage(
+            content=[ToolCall(id="c1", name="chip_metrics", arguments={})]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="chip_metrics",
+            content=[TextContent(text="x" * 5000)],
+        ),
+        _user("q2"),
+        _assistant("r2"),
+        _user("q3"),
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+    await middleware.transform_context(messages, ctx=ctx)
+
+    # Verify preserved results are in state
+    state = CompactionState.model_validate(ctx.extra["compaction"])
+    assert len(state.preserved_tool_results) == 1
+    assert state.preserved_tool_results[0].text == "preserved data"
+    assert state.preserved_tool_results[0].tool_name == "chip_metrics"
+
+    # Round 2 — under threshold, returns compressed view with preserved data
+    provider2 = _FakeSummaryProvider(reply="round 2 summary")
+    middleware2 = _make_middleware_with_compressor(
+        provider2, compressor, max_tokens_before=100_000, keep_tail_tokens=4
+    )
+    result = await middleware2.transform_context(messages, ctx=ctx)
+    summary_msg = result[0]
+    assert "preserved data" in summary_msg.content[0].text

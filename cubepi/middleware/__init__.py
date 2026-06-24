@@ -8,6 +8,7 @@ __all__ = [
     "CompactionMiddleware",
     "CompactionState",
     "GoalMiddleware",
+    "ToolResultCompressor",
     "Middleware",
     "SubagentMiddleware",
     "SubagentRequest",
@@ -27,6 +28,7 @@ __all__ = [
 _LAZY = {
     "CompactionMiddleware": ("cubepi.middleware.compaction", "CompactionMiddleware"),
     "CompactionState": ("cubepi.middleware.compaction", "CompactionState"),
+    "ToolResultCompressor": ("cubepi.middleware.compaction", "ToolResultCompressor"),
     "GoalMiddleware": ("cubepi.middleware.goal", "GoalMiddleware"),
     "SubagentMiddleware": ("cubepi.middleware.subagents", "SubagentMiddleware"),
     "SubagentRequest": ("cubepi.middleware.subagents", "SubagentRequest"),
