@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-24
+
+### Added
+
+- **`CompactionMiddleware(tool_result_compressor=...)`** — a
+  `Callable[[ToolResultMessage], str | None]` callback for selective tool
+  result preservation during compaction. Return a `str` to preserve that
+  text verbatim in the summary (for grounding/citation); return `None` to
+  fall through to default pruning. Preserved results are appended to the
+  summary as a labeled reference section, excluded from the summarizer
+  input to save budget, and accumulated across compaction rounds via
+  `CompactionState` persistence.
+- **Sender attribution at the provider boundary.** `UserMessage.metadata`
+  can now carry `sender_user_id` / `sender_display_name`; providers prefix
+  the first text block with `[Name]:` when converting to the API format.
+  Keeps stored message content clean while letting the model know who sent
+  each turn in group-chat scenarios.
+- **Deferred tool ordering hint.** The dispatcher description now hints
+  models to emit `tool_name` before arguments, smoothing streaming UX for
+  dispatch-mode deferred tools.
+
+### Fixed
+
+- Removed stale `(latest)` labels from Chinese 0.7 and 0.8 version docs.
+
 ## [0.11.0] - 2026-06-17
 
 ### Changed (BREAKING)
@@ -610,7 +635,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/cubeplexai/cubepi/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/cubeplexai/cubepi/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/cubeplexai/cubepi/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/cubeplexai/cubepi/compare/v0.8.0...v0.9.0
