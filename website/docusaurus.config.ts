@@ -73,7 +73,7 @@ const config: Config = {
 
   url: 'https://cubepi.ai',
   baseUrl: '/',
-  trailingSlash: true,
+  trailingSlash: false,
   organizationName: 'cubeplexai',
   projectName: 'cubepi',
 
