@@ -68,9 +68,9 @@ pip install cubepi
 这里描述的 API 在打 tag 发布之前还可能变动。
 
 最新已发布版本是 v<PackageVersion />（[从右上角版本选择器切换](pathname:///)）。
-CubePi 0.11 将 deferred tool group 的默认策略切换为 `dispatch`，
-新增 `resolve_tool_call` 中间件 hook，以及 `AgentTool.expose_to_model`
-（隐藏但可解析的工具）。
+CubePi 0.12 新增 `tool_result_compressor` 用于压缩时选择性保留 tool result、
+provider 层的发送者归属（group-chat 场景），以及 deferred tool 排序提示
+以改善流式输出体验。
 
 源代码、Issue 和讨论都在
 [GitHub](https://github.com/cubeplexai/cubepi)。

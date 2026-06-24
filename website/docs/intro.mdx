@@ -71,10 +71,10 @@ the `main` branch. APIs documented here can still change before they
 ship in a tagged release.
 
 The latest released version is v<PackageVersion /> ([switch to it from the
-version picker, top-right](pathname:///)). CubePi 0.11 switches deferred
-tool groups to the `dispatch` strategy by default, adds the
-`resolve_tool_call` middleware hook, and introduces
-`AgentTool.expose_to_model` for hidden-but-resolvable tools.
+version picker, top-right](pathname:///)). CubePi 0.12 adds
+`tool_result_compressor` for selective tool result preservation during
+compaction, sender attribution at the provider boundary, and deferred
+tool ordering hints for smoother streaming UX.
 
 Source, issues, and discussion live on
 [GitHub](https://github.com/cubeplexai/cubepi).
