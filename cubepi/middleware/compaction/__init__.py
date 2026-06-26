@@ -22,7 +22,7 @@ from cubepi.middleware.compaction.summarizer import (
     build_fallback_summary,
     summarize,
 )
-from cubepi.middleware.compaction.tokens import approx_tokens
+from cubepi.middleware.compaction.tokens import approx_tokens, real_context_estimate
 from cubepi.providers.base import (
     BoundModel,
     Message,
@@ -206,8 +206,13 @@ class CompactionMiddleware(Middleware):
         # for the summariser and the post-compaction tail; running it when no
         # compaction is needed would silently hide tool outputs from the main
         # model every turn, with no state recording the loss.
+        #
+        # The trigger uses ``real_context_estimate`` (anchored to the last
+        # turn's real usage) rather than the char heuristic: under prompt
+        # caching the true fill is dominated by cache_read tokens that a char
+        # estimate has no way to see.
         unpruned_compressed = _compressed_view(messages, state, boundary)
-        tokens_now = approx_tokens(unpruned_compressed)
+        tokens_now = real_context_estimate(unpruned_compressed)
         if tokens_now < self._max_tokens_before:
             return unpruned_compressed
 
@@ -252,12 +257,15 @@ class CompactionMiddleware(Middleware):
                 )
 
         # Anti-thrashing guard — uses raw_tokens so prior cumulative summaries
-        # don't mask a genuinely over-limit history.
+        # don't mask a genuinely over-limit history. The emergency override also
+        # checks ``tokens_now`` (the real, cache-aware fill we'd actually send):
+        # under prompt caching the char-based ``raw_tokens`` can stay under the
+        # 1.5× line while the true context is well over it, which would let the
+        # low-savings guard keep skipping an over-threshold send.
         raw_tokens = approx_tokens(messages)
         low_savings = _load_int(ctx.extra.get("compaction_low_savings_count"), 0)
-        force_emergency = (
-            raw_tokens >= self._max_tokens_before * _ANTI_THRASH_FORCE_RATIO
-        )
+        emergency_limit = self._max_tokens_before * _ANTI_THRASH_FORCE_RATIO
+        force_emergency = raw_tokens >= emergency_limit or tokens_now >= emergency_limit
         enough_new = (new_boundary - boundary) >= _ANTI_THRASH_NEW_MSGS
         if low_savings >= _MAX_LOW_SAVINGS and not force_emergency and not enough_new:
             logger.debug("CompactionMiddleware: skipping — low savings guard active")

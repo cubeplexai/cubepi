@@ -77,7 +77,7 @@ def test_rejects_suffix_with_orphan_tool_result() -> None:
     assert safe_boundary(messages, tail_start=4, min_compact=1) is None
 
 
-def test_accepts_suffix_with_matching_tool_call_and_result() -> None:
+def test_accepts_assistant_turn_start_as_boundary() -> None:
     call = ToolCall(id="c1", name="search", arguments={})
     messages: list[Message] = [
         _user("q1"),
@@ -87,10 +87,11 @@ def test_accepts_suffix_with_matching_tool_call_and_result() -> None:
         _tool_result("c1"),
         _assistant("done"),
     ]
-    # tail_start=3 lands inside a tool-call/result pair (3 is the assistant
-    # with the call). Walk back: 3 not UserMessage → 2 is UserMessage,
-    # suffix [2..] is self-contained → return 2.
-    assert safe_boundary(messages, tail_start=3, min_compact=1) == 2
+    # tail_start=3 is the assistant that opens a tool turn. Its suffix
+    # [assistant(c1), tool_result(c1), assistant(done)] is self-contained, so
+    # the boundary lands there (closest to the tail) rather than walking all the
+    # way back to the user message at index 2.
+    assert safe_boundary(messages, tail_start=3, min_compact=1) == 3
 
 
 def test_enforces_min_compact() -> None:
@@ -150,8 +151,9 @@ def test_safe_boundary_using_tail_start_by_tokens() -> None:
     ]
     tail_start = tail_start_by_tokens(messages, budget=1)  # tiny budget → tail=5
     assert tail_start == 5
-    # safe_boundary then walks back to find the latest UserMessage <= 5.
-    assert safe_boundary(messages, tail_start=tail_start, min_compact=1) == 4
+    # safe_boundary walks back to the latest self-contained turn boundary <= 5;
+    # the last assistant (index 5) has a self-contained suffix, so it wins.
+    assert safe_boundary(messages, tail_start=tail_start, min_compact=1) == 5
 
 
 def test_safe_boundary_rejects_out_of_range_tail_start() -> None:
@@ -170,5 +172,79 @@ def test_safe_boundary_tail_start_equals_len_clamps_in_bounds() -> None:
         _user("q2"),
         _assistant("a2"),
     ]
-    # tail_start == 4 == len(messages). Clamp to 3, walk back to 2 (UserMessage).
-    assert safe_boundary(messages, tail_start=4, min_compact=1) == 2
+    # tail_start == 4 == len(messages). Clamp to 3; index 3 (assistant a2) has a
+    # self-contained suffix, so the boundary lands there.
+    assert safe_boundary(messages, tail_start=4, min_compact=1) == 3
+
+
+# --- run-scoped compaction: cut at turn boundaries inside a single run ---
+
+
+def _run_with_tool_chain() -> list[Message]:
+    """A long run with NO intervening UserMessage — just a tool-call chain."""
+    return [
+        _user("open"),
+        _assistant(tool_calls=[ToolCall(id="c1", name="t", arguments={})]),
+        _tool_result("c1"),
+        _assistant(tool_calls=[ToolCall(id="c2", name="t", arguments={})]),
+        _tool_result("c2"),
+        _assistant(tool_calls=[ToolCall(id="c3", name="t", arguments={})]),
+        _tool_result("c3"),
+    ]
+
+
+def test_run_scoped_cut_lands_on_inner_turn_not_run_start() -> None:
+    messages = _run_with_tool_chain()
+    # Protect only the last turn ([a(c3), tool_result c3]); the boundary must
+    # advance to the assistant that opens that turn (index 5), NOT stay pinned to
+    # the run's opening user message at index 0.
+    boundary = safe_boundary(messages, tail_start=5, min_compact=1)
+    assert boundary == 5
+    assert _is_self_contained(messages[boundary:])
+
+
+def test_run_scoped_never_splits_a_multi_tool_turn() -> None:
+    messages: list[Message] = [
+        _user("open"),
+        _assistant(
+            tool_calls=[
+                ToolCall(id="A", name="t", arguments={}),
+                ToolCall(id="B", name="t", arguments={}),
+            ]
+        ),
+        _tool_result("A"),
+        _tool_result("B"),
+        _assistant(tool_calls=[ToolCall(id="C", name="t", arguments={})]),
+        _tool_result("C"),
+    ]
+    # Searching back from the tail must skip the tool_result for C (orphan) and
+    # land on the assistant opening the C turn (index 4) — never between the A/B
+    # results of the multi-tool turn.
+    boundary = safe_boundary(messages, tail_start=5, min_compact=1)
+    assert boundary == 4
+    assert _is_self_contained(messages[boundary:])
+
+
+def test_every_returned_boundary_is_self_contained() -> None:
+    """Core invariant: whatever index safe_boundary returns, the kept suffix
+    never orphans a tool_use/tool_result pair — across every tail_start."""
+    messages = _run_with_tool_chain()
+    for tail_start in range(1, len(messages) + 1):
+        boundary = safe_boundary(messages, tail_start=tail_start, min_compact=1)
+        if boundary is None:
+            continue
+        assert not isinstance(messages[boundary], ToolResultMessage)
+        assert _is_self_contained(messages[boundary:])
+
+
+def _is_self_contained(suffix: list[Message]) -> bool:
+    available: set[str] = set()
+    for message in suffix:
+        if isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, ToolCall) and block.id:
+                    available.add(block.id)
+        elif isinstance(message, ToolResultMessage):
+            if message.tool_call_id and message.tool_call_id not in available:
+                return False
+    return True

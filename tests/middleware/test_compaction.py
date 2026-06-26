@@ -19,6 +19,7 @@ from cubepi.providers.base import (
     StreamOptions,
     TextContent,
     ToolDefinition,
+    Usage,
     UserMessage,
 )
 
@@ -417,6 +418,37 @@ async def test_anti_thrashing_emergency_override_when_raw_history_too_large() ->
     calls_before = len(provider.calls)
     await middleware.transform_context(messages, ctx=ctx)
     # Emergency override fired despite the guard.
+    assert len(provider.calls) > calls_before
+    assert "compaction" in ctx.extra
+
+
+async def test_anti_thrashing_emergency_override_when_real_tokens_too_large() -> None:
+    """Cache-aware emergency: char-based raw_tokens stays under 1.5×, but the
+    real fill (dominated by cache_read) is over it, so the guard is overridden.
+    The old raw-only check would have let the guard keep skipping."""
+    provider = _FakeSummaryProvider(reply="short summary")
+    middleware = _make_middleware(provider, max_tokens_before=200)
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        _assistant("reply 2"),
+        _user("turn 3"),
+        AssistantMessage(
+            content=[TextContent(text="reply 3")],
+            usage=Usage(cache_read_tokens=500),  # real fill lives in the cache
+        ),
+    ]
+    ctx = AgentContext(
+        system_prompt="",
+        messages=messages,
+        extra={"compaction_low_savings_count": 2},  # guard tripped
+    )
+
+    # raw_tokens (~19) is far under 1.5 * 200 = 300, so the raw-only emergency
+    # check does NOT fire; the real estimate (>=500, cache-aware) does.
+    calls_before = len(provider.calls)
+    await middleware.transform_context(messages, ctx=ctx)
     assert len(provider.calls) > calls_before
     assert "compaction" in ctx.extra
 

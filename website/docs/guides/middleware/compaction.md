@@ -53,6 +53,26 @@ next process can resume with the existing summary. If the message refs no longer
 match the current history, the middleware clears the stale state and starts over
 rather than sending an invalid summary.
 
+## How compaction triggers
+
+Compaction is evaluated **before every model call** — including the calls *inside*
+a single agent turn, between tool-call iterations — along two dimensions:
+
+- **Real-token threshold.** The trigger compares the *true* context fill against
+  `max_tokens_before_compact`. CubePi anchors the estimate to the last turn's
+  actual provider usage — `input_tokens + cache_read_tokens + cache_write_tokens`
+  — so it stays accurate under prompt caching, where most of the prompt is served
+  from cache and would be invisible to a character-only estimate. Before the first
+  model response (no usage yet), it falls back to a character estimate. Zero-usage
+  error/abort messages are skipped so a failure never resets the estimate.
+
+- **In-run boundaries.** The summary boundary advances at any self-contained
+  *turn boundary*, not only at user messages. A long agentic run — one user prompt
+  followed by many tool-call iterations with no intervening user message — is
+  compacted *as it grows*, cutting between complete tool turns. The middleware
+  never splits a `tool_use` from its `tool_result`, so the compressed view always
+  stays valid for the provider.
+
 ## Choosing thresholds
 
 Start with conservative values:
@@ -256,9 +276,53 @@ summariser model. The breaker resets the first time the LLM succeeds again.
 
 A second guard tracks **anti-thrashing**: if compaction saves less than 10%
 of context two runs in a row, the next attempt is skipped to avoid burning
-LLM calls for no gain. The guard automatically lifts when raw history grows
-past 1.5× the threshold, when the boundary would advance ≥ 8 messages, or
-when a later compaction does save ≥ 10%.
+LLM calls for no gain. The guard automatically lifts when the context grows
+past 1.5× the threshold — measured by either the raw character estimate or the
+real cache-aware token count, so prompt caching can't hide a genuinely
+over-limit context — when the boundary would advance ≥ 8 messages, or when a
+later compaction does save ≥ 10%.
+
+## Bounding oversized tool results
+
+Compaction summarizes *old* history, but it can't shrink a single tool result
+that the model must read on the **current** turn — if one tool returns more than
+the context window holds, no summary helps. Bounding that is the *application's*
+job, because CubePi is environment-agnostic: it has no filesystem, session
+directory, or blob store to spill overflow into, and where overflow goes is your
+call.
+
+The seam is the `after_tool_call` middleware hook. Inspect the result, persist
+the full content wherever your environment keeps it, and return a replacement
+that previews the content plus a reference the model can follow:
+
+```python
+from cubepi.middleware import Middleware
+from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult
+from cubepi.providers.base import TextContent
+
+class BoundToolResults(Middleware):
+    def __init__(self, *, max_chars: int = 20_000) -> None:
+        self._max_chars = max_chars
+
+    async def after_tool_call(self, ctx: AfterToolCallContext, *, signal=None):
+        text = "".join(
+            b.text for b in ctx.result.content if isinstance(b, TextContent)
+        )
+        if len(text) <= self._max_chars:
+            return None  # pass through unchanged
+
+        ref = my_store.put(text)            # YOUR environment decides where
+        preview = text[: self._max_chars]
+        return AfterToolCallResult(
+            content=[TextContent(text=f"{preview}\n\n[full output stored: {ref}]")],
+            is_error=ctx.result.is_error,
+            terminate=ctx.result.terminate,
+        )
+```
+
+CubePi never inspects `ref` — a disk path, object-store key, database id, or a
+plain truncation marker are all equally valid. This keeps tool-output policy in
+the layer that actually owns the environment.
 
 ## When not to use it
 

@@ -6,7 +6,6 @@ from cubepi.providers.base import (
     Message,
     ToolCall,
     ToolResultMessage,
-    UserMessage,
 )
 
 
@@ -43,8 +42,19 @@ def safe_boundary(
 
     ``tail_start`` is the precomputed protection boundary (call
     :func:`tail_start_by_tokens` first). Messages at ``[tail_start, end)``
-    are the protected tail; this function searches the prefix for the latest
-    ``UserMessage`` whose suffix has no orphaned tool-call/result pairs.
+    are the protected tail; this function searches backward from there for the
+    latest **self-contained turn boundary** — an index whose suffix
+    ``messages[candidate:]`` has no orphaned tool-call/result pairs.
+
+    Any message type may be a boundary as long as the suffix is self-contained;
+    in practice this lands on a ``UserMessage`` or the ``AssistantMessage`` that
+    starts the next turn. A ``ToolResultMessage`` can never be a boundary — a
+    suffix beginning with a tool result orphans it, so it is rejected. This is
+    what lets compaction advance *within* a single long run (a tool-call chain
+    with no intervening user messages), not only between user turns. Suffix
+    self-containment is the sole correctness rule: a result always follows its
+    tool_use, so the only way to orphan a pair is a result whose call landed in
+    the summarised prefix, which the check below rejects.
 
     Returns ``None`` when:
     - ``tail_start`` is out of range (negative, zero, or beyond ``messages``)
@@ -61,9 +71,6 @@ def safe_boundary(
         candidate -= 1
 
     while candidate > 0:
-        if not isinstance(messages[candidate], UserMessage):
-            candidate -= 1
-            continue
         if not _suffix_is_self_contained(messages[candidate:]):
             candidate -= 1
             continue

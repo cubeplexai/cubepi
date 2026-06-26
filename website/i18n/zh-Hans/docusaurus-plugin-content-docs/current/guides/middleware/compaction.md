@@ -48,6 +48,23 @@ middleware 会向 `AgentContext.extra` 写入两个键：
 `ctx.extra`，所以下一个进程可以带着已有摘要继续。如果消息引用与当前历史不再
 匹配，middleware 会清除旧状态并重新开始，而不是发送无效摘要。
 
+## 压缩触发机制
+
+压缩在**每次模型调用前**评估——包括单个 agent turn *内部*、多轮工具调用
+之间的那些调用——并沿两个维度触发：
+
+- **真实 token 阈值。** 触发判据用*真实*上下文占用与 `max_tokens_before_compact`
+  比较。CubePi 把估算锚定到上一轮的真实 provider usage ——
+  `input_tokens + cache_read_tokens + cache_write_tokens` ——所以在 prompt
+  caching 下依然准确（此时大部分 prompt 由缓存提供，纯字符估算根本看不到）。
+  首次模型响应前（还没有 usage）回退到字符估算。零值的 error/abort 消息会被
+  跳过，因此一次失败不会重置估算。
+
+- **run 内边界。** 摘要边界可以在任何**自洽的 turn 边界**前移，不再只限于用户
+  消息。一个长 agentic run ——一条用户 prompt 后跟着多轮工具调用、中间没有用户
+  消息——会*随着增长被压缩*，在完整的工具 turn 之间切分。middleware 绝不会把
+  `tool_use` 和它的 `tool_result` 切开，所以压缩后的视图对 provider 始终合法。
+
 ## 阈值选择
 
 先用保守值：
@@ -165,8 +182,48 @@ agent 不会因为 summariser 模型故障而卡在超限状态。下一次 LLM 
 会自动重置熔断器。
 
 第二道防线是**防抖（anti-thrashing）**：如果连续两次压缩节省不到 10%，
-下一次会跳过——避免在临界状态反复消耗 LLM 调用。当原始历史超过阈值的
-1.5 倍、边界能前进 ≥ 8 条消息、或一次压缩节省 ≥ 10% 时，防抖会自动解除。
+下一次会跳过——避免在临界状态反复消耗 LLM 调用。当上下文超过阈值的 1.5 倍时
+防抖会自动解除——这里用字符估算或真实 cache-aware token 数二者之一衡量，
+所以 prompt caching 无法掩盖一个真正超限的上下文；此外边界能前进 ≥ 8 条消息、
+或一次压缩节省 ≥ 10% 时也会解除。
+
+## 限制超大工具结果
+
+压缩总结的是*旧*历史，但它无法缩小一个模型在**当前**轮必须读取的单个工具
+结果——如果某个工具返回的内容超过上下文窗口能容纳的量，再多摘要也无济于事。
+限制它是*上层应用*的职责，因为 CubePi 是环境无关的：它没有文件系统、会话目录
+或对象存储可以把溢出内容写进去，而内容落到哪里由你决定。
+
+接入点是 `after_tool_call` middleware hook。检查结果、把完整内容持久化到你的
+环境里,再返回一个包含预览 + 模型可追溯引用的替换内容：
+
+```python
+from cubepi.middleware import Middleware
+from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult
+from cubepi.providers.base import TextContent
+
+class BoundToolResults(Middleware):
+    def __init__(self, *, max_chars: int = 20_000) -> None:
+        self._max_chars = max_chars
+
+    async def after_tool_call(self, ctx: AfterToolCallContext, *, signal=None):
+        text = "".join(
+            b.text for b in ctx.result.content if isinstance(b, TextContent)
+        )
+        if len(text) <= self._max_chars:
+            return None  # 原样放行
+
+        ref = my_store.put(text)            # 由你的环境决定存到哪
+        preview = text[: self._max_chars]
+        return AfterToolCallResult(
+            content=[TextContent(text=f"{preview}\n\n[full output stored: {ref}]")],
+            is_error=ctx.result.is_error,
+            terminate=ctx.result.terminate,
+        )
+```
+
+CubePi 从不解析 `ref` ——磁盘路径、对象存储 key、数据库 id,或一个纯截断标记
+都同样有效。这样工具输出策略就留在真正掌握环境的那一层。
 
 ## 什么时候不用
 
