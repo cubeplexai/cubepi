@@ -150,3 +150,16 @@ def test_real_estimate_only_zero_usage_falls_back_to_approx() -> None:
         AssistantMessage(content=[], usage=Usage()),  # zero-sum, not an anchor
     ]
     assert real_context_estimate(messages) == approx_tokens(messages) == 100
+
+
+def test_real_estimate_falls_back_when_no_usage_reported() -> None:
+    # A provider that never emits usage leaves every assistant with usage=None.
+    # The estimate must degrade to the plain char estimate — not crash, not
+    # anchor on a missing measurement, not undercount.
+    messages = [
+        UserMessage(content=[TextContent(text="x" * 400)]),  # 200 tokens
+        AssistantMessage(content=[TextContent(text="x" * 200)]),  # 100, usage=None
+        UserMessage(content=[TextContent(text="x" * 200)]),  # 100 tokens
+        AssistantMessage(content=[TextContent(text="x" * 100)]),  # 50, usage=None
+    ]
+    assert real_context_estimate(messages) == approx_tokens(messages) == 450
