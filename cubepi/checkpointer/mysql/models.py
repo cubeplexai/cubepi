@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.mysql import JSON, LONGBLOB, VARCHAR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-EXPECTED_SCHEMA_VERSION = 4
+EXPECTED_SCHEMA_VERSION = 5
 PARTITION_COUNT = 64
 
 cubepi_metadata = sa.MetaData()
@@ -133,6 +133,21 @@ class CubepiRun(CubepiBase):
         nullable=True,
     )
     completion_seq: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)
+
+
+class CubepiHitlAnswer(CubepiBase):
+    __tablename__ = "cubepi_hitl_answers"
+    __table_args__ = {"mysql_engine": "InnoDB"}
+
+    thread_id: Mapped[str] = mapped_column(_TID, primary_key=True)
+    run_id: Mapped[str] = mapped_column(VARCHAR(255), primary_key=True)
+    question_id: Mapped[str] = mapped_column(VARCHAR(255), primary_key=True)
+    answer: Mapped[Any] = mapped_column(JSON, nullable=False)
+    answered_at: Mapped[_dt.datetime] = mapped_column(
+        sa.TIMESTAMP,
+        nullable=False,
+        server_default=sa.text("CURRENT_TIMESTAMP"),
+    )
 
 
 class CubepiSchemaVersion(CubepiBase):

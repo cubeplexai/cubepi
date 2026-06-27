@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from cubepi.hitl.types import HitlRequest
 from cubepi.providers.base import Message
-from cubepi.types import JsonObject
+from cubepi.types import JsonObject, StructuredValue
 
 
 @dataclass
@@ -89,4 +90,35 @@ class Checkpointer(Protocol):
     ) -> tuple[HitlRequest, str | None] | None:
         """Read (HitlRequest, run_id) atomically from the pending row,
         or None when no pending request exists."""
+        ...
+
+    async def save_hitl_answer(
+        self,
+        thread_id: str,
+        question_id: str,
+        answer: StructuredValue,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        """Persist an answered HITL request for replay during resume."""
+        ...
+
+    async def load_hitl_answer(
+        self,
+        thread_id: str,
+        question_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> StructuredValue | None:
+        """Load a persisted HITL answer for replay, or None."""
+        ...
+
+    async def clear_hitl_answers(
+        self,
+        thread_id: str,
+        question_ids: Iterable[str] | None = None,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        """Clear persisted HITL answers for a run or selected question ids."""
         ...

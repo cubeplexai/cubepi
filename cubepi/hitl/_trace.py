@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from typing import Any, cast
 
 
 class _NullSpan:  # pragma: no cover - only exercised when opentelemetry is not installed
@@ -20,10 +21,11 @@ class _NullSpan:  # pragma: no cover - only exercised when opentelemetry is not 
 @contextlib.contextmanager
 def hitl_span(kind: str, **attrs):
     try:
-        from opentelemetry import trace
+        from opentelemetry import trace as otel_trace
     except ImportError:  # pragma: no cover - tracing extra not installed
         yield _NullSpan()
         return
+    trace = cast(Any, otel_trace)
     tracer = trace.get_tracer("cubepi.hitl")
     with tracer.start_as_current_span(f"hitl.{kind}") as span:
         for k, v in attrs.items():

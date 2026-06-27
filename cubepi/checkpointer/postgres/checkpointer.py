@@ -7,10 +7,12 @@ msgpack payload encoding. Schema version verified on context entry.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 import asyncpg
 import msgpack
+from pydantic import TypeAdapter
 
 from cubepi.checkpointer.base import CheckpointData
 from cubepi.checkpointer.exceptions import (
@@ -33,7 +35,23 @@ from cubepi.providers.base import (
     ToolResultMessage,
     UserMessage,
 )
-from cubepi.types import JsonObject
+from cubepi.types import JsonObject, StructuredValue
+
+_STRUCTURED_VALUE_ADAPTER: TypeAdapter[Any] = TypeAdapter(StructuredValue)
+
+
+def _run_key(run_id: str | None) -> str:
+    return run_id or ""
+
+
+def _serialize_structured_value(value: StructuredValue) -> str:
+    return _STRUCTURED_VALUE_ADAPTER.dump_json(value).decode("utf-8")
+
+
+def _deserialize_structured_value(value: Any) -> StructuredValue:
+    if isinstance(value, str):  # pragma: no cover - codec-dependent
+        return json.loads(value)
+    return value
 
 
 def _role_of(msg: Message) -> str:
@@ -561,3 +579,82 @@ class PostgresCheckpointer:
                 thread_id,
             )
         return row["run_id"] if row is not None else None
+
+    async def save_hitl_answer(
+        self,
+        thread_id: str,
+        question_id: str,
+        answer: StructuredValue,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        assert self._pool is not None
+        payload = _serialize_structured_value(answer)
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "INSERT INTO cubepi_threads (thread_id) "
+                    "VALUES ($1) ON CONFLICT DO NOTHING",
+                    thread_id,
+                )
+                await conn.execute(
+                    "INSERT INTO cubepi_hitl_answers "
+                    "(thread_id, run_id, question_id, answer) "
+                    "VALUES ($1, $2, $3, $4::jsonb) "
+                    "ON CONFLICT (thread_id, run_id, question_id) DO UPDATE "
+                    "SET answer = EXCLUDED.answer, answered_at = now()",
+                    thread_id,
+                    _run_key(run_id),
+                    question_id,
+                    payload,
+                )
+
+    async def load_hitl_answer(
+        self,
+        thread_id: str,
+        question_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> StructuredValue | None:
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT answer FROM cubepi_hitl_answers "
+                "WHERE thread_id = $1 AND run_id = $2 AND question_id = $3",
+                thread_id,
+                _run_key(run_id),
+                question_id,
+            )
+        if row is None:
+            return None
+        return _deserialize_structured_value(row["answer"])
+
+    async def clear_hitl_answers(
+        self,
+        thread_id: str,
+        question_ids: Iterable[str] | None = None,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        assert self._pool is not None
+        run_key = _run_key(run_id)
+        async with self._pool.acquire() as conn:
+            if question_ids is None:
+                await conn.execute(
+                    "DELETE FROM cubepi_hitl_answers "
+                    "WHERE thread_id = $1 AND run_id = $2",
+                    thread_id,
+                    run_key,
+                )
+                return
+            qids = list(dict.fromkeys(question_ids))
+            if not qids:
+                return
+            await conn.execute(
+                "DELETE FROM cubepi_hitl_answers "
+                "WHERE thread_id = $1 AND run_id = $2 "
+                "AND question_id = ANY($3::text[])",
+                thread_id,
+                run_key,
+                qids,
+            )

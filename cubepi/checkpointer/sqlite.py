@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Iterable
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, cast
 
 import aiosqlite
+from pydantic import TypeAdapter
 
 from cubepi.checkpointer.base import CheckpointData
 from cubepi.checkpointer.exceptions import (
@@ -24,7 +26,21 @@ from cubepi.providers.base import (
     ToolResultMessage,
     UserMessage,
 )
-from cubepi.types import JsonObject
+from cubepi.types import JsonObject, StructuredValue
+
+_STRUCTURED_VALUE_ADAPTER: TypeAdapter[Any] = TypeAdapter(StructuredValue)
+
+
+def _run_key(run_id: str | None) -> str:
+    return run_id or ""
+
+
+def _serialize_structured_value(value: StructuredValue) -> str:
+    return _STRUCTURED_VALUE_ADAPTER.dump_json(value).decode("utf-8")
+
+
+def _deserialize_structured_value(value: str) -> StructuredValue:
+    return cast(StructuredValue, json.loads(value))
 
 
 @asynccontextmanager
@@ -77,6 +93,16 @@ class SQLiteCheckpointer:
             "  request_json TEXT NOT NULL,"
             "  run_id TEXT,"
             "  created_at REAL NOT NULL DEFAULT (julianday('now'))"
+            ")"
+        )
+        await self._db.execute(
+            "CREATE TABLE IF NOT EXISTS thread_hitl_answers ("
+            "  thread_id TEXT NOT NULL,"
+            "  run_id TEXT NOT NULL,"
+            "  question_id TEXT NOT NULL,"
+            "  answer_json TEXT NOT NULL,"
+            "  answered_at REAL NOT NULL DEFAULT (julianday('now')),"
+            "  PRIMARY KEY (thread_id, run_id, question_id)"
             ")"
         )
         await self._db.execute(
@@ -309,6 +335,69 @@ class SQLiteCheckpointer:
             )
             row = await cursor.fetchone()
         return row[0] if row else None
+
+    async def save_hitl_answer(
+        self,
+        thread_id: str,
+        question_id: str,
+        answer: StructuredValue,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        assert self._db is not None
+        payload = _serialize_structured_value(answer)
+        async with self._lock, _writer_txn(self._db):
+            await self._db.execute(
+                "INSERT OR REPLACE INTO thread_hitl_answers "
+                "(thread_id, run_id, question_id, answer_json) "
+                "VALUES (?, ?, ?, ?)",
+                (thread_id, _run_key(run_id), question_id, payload),
+            )
+
+    async def load_hitl_answer(
+        self,
+        thread_id: str,
+        question_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> StructuredValue | None:
+        assert self._db is not None
+        async with self._lock:
+            cursor = await self._db.execute(
+                "SELECT answer_json FROM thread_hitl_answers "
+                "WHERE thread_id = ? AND run_id = ? AND question_id = ?",
+                (thread_id, _run_key(run_id), question_id),
+            )
+            row = await cursor.fetchone()
+        return _deserialize_structured_value(row[0]) if row else None
+
+    async def clear_hitl_answers(
+        self,
+        thread_id: str,
+        question_ids: Iterable[str] | None = None,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        assert self._db is not None
+        run_key = _run_key(run_id)
+        async with self._lock, _writer_txn(self._db):
+            if question_ids is None:
+                await self._db.execute(
+                    "DELETE FROM thread_hitl_answers "
+                    "WHERE thread_id = ? AND run_id = ?",
+                    (thread_id, run_key),
+                )
+                return
+            qids = list(dict.fromkeys(question_ids))
+            if not qids:
+                return
+            placeholders = ",".join("?" for _ in qids)
+            await self._db.execute(
+                "DELETE FROM thread_hitl_answers "
+                f"WHERE thread_id = ? AND run_id = ? "
+                f"AND question_id IN ({placeholders})",
+                (thread_id, run_key, *qids),
+            )
 
     async def snapshot(self, thread_id: str, *, after_run_id: str) -> list[Message]:
         assert self._db is not None

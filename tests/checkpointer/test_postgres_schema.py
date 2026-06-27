@@ -4,8 +4,8 @@ import pytest
 from cubepi.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
 
 
-def test_expected_schema_version_is_4():
-    assert EXPECTED_SCHEMA_VERSION == 4
+def test_expected_schema_version_is_5():
+    assert EXPECTED_SCHEMA_VERSION == 5
 
 
 @pytest.mark.asyncio
@@ -37,5 +37,25 @@ async def test_cubepi_messages_has_run_id_column(pg_v4_dsn):
             "WHERE table_name = 'cubepi_messages' AND column_name = 'run_id'"
         )
         assert row is not None
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_cubepi_hitl_answers_table_present(pg_v4_dsn):
+    conn = await asyncpg.connect(pg_v4_dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'cubepi_hitl_answers'"
+        )
+        cols = {r["column_name"] for r in rows}
+        assert {
+            "thread_id",
+            "run_id",
+            "question_id",
+            "answer",
+            "answered_at",
+        } <= cols
     finally:
         await conn.close()

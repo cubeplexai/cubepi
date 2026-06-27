@@ -99,6 +99,7 @@ async def test_legacy_checkpointer_works_without_run_id_kwarg():
 
         def __init__(self) -> None:
             self._pending: dict[str, HitlRequest | None] = {}
+            self._answers: dict[str, object] = {}
 
         async def save_pending_request(
             self, thread_id: str, request
@@ -107,6 +108,25 @@ async def test_legacy_checkpointer_works_without_run_id_kwarg():
 
         async def load_pending_request(self, thread_id: str):
             return self._pending.get(thread_id)
+
+        async def save_hitl_answer(
+            self, thread_id: str, question_id: str, answer, *, run_id=None
+        ):
+            self._answers[question_id] = answer
+
+        async def load_hitl_answer(
+            self, thread_id: str, question_id: str, *, run_id=None
+        ):
+            return self._answers.get(question_id)
+
+        async def clear_hitl_answers(
+            self, thread_id: str, question_ids=None, *, run_id=None
+        ):
+            if question_ids is None:
+                self._answers.clear()
+            else:
+                for question_id in question_ids:
+                    self._answers.pop(question_id, None)
 
     cp = LegacyCheckpointer()
     # No run_id at construction → channel must call legacy two-arg signature.

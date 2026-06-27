@@ -63,3 +63,54 @@ async def test_sqlite_create_table_idempotent(sqlite_cp):
         "thread_id TEXT PRIMARY KEY, request_json TEXT NOT NULL, "
         "created_at REAL NOT NULL DEFAULT (julianday('now')))"
     )
+
+
+async def test_memory_hitl_answer_ledger_crud():
+    cp = MemoryCheckpointer()
+    await cp.save_hitl_answer("t-1", "q-1", {"decision": "approve"}, run_id="r-1")
+    await cp.save_hitl_answer("t-1", "q-2", {"decision": "deny"}, run_id="r-1")
+    await cp.save_hitl_answer("t-1", "q-1", {"decision": "edit"}, run_id="r-2")
+
+    assert await cp.load_hitl_answer("t-1", "q-1", run_id="r-1") == {
+        "decision": "approve"
+    }
+    assert await cp.load_hitl_answer("t-1", "q-1", run_id="r-2") == {"decision": "edit"}
+
+    await cp.clear_hitl_answers("t-1", ["q-1"], run_id="r-1")
+    assert await cp.load_hitl_answer("t-1", "q-1", run_id="r-1") is None
+    assert await cp.load_hitl_answer("t-1", "q-2", run_id="r-1") == {"decision": "deny"}
+    assert await cp.load_hitl_answer("t-1", "q-1", run_id="r-2") == {"decision": "edit"}
+
+    await cp.clear_hitl_answers("t-1", run_id="r-1")
+    assert await cp.load_hitl_answer("t-1", "q-2", run_id="r-1") is None
+    assert await cp.load_hitl_answer("t-1", "q-1", run_id="r-2") == {"decision": "edit"}
+
+
+async def test_sqlite_hitl_answer_ledger_crud(sqlite_cp):
+    await sqlite_cp.save_hitl_answer(
+        "t-1", "q-1", {"decision": "approve"}, run_id="r-1"
+    )
+    await sqlite_cp.save_hitl_answer("t-1", "q-2", {"decision": "deny"}, run_id="r-1")
+    await sqlite_cp.save_hitl_answer("t-1", "q-1", {"decision": "edit"}, run_id="r-2")
+
+    assert await sqlite_cp.load_hitl_answer("t-1", "q-1", run_id="r-1") == {
+        "decision": "approve"
+    }
+    assert await sqlite_cp.load_hitl_answer("t-1", "q-1", run_id="r-2") == {
+        "decision": "edit"
+    }
+
+    await sqlite_cp.clear_hitl_answers("t-1", ["q-1"], run_id="r-1")
+    assert await sqlite_cp.load_hitl_answer("t-1", "q-1", run_id="r-1") is None
+    assert await sqlite_cp.load_hitl_answer("t-1", "q-2", run_id="r-1") == {
+        "decision": "deny"
+    }
+    assert await sqlite_cp.load_hitl_answer("t-1", "q-1", run_id="r-2") == {
+        "decision": "edit"
+    }
+
+    await sqlite_cp.clear_hitl_answers("t-1", run_id="r-1")
+    assert await sqlite_cp.load_hitl_answer("t-1", "q-2", run_id="r-1") is None
+    assert await sqlite_cp.load_hitl_answer("t-1", "q-1", run_id="r-2") == {
+        "decision": "edit"
+    }

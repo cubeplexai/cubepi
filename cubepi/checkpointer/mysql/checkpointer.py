@@ -9,12 +9,14 @@ list of deliberate MySQL divergences.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 from urllib.parse import unquote, urlparse
 
 import aiomysql
 import msgpack
 import pymysql
+from pydantic import TypeAdapter
 
 from cubepi.checkpointer.base import CheckpointData
 from cubepi.checkpointer.exceptions import (
@@ -37,7 +39,9 @@ from cubepi.providers.base import (
     ToolResultMessage,
     UserMessage,
 )
-from cubepi.types import JsonObject
+from cubepi.types import JsonObject, StructuredValue
+
+_STRUCTURED_VALUE_ADAPTER: TypeAdapter[Any] = TypeAdapter(StructuredValue)
 
 _ER_NO_SUCH_TABLE = 1146
 _ER_BAD_FIELD_ERROR = 1054
@@ -78,6 +82,20 @@ def _decode_json(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
     if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _run_key(run_id: str | None) -> str:
+    return run_id or ""
+
+
+def _serialize_structured_value(value: StructuredValue) -> str:
+    return _STRUCTURED_VALUE_ADAPTER.dump_json(value).decode("utf-8")
+
+
+def _decode_json_value(value: Any) -> StructuredValue:
+    if isinstance(value, str):  # pragma: no cover - codec-dependent
         return json.loads(value)
     return value
 
@@ -693,3 +711,90 @@ class MySQLCheckpointer:
                 )
                 row = await cur.fetchone()
         return row[0] if row is not None else None
+
+    async def save_hitl_answer(
+        self,
+        thread_id: str,
+        question_id: str,
+        answer: StructuredValue,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        assert self._pool is not None
+        payload = _serialize_structured_value(answer)
+        async with self._pool.acquire() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
+                        "ON DUPLICATE KEY UPDATE thread_id = thread_id",
+                        (thread_id,),
+                    )
+                    await cur.execute(
+                        "INSERT INTO cubepi_hitl_answers "
+                        "(thread_id, run_id, question_id, answer) "
+                        "VALUES (%s, %s, %s, %s) "
+                        "ON DUPLICATE KEY UPDATE "
+                        "answer = VALUES(answer), "
+                        "answered_at = CURRENT_TIMESTAMP",
+                        (thread_id, _run_key(run_id), question_id, payload),
+                    )
+                await conn.commit()
+            except BaseException:  # pragma: no cover - defensive txn rollback
+                await conn.rollback()
+                raise
+
+    async def load_hitl_answer(
+        self,
+        thread_id: str,
+        question_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> StructuredValue | None:
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT answer FROM cubepi_hitl_answers "
+                    "WHERE thread_id = %s AND run_id = %s AND question_id = %s",
+                    (thread_id, _run_key(run_id), question_id),
+                )
+                row = await cur.fetchone()
+        if row is None:
+            return None
+        return _decode_json_value(row[0])
+
+    async def clear_hitl_answers(
+        self,
+        thread_id: str,
+        question_ids: Iterable[str] | None = None,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        assert self._pool is not None
+        run_key = _run_key(run_id)
+        async with self._pool.acquire() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cur:
+                    if question_ids is None:
+                        await cur.execute(
+                            "DELETE FROM cubepi_hitl_answers "
+                            "WHERE thread_id = %s AND run_id = %s",
+                            (thread_id, run_key),
+                        )
+                    else:
+                        qids = list(dict.fromkeys(question_ids))
+                        if qids:
+                            placeholders = ",".join("%s" for _ in qids)
+                            await cur.execute(
+                                "DELETE FROM cubepi_hitl_answers "
+                                "WHERE thread_id = %s AND run_id = %s "
+                                f"AND question_id IN ({placeholders})",
+                                (thread_id, run_key, *qids),
+                            )
+                await conn.commit()
+            except BaseException:  # pragma: no cover - defensive txn rollback
+                await conn.rollback()
+                raise

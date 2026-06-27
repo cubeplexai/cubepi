@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from cubepi.checkpointer.base import CheckpointData
@@ -16,7 +17,7 @@ from cubepi.checkpointer.exceptions import (
 )
 from cubepi.hitl.types import HitlRequest
 from cubepi.providers.base import Message
-from cubepi.types import JsonObject
+from cubepi.types import JsonObject, StructuredValue
 
 
 @dataclass
@@ -30,11 +31,16 @@ def _legible_message_copy(m: Message) -> Message:
     return m.model_copy(deep=True)
 
 
+def _run_key(run_id: str | None) -> str:
+    return run_id or ""
+
+
 class MemoryCheckpointer:
     def __init__(self) -> None:
         self._store: dict[str, CheckpointData] = {}
         self._pending: dict[str, HitlRequest] = {}
         self._pending_run_id: dict[str, str | None] = {}
+        self._hitl_answers: dict[tuple[str, str, str], StructuredValue] = {}
         self._runs: dict[str, dict[str, _RunState]] = {}
         self._lock = asyncio.Lock()
 
@@ -89,6 +95,53 @@ class MemoryCheckpointer:
         if req is None:
             return None
         return req, self._pending_run_id.get(thread_id)
+
+    async def save_hitl_answer(
+        self,
+        thread_id: str,
+        question_id: str,
+        answer: StructuredValue,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        key = (thread_id, _run_key(run_id), question_id)
+        async with self._lock:
+            self._hitl_answers[key] = copy.deepcopy(answer)
+
+    async def load_hitl_answer(
+        self,
+        thread_id: str,
+        question_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> StructuredValue | None:
+        key = (thread_id, _run_key(run_id), question_id)
+        async with self._lock:
+            answer = self._hitl_answers.get(key)
+            return copy.deepcopy(answer)
+
+    async def clear_hitl_answers(
+        self,
+        thread_id: str,
+        question_ids: Iterable[str] | None = None,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        run_key = _run_key(run_id)
+        async with self._lock:
+            if question_ids is None:
+                keys = [
+                    key
+                    for key in self._hitl_answers
+                    if key[0] == thread_id and key[1] == run_key
+                ]
+            else:
+                keys = [
+                    (thread_id, run_key, question_id)
+                    for question_id in set(question_ids)
+                ]
+            for key in keys:
+                self._hitl_answers.pop(key, None)
 
     async def claim_run(self, thread_id: str, run_id: str) -> None:
         async with self._lock:

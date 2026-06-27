@@ -82,18 +82,33 @@ CREATE TABLE thread_extra (
 
 This schema is append-only. CubePi never updates or deletes rows.
 
-## HITL pending table
+## HITL tables
 
-When the [HITL](../hitl/overview) module is in use, an additional table is
+When the [HITL](../hitl/overview) module is in use, additional tables are
 created automatically on `__aenter__`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS thread_pending_request (
     thread_id TEXT PRIMARY KEY,
     request_json TEXT NOT NULL,
+    run_id TEXT,
     created_at REAL NOT NULL DEFAULT (julianday('now'))
 );
+
+CREATE TABLE IF NOT EXISTS thread_hitl_answers (
+    thread_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    question_id TEXT NOT NULL,
+    answer_json TEXT NOT NULL,
+    answered_at REAL NOT NULL DEFAULT (julianday('now')),
+    PRIMARY KEY (thread_id, run_id, question_id)
+);
 ```
+
+`thread_pending_request` stores the single visible HITL request for a
+thread. `thread_hitl_answers` stores already-answered prompts so a
+parallel approval batch can collect approvals one by one and then
+execute the batch only after every gate is satisfied.
 
 No manual migration is needed — `CREATE TABLE IF NOT EXISTS` is
 idempotent.

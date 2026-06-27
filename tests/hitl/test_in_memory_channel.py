@@ -209,6 +209,26 @@ async def test_attach_resume_answer_short_circuits_next_call():
     assert ch.pending is None
 
 
+async def test_answer_ledger_short_circuits_replayed_approve():
+    ch = InMemoryChannel()
+
+    async def host():
+        while ch.pending is None:
+            await asyncio.sleep(0)
+        await ch.answer(ch.pending.question_id, ApproveAnswer(decision="approve"))
+
+    asyncio.create_task(host())
+    first = await ch.approve(tool_name="bash", tool_call_id="tc-7", args={})
+    assert first.decision == "approve"
+    assert ch.pending is None
+
+    replayed = await ch.approve(
+        tool_name="bash", tool_call_id="tc-7", args={}, timeout=0.01
+    )
+    assert replayed.decision == "approve"
+    assert ch.pending is None
+
+
 async def test_resume_short_circuit_emits_hitl_answer_event():
     """Resume short-circuit must emit HitlAnswerEvent so subscribers
     (e.g. IM outbound tailers) learn the question was answered."""

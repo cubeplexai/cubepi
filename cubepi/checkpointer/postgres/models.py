@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-EXPECTED_SCHEMA_VERSION = 4
+EXPECTED_SCHEMA_VERSION = 5
 PARTITION_COUNT = 64
 
 cubepi_metadata = sa.MetaData()
@@ -127,6 +127,24 @@ class CubepiRun(CubepiBase):
         sa.TIMESTAMP(timezone=True), nullable=True
     )
     completion_seq: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)
+
+
+class CubepiHitlAnswer(CubepiBase):
+    __tablename__ = "cubepi_hitl_answers"
+
+    thread_id: Mapped[str] = mapped_column(
+        sa.Text,
+        sa.ForeignKey("cubepi_threads.thread_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    run_id: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    question_id: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    answer: Mapped[Any] = mapped_column(JSONB, nullable=False)
+    answered_at: Mapped[_dt.datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=sa.text("now()"),
+    )
 
 
 class CubepiSchemaVersion(CubepiBase):
