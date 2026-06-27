@@ -132,7 +132,9 @@ def test_respond_raises_when_checkpointer_lacks_hitl_answer_store():
                 "R1",
             )
 
-    agent = _agent(channel=InMemoryChannel(), checkpointer=_PartialCP(), thread_id="t-1")
+    agent = _agent(
+        channel=InMemoryChannel(), checkpointer=_PartialCP(), thread_id="t-1"
+    )
     with pytest.raises(HitlError, match="save_hitl_answer"):
         asyncio.get_event_loop().run_until_complete(
             agent.respond(answer=ApproveAnswer(decision="approve"))

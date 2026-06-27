@@ -48,6 +48,13 @@ uv add cubepi
 uv add cubepi[sqlite,postgres,mysql,mcp,tracing]
 ```
 
+For local Git hooks that mirror CI, install `pre-commit` and enable the repo
+config:
+
+```bash
+uvx pre-commit install
+```
+
 ## Quick Start
 
 ```python

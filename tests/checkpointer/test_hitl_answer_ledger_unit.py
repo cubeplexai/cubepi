@@ -113,9 +113,7 @@ async def test_postgres_hitl_answer_ledger_load_from_json_string() -> None:
     conn = _PgConn(row={"answer": json.dumps({"decision": "deny"})})
     cp._pool = _PgPool(conn)
 
-    assert await cp.load_hitl_answer("t-1", "q-1", run_id="r-1") == {
-        "decision": "deny"
-    }
+    assert await cp.load_hitl_answer("t-1", "q-1", run_id="r-1") == {"decision": "deny"}
     assert await cp.load_hitl_answer("t-1", "q-missing", run_id="r-1") == {
         "decision": "deny"
     }
@@ -155,9 +153,7 @@ async def test_mysql_hitl_answer_ledger_load_from_json_string() -> None:
     conn = _MyConn(row=("{}".format(json.dumps({"decision": "deny"})),))
     cp._pool = _MyPool(conn)
 
-    assert await cp.load_hitl_answer("t-1", "q-1", run_id="r-1") == {
-        "decision": "deny"
-    }
+    assert await cp.load_hitl_answer("t-1", "q-1", run_id="r-1") == {"decision": "deny"}
 
 
 @pytest.mark.asyncio
