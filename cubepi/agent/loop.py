@@ -335,6 +335,9 @@ async def _run_agent_loop_resume_body(  # pragma: no cover — E2E tested
         save_pending = getattr(checkpointer, "save_pending_request", None)
         if save_pending is not None:
             await save_pending(thread_id, None)
+        clear_answers = getattr(checkpointer, "clear_hitl_answers", None)
+        if clear_answers is not None:
+            await clear_answers(thread_id, run_id=last.run_id)
 
     # Emit TurnEndEvent with the ACTUAL tool_results so listeners get the
     # right payload (codex BLOCKING: previous draft emitted []).

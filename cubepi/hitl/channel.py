@@ -151,6 +151,12 @@ class _BaseChannel:
     def _bind_emit(self, emit) -> None:
         self._emit = emit
 
+    async def _load_answer(self, question_id: str) -> StructuredValue | None:
+        return None
+
+    async def _save_answer(self, question_id: str, answer: StructuredValue) -> None:
+        return None
+
     def _next_qid(self, kind: str, payload_repr: StructuredValue) -> str:
         """Derive the next question_id for an ask/confirm payload.
 
@@ -225,6 +231,19 @@ class _BaseChannel:
                 ):
                     _, ans = self._resume_slot
                     self._resume_slot = None
+                    from_resume = True
+                    outcome = _outcome_from_answer(kind, ans)
+                    if self._emit is not None:
+                        from cubepi.agent.types import HitlAnswerEvent
+
+                        await self._emit_event(
+                            HitlAnswerEvent(question_id=question_id, answer=ans)
+                        )
+                    return ans
+
+                persisted_answer = await self._load_answer(question_id)
+                if persisted_answer is not None:
+                    ans = _normalize_answer(payload, persisted_answer)
                     from_resume = True
                     outcome = _outcome_from_answer(kind, ans)
                     if self._emit is not None:
@@ -362,6 +381,7 @@ class _BaseChannel:
                 f"answer for {question_id}; pending is "
                 f"{self._pending.question_id if self._pending else 'None'}"
             )
+        await self._save_answer(question_id, answer)
         if self._future is not None and not self._future.done():
             self._future.set_result(answer)
         if self._emit is not None:  # pragma: no cover — integration tested
@@ -493,6 +513,12 @@ def _outcome_from_answer(kind: str, ans: StructuredValue) -> str:
     return "answered"
 
 
+def _normalize_answer(payload: HitlPayload, ans: StructuredValue) -> StructuredValue:
+    if isinstance(payload, ApproveRequest) and not isinstance(ans, ApproveAnswer):
+        return ApproveAnswer.model_validate(ans)
+    return ans
+
+
 def _outcome_from_exception(exc: BaseException) -> str:
     from cubepi.hitl.exceptions import (
         HitlAborted,
@@ -514,6 +540,21 @@ def _outcome_from_exception(exc: BaseException) -> str:
 
 class InMemoryChannel(_BaseChannel):
     """In-process HITL channel; no persistence."""
+
+    def __init__(
+        self,
+        *,
+        default_timeout: float | None = None,
+        thread_id: str | None = None,
+    ) -> None:
+        super().__init__(default_timeout=default_timeout, thread_id=thread_id)
+        self._answer_ledger: dict[str, StructuredValue] = {}
+
+    async def _load_answer(self, question_id: str) -> StructuredValue | None:
+        return self._answer_ledger.get(question_id)
+
+    async def _save_answer(self, question_id: str, answer: StructuredValue) -> None:
+        self._answer_ledger[question_id] = answer
 
 
 class CheckpointedChannel(_BaseChannel):
@@ -540,12 +581,17 @@ class CheckpointedChannel(_BaseChannel):
         if not (
             hasattr(checkpointer, "save_pending_request")
             and hasattr(checkpointer, "load_pending_request")
+            and hasattr(checkpointer, "save_hitl_answer")
+            and hasattr(checkpointer, "load_hitl_answer")
+            and hasattr(checkpointer, "clear_hitl_answers")
         ):
             from cubepi.hitl.exceptions import HitlError
 
             raise HitlError(
                 "CheckpointedChannel requires a checkpointer with "
-                "save_pending_request and load_pending_request methods. "
+                "save_pending_request, load_pending_request, "
+                "save_hitl_answer, load_hitl_answer, and "
+                "clear_hitl_answers methods. "
                 "First-party checkpointers (Memory/SQLite/Postgres/MySQL) "
                 "implement these; third-party Protocol-only impls may not."
             )
@@ -558,6 +604,18 @@ class CheckpointedChannel(_BaseChannel):
         # run_id columns.
         self._run_id = run_id
         self._allow_inside_custom_tool = allow_inside_custom_tool
+
+    async def _load_answer(self, question_id: str) -> StructuredValue | None:
+        assert self._thread_id is not None
+        return await self._checkpointer.load_hitl_answer(
+            self._thread_id, question_id, run_id=self._run_id
+        )
+
+    async def _save_answer(self, question_id: str, answer: StructuredValue) -> None:
+        assert self._thread_id is not None
+        await self._checkpointer.save_hitl_answer(
+            self._thread_id, question_id, answer, run_id=self._run_id
+        )
 
     async def _on_pending_set(self, req: HitlRequest) -> None:
         if _in_custom_tool_var.get() and not self._allow_inside_custom_tool:

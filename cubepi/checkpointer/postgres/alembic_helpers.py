@@ -93,6 +93,26 @@ def upgrade_v3_to_v4_op() -> str:
     return "\n".join(parts)
 
 
+def upgrade_v4_to_v5_op() -> str:
+    """Return SQL applying the v4->v5 schema changes.
+
+    Creates the durable HITL answer ledger table. Hosts must also bump
+    `cubepi_schema_version` via write_schema_version_op()
+    (EXPECTED_SCHEMA_VERSION is now 5).
+    """
+    return (
+        "CREATE TABLE IF NOT EXISTS cubepi_hitl_answers ("
+        "  thread_id TEXT NOT NULL REFERENCES cubepi_threads(thread_id) "
+        "ON DELETE CASCADE,"
+        "  run_id TEXT NOT NULL,"
+        "  question_id TEXT NOT NULL,"
+        "  answer JSONB NOT NULL,"
+        "  answered_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
+        "  PRIMARY KEY (thread_id, run_id, question_id)"
+        ");"
+    )
+
+
 def write_schema_version_op() -> str:
     """Return SQL setting cubepi_schema_version to the current version.
 

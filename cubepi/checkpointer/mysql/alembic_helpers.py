@@ -129,6 +129,30 @@ def upgrade_v3_to_v4_op() -> str:
     return f"{add_messages_run_id_column_op()} {create_runs_table_op()};"
 
 
+def create_hitl_answers_table_op() -> str:
+    """Return SQL creating the durable HITL answer ledger table."""
+    return (
+        "CREATE TABLE cubepi_hitl_answers ("
+        "  thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,"
+        "  run_id VARCHAR(255) NOT NULL,"
+        "  question_id VARCHAR(255) NOT NULL,"
+        "  answer JSON NOT NULL,"
+        "  answered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "  PRIMARY KEY (thread_id, run_id, question_id)"
+        ") ENGINE=InnoDB"
+    )
+
+
+def upgrade_v4_to_v5_op() -> str:
+    """Return SQL applying the v4->v5 schema changes.
+
+    Creates the durable HITL answer ledger table. Hosts must also bump
+    ``cubepi_schema_version`` via ``write_schema_version_op()``
+    (EXPECTED_SCHEMA_VERSION is now 5).
+    """
+    return create_hitl_answers_table_op() + ";"
+
+
 def write_schema_version_op() -> str:
     """Return SQL setting cubepi_schema_version to the current version.
 

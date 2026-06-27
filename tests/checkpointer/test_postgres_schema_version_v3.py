@@ -27,7 +27,7 @@ async def test_postgres_v2_database_refused_with_actionable_error(clean_db) -> N
             pass
 
     msg = str(ei.value)
-    assert "expected 4" in msg or "expected=4" in msg
+    assert "expected 5" in msg or "expected=5" in msg
     assert "actual 2" in msg or "actual=2" in msg
     # Hint mentions the host alembic migration path so operators know what to do.
     assert "alembic" in msg.lower()
@@ -59,6 +59,6 @@ async def test_mysql_v2_database_refused_with_actionable_error(clean_mysql_db) -
             pass
 
     msg = str(ei.value)
-    assert "expected 4" in msg or "expected=4" in msg
+    assert "expected 5" in msg or "expected=5" in msg
     assert "actual 2" in msg or "actual=2" in msg
     assert "alembic" in msg.lower()

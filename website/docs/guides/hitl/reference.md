@@ -120,6 +120,11 @@ assert await ch.ask([Question(key="k", prompt="p")]) == {"k": ""}
 - **Single pending per thread.** The agent loop is sequential — at most one
   HITL request is outstanding per `thread_id`. Concurrent `confirm/approve/ask`
   raises `HitlConcurrencyError`.
+- **Parallel approval batches collect answers before execution.** If one
+  assistant turn contains multiple parallel tool calls that require approval,
+  CubePi still exposes one pending request at a time. Each approved answer is
+  persisted by `question_id` and replayed on the next resume attempt. Tool
+  bodies start only after every gate in the parallel batch has been answered.
 - **Prompt-cache prefix invariant.** Between pause and resume, the messages
   list changes only by appending tool-result messages and the next assistant
   turn at the tail. No inserting, reordering, or mutating prior messages —
@@ -127,6 +132,7 @@ assert await ch.ask([Question(key="k", prompt="p")]) == {"k": ""}
 - **`question_id == tool_call_id` for approve requests.** No aliasing or
   mapping needed — hosts that already track `call_id` from the tool stream
   pass it directly.
-- **Resume does not replay.** It re-enters the loop with the answer pre-loaded
-  into the channel. The last assistant message's unresolved tool calls dictate
-  what executes next. No node-based replay semantics.
+- **Resume re-enters the unresolved tool cycle.** The last assistant message's
+  unresolved tool calls dictate what prepares and executes next. Persisted HITL
+  answers can be replayed by `question_id`, but CubePi does not use node-based
+  graph replay semantics.

@@ -847,6 +847,11 @@ class Agent(Generic[TMessage]):
                 "respond() requires a checkpointer that implements "
                 "load_pending (added in checkpointer v4)"
             )
+        save_hitl_answer = getattr(self.checkpointer, "save_hitl_answer", None)
+        if save_hitl_answer is None:
+            raise HitlError(
+                "respond() requires a checkpointer that implements save_hitl_answer"
+            )
 
         async with self._run_lock:
             if not self._state._messages:
@@ -882,6 +887,12 @@ class Agent(Generic[TMessage]):
                 self._state.active_run_id = recovered_run_id
             self._state.last_outcome = None
 
+            await save_hitl_answer(
+                self.thread_id,
+                question_id,
+                answer,
+                run_id=recovered_run_id,
+            )
             self._channel.attach_resume_answer(question_id, answer)
             try:
                 await self._run_hitl_resume()
@@ -980,6 +991,11 @@ class Agent(Generic[TMessage]):
                 # No unresolved assistant turn — conversation already closed
                 # by some other path. Still clear pending + emit for observability.
                 await save_pending(self.thread_id, None)
+                clear_answers = getattr(self.checkpointer, "clear_hitl_answers", None)
+                if clear_answers is not None:
+                    await clear_answers(
+                        self.thread_id, run_id=self._state.active_run_id
+                    )
                 await self._process_event(AgentAbortedEvent(reason=reason))
                 return
 
@@ -1033,6 +1049,9 @@ class Agent(Generic[TMessage]):
             # Defensive clear (Phase 1's _on_pending_cleared usually did this,
             # but cross-process abort_pending may bypass Phase 1 entirely).
             await save_pending(self.thread_id, None)
+            clear_answers = getattr(self.checkpointer, "clear_hitl_answers", None)
+            if clear_answers is not None:
+                await clear_answers(self.thread_id, run_id=owning_run_id)
             await self._process_event(AgentAbortedEvent(reason=reason))
 
     async def _run_hitl_resume(self) -> None:

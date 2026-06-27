@@ -36,6 +36,11 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 if TYPE_CHECKING:
     pass
 
+_otel_trace: Any
+SpanKind: Any
+Status: Any
+StatusCode: Any
+
 
 try:
     from opentelemetry import trace as _otel_trace
@@ -44,10 +49,10 @@ try:
     _OTEL_AVAILABLE = True
 except ImportError:  # pragma: no cover — exercised only without the extra.
     _OTEL_AVAILABLE = False
-    _otel_trace = None  # type: ignore[assignment]
-    SpanKind = None  # type: ignore[assignment,misc]
-    Status = None  # type: ignore[assignment,misc]
-    StatusCode = None  # type: ignore[assignment,misc]
+    _otel_trace = None
+    SpanKind = None
+    Status = None
+    StatusCode = None
 
 
 # When :class:`cubepi.tracing.Tracer` is attached to an agent it

@@ -54,8 +54,9 @@ async with PostgresCheckpointer(
 
 ## Schema
 
-The checkpointer expects three tables: `cubepi_threads`,
-`cubepi_messages`, and `cubepi_schema_version`. Unlike SQLite, CubePi
+The checkpointer expects `cubepi_threads`, `cubepi_messages`,
+`cubepi_runs`, `cubepi_hitl_answers`, and `cubepi_schema_version`.
+Unlike SQLite, CubePi
 **does not create these for you** — it verifies on `__aenter__` that
 they exist with the expected `schema_version`.
 
@@ -129,6 +130,16 @@ cubepi_messages
     metadata           -- JSONB (indexed via GIN)
     payload            -- bytea (msgpack)
     created_at
+
+cubepi_runs
+    thread_id, run_id  -- composite PK
+    claimed_at / completed_at
+    completion_seq
+
+cubepi_hitl_answers
+    thread_id, run_id, question_id -- composite PK
+    answer                         -- JSONB
+    answered_at
 
 cubepi_schema_version
     version (PK)
@@ -212,6 +223,25 @@ def upgrade():
 Pre-feature messages keep `run_id = NULL` and remain readable; see
 [Legacy data behaviour](../agents/forking#legacy-data-behaviour) for the
 fork-eligibility rules on mixed threads.
+
+## Schema v4 -> v5 migration
+
+Durable HITL answer replay bumps `EXPECTED_SCHEMA_VERSION` from 4 to 5.
+The upgrade creates `cubepi_hitl_answers`, which stores answered HITL
+requests by `(thread_id, run_id, question_id)` until the suspended tool
+cycle completes.
+
+```python
+# In a migration's upgrade():
+from cubepi.checkpointer.postgres.alembic_helpers import (
+    upgrade_v4_to_v5_op,
+    write_schema_version_op,
+)
+
+def upgrade():
+    op.execute(upgrade_v4_to_v5_op())
+    op.execute(write_schema_version_op())  # bumps cubepi_schema_version to 5
+```
 
 ## Common pitfalls
 

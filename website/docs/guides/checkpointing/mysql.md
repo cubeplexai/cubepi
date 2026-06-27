@@ -61,10 +61,11 @@ async with MySQLCheckpointer(
 
 ## Schema
 
-The checkpointer expects three tables: `cubepi_threads`,
-`cubepi_messages`, and `cubepi_schema_version`. Like Postgres (and
-unlike SQLite), CubePi **does not create these for you** — it verifies
-on `__aenter__` that they exist with the expected `schema_version`.
+The checkpointer expects `cubepi_threads`, `cubepi_messages`,
+`cubepi_runs`, `cubepi_hitl_answers`, and `cubepi_schema_version`. Like
+Postgres (and unlike SQLite), CubePi **does not create these for you** —
+it verifies on `__aenter__` that they exist with the expected
+`schema_version`.
 
 If they're missing, you get `CubepiSchemaUninitialized`. If the version
 doesn't match this CubePi release, you get `CubepiSchemaMismatch`. A
@@ -140,6 +141,16 @@ cubepi_messages
     metadata                   -- JSON (not indexed; see below)
     payload                    -- LONGBLOB (msgpack)
     created_at
+
+cubepi_runs
+    thread_id, run_id          -- composite PK
+    claimed_at / completed_at
+    completion_seq
+
+cubepi_hitl_answers
+    thread_id, run_id, question_id -- composite PK
+    answer                         -- JSON
+    answered_at
 
 cubepi_schema_version
     version (PK)
@@ -223,6 +234,29 @@ def upgrade():
 Pre-feature messages keep `run_id = NULL` and remain readable; see
 [Legacy data behaviour](../agents/forking#legacy-data-behaviour) for the
 fork-eligibility rules on mixed threads.
+
+## Schema v4 -> v5 migration
+
+Durable HITL answer replay bumps `EXPECTED_SCHEMA_VERSION` from 4 to 5.
+The upgrade creates `cubepi_hitl_answers`, which stores answered HITL
+requests by `(thread_id, run_id, question_id)` until the suspended tool
+cycle completes.
+
+```python
+# In a migration's upgrade():
+from cubepi.checkpointer.mysql.alembic_helpers import (
+    upgrade_v4_to_v5_op,
+    write_schema_version_op,
+)
+
+def upgrade():
+    for stmt in upgrade_v4_to_v5_op().split(";"):
+        if stmt.strip():
+            op.execute(stmt)
+    for stmt in write_schema_version_op().split(";"):
+        if stmt.strip():
+            op.execute(stmt)
+```
 
 ## Common pitfalls
 

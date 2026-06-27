@@ -29,6 +29,7 @@ def test_exceptions_are_postgres_aliases() -> None:
 def test_models_import() -> None:
     from cubepi.checkpointer.mysql.models import (
         EXPECTED_SCHEMA_VERSION,
+        CubepiHitlAnswer,
         PARTITION_COUNT,
         CubepiMessage,
         CubepiSchemaVersion,
@@ -36,13 +37,15 @@ def test_models_import() -> None:
         cubepi_metadata,
     )
 
-    assert EXPECTED_SCHEMA_VERSION == 4
+    assert EXPECTED_SCHEMA_VERSION == 5
     assert PARTITION_COUNT == 64
     assert CubepiThread.__tablename__ == "cubepi_threads"
     assert CubepiMessage.__tablename__ == "cubepi_messages"
+    assert CubepiHitlAnswer.__tablename__ == "cubepi_hitl_answers"
     assert CubepiSchemaVersion.__tablename__ == "cubepi_schema_version"
     assert "cubepi_threads" in cubepi_metadata.tables
     assert "cubepi_messages" in cubepi_metadata.tables
+    assert "cubepi_hitl_answers" in cubepi_metadata.tables
     assert "cubepi_schema_version" in cubepi_metadata.tables
 
 
@@ -232,6 +235,7 @@ async def _setup_schema(dsn: str) -> None:
                 add_pending_request_column_op,
                 add_run_id_column_op,
                 upgrade_v3_to_v4_op,
+                upgrade_v4_to_v5_op,
             )
 
             await cur.execute(add_pending_request_column_op())
@@ -256,6 +260,9 @@ async def _setup_schema(dsn: str) -> None:
             """)
             # v3 → v4: run_id on cubepi_messages + cubepi_runs partitioned table.
             for stmt in upgrade_v3_to_v4_op().split(";"):
+                if stmt.strip():
+                    await cur.execute(stmt)
+            for stmt in upgrade_v4_to_v5_op().split(";"):
                 if stmt.strip():
                     await cur.execute(stmt)
             for stmt in write_schema_version_op().split(";"):
@@ -389,7 +396,9 @@ async def test_version_mismatch_raises(clean_mysql_db) -> None:
     with pytest.raises(CubepiSchemaMismatch) as exc_info:
         async with MySQLCheckpointer(clean_mysql_db):
             pass
-    assert exc_info.value.expected == 4
+    from cubepi.checkpointer.mysql.models import EXPECTED_SCHEMA_VERSION
+
+    assert exc_info.value.expected == EXPECTED_SCHEMA_VERSION
     assert exc_info.value.actual == 999
 
 
