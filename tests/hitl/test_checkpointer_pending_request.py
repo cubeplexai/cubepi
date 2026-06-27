@@ -114,3 +114,11 @@ async def test_sqlite_hitl_answer_ledger_crud(sqlite_cp):
     assert await sqlite_cp.load_hitl_answer("t-1", "q-1", run_id="r-2") == {
         "decision": "edit"
     }
+
+
+async def test_sqlite_hitl_answer_ledger_clear_empty_iterable(sqlite_cp):
+    await sqlite_cp.save_hitl_answer("t-1", "q-1", {"decision": "approve"})
+    await sqlite_cp.clear_hitl_answers("t-1", [], run_id=None)
+    assert await sqlite_cp.load_hitl_answer("t-1", "q-1") == {
+        "decision": "approve"
+    }

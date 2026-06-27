@@ -10,7 +10,11 @@ from cubepi.hitl import (
     HitlTimedOut,
     Question,
 )
-from cubepi.hitl.channel import InMemoryChannel
+from cubepi.hitl.channel import InMemoryChannel, _BaseChannel
+
+
+class _BareChannel(_BaseChannel):
+    pass
 
 
 async def test_ask_resolves_via_answer():
@@ -227,6 +231,61 @@ async def test_answer_ledger_short_circuits_replayed_approve():
     )
     assert replayed.decision == "approve"
     assert ch.pending is None
+
+
+async def test_answer_ledger_replays_raw_dict_as_approve_answer():
+    ch = InMemoryChannel()
+
+    async def host():
+        while ch.pending is None:
+            await asyncio.sleep(0)
+        await ch.answer(ch.pending.question_id, {"decision": "approve"})
+
+    asyncio.create_task(host())
+    first = await ch.approve(tool_name="bash", tool_call_id="tc-8", args={})
+    assert first == {"decision": "approve"}
+
+    replayed = await ch.approve(
+        tool_name="bash", tool_call_id="tc-8", args={}, timeout=0.01
+    )
+    assert replayed.decision == "approve"
+
+
+async def test_answer_ledger_replay_emits_hitl_answer_event():
+    from cubepi.agent.types import HitlAnswerEvent
+
+    emitted: list[object] = []
+    ch = InMemoryChannel()
+    ch._bind_emit(lambda e: emitted.append(e))
+
+    async def host():
+        while ch.pending is None:
+            await asyncio.sleep(0)
+        await ch.answer(ch.pending.question_id, ApproveAnswer(decision="approve"))
+
+    asyncio.create_task(host())
+    await ch.approve(tool_name="bash", tool_call_id="tc-9", args={})
+    emitted.clear()
+
+    replayed = await ch.approve(
+        tool_name="bash", tool_call_id="tc-9", args={}, timeout=0.01
+    )
+    assert replayed.decision == "approve"
+    answer_events = [e for e in emitted if isinstance(e, HitlAnswerEvent)]
+    assert len(answer_events) == 1
+    assert answer_events[0].question_id == "tc-9"
+
+
+async def test_base_channel_ledger_hooks_default_to_noop():
+    ch = _BareChannel()
+    assert await ch._load_answer("q-1") is None
+    assert await ch._save_answer("q-1", {"answer": True}) is None
+
+
+async def test_cancel_with_stale_qid_raises():
+    ch = InMemoryChannel()
+    with pytest.raises(HitlStaleAnswer):
+        await ch.cancel("not-pending")
 
 
 async def test_resume_short_circuit_emits_hitl_answer_event():

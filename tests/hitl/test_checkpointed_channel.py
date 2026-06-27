@@ -101,3 +101,15 @@ def test_checkpointed_requires_hitl_methods_on_checkpointer():
 
     with pytest.raises(HitlError):
         CheckpointedChannel(checkpointer=_BareCheckpointer(), thread_id="t-1")
+
+
+def test_checkpointed_requires_hitl_answer_ledger_methods():
+    class _PartialCheckpointer:
+        async def save_pending_request(self, thread_id, request, *, run_id=None):
+            return None
+
+        async def load_pending_request(self, thread_id):
+            return None
+
+    with pytest.raises(HitlError, match="save_hitl_answer"):
+        CheckpointedChannel(checkpointer=_PartialCheckpointer(), thread_id="t-1")
