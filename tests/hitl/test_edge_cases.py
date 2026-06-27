@@ -114,6 +114,31 @@ def test_respond_raises_when_checkpointer_lacks_hitl():
         )
 
 
+def test_respond_raises_when_checkpointer_lacks_hitl_answer_store():
+    class _PartialCP:  # pragma: no cover — minimal stub
+        async def load(self, tid):
+            return None
+
+        async def load_pending(self, tid):
+            return (
+                HitlRequest(
+                    question_id="tc-1",
+                    thread_id=tid,
+                    payload=ApproveRequest(
+                        tool_name="bash", tool_call_id="tc-1", args={}
+                    ),
+                    created_at=0.0,
+                ),
+                "R1",
+            )
+
+    agent = _agent(channel=InMemoryChannel(), checkpointer=_PartialCP(), thread_id="t-1")
+    with pytest.raises(HitlError, match="save_hitl_answer"):
+        asyncio.get_event_loop().run_until_complete(
+            agent.respond(answer=ApproveAnswer(decision="approve"))
+        )
+
+
 def test_respond_raises_no_pending():
     cp = MemoryCheckpointer()
     ch = InMemoryChannel()
