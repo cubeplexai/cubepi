@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check cubepi/ tests/
+        language: system
+        pass_filenames: false
+      - id: ruff-format-check
+        name: ruff format --check
+        entry: uv run ruff format --check cubepi/ tests/
+        language: system
+        pass_filenames: false
+      - id: mypy
+        name: mypy cubepi
+        entry: uv run mypy cubepi
+        language: system
+        pass_filenames: false
+      - id: pytest
+        name: pytest tests
+        entry: uv run pytest tests/
+        language: system
+        pass_filenames: false
