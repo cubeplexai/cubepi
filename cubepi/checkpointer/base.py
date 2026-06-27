@@ -121,4 +121,4 @@ class Checkpointer(Protocol):
         run_id: str | None = None,
     ) -> None:
         """Clear persisted HITL answers for a run or selected question ids."""
-        ...
+        pass
