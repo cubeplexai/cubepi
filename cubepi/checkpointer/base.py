@@ -111,7 +111,7 @@ class Checkpointer(Protocol):
         run_id: str | None = None,
     ) -> StructuredValue | None:
         """Load a persisted HITL answer for replay, or None."""
-        ...
+        pass
 
     async def clear_hitl_answers(
         self,
