@@ -101,7 +101,7 @@ class Checkpointer(Protocol):
         run_id: str | None = None,
     ) -> None:
         """Persist an answered HITL request for replay during resume."""
-        ...
+        pass
 
     async def load_hitl_answer(
         self,
