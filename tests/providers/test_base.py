@@ -11,9 +11,9 @@ from cubepi.providers.base import (
     MessageStream,
     Model,
     ModelCost,
+    ReasoningControl,
     StreamEvent,
     TextContent,
-    ThinkingBudgets,
     ThinkingContent,
     ToolCall,
     ToolDefinition,
@@ -256,8 +256,8 @@ class TestBaseProviderGenerate:
     async def test_generate_applies_common_per_call_overrides(self):
         provider = _RecordingProvider(AssistantMessage(content=[]))
         base_model = Model(id="gpt-4o", provider_id="openai", max_tokens=128)
-        base_options = StreamOptions(thinking="low")
-        budgets = ThinkingBudgets(low=4096)
+        base_options = StreamOptions(reasoning=ReasoningControl(mode="auto"))
+        reasoning = ReasoningControl(mode="on", effort="high")
 
         await provider.generate(
             base_model,
@@ -265,8 +265,7 @@ class TestBaseProviderGenerate:
             options=base_options,
             max_output_tokens=512,
             temperature=0.0,
-            thinking="high",
-            thinking_budgets=budgets,
+            reasoning=reasoning,
         )
 
         assert provider.seen_model is not None
@@ -274,9 +273,8 @@ class TestBaseProviderGenerate:
         assert provider.seen_model.temperature == 0.0
         assert base_model.max_tokens == 128
         assert provider.seen_options is not None
-        assert provider.seen_options.thinking == "high"
-        assert provider.seen_options.thinking_budgets is budgets
-        assert base_options.thinking == "low"
+        assert provider.seen_options.reasoning == reasoning
+        assert base_options.reasoning == ReasoningControl(mode="auto")
 
 
 class TestAssistantMessageMetadata:
