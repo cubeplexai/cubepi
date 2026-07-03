@@ -190,8 +190,7 @@ class AnthropicProvider(BaseProvider):
         apply_reasoning_control(kwargs, cap, opts.reasoning, model=model)
         thinking_block = kwargs.get("thinking")
         thinking_enabled = (
-            isinstance(thinking_block, dict)
-            and thinking_block.get("type") == "enabled"
+            isinstance(thinking_block, dict) and thinking_block.get("type") == "enabled"
         )
         if not thinking_enabled:
             kwargs.setdefault("temperature", model.temperature)

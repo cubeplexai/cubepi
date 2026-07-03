@@ -275,9 +275,7 @@ async def test_capability_on_payload_overrides_max_output_tokens():
         kwargs["max_output_tokens"] = 1234
         return kwargs
 
-    payload = await _capture_payload_responses(
-        p, _model(), on_payload=set_max
-    )
+    payload = await _capture_payload_responses(p, _model(), on_payload=set_max)
     assert payload["max_output_tokens"] == 1234
 
 
@@ -289,9 +287,7 @@ async def test_default_profile_preserves_on_payload_max_output_tokens():
         kwargs["max_output_tokens"] = 999
         return kwargs
 
-    payload = await _capture_payload_responses(
-        p, _model(), on_payload=set_max
-    )
+    payload = await _capture_payload_responses(p, _model(), on_payload=set_max)
     assert payload["max_output_tokens"] == 999
 
 

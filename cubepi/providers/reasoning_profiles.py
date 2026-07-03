@@ -29,7 +29,9 @@ _API_ALIASES: dict[tuple[str, str], tuple[str, str]] = {
 }
 
 
-def get_capability_profile(provider: str, api: str | None = None) -> CapabilityDescriptor:
+def get_capability_profile(
+    provider: str, api: str | None = None
+) -> CapabilityDescriptor:
     """Return the built-in capability profile for a provider/API pair."""
 
     provider_key = provider.lower()

@@ -249,7 +249,9 @@ def _handle_unsupported_mode(
     message = f"Reasoning mode '{mode}' is not supported by this capability."
     if reasoning.unsupported_mode_policy == "error":
         raise ValueError(message)
-    warnings.append(CapabilityWarning(code="unsupported_reasoning_mode", message=message))
+    warnings.append(
+        CapabilityWarning(code="unsupported_reasoning_mode", message=message)
+    )
 
 
 def _payload_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
@@ -275,4 +277,3 @@ def _write_dotted_path(target: dict[str, Any], path: str, value: Any) -> None:
             cursor[part] = {}
         cursor = cursor[part]
     cursor[parts[-1]] = value
-
