@@ -12,6 +12,7 @@ def test_models_import() -> None:
         EXPECTED_SCHEMA_VERSION,
         CubepiHitlAnswer,
         PARTITION_COUNT,
+        CubepiHitlAnswer,
         CubepiMessage,
         CubepiSchemaVersion,
         CubepiThread,
