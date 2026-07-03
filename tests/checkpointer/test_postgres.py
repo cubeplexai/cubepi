@@ -10,7 +10,6 @@ import pytest
 def test_models_import() -> None:
     from cubepi.checkpointer.postgres.models import (
         EXPECTED_SCHEMA_VERSION,
-        CubepiHitlAnswer,
         PARTITION_COUNT,
         CubepiHitlAnswer,
         CubepiMessage,
