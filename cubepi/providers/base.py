@@ -23,8 +23,19 @@ from cubepi.types import JsonObject, StructuredValue
 BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
 
 ThinkingLevel = Literal["off", "low", "medium", "high", "xhigh"]
+ReasoningMode = Literal["off", "auto", "on"]
+ReasoningEffort = Literal["minimal", "low", "medium", "high", "max"]
+ReasoningSummary = Literal["none", "auto", "detailed", "summarized"]
 
 ToolChoice = Literal["auto", "required", "none"] | str
+
+
+class ReasoningControl(BaseModel):
+    """Provider-independent reasoning controls."""
+
+    mode: ReasoningMode = "off"
+    effort: ReasoningEffort = "medium"
+    summary: ReasoningSummary = "none"
 
 
 class ThinkingBudgets(BaseModel):
@@ -625,6 +636,7 @@ class StreamOptions(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    reasoning: ReasoningControl = Field(default_factory=ReasoningControl)
     thinking: ThinkingLevel = "off"
     thinking_budgets: ThinkingBudgets | None = None
     signal: asyncio.Event | None = None
@@ -683,6 +695,7 @@ class Provider(Protocol):
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
+        reasoning: ReasoningControl | None = None,
         thinking: ThinkingLevel | None = None,
         thinking_budgets: ThinkingBudgets | None = None,
     ) -> AssistantMessage: ...
@@ -764,6 +777,7 @@ class BaseProvider:
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
+        reasoning: ReasoningControl | None = None,
         thinking: ThinkingLevel | None = None,
         thinking_budgets: ThinkingBudgets | None = None,
     ) -> AssistantMessage:
@@ -776,7 +790,9 @@ class BaseProvider:
         if model_updates:
             model = model.model_copy(update=model_updates)
 
-        option_updates: dict[str, ThinkingLevel | ThinkingBudgets] = {}
+        option_updates: dict[str, ReasoningControl | ThinkingLevel | ThinkingBudgets] = {}
+        if reasoning is not None:
+            option_updates["reasoning"] = reasoning
         if thinking is not None:
             option_updates["thinking"] = thinking
         if thinking_budgets is not None:
@@ -895,6 +911,7 @@ class BoundModel:
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
+        reasoning: ReasoningControl | None = None,
         thinking: ThinkingLevel | None = None,
         thinking_budgets: ThinkingBudgets | None = None,
     ) -> AssistantMessage:
@@ -908,6 +925,7 @@ class BoundModel:
             options=options,
             max_output_tokens=max_output_tokens,
             temperature=temperature,
+            reasoning=reasoning,
             thinking=thinking,
             thinking_budgets=thinking_budgets,
         )

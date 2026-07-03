@@ -5,11 +5,19 @@ See docs/dev/specs/2026-05-19-llm-provider-platform-design.md §3.1.
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from cubepi.providers.base import ThinkingLevel
+from cubepi.providers.base import (
+    Model,
+    ReasoningControl,
+    ReasoningEffort,
+    ReasoningMode,
+    ReasoningSummary,
+    ThinkingLevel,
+)
 
 
 class TemperatureSpec(BaseModel):
@@ -50,9 +58,36 @@ class ReasoningLevelSpec(BaseModel):
         return self
 
 
+UnsupportedModePolicy = Literal["skip", "warn", "error"]
+
+
+class ReasoningCapability(BaseModel):
+    """How one endpoint maps standard reasoning controls onto its wire payload."""
+
+    mode_payloads: dict[ReasoningMode, dict[str, Any]] = Field(default_factory=dict)
+    effort_path: str | None = None
+    effort_values: dict[ReasoningEffort, Any] = Field(default_factory=dict)
+    summary_path: str | None = None
+    summary_values: dict[ReasoningSummary, Any] = Field(default_factory=dict)
+    include_payloads: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    apply_effort_when_off: bool = True
+    unsupported_mode_policy: UnsupportedModePolicy = "warn"
+
+
+class CapabilityWarning(BaseModel):
+    code: str
+    message: str
+
+
+class PayloadPreview(BaseModel):
+    payload: dict[str, Any]
+    warnings: list[CapabilityWarning] = Field(default_factory=list)
+
+
 class CapabilityDescriptor(BaseModel):
     """Vendor quirks for one endpoint. Empty default = legacy no-op."""
 
+    reasoning: ReasoningCapability | None = None
     reasoning_off_payload: dict[str, Any] = Field(default_factory=dict)
     reasoning_on_payload: dict[str, Any] = Field(default_factory=dict)
     reasoning_level: ReasoningLevelSpec | None = None
@@ -117,6 +152,97 @@ def apply_temperature(kwargs: dict[str, Any], spec: TemperatureSpec) -> None:
         kwargs["temperature"] = max(spec.min, min(spec.max, value))
 
 
+def apply_reasoning_control(
+    kwargs: dict[str, Any],
+    capability: CapabilityDescriptor | ReasoningCapability,
+    control: ReasoningControl,
+) -> list[CapabilityWarning]:
+    """Apply provider-independent reasoning controls to a provider payload."""
+
+    reasoning = (
+        capability.reasoning
+        if isinstance(capability, CapabilityDescriptor)
+        else capability
+    )
+    if reasoning is None:
+        return []
+
+    warnings: list[CapabilityWarning] = []
+    mode_payload = reasoning.mode_payloads.get(control.mode)
+    if mode_payload is not None:
+        merge_capability_payload(kwargs, mode_payload)
+    else:
+        _handle_unsupported_mode(reasoning, control.mode, warnings)
+
+    if (
+        reasoning.effort_path is not None
+        and (control.mode != "off" or reasoning.apply_effort_when_off)
+    ):
+        effort = reasoning.effort_values.get(control.effort)
+        if effort is not None:
+            _write_dotted_path(kwargs, reasoning.effort_path, effort)
+
+    if reasoning.summary_path is not None:
+        summary = reasoning.summary_values.get(control.summary)
+        if summary is not None:
+            _write_dotted_path(kwargs, reasoning.summary_path, summary)
+
+    for key in (
+        "always",
+        f"mode:{control.mode}",
+        f"effort:{control.effort}",
+        f"summary:{control.summary}",
+    ):
+        patch = reasoning.include_payloads.get(key)
+        if patch is not None:
+            merge_capability_payload(kwargs, patch)
+
+    return warnings
+
+
+def preview_payload(
+    model: Model,
+    capability: CapabilityDescriptor,
+    control: ReasoningControl,
+    base_payload: dict[str, Any] | None = None,
+) -> PayloadPreview:
+    """Return the payload fragment produced by applying reasoning controls."""
+
+    payload = copy.deepcopy(base_payload) if base_payload is not None else {}
+    before = copy.deepcopy(payload)
+    warnings = apply_reasoning_control(payload, capability, control)
+    warnings.extend(lint_capability(model, capability))
+    return PayloadPreview(payload=_payload_delta(before, payload), warnings=warnings)
+
+
+def lint_capability(
+    model: Model,
+    capability: CapabilityDescriptor,
+) -> list[CapabilityWarning]:
+    """Detect capability mappings that are known to be invalid for an API shape."""
+
+    reasoning = capability.reasoning
+    if reasoning is None:
+        return []
+
+    warnings: list[CapabilityWarning] = []
+    if model.api in {"openai-completions", "chat_completions"}:
+        for payload in reasoning.mode_payloads.values():
+            if "thinking" in payload:
+                warnings.append(
+                    CapabilityWarning(
+                        code="openai_chat_top_level_thinking",
+                        message=(
+                            "OpenAI-compatible Chat Completions payloads must put "
+                            "provider-specific thinking controls under "
+                            "extra_body.thinking, not top-level thinking."
+                        ),
+                    )
+                )
+                break
+    return warnings
+
+
 def _resolve_level_value(spec: ReasoningLevelSpec, level: ThinkingLevel) -> Any | None:
     """Return the wire value for ``level`` per ``spec``, or None to skip writing."""
     if spec.kind == "int_budget":
@@ -141,6 +267,27 @@ def _resolve_level_value(spec: ReasoningLevelSpec, level: ThinkingLevel) -> Any 
             )
         return spec.level_to_enum.get(level)
     return None
+
+
+def _handle_unsupported_mode(
+    reasoning: ReasoningCapability,
+    mode: ReasoningMode,
+    warnings: list[CapabilityWarning],
+) -> None:
+    if reasoning.unsupported_mode_policy == "skip":
+        return
+    message = f"Reasoning mode '{mode}' is not supported by this capability."
+    if reasoning.unsupported_mode_policy == "error":
+        raise ValueError(message)
+    warnings.append(CapabilityWarning(code="unsupported_reasoning_mode", message=message))
+
+
+def _payload_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    delta: dict[str, Any] = {}
+    for key, value in after.items():
+        if key not in before or before[key] != value:
+            delta[key] = value
+    return delta
 
 
 def _write_dotted_path(target: dict[str, Any], path: str, value: Any) -> None:

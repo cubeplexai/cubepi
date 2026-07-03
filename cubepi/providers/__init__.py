@@ -15,6 +15,10 @@ from cubepi.providers.base import (
     OnResponseCallback,
     Provider,
     ProviderResponse,
+    ReasoningControl,
+    ReasoningEffort,
+    ReasoningMode,
+    ReasoningSummary,
     StreamEvent,
     StreamOptions,
     TextContent,
@@ -31,6 +35,17 @@ from cubepi.providers.base import (
     adjust_max_tokens_for_thinking,
     chain_providers,
     collect_agent_providers,
+)
+from cubepi.providers.capability import (
+    CapabilityDescriptor,
+    CapabilityWarning,
+    PayloadPreview,
+    ReasoningCapability,
+    ReasoningLevelSpec,
+    TemperatureSpec,
+    apply_reasoning_control,
+    lint_capability,
+    preview_payload,
 )
 from cubepi.providers.faux import (
     FauxProvider,
@@ -49,6 +64,7 @@ from cubepi.providers.models import (
     get_supported_thinking_levels,
     models_are_equal,
 )
+from cubepi.providers.reasoning_profiles import get_capability_profile
 
 
 # Lazy imports for optional providers
@@ -90,6 +106,12 @@ __all__ = [
     "OnResponseCallback",
     "Provider",
     "ProviderResponse",
+    "ReasoningCapability",
+    "ReasoningControl",
+    "ReasoningEffort",
+    "ReasoningLevelSpec",
+    "ReasoningMode",
+    "ReasoningSummary",
     "StreamEvent",
     "StreamOptions",
     "TextContent",
@@ -101,6 +123,7 @@ __all__ = [
     "ToolResultMessage",
     "Usage",
     "UserMessage",
+    "apply_reasoning_control",
     "is_synthetic_message",
     "synthetic_user_message",
     "adjust_max_tokens_for_thinking",
@@ -112,6 +135,13 @@ __all__ = [
     "faux_thinking",
     "faux_tool_call",
     "get_supported_thinking_levels",
+    "get_capability_profile",
+    "lint_capability",
     "models_are_equal",
+    "preview_payload",
+    "CapabilityDescriptor",
+    "CapabilityWarning",
+    "PayloadPreview",
+    "TemperatureSpec",
     "THINKING_LEVELS",
 ]
