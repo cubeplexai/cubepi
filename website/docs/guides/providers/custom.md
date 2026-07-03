@@ -25,7 +25,7 @@ class Provider(Protocol):
 That is the only method custom providers usually implement. The
 inherited `generate()` consumes `stream()` and returns the final
 `AssistantMessage`, with per-call overrides for `max_output_tokens`,
-`temperature`, `thinking`, and `thinking_budgets`.
+`temperature`, and `reasoning` (a `ReasoningControl`).
 
 This page covers two scenarios:
 

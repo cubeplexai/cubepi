@@ -135,9 +135,17 @@ def apply_reasoning_control(
     *,
     model: Model | None = None,
 ) -> list[CapabilityWarning]:
-    """Apply provider-independent reasoning controls to a provider payload."""
-    del model
+    """Apply provider-independent reasoning controls to a provider payload.
 
+    When ``model.reasoning`` is False, any requested mode other than "off" is
+    treated as "off" — the model can't reason, so no effort/summary/include
+    fields are written and only the "off" mode payload (if any) applies. This
+    is what lets a hybrid model's off-payload (e.g. Qwen's
+    ``enable_thinking: false``) keep firing regardless of ``model.reasoning``,
+    while never sending enable/effort/summary fields to a model that can't use
+    them. Callers should invoke this unconditionally rather than re-deriving
+    their own ``model.reasoning`` gate.
+    """
     reasoning = (
         capability.reasoning
         if isinstance(capability, CapabilityDescriptor)
@@ -146,35 +154,44 @@ def apply_reasoning_control(
     if reasoning is None:
         return []
 
+    model_supports_reasoning = model is None or model.reasoning
+    effective_mode = control.mode if model_supports_reasoning else "off"
+
     warnings: list[CapabilityWarning] = []
-    mode_payload = reasoning.mode_payloads.get(control.mode)
+    mode_payload = reasoning.mode_payloads.get(effective_mode)
     if mode_payload is not None:
         merge_capability_payload(kwargs, mode_payload)
     else:
-        _handle_unsupported_mode(reasoning, control.mode, warnings)
+        _handle_unsupported_mode(reasoning, effective_mode, warnings)
 
     if (
-        reasoning.effort_path is not None
-        and (control.mode != "off" or reasoning.apply_effort_when_off)
+        model_supports_reasoning
+        and reasoning.effort_path is not None
+        and (effective_mode != "off" or reasoning.apply_effort_when_off)
     ):
         effort = reasoning.effort_values.get(control.effort)
         if effort is not None:
             _write_dotted_path(kwargs, reasoning.effort_path, effort)
 
-    if reasoning.summary_path is not None:
+    if (
+        model_supports_reasoning
+        and reasoning.summary_path is not None
+        and effective_mode != "off"
+    ):
         summary = reasoning.summary_values.get(control.summary)
         if summary is not None:
             _write_dotted_path(kwargs, reasoning.summary_path, summary)
 
-    for key in (
-        "always",
-        f"mode:{control.mode}",
-        f"effort:{control.effort}",
-        f"summary:{control.summary}",
-    ):
-        patch = reasoning.include_payloads.get(key)
-        if patch is not None:
-            merge_capability_payload(kwargs, patch)
+    if model_supports_reasoning:
+        for key in (
+            "always",
+            f"mode:{effective_mode}",
+            f"effort:{control.effort}",
+            f"summary:{control.summary}",
+        ):
+            patch = reasoning.include_payloads.get(key)
+            if patch is not None:
+                merge_capability_payload(kwargs, patch)
 
     return warnings
 

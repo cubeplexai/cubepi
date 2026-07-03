@@ -81,8 +81,7 @@ class Provider(Protocol):
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
-        thinking: ThinkingLevel | None = None,
-        thinking_budgets: ThinkingBudgets | None = None,
+        reasoning: ReasoningControl | None = None,
     ) -> AssistantMessage: ...
 ```
 
@@ -92,7 +91,7 @@ yields `StreamEvent`s and exposes the final `AssistantMessage` via
 the final message directly; `BaseProvider` implements it for any
 provider that implements `stream()`. Built-in providers:
 
-- `AnthropicProvider` — Claude (Messages API, with thinking, caching,
+- `AnthropicProvider` — Claude (Messages API, with reasoning, caching,
   tool use).
 - `OpenAIProvider` — GPT family (Chat Completions API).
 - `OpenAIResponsesProvider` — GPT family (Responses API, server-side

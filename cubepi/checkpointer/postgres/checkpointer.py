@@ -44,6 +44,25 @@ def _run_key(run_id: str | None) -> str:
     return run_id or ""
 
 
+def _schema_mismatch_hint(actual: int, expected: int) -> str:
+    """Build the operator-facing hint for a schema-version mismatch.
+
+    Names the actual upgrade_vN_to_vM_op() helper(s) needed to close the gap
+    between ``actual`` and ``expected``, rather than hardcoding one version
+    transition, so the hint stays correct as EXPECTED_SCHEMA_VERSION grows.
+    """
+    steps = ", ".join(
+        f"upgrade_v{v}_to_v{v + 1}_op()" for v in range(actual, expected)
+    )
+    return (
+        "cubepi was upgraded but host alembic is behind. "
+        f"Generate a new alembic revision that calls {steps} + "
+        "write_schema_version_op() (see "
+        "cubepi.checkpointer.postgres.alembic_helpers) and run "
+        "`alembic upgrade head` against this database."
+    )
+
+
 def _serialize_structured_value(value: StructuredValue) -> str:
     return _STRUCTURED_VALUE_ADAPTER.dump_json(value).decode("utf-8")
 
@@ -131,13 +150,7 @@ class PostgresCheckpointer:
                 raise CubepiSchemaMismatch(
                     expected=EXPECTED_SCHEMA_VERSION,
                     actual=row["version"],
-                    hint=(
-                        "cubepi was upgraded but host alembic is behind. "
-                        "Generate a new alembic revision that calls "
-                        "add_run_id_column_op() + write_schema_version_op() "
-                        "(see cubepi.checkpointer.postgres.alembic_helpers) "
-                        "and run `alembic upgrade head` against this database."
-                    ),
+                    hint=_schema_mismatch_hint(row["version"], EXPECTED_SCHEMA_VERSION),
                 )
 
     async def load(self, thread_id: str) -> CheckpointData | None:

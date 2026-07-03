@@ -172,6 +172,18 @@ async def test_openai_chat_off_writes_minimal_effort() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_chat_reasoning_model_does_not_get_default_temperature() -> None:
+    """Reasoning models on chat completions reject a non-default temperature;
+    a legacy caller with no explicit capability must not have one injected."""
+    payload = await _capture_payload_openai(
+        OpenAIProvider(api_key="x", base_url="http://example"),
+        _model(reasoning=True, temperature=0.7),
+    )
+
+    assert "temperature" not in payload
+
+
+@pytest.mark.asyncio
 async def test_temperature_ignored_strips_field():
     cap = CapabilityDescriptor(temperature=TemperatureSpec(mode="ignored"))
     p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)

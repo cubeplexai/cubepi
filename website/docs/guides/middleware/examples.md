@@ -196,8 +196,8 @@ agent = Agent(
 ```
 
 The summary call uses `Provider.generate(...)` with
-`temperature=0.0`, `thinking="off"`, and `max_output_tokens` set from
-`max_summary_tokens`.
+`temperature=0.0`, `reasoning=ReasoningControl(mode="off")`, and
+`max_output_tokens` set from `max_summary_tokens`.
 
 ## Built-in subagents
 

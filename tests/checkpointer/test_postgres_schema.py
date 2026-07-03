@@ -1,11 +1,24 @@
 import asyncpg
 import pytest
 
+from cubepi.checkpointer.postgres.checkpointer import _schema_mismatch_hint
 from cubepi.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
 
 
 def test_expected_schema_version_is_5():
     assert EXPECTED_SCHEMA_VERSION == 5
+
+
+def test_schema_mismatch_hint_names_the_v4_to_v5_helper():
+    hint = _schema_mismatch_hint(actual=4, expected=5)
+    assert "upgrade_v4_to_v5_op()" in hint
+    assert "add_run_id_column_op" not in hint
+
+
+def test_schema_mismatch_hint_names_every_step_across_multiple_versions():
+    hint = _schema_mismatch_hint(actual=3, expected=5)
+    assert "upgrade_v3_to_v4_op()" in hint
+    assert "upgrade_v4_to_v5_op()" in hint
 
 
 @pytest.mark.asyncio

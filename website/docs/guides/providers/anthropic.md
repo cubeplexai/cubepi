@@ -42,58 +42,70 @@ SDK. `provider_id` is a free-form label used by CubePi internals — keep
 it stable across your codebase, and set it when you want tracing and
 error messages to show a specific source label.
 
-## Extended thinking
+## Extended thinking (reasoning)
 
-CubePi maps a `ThinkingLevel` enum onto Anthropic's `budget_tokens`:
+CubePi exposes a provider-independent `ReasoningControl(mode, effort,
+summary)` and maps it onto Anthropic's `thinking` + `budget_tokens`:
 
-| Level | Default budget |
+| `effort` | Budget |
 |---|---|
-| `"off"` | thinking disabled |
+| `"minimal"` | 1024 |
 | `"low"` | 2048 |
 | `"medium"` | 8192 |
 | `"high"` | 16384 |
-| `"xhigh"` | clamped to `"high"` |
+| `"max"` | 16384 (Anthropic has no tier above `"high"`) |
 
-Set it per-agent:
+`mode="off"` disables thinking; `mode="on"` (or `"auto"`) enables it at
+the given `effort`. Set it per-agent:
 
 ```python
-agent = Agent(model=model, thinking="medium")
+from cubepi import ReasoningControl
+
+agent = Agent(
+    model=model,
+    reasoning=ReasoningControl(mode="on", effort="medium"),
+)
 ```
 
-To change the per-level budgets, supply a
-[`CapabilityDescriptor`](./overview) with a
-`reasoning_level` of `kind="int_budget"` at construction — its
-`level_budgets` map is the single source of truth for budget values.
+A non-reasoning model (`Model(reasoning=False)`) never receives an
+enabled `thinking` payload, regardless of the requested `mode` — CubePi
+clamps it to `"off"` for you.
+
+To change the per-effort budgets, supply a
+[`CapabilityDescriptor`](./overview) with a `ReasoningCapability` whose
+`effort_values` map is the single source of truth for budget values:
 
 ```python
-from cubepi import CapabilityDescriptor, ReasoningLevelSpec
+from cubepi import CapabilityDescriptor, ReasoningCapability
 from cubepi.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(
     api_key="sk-ant-…",
     capability=CapabilityDescriptor(
-        reasoning_off_payload={"thinking": {"type": "disabled"}},
-        reasoning_on_payload={"thinking": {"type": "enabled"}},
-        reasoning_level=ReasoningLevelSpec(
-            path="thinking.budget_tokens",
-            kind="int_budget",
-            level_budgets={"off": 0, "low": 4096,
-                           "medium": 12288, "high": 16384, "xhigh": 16384},
+        reasoning=ReasoningCapability(
+            mode_payloads={
+                "off": {"thinking": {"type": "disabled"}},
+                "on": {"thinking": {"type": "enabled"}},
+            },
+            effort_path="thinking.budget_tokens",
+            effort_values={
+                "low": 4096, "medium": 12288, "high": 16384, "max": 16384,
+            },
         ),
     ),
 )
 ```
 
-:::note Changed in 0.5
-`AnthropicProvider` no longer honors
-`StreamOptions(thinking_budgets=…)` — the capability descriptor's
-`level_budgets` is now the only way to override budgets.
+:::note Changed in 0.13
+The `thinking` / `ThinkingLevel` / `ThinkingBudgets` API (and
+`StreamOptions(thinking_budgets=…)`) is replaced by `ReasoningControl` +
+`ReasoningCapability`. `Agent(thinking=…)` is now `Agent(reasoning=…)`.
 :::
 
-When thinking is on, CubePi **omits `temperature`** because the
+When reasoning is on, CubePi **omits `temperature`** because the
 Anthropic API rejects non-default temperatures alongside extended
 thinking ([feature compatibility](https://platform.claude.com/docs/en/build-with-claude/extended-thinking#feature-compatibility)).
-Set `Model.temperature` to the value you want when thinking is off;
+Set `Model.temperature` to the value you want when reasoning is off;
 CubePi handles the rest.
 
 Thinking content streams as `thinking_start` / `thinking_delta` /
@@ -177,11 +189,11 @@ and inject it via a [custom provider](./custom).
 
 ## Common pitfalls
 
-- **`temperature` ignored** — Expected. CubePi drops it when thinking
+- **`temperature` ignored** — Expected. CubePi drops it when reasoning
   is on; that's an API constraint, not a bug.
-- **`xhigh` looks the same as `high`** — Anthropic doesn't expose a
-  budget tier above `high`, so CubePi clamps `xhigh` down. The token
-  budget is the same.
+- **`effort="max"` looks the same as `"high"`** — Anthropic doesn't
+  expose a budget tier above `high`, so the built-in profile maps both
+  to the same token budget.
 - **Cache misses you didn't expect** — Caches are keyed by content +
   ttl. Changing the system prompt invalidates everything; changing the
   tool list invalidates from the tools onward. Make those two stable

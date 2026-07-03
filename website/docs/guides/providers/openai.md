@@ -32,18 +32,32 @@ provider = OpenAIProvider(
 
 model = provider.model(
     "gpt-5",
-    reasoning=True,        # enables thinking level mapping
+    reasoning=True,        # enables reasoning-effort mapping
     max_tokens=8192,
     context_window=128_000,
 )
 ```
 
-### Thinking on Chat Completions
+### Reasoning on Chat Completions
 
 OpenAI exposes reasoning content through `delta.reasoning_content` on
 o-series and gpt-5 models. CubePi captures it as `ThinkingContent` and
-emits `thinking_*` events identically to Anthropic. The same
-`ThinkingLevel` enum (`"off"` → `"high"`) works.
+emits `thinking_*` events identically to Anthropic. Control it with
+`ReasoningControl`:
+
+```python
+from cubepi import ReasoningControl
+
+agent = Agent(
+    model=model,
+    reasoning=ReasoningControl(mode="on", effort="high"),
+)
+```
+
+`effort` accepts `"minimal" | "low" | "medium" | "high" | "max"` and is
+written to `reasoning_effort` on the wire (`"max"` maps to OpenAI's
+`"xhigh"` tier). A model bound with `reasoning=False` never receives a
+`reasoning_effort` field, regardless of the requested mode.
 
 Many OpenAI-compatible OSS backends emit reasoning under different
 fields. CubePi understands three in priority order:

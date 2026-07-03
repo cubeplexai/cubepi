@@ -91,11 +91,12 @@ class AnthropicProvider(BaseProvider):
             cache_policy or DefaultCacheMarkerPolicy()
         )
         # Anthropic always runs the capability path; capability=None falls back
-        # to _ANTHROPIC_DEFAULT_CAPABILITY which mirrors legacy wire bytes.
+        # to the built-in Anthropic Messages profile, which mirrors legacy
+        # wire bytes.
         self._capability: CapabilityDescriptor = (
             capability
             if capability is not None
-            else get_capability_profile("anthropic.messages.legacy_budget")
+            else get_capability_profile("anthropic", "messages")
         )
         self._model_overrides: dict[str, CapabilityDescriptor] = (
             model_capability_overrides or {}
