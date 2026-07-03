@@ -69,8 +69,8 @@ class OpenAIResponsesProvider(BaseProvider):
         self._cap_active: bool = (
             capability is not None or model_capability_overrides is not None
         )
-        self._capability: CapabilityDescriptor = (
-            capability or get_capability_profile("openai.responses")
+        self._capability: CapabilityDescriptor = capability or get_capability_profile(
+            "openai.responses"
         )
         self._model_overrides: dict[str, CapabilityDescriptor] = (
             model_capability_overrides or {}

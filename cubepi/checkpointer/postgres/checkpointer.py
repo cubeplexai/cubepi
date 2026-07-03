@@ -51,9 +51,7 @@ def _schema_mismatch_hint(actual: int, expected: int) -> str:
     between ``actual`` and ``expected``, rather than hardcoding one version
     transition, so the hint stays correct as EXPECTED_SCHEMA_VERSION grows.
     """
-    steps = ", ".join(
-        f"upgrade_v{v}_to_v{v + 1}_op()" for v in range(actual, expected)
-    )
+    steps = ", ".join(f"upgrade_v{v}_to_v{v + 1}_op()" for v in range(actual, expected))
     return (
         "cubepi was upgraded but host alembic is behind. "
         f"Generate a new alembic revision that calls {steps} + "
