@@ -29,7 +29,7 @@ model = provider.model(
 ```
 
 `provider_id` lives on the provider constructor and is propagated into the
-bound model automatically — used by the framework to clamp thinking levels
+bound model automatically — used by the framework to gate reasoning fields
 and tag responses. Building a `Model` by hand and passing both
 `provider=` and `model=` to `Agent` is the 0.6 idiom and no longer works
 in 0.7.

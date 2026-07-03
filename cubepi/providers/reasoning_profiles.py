@@ -11,7 +11,9 @@ _OPENAI_EFFORT_VALUES: dict[ReasoningEffort, str] = {
     "low": "low",
     "medium": "medium",
     "high": "high",
-    "max": "max",
+    # OpenAI has no "max" effort value; "xhigh" is its highest tier (mirrors
+    # the legacy _THINKING_TO_EFFORT mapping's "xhigh" -> "xhigh").
+    "max": "xhigh",
 }
 
 _OPENAI_SUMMARY_VALUES: dict[ReasoningSummary, Any] = {
@@ -19,6 +21,11 @@ _OPENAI_SUMMARY_VALUES: dict[ReasoningSummary, Any] = {
     "auto": "auto",
     "detailed": "detailed",
     "summarized": "summarized",
+}
+
+
+_API_ALIASES: dict[tuple[str, str], tuple[str, str]] = {
+    ("openai", "openai-completions"): ("openai", "chat_completions"),
 }
 
 
@@ -31,17 +38,10 @@ def get_capability_profile(provider: str, api: str | None = None) -> CapabilityD
     if api is None:
         return CapabilityDescriptor()
 
-    key = (provider_key, api)
+    key = _API_ALIASES.get((provider_key, api), (provider_key, api))
     profile = _PROFILES.get(key)
     if profile is not None:
         return profile.model_copy(deep=True)
-
-    if provider_key == "openai" and api in {"chat_completions", "openai-completions"}:
-        return _PROFILES[("openai", "chat_completions")].model_copy(deep=True)
-    if provider_key == "openai" and api == "responses":
-        return _PROFILES[("openai", "responses")].model_copy(deep=True)
-    if provider_key == "anthropic":
-        return _PROFILES[("anthropic", "messages")].model_copy(deep=True)
     return CapabilityDescriptor()
 
 
@@ -80,9 +80,15 @@ _PROFILES: dict[tuple[str, str], CapabilityDescriptor] = {
             },
             effort_path="thinking.budget_tokens",
             effort_values={
+                # Anthropic requires budget_tokens >= 1024 for extended
+                # thinking; "minimal" uses that floor.
+                "minimal": 1024,
                 "low": 2048,
                 "medium": 8192,
                 "high": 16384,
+                # No tier above "high" in the legacy budget scale (the old
+                # ThinkingLevel="xhigh" clamped down to "high"'s budget).
+                "max": 16384,
             },
             apply_effort_when_off=False,
             unsupported_mode_policy="skip",

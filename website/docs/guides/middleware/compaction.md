@@ -37,7 +37,7 @@ agent = Agent(
 ```
 
 The summary call uses `Provider.generate(...)` with `temperature=0.0` and
-`thinking="off"`. `max_output_tokens` is computed dynamically from the
+`reasoning=ReasoningControl(mode="off")`. `max_output_tokens` is computed dynamically from the
 content size (floor 1024, ceiling 4096) when `max_summary_tokens` is `None`,
 or passed verbatim otherwise.
 

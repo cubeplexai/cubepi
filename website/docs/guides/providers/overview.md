@@ -26,13 +26,13 @@ Use `provider.model(model_id, ...)` to create a bound model for an agent.
 arguments:
 
 - `api: str` — alternate API name/route tag for downstream integrations.
-- `reasoning: bool` — enable reasoning mode and thinking-level negotiation.
+- `reasoning: bool` — enable reasoning for this model. A model bound with
+  `reasoning=False` never receives reasoning fields on the wire, regardless
+  of the agent's `ReasoningControl`.
 - `context_window: int` — context-capacity hint used for validation and prompt planning.
 - `max_tokens: int` — default max generation cap for this model.
 - `temperature: float` — default sampling temperature for this model.
 - `cost: ModelCost | None` — optional cost metadata object.
-- `thinking_level_map: dict[str, str | None] | None` — optional map for level
-  overrides and unsupported levels (`None` disables a level).
 
 ### Calling a bound model directly
 
@@ -66,15 +66,19 @@ for utilities (summarizers, classifiers) where you already hold a
 all models served by that provider:
 
 ```python
-from cubepi import CapabilityDescriptor
+from cubepi import CapabilityDescriptor, ReasoningCapability
 from cubepi.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="...",
     base_url="https://api.deepseek.com",
     capability=CapabilityDescriptor(
-        reasoning_on_payload={"extra_body": {"thinking": True}},
-        reasoning_off_payload={"extra_body": {"thinking": False}},
+        reasoning=ReasoningCapability(
+            mode_payloads={
+                "on": {"extra_body": {"thinking": True}},
+                "off": {"extra_body": {"thinking": False}},
+            },
+        ),
         max_tokens_field="max_completion_tokens",
     ),
 )
@@ -84,18 +88,22 @@ If only one model needs an override, use
 `model_capability_overrides`:
 
 ```python
-from cubepi import CapabilityDescriptor
+from cubepi import CapabilityDescriptor, ReasoningCapability
 from cubepi.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="...",
     base_url="https://openrouter.ai/api/v1",
     capability=CapabilityDescriptor(
-        reasoning_on_payload={"extra_body": {"thinking": True}},
+        reasoning=ReasoningCapability(
+            mode_payloads={"on": {"extra_body": {"thinking": True}}},
+        ),
     ),
     model_capability_overrides={
         "deepseek-r1": CapabilityDescriptor(
-            reasoning_on_payload={"extra_body": {"thinking": "enabled"}},
+            reasoning=ReasoningCapability(
+                mode_payloads={"on": {"extra_body": {"thinking": "enabled"}}},
+            ),
         ),
     },
 )
@@ -105,10 +113,8 @@ provider = OpenAIProvider(
 
 `CapabilityDescriptor` supports these fields:
 
-- `reasoning_on_payload / reasoning_off_payload` — payload merged when
-  reasoning is on/off.
-- `reasoning_level` (`ReasoningLevelSpec`) — map `off`/`low`/... to backend
-  payload paths.
+- `reasoning` (`ReasoningCapability | None`) — maps `ReasoningControl`
+  (mode/effort/summary) onto this endpoint's wire payload.
 - `temperature` (`TemperatureSpec`) — clip, force, or strip temperature.
 - `max_tokens_field` — pick `max_tokens` or `max_completion_tokens`.
 - `supports_tools` / `supports_images` / `supports_streaming` — metadata consumed
@@ -155,15 +161,19 @@ endpoint's wire shape:
 
 ```python
 import os
-from cubepi import CapabilityDescriptor
+from cubepi import CapabilityDescriptor, ReasoningCapability
 from cubepi.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key=os.environ["DEEPSEEK_API_KEY"],
     base_url="https://api.deepseek.com",
     capability=CapabilityDescriptor(
-        reasoning_off_payload={"extra_body": {"reasoning": {"exclude": True}}},
-        reasoning_on_payload={"extra_body": {"reasoning": {"exclude": False}}},
+        reasoning=ReasoningCapability(
+            mode_payloads={
+                "off": {"extra_body": {"reasoning": {"exclude": True}}},
+                "on": {"extra_body": {"reasoning": {"exclude": False}}},
+            },
+        ),
     ),
 )
 ```
@@ -206,87 +216,103 @@ TemperatureSpec(mode="ignored")                              # drop the key
 - **`ignored`** — the key is stripped entirely. **Effect:** for backends
   that 400 on any `temperature` while reasoning.
 
-### Reasoning toggle: `reasoning_off_payload` / `reasoning_on_payload`
+### Reasoning: `ReasoningCapability`
 
-When thinking is off, `reasoning_off_payload` is deep-merged into the
-request; when it's on, `reasoning_on_payload` is. **Effect:** this is how
-"turn reasoning on/off" becomes whatever field the vendor expects:
+`ReasoningCapability` maps the provider-independent `ReasoningControl`
+(`mode`, `effort`, `summary`) onto whatever fields the vendor expects.
+`mode_payloads` is the on/off toggle — the payload for the request's
+`ReasoningControl.mode` is deep-merged into the request:
 
 ```python
+from cubepi import CapabilityDescriptor, ReasoningCapability
+
 CapabilityDescriptor(
-    reasoning_off_payload={"extra_body": {"enable_thinking": False}},
-    reasoning_on_payload={"extra_body": {"enable_thinking": True}},
+    reasoning=ReasoningCapability(
+        mode_payloads={
+            "off": {"extra_body": {"enable_thinking": False}},
+            "on": {"extra_body": {"enable_thinking": True}},
+        },
+    ),
 )
 ```
 
 The merge recurses into nested dicts; arrays are atomic; on a collision
-the capability value wins.
+the capability value wins. `mode_payloads["off"]` is applied even for a
+model bound with `reasoning=False` (so a hybrid model's "disable
+thinking" quirk always fires); anything else in `ReasoningCapability`
+(effort, summary, `mode_payloads` for any mode other than `"off"`) is
+skipped entirely for such a model.
 
-### Reasoning level: `reasoning_level` (three shapes)
-
-Beyond on/off, CubePi maps a `ThinkingLevel`
-(`off`/`low`/`medium`/`high`/`xhigh`) onto a concrete wire value
-written at a dotted `path`. `kind` picks the shape:
-
-`ReasoningLevelSpec` only changes how that level is serialized. You still need
-two call-site controls:
+Beyond on/off, `effort_path` + `effort_values` map a `ReasoningEffort`
+(`minimal`/`low`/`medium`/`high`/`max`) onto a concrete wire value
+written at a dotted path — a token budget, an effort string, or a
+vendor-specific enum, depending on what you put in `effort_values`.
+`summary_path` + `summary_values` do the same for `ReasoningSummary`.
+You still need two call-site controls:
 
 - set `reasoning=True` when binding the model (enable reasoning for that model)
-- set the Agent's `thinking` argument to one of `off|low|medium|high|xhigh`
-  (defaults to `off`).
+- set the agent's `reasoning` argument to a `ReasoningControl(mode=..., effort=...)`
+  (defaults to `mode="off"`).
 
 ```python
-from cubepi import CapabilityDescriptor, ReasoningLevelSpec
+from cubepi import (
+    Agent,
+    CapabilityDescriptor,
+    ReasoningCapability,
+    ReasoningControl,
+)
 from cubepi.providers.openai import OpenAIProvider
-from cubepi import Agent
 
 provider = OpenAIProvider(
     api_key="...",
     capability=CapabilityDescriptor(
-        reasoning_on_payload={"extra_body": {"reasoning": {"enabled": True}}},
-        reasoning_level=ReasoningLevelSpec(
-            path="reasoning.effort",
-            kind="effort",
-            level_to_effort={
-                "off": "low",
+        reasoning=ReasoningCapability(
+            mode_payloads={"on": {"extra_body": {"reasoning": {"enabled": True}}}},
+            effort_path="reasoning.effort",
+            effort_values={
                 "low": "low",
                 "medium": "medium",
                 "high": "high",
-                "xhigh": "high",
+                "max": "high",
             },
         ),
     ),
 )
 
-agent = Agent(model=provider.model("deepseek-r1", reasoning=True), thinking="high")
+agent = Agent(
+    model=provider.model("deepseek-r1", reasoning=True),
+    reasoning=ReasoningControl(mode="on", effort="high"),
+)
 ```
 
 ```python
-from cubepi import ReasoningLevelSpec
+from cubepi import ReasoningCapability
 
-# int_budget — a token budget (Anthropic).
-ReasoningLevelSpec(
-    path="thinking.budget_tokens", kind="int_budget",
-    level_budgets={"off": 0, "low": 2048,
-                   "medium": 8192, "high": 16384, "xhigh": 16384},
+# A token budget (Anthropic).
+ReasoningCapability(
+    effort_path="thinking.budget_tokens",
+    effort_values={"minimal": 1024, "low": 2048,
+                   "medium": 8192, "high": 16384, "max": 16384},
 )
 
-# effort — an effort string (OpenAI Responses).
-ReasoningLevelSpec(
-    path="reasoning.effort", kind="effort",
-    level_to_effort={"low": "low", "medium": "medium",
-                     "high": "high", "xhigh": "high"},
+# An effort string (OpenAI Responses).
+ReasoningCapability(
+    effort_path="reasoning.effort",
+    effort_values={"low": "low", "medium": "medium",
+                   "high": "high", "max": "xhigh"},
 )
 
-# enum — a vendor-specific state (Doubao's 3-state thinking).
-ReasoningLevelSpec(
-    path="thinking.type", kind="enum",
-    level_to_enum={"off": "disabled", "low": "enabled", "high": "enabled"},
+# A vendor-specific enum (Doubao's 3-state thinking) via mode_payloads.
+ReasoningCapability(
+    mode_payloads={
+        "off": {"thinking": {"type": "disabled"}},
+        "on": {"thinking": {"type": "enabled"}},
+    },
 )
 ```
 
-**Effect:** a level missing from the map is simply not written, so the
-endpoint keeps its own default for that level.
+**Effect:** an effort/summary value missing from the map is simply not
+written, so the endpoint keeps its own default for that value.
 
 ### `supports_tools` / `supports_images` / `supports_streaming`
 
@@ -347,7 +373,7 @@ full guide.
 ## See also
 
 - [OpenAI Provider](./openai) — concrete OpenAI / OpenAI-compatible setup.
-- [Anthropic Provider](./anthropic) — the `int_budget` reasoning shape in practice.
+- [Anthropic Provider](./anthropic) — the token-budget reasoning shape in practice.
 - [Writing a Custom Provider](./custom) — when the endpoint isn't even OpenAI/Anthropic-shaped.
 - [Multi-Provider Failover](../../recipes/multi-provider-failover) — `FallbackBoundModel` in action.
 - [API Reference → `cubepi.providers`](../../api/cubepi-providers).

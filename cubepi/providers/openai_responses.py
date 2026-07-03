@@ -149,8 +149,7 @@ class OpenAIResponsesProvider(BaseProvider):
                         kwargs.setdefault("max_output_tokens", model.max_tokens)
                     cap = self._resolve_capability(model.id)
                     apply_temperature(kwargs, cap.temperature)
-                    if model.reasoning:
-                        apply_reasoning_control(kwargs, cap, opts.reasoning, model=model)
+                    apply_reasoning_control(kwargs, cap, opts.reasoning, model=model)
                 else:
                     if model.max_tokens:
                         kwargs.setdefault("max_output_tokens", model.max_tokens)
