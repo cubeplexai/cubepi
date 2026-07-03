@@ -20,10 +20,9 @@ from cubepi.providers.base import (
     MessageStream,
     Model,
     Provider,
+    ReasoningControl,
     StreamEvent,
     StreamOptions,
-    ThinkingBudgets,
-    ThinkingLevel,
     ToolChoice,
     ToolDefinition,
     Usage,
@@ -203,8 +202,7 @@ class FallbackBoundModel:
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
-        thinking: ThinkingLevel | None = None,
-        thinking_budgets: ThinkingBudgets | None = None,
+        reasoning: ReasoningControl | None = None,
     ) -> AssistantMessage:
         last_error: BaseException | str = "no providers in chain"
         trigger = tuple(self.trigger_errors)
@@ -221,8 +219,7 @@ class FallbackBoundModel:
                     options=options,
                     max_output_tokens=max_output_tokens,
                     temperature=temperature,
-                    thinking=thinking,
-                    thinking_budgets=thinking_budgets,
+                    reasoning=reasoning,
                 )
             except trigger as exc:
                 last_error = exc

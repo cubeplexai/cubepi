@@ -10,6 +10,7 @@ from cubepi.providers.anthropic import AnthropicProvider, CacheRetention
 from cubepi.providers.base import (
     ImageContent,
     Model,
+    ReasoningControl,
     StreamOptions,
     TextContent,
     ThinkingContent,
@@ -521,7 +522,9 @@ class TestAnthropicStreamThinking:
         ms = await provider.stream(
             model,
             [UserMessage(content=[TextContent(text="think about this")])],
-            options=StreamOptions(thinking="medium"),
+            options=StreamOptions(
+                reasoning=ReasoningControl(mode="on", effort="medium")
+            ),
         )
 
         stream_events = []
@@ -836,7 +839,7 @@ class TestAnthropicStreamKwargsBuilding:
         ms = await provider.stream(
             model,
             [UserMessage(content=[TextContent(text="think")])],
-            options=StreamOptions(thinking="high"),
+            options=StreamOptions(reasoning=ReasoningControl(mode="on", effort="high")),
         )
         async for _ in ms:
             pass
@@ -848,8 +851,8 @@ class TestAnthropicStreamKwargsBuilding:
         assert call_kwargs["thinking"]["budget_tokens"] > 0
 
     @pytest.mark.asyncio
-    async def test_no_thinking_when_off(self):
-        """When thinking is 'off', kwargs should not contain 'thinking'."""
+    async def test_thinking_disabled_when_off(self):
+        """When reasoning is off, Anthropic receives explicit disabled thinking."""
         events = []
         final = _make_final_message(content=[])
         mock_stream = _MockAnthropicStream(events, final)
@@ -861,14 +864,14 @@ class TestAnthropicStreamKwargsBuilding:
         ms = await provider.stream(
             model,
             [UserMessage(content=[TextContent(text="hi")])],
-            options=StreamOptions(thinking="off"),
+            options=StreamOptions(reasoning=ReasoningControl(mode="off")),
         )
         async for _ in ms:
             pass
         await ms.result()
 
         call_kwargs = mock_client.messages.stream.call_args[1]
-        assert "thinking" not in call_kwargs
+        assert call_kwargs["thinking"] == {"type": "disabled"}
 
     @pytest.mark.asyncio
     async def test_on_response_callback_invoked(self):

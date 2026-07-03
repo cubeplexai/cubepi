@@ -15,13 +15,14 @@ import pytest
 from cubepi.providers.anthropic import AnthropicProvider
 from cubepi.providers.base import (
     Model,
+    ReasoningControl,
     StreamOptions,
     TextContent,
     UserMessage,
 )
 from cubepi.providers.capability import (
     CapabilityDescriptor,
-    ReasoningLevelSpec,
+    ReasoningCapability,
     TemperatureSpec,
 )
 
@@ -29,7 +30,7 @@ from cubepi.providers.capability import (
 def _model() -> Model:
     return Model(
         id="claude-sonnet-test",
-        provider="anthropic",
+        provider_id="anthropic",
         context_window=200000,
         max_tokens=8192,
         reasoning=True,
@@ -80,7 +81,7 @@ async def _capture_anthropic(
     def fake_stream(**kw: Any) -> _FakeStream:
         return _FakeStream()
 
-    p._client.messages.stream = fake_stream  # type: ignore[attr-defined]
+    p._client.messages.stream = fake_stream  # type: ignore[method-assign,assignment]
 
     s = await p.stream(
         model=_model(),
@@ -94,14 +95,26 @@ async def _capture_anthropic(
 
 
 @pytest.mark.asyncio
+async def test_anthropic_legacy_budget_profile_maps_effort_to_budget() -> None:
+    provider = AnthropicProvider(api_key="x")
+    payload = await _capture_anthropic(
+        provider,
+        StreamOptions(reasoning=ReasoningControl(mode="on", effort="medium")),
+    )
+
+    assert payload["thinking"]["type"] == "enabled"
+    assert payload["thinking"]["budget_tokens"] == 8192
+    assert payload["max_tokens"] > payload["thinking"]["budget_tokens"]
+
+
+@pytest.mark.asyncio
 async def test_default_capability_matches_legacy_thinking_off() -> None:
     p = AnthropicProvider(api_key="x")
-    payload = await _capture_anthropic(p, StreamOptions(thinking="off"))
-    # Legacy behavior: no "thinking" key when thinking=off.
-    # The default capability's reasoning_off_payload is empty, so the
-    # absent-key case is what we get; tolerate {"type": "disabled"} for
-    # callers who override the default capability.
-    assert payload.get("thinking") == {"type": "disabled"} or "thinking" not in payload
+    payload = await _capture_anthropic(
+        p,
+        StreamOptions(reasoning=ReasoningControl(mode="off")),
+    )
+    assert payload["thinking"] == {"type": "disabled"}
     # Temperature is allowed when thinking is off.
     assert payload.get("temperature") == 1.0
 
@@ -109,9 +122,12 @@ async def test_default_capability_matches_legacy_thinking_off() -> None:
 @pytest.mark.asyncio
 async def test_default_capability_thinking_medium_writes_budget() -> None:
     p = AnthropicProvider(api_key="x")
-    payload = await _capture_anthropic(p, StreamOptions(thinking="medium"))
+    payload = await _capture_anthropic(
+        p,
+        StreamOptions(reasoning=ReasoningControl(mode="on", effort="medium")),
+    )
     assert payload["thinking"]["type"] == "enabled"
-    # Mirrors ThinkingBudgets.medium (8192) in cubepi/providers/base.py.
+    # Mirrors the built-in Anthropic legacy-budget profile.
     assert payload["thinking"]["budget_tokens"] == 8192
     # Anthropic rejects custom temperature with thinking on.
     assert "temperature" not in payload
@@ -120,17 +136,21 @@ async def test_default_capability_thinking_medium_writes_budget() -> None:
 @pytest.mark.asyncio
 async def test_custom_capability_overrides_default() -> None:
     custom = CapabilityDescriptor(
-        reasoning_off_payload={"thinking": {"type": "disabled"}},
-        reasoning_on_payload={"thinking": {"type": "enabled"}},
-        reasoning_level=ReasoningLevelSpec(
-            path="thinking.budget_tokens",
-            kind="int_budget",
-            level_budgets={"medium": 99999},
+        reasoning=ReasoningCapability(
+            mode_payloads={
+                "off": {"thinking": {"type": "disabled"}},
+                "on": {"thinking": {"type": "enabled"}},
+            },
+            effort_path="thinking.budget_tokens",
+            effort_values={"medium": 99999},
         ),
         temperature=TemperatureSpec(mode="ignored"),
     )
     p = AnthropicProvider(api_key="x", capability=custom)
-    payload = await _capture_anthropic(p, StreamOptions(thinking="medium"))
+    payload = await _capture_anthropic(
+        p,
+        StreamOptions(reasoning=ReasoningControl(mode="on", effort="medium")),
+    )
     assert payload["thinking"]["budget_tokens"] == 99999
     assert "temperature" not in payload
 
@@ -139,12 +159,10 @@ async def test_custom_capability_overrides_default() -> None:
 async def test_model_capability_overrides_take_precedence() -> None:
     """Per-model override beats the instance-level capability."""
     override = CapabilityDescriptor(
-        reasoning_off_payload={},
-        reasoning_on_payload={"thinking": {"type": "enabled"}},
-        reasoning_level=ReasoningLevelSpec(
-            path="thinking.budget_tokens",
-            kind="int_budget",
-            level_budgets={"medium": 4242},
+        reasoning=ReasoningCapability(
+            mode_payloads={"on": {"thinking": {"type": "enabled"}}},
+            effort_path="thinking.budget_tokens",
+            effort_values={"medium": 4242},
         ),
         temperature=TemperatureSpec(mode="ignored"),
     )
@@ -152,26 +170,31 @@ async def test_model_capability_overrides_take_precedence() -> None:
         api_key="x",
         model_capability_overrides={"claude-sonnet-test": override},
     )
-    payload = await _capture_anthropic(p, StreamOptions(thinking="medium"))
+    payload = await _capture_anthropic(
+        p,
+        StreamOptions(reasoning=ReasoningControl(mode="on", effort="medium")),
+    )
     assert payload["thinking"]["budget_tokens"] == 4242
 
 
 @pytest.mark.asyncio
 async def test_custom_high_budget_capability_bumps_max_tokens():
     """Regression for max_tokens/budget_tokens desync: when custom level_budgets
-    writes a budget larger than ThinkingBudgets defaults, max_tokens must be
+    writes a large budget, max_tokens must be
     expanded to accommodate it (else Anthropic API rejects with
     budget_tokens >= max_tokens)."""
     custom = CapabilityDescriptor(
-        reasoning_on_payload={"thinking": {"type": "enabled"}},
-        reasoning_level=ReasoningLevelSpec(
-            path="thinking.budget_tokens",
-            kind="int_budget",
-            level_budgets={"medium": 50000},  # WAY above ThinkingBudgets.medium=8192
+        reasoning=ReasoningCapability(
+            mode_payloads={"on": {"thinking": {"type": "enabled"}}},
+            effort_path="thinking.budget_tokens",
+            effort_values={"medium": 50000},
         ),
     )
     p = AnthropicProvider(api_key="x", capability=custom)
-    payload = await _capture_anthropic(p, StreamOptions(thinking="medium"))
+    payload = await _capture_anthropic(
+        p,
+        StreamOptions(reasoning=ReasoningControl(mode="on", effort="medium")),
+    )
     assert payload["thinking"]["budget_tokens"] == 50000
     # max_tokens must be at least budget + something (model.max_tokens=8192,
     # so min(8192+50000, 200000) = 58192). Anthropic rejects budget>=max_tokens.
@@ -183,18 +206,17 @@ async def test_capability_clamps_budget_when_context_too_small() -> None:
     """Regression: when context_window can't fit max_tokens + budget,
     budget is reduced to fit. Anthropic rejects budget >= max_tokens."""
     custom = CapabilityDescriptor(
-        reasoning_on_payload={"thinking": {"type": "enabled"}},
-        reasoning_level=ReasoningLevelSpec(
-            path="thinking.budget_tokens",
-            kind="int_budget",
-            level_budgets={"high": 16384},
+        reasoning=ReasoningCapability(
+            mode_payloads={"on": {"thinking": {"type": "enabled"}}},
+            effort_path="thinking.budget_tokens",
+            effort_values={"high": 16384},
         ),
     )
     p = AnthropicProvider(api_key="x", capability=custom)
     # Tight model: context_window only 10000, max_tokens 8192.
     m = Model(
         id="claude-tight-test",
-        provider="anthropic",
+        provider_id="anthropic",
         context_window=10000,
         max_tokens=8192,
         reasoning=True,
@@ -240,12 +262,12 @@ async def test_capability_clamps_budget_when_context_too_small() -> None:
     def fake_stream(**kw: Any) -> _FakeStream:
         return _FakeStream()
 
-    p._client.messages.stream = fake_stream  # type: ignore[attr-defined]
+    p._client.messages.stream = fake_stream  # type: ignore[method-assign,assignment]
 
     s = await p.stream(
         model=m,
         messages=[UserMessage(content=[TextContent(text="hi")])],
-        options=StreamOptions(thinking="high"),
+        options=StreamOptions(reasoning=ReasoningControl(mode="on", effort="high")),
     )
     async for _ in s:
         pass
@@ -258,16 +280,20 @@ async def test_capability_clamps_budget_when_context_too_small() -> None:
 
 
 @pytest.mark.asyncio
-async def test_capability_honors_opts_thinking_budgets_override():
-    """StreamOptions.thinking_budgets overrides capability's level_budgets per request."""
-    from cubepi.providers.base import ThinkingBudgets
-
-    # Default capability — level_budgets has medium=8192
-    p = AnthropicProvider(api_key="x")
-    custom_budgets = ThinkingBudgets(medium=12288)
-    payload = await _capture_anthropic(
-        p, StreamOptions(thinking="medium", thinking_budgets=custom_budgets)
+async def test_capability_effort_mapping_controls_budget() -> None:
+    cap = CapabilityDescriptor(
+        reasoning=ReasoningCapability(
+            mode_payloads={"on": {"thinking": {"type": "enabled"}}},
+            effort_path="thinking.budget_tokens",
+            effort_values={"medium": 12288},
+        )
     )
+    p = AnthropicProvider(api_key="x", capability=cap)
+    payload = await _capture_anthropic(
+        p,
+        StreamOptions(reasoning=ReasoningControl(mode="on", effort="medium")),
+    )
+
     assert payload["thinking"]["type"] == "enabled"
     assert payload["thinking"]["budget_tokens"] == 12288
     # max_tokens must accommodate the new budget.
@@ -279,18 +305,17 @@ async def test_capability_disables_thinking_when_budget_reduced_to_zero() -> Non
     """When max_tokens floor is below min_output_tokens (1024), the clamp reduces
     budget to 0 and the provider must fall back to thinking.type=disabled."""
     custom = CapabilityDescriptor(
-        reasoning_on_payload={"thinking": {"type": "enabled"}},
-        reasoning_level=ReasoningLevelSpec(
-            path="thinking.budget_tokens",
-            kind="int_budget",
-            level_budgets={"high": 16384},
+        reasoning=ReasoningCapability(
+            mode_payloads={"on": {"thinking": {"type": "enabled"}}},
+            effort_path="thinking.budget_tokens",
+            effort_values={"high": 16384},
         ),
     )
     p = AnthropicProvider(api_key="x", capability=custom)
     # context_window=512 leaves no room for any budget at all.
     m = Model(
         id="claude-tiny-test",
-        provider="anthropic",
+        provider_id="anthropic",
         context_window=512,
         max_tokens=512,
         reasoning=True,
@@ -336,12 +361,12 @@ async def test_capability_disables_thinking_when_budget_reduced_to_zero() -> Non
     def fake_stream(**kw: Any) -> _FakeStream:
         return _FakeStream()
 
-    p._client.messages.stream = fake_stream  # type: ignore[attr-defined]
+    p._client.messages.stream = fake_stream  # type: ignore[method-assign,assignment]
 
     s = await p.stream(
         model=m,
         messages=[UserMessage(content=[TextContent(text="hi")])],
-        options=StreamOptions(thinking="high"),
+        options=StreamOptions(reasoning=ReasoningControl(mode="on", effort="high")),
     )
     async for _ in s:
         pass

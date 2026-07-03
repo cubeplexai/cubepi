@@ -7,6 +7,7 @@ from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import (
     AssistantMessage,
     Model,
+    ReasoningControl,
     TextContent,
     ToolCall,
     ToolResultMessage,
@@ -182,7 +183,7 @@ class TestE2EBasic:
         )
         agent = Agent(
             model=provider.model("faux-reasoning", reasoning=True),
-            thinking="low",
+            reasoning=ReasoningControl(mode="on", effort="low"),
         )
 
         await agent.prompt("What is 2+2?")

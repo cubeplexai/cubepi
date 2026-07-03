@@ -8,6 +8,7 @@ from cubepi.middleware.base import Middleware
 from cubepi.providers.base import (
     AssistantMessage,
     Model,
+    ReasoningControl,
     TextContent,
     UserMessage,
 )
@@ -34,7 +35,7 @@ class TestAgentInit:
         agent = Agent(model=provider.model("faux-1"))
 
         assert agent.state.system_prompt == ""
-        assert agent.state.thinking == "off"
+        assert agent.state.reasoning == ReasoningControl()
         assert agent.state.tools == []
         assert agent.state.messages == []
         assert agent.state.is_streaming is False
@@ -47,11 +48,11 @@ class TestAgentInit:
         agent = Agent(
             model=provider.model("faux-1"),
             system_prompt="You are a helpful assistant.",
-            thinking="low",
+            reasoning=ReasoningControl(mode="on", effort="low"),
         )
 
         assert agent.state.system_prompt == "You are a helpful assistant."
-        assert agent.state.thinking == "low"
+        assert agent.state.reasoning == ReasoningControl(mode="on", effort="low")
 
     def test_middleware_tools_are_registered_on_agent(self):
         class Params(BaseModel):

@@ -17,7 +17,6 @@ from cubepi.providers.base import (
     StreamOptions,
     TextContent,
     ThinkingContent,
-    ThinkingLevel,
     ToolCall,
     ToolChoice,
     ToolDefinition,
@@ -32,20 +31,10 @@ from cubepi.providers.base import (
 )
 from cubepi.providers.capability import (
     CapabilityDescriptor,
+    apply_reasoning_control,
     apply_temperature,
-    merge_capability_payload,
-    write_reasoning_level,
 )
-
-# Map cubepi ThinkingLevel to OpenAI reasoning.effort values.
-# "off" means no reasoning parameter is sent.
-_THINKING_TO_EFFORT: dict[ThinkingLevel, str | None] = {
-    "off": None,
-    "low": "low",
-    "medium": "medium",
-    "high": "high",
-    "xhigh": "xhigh",
-}
+from cubepi.providers.reasoning_profiles import get_capability_profile
 
 
 class OpenAIResponsesProvider(BaseProvider):
@@ -80,7 +69,9 @@ class OpenAIResponsesProvider(BaseProvider):
         self._cap_active: bool = (
             capability is not None or model_capability_overrides is not None
         )
-        self._capability: CapabilityDescriptor = capability or CapabilityDescriptor()
+        self._capability: CapabilityDescriptor = (
+            capability or get_capability_profile("openai.responses")
+        )
         self._model_overrides: dict[str, CapabilityDescriptor] = (
             model_capability_overrides or {}
         )
@@ -147,7 +138,7 @@ class OpenAIResponsesProvider(BaseProvider):
                 # Capability-driven payload mutations run AFTER on_payload so a
                 # caller's explicit values survive via setdefault. Mirrors the
                 # ordering used by OpenAIProvider. Spec §3.5.
-                if self._cap_active:
+                if self._cap_active or model.reasoning:
                     # The max_tokens_field rename used by the chat-completions
                     # OpenAIProvider doesn't apply here — Responses always uses
                     # ``max_output_tokens`` natively, so we skip it. Reasoning
@@ -158,32 +149,9 @@ class OpenAIResponsesProvider(BaseProvider):
                         kwargs.setdefault("max_output_tokens", model.max_tokens)
                     cap = self._resolve_capability(model.id)
                     apply_temperature(kwargs, cap.temperature)
-                    if opts.thinking == "off":
-                        merge_capability_payload(kwargs, cap.reasoning_off_payload)
-                    elif model.reasoning:
-                        # Only write reasoning fields when the model actually
-                        # reasons. Non-reasoning Responses models reject
-                        # reasoning_effort and related fields.
-                        merge_capability_payload(kwargs, cap.reasoning_on_payload)
-                        if cap.reasoning_level is not None:
-                            write_reasoning_level(
-                                kwargs, cap.reasoning_level, opts.thinking
-                            )
+                    if model.reasoning:
+                        apply_reasoning_control(kwargs, cap, opts.reasoning, model=model)
                 else:
-                    # Legacy path: configure reasoning effort via the inline map.
-                    # Use setdefault to preserve on_payload-set fields, matching
-                    # the capability path's ordering semantics.
-                    effort = _THINKING_TO_EFFORT.get(opts.thinking)
-                    if model.reasoning and effort is not None:
-                        kwargs.setdefault(
-                            "reasoning",
-                            {
-                                "effort": effort,
-                                "summary": "auto",
-                            },
-                        )
-                        kwargs.setdefault("include", ["reasoning.encrypted_content"])
-
                     if model.max_tokens:
                         kwargs.setdefault("max_output_tokens", model.max_tokens)
 

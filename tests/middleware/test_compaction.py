@@ -16,6 +16,7 @@ from cubepi.providers.base import (
     BoundModel,
     Message,
     Model,
+    ReasoningControl,
     StreamOptions,
     TextContent,
     ToolDefinition,
@@ -51,8 +52,7 @@ class _FakeSummaryProvider:
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
-        thinking=None,
-        thinking_budgets=None,
+        reasoning: ReasoningControl | None = None,
     ) -> AssistantMessage:
         self.calls.append(
             {
@@ -63,8 +63,7 @@ class _FakeSummaryProvider:
                 "options": options,
                 "max_output_tokens": max_output_tokens,
                 "temperature": temperature,
-                "thinking": thinking,
-                "thinking_budgets": thinking_budgets,
+                "reasoning": reasoning,
             }
         )
         if self.raises is not None:

@@ -22,7 +22,6 @@ from cubepi.types import JsonObject, StructuredValue
 
 BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
 
-ThinkingLevel = Literal["off", "low", "medium", "high", "xhigh"]
 ReasoningMode = Literal["off", "auto", "on"]
 ReasoningEffort = Literal["minimal", "low", "medium", "high", "max"]
 ReasoningSummary = Literal["none", "auto", "detailed", "summarized"]
@@ -36,48 +35,6 @@ class ReasoningControl(BaseModel):
     mode: ReasoningMode = "off"
     effort: ReasoningEffort = "medium"
     summary: ReasoningSummary = "none"
-
-
-class ThinkingBudgets(BaseModel):
-    """Token budgets for each thinking level."""
-
-    low: int = 2048
-    medium: int = 8192
-    high: int = 16384
-
-
-def adjust_max_tokens_for_thinking(
-    base_max_tokens: int,
-    model_max_tokens: int,
-    reasoning_level: ThinkingLevel,
-    custom_budgets: ThinkingBudgets | None = None,
-) -> tuple[int, int]:
-    """Adjust max_tokens to reserve space for a thinking budget.
-
-    Given a base max_tokens (the desired output capacity), increases it to
-    accommodate the thinking budget while respecting the model's hard cap.
-    If the model cap is too small to fit both, the thinking budget is reduced
-    to leave at least ``min_output_tokens`` (1024) for output.
-
-    Returns:
-        A ``(max_tokens, thinking_budget)`` tuple.
-    """
-    if reasoning_level == "off":
-        return base_max_tokens, 0
-
-    budgets = custom_budgets or ThinkingBudgets()
-    min_output_tokens = 1024
-
-    # Clamp "xhigh" down to "high"
-    level = "high" if reasoning_level == "xhigh" else reasoning_level
-    thinking_budget: int = getattr(budgets, level)
-
-    max_tokens = min(base_max_tokens + thinking_budget, model_max_tokens)
-
-    if max_tokens - thinking_budget < min_output_tokens:
-        thinking_budget = max(0, max_tokens - min_output_tokens)
-
-    return max_tokens, thinking_budget
 
 
 class ModelCost(BaseModel):
@@ -103,7 +60,6 @@ class Model(BaseModel):
     max_tokens: int = 8192
     temperature: float = 0.7
     cost: ModelCost | None = None
-    thinking_level_map: dict[str, str | None] | None = None
 
 
 class StructuredOutputError(Exception):
@@ -634,11 +590,9 @@ def _detach(listeners: list, cb: Callable) -> None:
 class StreamOptions(BaseModel):
     """Options bag for Provider.stream(), transparent to the agent loop."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     reasoning: ReasoningControl = Field(default_factory=ReasoningControl)
-    thinking: ThinkingLevel = "off"
-    thinking_budgets: ThinkingBudgets | None = None
     signal: asyncio.Event | None = None
     on_payload: OnPayloadCallback | None = None
     on_response: OnResponseCallback | None = None
@@ -696,8 +650,6 @@ class Provider(Protocol):
         max_output_tokens: int | None = None,
         temperature: float | None = None,
         reasoning: ReasoningControl | None = None,
-        thinking: ThinkingLevel | None = None,
-        thinking_budgets: ThinkingBudgets | None = None,
     ) -> AssistantMessage: ...
 
 
@@ -737,7 +689,6 @@ class BaseProvider:
         max_tokens: int = 8192,
         temperature: float = 0.7,
         cost: ModelCost | None = None,
-        thinking_level_map: dict[str, str | None] | None = None,
     ) -> BoundModel:
         return BoundModel(
             provider=self,
@@ -750,7 +701,6 @@ class BaseProvider:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 cost=cost,
-                thinking_level_map=thinking_level_map,
             ),
         )
 
@@ -778,8 +728,6 @@ class BaseProvider:
         max_output_tokens: int | None = None,
         temperature: float | None = None,
         reasoning: ReasoningControl | None = None,
-        thinking: ThinkingLevel | None = None,
-        thinking_budgets: ThinkingBudgets | None = None,
     ) -> AssistantMessage:
         """Run a single provider call and return the final assistant message."""
         model_updates: dict[str, int | float] = {}
@@ -790,13 +738,9 @@ class BaseProvider:
         if model_updates:
             model = model.model_copy(update=model_updates)
 
-        option_updates: dict[str, ReasoningControl | ThinkingLevel | ThinkingBudgets] = {}
+        option_updates: dict[str, ReasoningControl] = {}
         if reasoning is not None:
             option_updates["reasoning"] = reasoning
-        if thinking is not None:
-            option_updates["thinking"] = thinking
-        if thinking_budgets is not None:
-            option_updates["thinking_budgets"] = thinking_budgets
         if option_updates:
             base_options = options or StreamOptions()
             options = base_options.model_copy(update=option_updates)
@@ -912,8 +856,6 @@ class BoundModel:
         max_output_tokens: int | None = None,
         temperature: float | None = None,
         reasoning: ReasoningControl | None = None,
-        thinking: ThinkingLevel | None = None,
-        thinking_budgets: ThinkingBudgets | None = None,
     ) -> AssistantMessage:
         # Same positional-forwarding rationale as ``stream`` above.
         return await self.provider.generate(
@@ -926,8 +868,6 @@ class BoundModel:
             max_output_tokens=max_output_tokens,
             temperature=temperature,
             reasoning=reasoning,
-            thinking=thinking,
-            thinking_budgets=thinking_budgets,
         )
 
     async def generate_structured(

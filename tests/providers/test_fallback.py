@@ -19,11 +19,10 @@ from cubepi.providers.base import (
     Message,
     MessageStream,
     Model,
+    ReasoningControl,
     StreamEvent,
     StreamOptions,
     TextContent,
-    ThinkingBudgets,
-    ThinkingLevel,
     ToolDefinition,
     UserMessage,
 )
@@ -61,8 +60,7 @@ class _RaisingProvider(BaseProvider):
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
-        thinking: ThinkingLevel | None = None,
-        thinking_budgets: ThinkingBudgets | None = None,
+        reasoning: ReasoningControl | None = None,
     ) -> AssistantMessage:
         raise self._error
 

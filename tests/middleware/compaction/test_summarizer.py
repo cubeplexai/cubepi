@@ -13,6 +13,7 @@ from cubepi.providers.base import (
     BoundModel,
     Message,
     Model,
+    ReasoningControl,
     StreamOptions,
     TextContent,
     ToolCall,
@@ -37,8 +38,7 @@ class _FakeProvider:
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
-        thinking=None,
-        thinking_budgets=None,
+        reasoning: ReasoningControl | None = None,
     ) -> AssistantMessage:
         self.calls.append(
             {
@@ -49,8 +49,7 @@ class _FakeProvider:
                 "options": options,
                 "max_output_tokens": max_output_tokens,
                 "temperature": temperature,
-                "thinking": thinking,
-                "thinking_budgets": thinking_budgets,
+                "reasoning": reasoning,
             }
         )
         return AssistantMessage(content=[TextContent(text=self.reply)])
@@ -77,7 +76,7 @@ async def test_summarize_uses_provider_generate_with_common_overrides() -> None:
     assert len(result.summarized_message_refs) == 2
     assert provider.calls[0]["max_output_tokens"] == 512
     assert provider.calls[0]["temperature"] == 0.0
-    assert provider.calls[0]["thinking"] == "off"
+    assert provider.calls[0]["reasoning"] == ReasoningControl(mode="off")
     assert provider.calls[0]["options"].signal is signal
 
 
@@ -111,11 +110,10 @@ async def test_summarize_raises_on_provider_error_message() -> None:
             options: StreamOptions | None = None,
             max_output_tokens: int | None = None,
             temperature: float | None = None,
-            thinking=None,
-            thinking_budgets=None,
+            reasoning: ReasoningControl | None = None,
         ) -> AssistantMessage:
             del model, messages, system_prompt, tools, tool_choice, options
-            del max_output_tokens, temperature, thinking, thinking_budgets
+            del max_output_tokens, temperature, reasoning
             return AssistantMessage(
                 content=[],
                 stop_reason="error",

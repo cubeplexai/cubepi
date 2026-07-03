@@ -9,6 +9,7 @@ from cubepi.providers.base import (
     BaseProvider,
     Message,
     Model,
+    ReasoningControl,
     StreamOptions,
     TextContent,
     ToolDefinition,
@@ -22,7 +23,7 @@ class _RecordingProvider(BaseProvider):
         super().__init__(provider_id="rec")
         self.generate_calls: list[dict[str, Any]] = []
 
-    async def generate(  # type: ignore[override]
+    async def generate(
         self,
         model: Model,
         messages: list[Message],
@@ -33,8 +34,7 @@ class _RecordingProvider(BaseProvider):
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
-        thinking: Any = None,
-        thinking_budgets: Any = None,
+        reasoning: ReasoningControl | None = None,
     ) -> AssistantMessage:
         self.generate_calls.append(
             {
@@ -45,8 +45,7 @@ class _RecordingProvider(BaseProvider):
                 "options": options,
                 "max_output_tokens": max_output_tokens,
                 "temperature": temperature,
-                "thinking": thinking,
-                "thinking_budgets": thinking_budgets,
+                "reasoning": reasoning,
             }
         )
         return AssistantMessage(
@@ -60,14 +59,14 @@ class _RecordingProvider(BaseProvider):
 async def test_bound_model_generate_forwards_to_provider() -> None:
     provider = _RecordingProvider()
     bound = provider.model("model-x", temperature=0.5)
-    messages = [UserMessage(content=[TextContent(text="hi")])]
+    messages: list[Message] = [UserMessage(content=[TextContent(text="hi")])]
 
     response = await bound.generate(
         messages=messages,
         system_prompt="be brief",
         max_output_tokens=64,
         temperature=0.0,
-        thinking="off",
+        reasoning=ReasoningControl(mode="off", effort="minimal"),
     )
 
     assert isinstance(response, AssistantMessage)
@@ -81,7 +80,7 @@ async def test_bound_model_generate_forwards_to_provider() -> None:
     assert call["system_prompt"] == "be brief"
     assert call["max_output_tokens"] == 64
     assert call["temperature"] == 0.0
-    assert call["thinking"] == "off"
+    assert call["reasoning"] == ReasoningControl(mode="off", effort="minimal")
 
 
 @pytest.mark.asyncio
@@ -122,7 +121,7 @@ class _MangledNamesProvider(BaseProvider):
         self.captured_model: Model | None = None
         self.captured_messages: list[Message] | None = None
 
-    async def generate(  # type: ignore[override]
+    async def generate(
         self,
         spec_in,  # NOT ``model=``
         msg_in,  # NOT ``messages=``
@@ -133,8 +132,7 @@ class _MangledNamesProvider(BaseProvider):
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
-        thinking: Any = None,
-        thinking_budgets: Any = None,
+        reasoning: ReasoningControl | None = None,
     ) -> AssistantMessage:
         self.captured_model = spec_in
         self.captured_messages = msg_in
@@ -151,7 +149,7 @@ async def test_bound_model_generate_forwards_positionally_for_mangled_provider()
 ):
     provider = _MangledNamesProvider()
     bound = provider.model("model-x")
-    messages = [UserMessage(content=[TextContent(text="hi")])]
+    messages: list[Message] = [UserMessage(content=[TextContent(text="hi")])]
 
     response = await bound.generate(messages=messages, system_prompt="x")
 

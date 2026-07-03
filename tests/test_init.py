@@ -7,5 +7,6 @@ def test_capability_types_re_exported():
     import cubepi
 
     assert hasattr(cubepi, "CapabilityDescriptor")
+    assert hasattr(cubepi, "ReasoningCapability")
     assert hasattr(cubepi, "TemperatureSpec")
-    assert hasattr(cubepi, "ReasoningLevelSpec")
+    assert not hasattr(cubepi, "ReasoningLevelSpec")

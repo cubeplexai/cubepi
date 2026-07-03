@@ -9,6 +9,7 @@ from cubepi.providers.base import (
     AssistantMessage,
     BoundModel,
     Message,
+    ReasoningControl,
     StreamOptions,
     TextContent,
     ToolCall,
@@ -213,7 +214,7 @@ async def summarize(
         options=StreamOptions(signal=abort_signal),
         max_output_tokens=budget,
         temperature=0.0,
-        thinking="off",
+        reasoning=ReasoningControl(mode="off"),
     )
 
     text = "".join(

@@ -8,14 +8,14 @@ import pytest
 
 from cubepi.providers.base import (
     Model,
+    ReasoningControl,
     StreamOptions,
     TextContent,
-    ThinkingLevel,
     UserMessage,
 )
 from cubepi.providers.capability import (
     CapabilityDescriptor,
-    ReasoningLevelSpec,
+    ReasoningCapability,
     TemperatureSpec,
 )
 from cubepi.providers.openai import OpenAIProvider
@@ -31,7 +31,7 @@ def test_provider_accepts_model_overrides():
     cap = CapabilityDescriptor()
     overrides = {
         "deepseek-r1": CapabilityDescriptor(
-            reasoning_off_payload={"reasoning": {"effort": "low"}}
+            reasoning=ReasoningCapability(effort_path="reasoning.effort")
         )
     }
     p = OpenAIProvider(
@@ -46,7 +46,7 @@ def test_provider_accepts_model_overrides():
 def test_resolve_capability_uses_override_when_present():
     base = CapabilityDescriptor()
     override = CapabilityDescriptor(
-        reasoning_off_payload={"reasoning": {"effort": "low"}}
+        reasoning=ReasoningCapability(effort_path="reasoning.effort")
     )
     p = OpenAIProvider(
         api_key="x",
@@ -60,9 +60,9 @@ def test_resolve_capability_uses_override_when_present():
 
 def test_capability_default_when_kwarg_none():
     p = OpenAIProvider(api_key="x", base_url="http://example")
-    # No capability passed -> legacy no-op default, _cap_active=False
+    # No capability passed -> official OpenAI Chat profile, but _cap_active=False.
     assert isinstance(p._capability, CapabilityDescriptor)
-    assert p._capability.reasoning_off_payload == {}
+    assert p._capability.reasoning is not None
     assert p._cap_active is False
 
 
@@ -89,7 +89,7 @@ def test_resolve_capability_returns_default_when_inactive():
     p = OpenAIProvider(api_key="x", base_url="http://example")
     result = p._resolve_capability("any-model")
     assert isinstance(result, CapabilityDescriptor)
-    assert result.reasoning_off_payload == {}
+    assert result.reasoning is not None
 
 
 async def _capture_payload_openai(
@@ -97,12 +97,11 @@ async def _capture_payload_openai(
     model: Model,
     *,
     on_payload=None,
-    thinking: ThinkingLevel = "off",
+    reasoning: ReasoningControl | None = None,
 ) -> dict:
     """Run a stream with a fake openai client and return the kwargs sent.
 
     on_payload: optional caller-side payload mutator passed via StreamOptions.
-    thinking: ThinkingLevel value for StreamOptions; defaults to "off".
     """
     captured: dict = {}
 
@@ -124,11 +123,14 @@ async def _capture_payload_openai(
     async def fake_create(**kw):
         return _FakeResponse()
 
-    provider._client.chat.completions.create = fake_create  # type: ignore[assignment]
+    provider._client.chat.completions.create = fake_create  # type: ignore[method-assign]
     stream = await provider.stream(
         model=model,
         messages=[UserMessage(content=[TextContent(text="hi")])],
-        options=StreamOptions(thinking=thinking, on_payload=on_payload),
+        options=StreamOptions(
+            reasoning=reasoning or ReasoningControl(mode="off"),
+            on_payload=on_payload,
+        ),
     )
     async for _ in stream:
         pass
@@ -138,11 +140,35 @@ async def _capture_payload_openai(
 def _model(id: str = "test-model", **kw) -> Model:
     return Model(
         id=id,
-        provider="test",
+        provider_id="test",
+        reasoning=kw.get("reasoning", False),
         context_window=kw.get("context_window", 32000),
         max_tokens=kw.get("max_tokens", 4096),
         temperature=kw.get("temperature", 0.7),
     )
+
+
+@pytest.mark.asyncio
+async def test_openai_chat_default_profile_writes_reasoning_effort() -> None:
+    payload = await _capture_payload_openai(
+        OpenAIProvider(api_key="x", base_url="http://example"),
+        _model(reasoning=True),
+        reasoning=ReasoningControl(mode="on", effort="high", summary="none"),
+    )
+
+    assert payload["reasoning_effort"] == "high"
+    assert "thinking" not in payload
+
+
+@pytest.mark.asyncio
+async def test_openai_chat_off_writes_minimal_effort() -> None:
+    payload = await _capture_payload_openai(
+        OpenAIProvider(api_key="x", base_url="http://example"),
+        _model(reasoning=True),
+        reasoning=ReasoningControl(mode="off", effort="minimal", summary="none"),
+    )
+
+    assert payload["reasoning_effort"] == "minimal"
 
 
 @pytest.mark.asyncio
@@ -199,38 +225,53 @@ async def test_temperature_free_preserves_caller_value_via_on_payload():
 
 
 @pytest.mark.asyncio
-async def test_reasoning_off_payload_merged_qwen():
+async def test_reasoning_mode_off_payload_merged_qwen():
     cap = CapabilityDescriptor(
-        reasoning_off_payload={"extra_body": {"enable_thinking": False}},
-        reasoning_on_payload={"extra_body": {"enable_thinking": True}},
+        reasoning=ReasoningCapability(
+            mode_payloads={
+                "off": {"extra_body": {"enable_thinking": False}},
+                "on": {"extra_body": {"enable_thinking": True}},
+            }
+        )
     )
     p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
-    payload = await _capture_payload_openai(p, _model())  # default thinking="off"
+    payload = await _capture_payload_openai(p, _model(reasoning=True))
     assert payload["extra_body"]["enable_thinking"] is False
 
 
 @pytest.mark.asyncio
-async def test_reasoning_on_payload_merged_qwen():
+async def test_reasoning_mode_on_payload_merged_qwen():
     cap = CapabilityDescriptor(
-        reasoning_off_payload={"extra_body": {"enable_thinking": False}},
-        reasoning_on_payload={"extra_body": {"enable_thinking": True}},
+        reasoning=ReasoningCapability(
+            mode_payloads={
+                "off": {"extra_body": {"enable_thinking": False}},
+                "on": {"extra_body": {"enable_thinking": True}},
+            }
+        )
     )
     p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
-    payload = await _capture_payload_openai(p, _model(), thinking="medium")
+    payload = await _capture_payload_openai(
+        p,
+        _model(reasoning=True),
+        reasoning=ReasoningControl(mode="on"),
+    )
     assert payload["extra_body"]["enable_thinking"] is True
 
 
 @pytest.mark.asyncio
-async def test_reasoning_level_effort_written():
+async def test_reasoning_effort_written():
     cap = CapabilityDescriptor(
-        reasoning_level=ReasoningLevelSpec(
-            path="reasoning_effort",
-            kind="effort",
-            level_to_effort={"low": "low", "medium": "medium", "high": "high"},
-        ),
+        reasoning=ReasoningCapability(
+            effort_path="reasoning_effort",
+            effort_values={"medium": "medium"},
+        )
     )
     p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
-    payload = await _capture_payload_openai(p, _model(), thinking="medium")
+    payload = await _capture_payload_openai(
+        p,
+        _model(reasoning=True),
+        reasoning=ReasoningControl(mode="on", effort="medium"),
+    )
     assert payload["reasoning_effort"] == "medium"
 
 
@@ -238,7 +279,9 @@ async def test_reasoning_level_effort_written():
 async def test_model_override_wins_for_reasoning():
     base = CapabilityDescriptor()
     override = CapabilityDescriptor(
-        reasoning_on_payload={"reasoning": {"effort": "low"}},
+        reasoning=ReasoningCapability(
+            mode_payloads={"on": {"reasoning": {"effort": "low"}}},
+        )
     )
     p = OpenAIProvider(
         api_key="x",
@@ -246,7 +289,11 @@ async def test_model_override_wins_for_reasoning():
         capability=base,
         model_capability_overrides={"deepseek-r1": override},
     )
-    payload = await _capture_payload_openai(p, _model("deepseek-r1"), thinking="medium")
+    payload = await _capture_payload_openai(
+        p,
+        _model("deepseek-r1", reasoning=True),
+        reasoning=ReasoningControl(mode="on"),
+    )
     assert payload["reasoning"] == {"effort": "low"}
 
 
@@ -254,26 +301,29 @@ async def test_model_override_wins_for_reasoning():
 async def test_legacy_no_capability_does_not_merge_reasoning_payload():
     """Regression: no capability -> no reasoning_off/on payload write."""
     p = OpenAIProvider(api_key="x", base_url="http://e")  # legacy
-    payload = await _capture_payload_openai(p, _model(), thinking="off")
+    payload = await _capture_payload_openai(p, _model())
     assert "extra_body" not in payload
     assert "reasoning_effort" not in payload
 
 
 @pytest.mark.asyncio
-async def test_reasoning_on_payload_and_level_both_applied():
+async def test_reasoning_mode_payload_and_effort_both_applied():
     """Anthropic-style combined case: on_payload writes the thinking block,
-    then reasoning_level writes budget_tokens into the same dict. Order
+    then effort_path writes budget_tokens into the same dict. Order
     matters — the merge must run before the level write so the dict exists."""
     cap = CapabilityDescriptor(
-        reasoning_on_payload={"thinking": {"type": "enabled"}},
-        reasoning_level=ReasoningLevelSpec(
-            path="thinking.budget_tokens",
-            kind="int_budget",
-            level_budgets={"medium": 8192},
-        ),
+        reasoning=ReasoningCapability(
+            mode_payloads={"on": {"thinking": {"type": "enabled"}}},
+            effort_path="thinking.budget_tokens",
+            effort_values={"medium": 8192},
+        )
     )
     p = OpenAIProvider(api_key="x", base_url="http://e", capability=cap)
-    payload = await _capture_payload_openai(p, _model(), thinking="medium")
+    payload = await _capture_payload_openai(
+        p,
+        _model(reasoning=True),
+        reasoning=ReasoningControl(mode="on", effort="medium"),
+    )
     assert payload["thinking"] == {"type": "enabled", "budget_tokens": 8192}
 
 

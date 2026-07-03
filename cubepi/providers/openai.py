@@ -9,9 +9,8 @@ from cubepi.utils.json_parse import parse_streaming_json
 
 from cubepi.providers.capability import (
     CapabilityDescriptor,
+    apply_reasoning_control,
     apply_temperature,
-    merge_capability_payload,
-    write_reasoning_level,
 )
 from cubepi.providers.base import (
     AssistantMessage,
@@ -37,6 +36,7 @@ from cubepi.providers.base import (
     invoke_on_payload,
     invoke_on_response,
 )
+from cubepi.providers.reasoning_profiles import get_capability_profile
 
 
 class OpenAIProvider(BaseProvider):
@@ -70,7 +70,9 @@ class OpenAIProvider(BaseProvider):
         self._cap_active: bool = (
             capability is not None or model_capability_overrides is not None
         )
-        self._capability: CapabilityDescriptor = capability or CapabilityDescriptor()
+        self._capability: CapabilityDescriptor = (
+            capability or get_capability_profile("openai.chat_completions")
+        )
         self._model_overrides: dict[str, CapabilityDescriptor] = (
             model_capability_overrides or {}
         )
@@ -148,7 +150,7 @@ class OpenAIProvider(BaseProvider):
                 # exactly — the OpenAI path historically does not inject
                 # temperature or max_tokens. Spec §3.5.
                 cap = self._resolve_capability(model.id)
-                if self._cap_active:
+                if self._cap_active or model.reasoning:
                     kwargs.setdefault("temperature", model.temperature)
                     # Don't inject a default max_tokens when the caller already
                     # set the renamed target field (e.g. max_completion_tokens
@@ -158,14 +160,8 @@ class OpenAIProvider(BaseProvider):
                     apply_temperature(kwargs, cap.temperature)
                     if cap.max_tokens_field != "max_tokens" and "max_tokens" in kwargs:
                         kwargs[cap.max_tokens_field] = kwargs.pop("max_tokens")
-                    if opts.thinking == "off":
-                        merge_capability_payload(kwargs, cap.reasoning_off_payload)
-                    else:
-                        merge_capability_payload(kwargs, cap.reasoning_on_payload)
-                        if cap.reasoning_level is not None:
-                            write_reasoning_level(
-                                kwargs, cap.reasoning_level, opts.thinking
-                            )
+                    if model.reasoning:
+                        apply_reasoning_control(kwargs, cap, opts.reasoning, model=model)
 
                 # Fire request listeners AFTER all kwargs mutations so observers
                 # see the final wire payload (including extra_body merges,

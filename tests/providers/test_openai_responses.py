@@ -12,6 +12,7 @@ from cubepi.providers.base import (
     AssistantMessage,
     ImageContent,
     Model,
+    ReasoningControl,
     StreamOptions,
     TextContent,
     ThinkingContent,
@@ -31,7 +32,7 @@ from cubepi.providers.openai_responses import OpenAIResponsesProvider
 def _model(*, reasoning: bool = False, max_tokens: int = 4096) -> Model:
     return Model(
         id="o3" if reasoning else "gpt-4.1",
-        provider="openai",
+        provider_id="openai",
         api="openai-responses",
         reasoning=reasoning,
         max_tokens=max_tokens,
@@ -373,7 +374,13 @@ class TestStreamThinking:
             ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="think about this")])],
-                options=StreamOptions(thinking="medium"),
+                options=StreamOptions(
+                    reasoning=ReasoningControl(
+                        mode="on",
+                        effort="medium",
+                        summary="auto",
+                    )
+                ),
             )
 
             stream_events = []
@@ -743,8 +750,7 @@ class TestReasoningParams:
     """Test that reasoning parameters are correctly configured."""
 
     @pytest.mark.asyncio
-    async def test_reasoning_effort_sent(self):
-        """When thinking is not 'off', reasoning params should be in the API call."""
+    async def test_responses_default_profile_writes_reasoning_object(self):
         events = [
             _make_event(
                 "response.completed",
@@ -775,7 +781,66 @@ class TestReasoningParams:
             ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="think")])],
-                options=StreamOptions(thinking="high"),
+                options=StreamOptions(
+                    reasoning=ReasoningControl(
+                        mode="on",
+                        effort="high",
+                        summary="auto",
+                    )
+                ),
+            )
+
+            async for _ in ms:
+                pass
+            await ms.result()
+
+            call_kwargs = mock_client.responses.create.call_args[1]
+            assert call_kwargs["reasoning"] == {
+                "effort": "high",
+                "summary": "auto",
+            }
+            assert call_kwargs["include"] == ["reasoning.encrypted_content"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_effort_sent(self):
+        """ReasoningControl writes Responses reasoning params."""
+        events = [
+            _make_event(
+                "response.completed",
+                response=SimpleNamespace(
+                    id="resp_1",
+                    status="completed",
+                    usage=SimpleNamespace(
+                        input_tokens=5,
+                        output_tokens=5,
+                        total_tokens=10,
+                        input_tokens_details=SimpleNamespace(cached_tokens=0),
+                    ),
+                    service_tier=None,
+                ),
+            ),
+        ]
+
+        with patch("openai.AsyncOpenAI") as mock_openai:
+            mock_client = MagicMock()
+            mock_openai.return_value = mock_client
+            mock_client.responses = MagicMock()
+            mock_client.responses.create = AsyncMock(return_value=_async_iter(events))
+
+            provider = OpenAIResponsesProvider(api_key="test-key")
+            provider._client = mock_client
+
+            model = _model(reasoning=True)
+            ms = await provider.stream(
+                model,
+                [UserMessage(content=[TextContent(text="think")])],
+                options=StreamOptions(
+                    reasoning=ReasoningControl(
+                        mode="on",
+                        effort="high",
+                        summary="auto",
+                    )
+                ),
             )
 
             # Consume the stream to ensure the background task has run
@@ -789,7 +854,7 @@ class TestReasoningParams:
 
     @pytest.mark.asyncio
     async def test_no_reasoning_when_off(self):
-        """When thinking is 'off', no reasoning params should be sent."""
+        """mode=off maps to minimal effort for reasoning-only Responses models."""
         events = [
             _make_event(
                 "response.completed",
@@ -820,14 +885,21 @@ class TestReasoningParams:
             ms = await provider.stream(
                 model,
                 [UserMessage(content=[TextContent(text="hi")])],
-                options=StreamOptions(thinking="off"),
+                options=StreamOptions(
+                    reasoning=ReasoningControl(
+                        mode="off",
+                        effort="minimal",
+                        summary="none",
+                    )
+                ),
             )
             async for _ in ms:
                 pass
             await ms.result()
 
             call_kwargs = mock_client.responses.create.call_args[1]
-            assert "reasoning" not in call_kwargs
+            assert call_kwargs["reasoning"] == {"effort": "minimal"}
+            assert "include" not in call_kwargs
 
     @pytest.mark.asyncio
     async def test_system_prompt_as_developer_for_reasoning(self):

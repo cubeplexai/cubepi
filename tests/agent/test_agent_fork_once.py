@@ -9,7 +9,7 @@ from cubepi.checkpointer.exceptions import CheckpointerError
 from cubepi.checkpointer.memory import MemoryCheckpointer
 from cubepi.hitl.binding import HitlBinding
 from cubepi.middleware.base import Middleware
-from cubepi.providers.base import AssistantMessage, TextContent
+from cubepi.providers.base import AssistantMessage, ReasoningControl, TextContent
 from cubepi.providers.faux import FauxProvider
 
 
@@ -242,7 +242,7 @@ async def test_fork_once_forwards_parent_execution_options():
         checkpointer=cp,
         thread_id="src",
         tool_execution="sequential",
-        thinking="medium",
+        reasoning=ReasoningControl(mode="on", effort="medium"),
         after_model_response=_after_response,
     )
     await parent.fork_once("src", "probe", after_run_id="R1")
@@ -252,8 +252,8 @@ async def test_fork_once_forwards_parent_execution_options():
 
 
 @pytest.mark.asyncio
-async def test_fork_once_forwards_tool_execution_and_thinking():
-    """fork_once() child must inherit tool_execution and thinking settings."""
+async def test_fork_once_forwards_tool_execution_and_reasoning():
+    """fork_once() child must inherit tool_execution and reasoning settings."""
     cp = MemoryCheckpointer()
     captured: dict[str, object] = {}
 
@@ -263,14 +263,14 @@ async def test_fork_once_forwards_tool_execution_and_thinking():
     def _spy_init(self, *args, **kwargs):
         # Skip the parent constructor call: only capture the second Agent()
         # (the child built by fork_once).
-        captured.setdefault("calls", 0)
-        captured["calls"] = captured["calls"] + 1  # type: ignore[operator]
-        if captured["calls"] >= 3:  # 1=seed, 2=parent, 3=child
-            captured["thinking"] = kwargs.get("thinking")
+        calls = int(captured.get("calls", 0)) + 1
+        captured["calls"] = calls
+        if calls >= 3:  # 1=seed, 2=parent, 3=child
+            captured["reasoning"] = kwargs.get("reasoning")
             captured["tool_execution"] = kwargs.get("tool_execution")
         return real_init(self, *args, **kwargs)
 
-    Agent.__init__ = _spy_init  # type: ignore[method-assign]
+    Agent.__init__ = _spy_init
     try:
         seed_agent = Agent(
             model=_ok_faux().model("faux-model"),
@@ -283,11 +283,11 @@ async def test_fork_once_forwards_tool_execution_and_thinking():
             checkpointer=cp,
             thread_id="src",
             tool_execution="sequential",
-            thinking="medium",
+            reasoning=ReasoningControl(mode="on", effort="medium"),
         )
         await parent.fork_once("src", "probe", after_run_id="R1")
     finally:
-        Agent.__init__ = real_init  # type: ignore[method-assign]
+        Agent.__init__ = real_init
 
-    assert captured["thinking"] == "medium"
+    assert captured["reasoning"] == ReasoningControl(mode="on", effort="medium")
     assert captured["tool_execution"] == "sequential"

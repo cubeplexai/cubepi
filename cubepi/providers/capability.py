@@ -16,7 +16,6 @@ from cubepi.providers.base import (
     ReasoningEffort,
     ReasoningMode,
     ReasoningSummary,
-    ThinkingLevel,
 )
 
 
@@ -35,26 +34,6 @@ class TemperatureSpec(BaseModel):
             raise ValueError(
                 f"TemperatureSpec.default ({self.default}) must be within [min={self.min}, max={self.max}]"
             )
-        return self
-
-
-class ReasoningLevelSpec(BaseModel):
-    """How to express a fine-grain reasoning level on this endpoint."""
-
-    path: str = Field(..., min_length=1)
-    kind: Literal["int_budget", "effort", "enum"]
-    level_budgets: dict[str, int] | None = None
-    level_to_effort: dict[str, str] | None = None
-    level_to_enum: dict[str, str] | None = None
-
-    @model_validator(mode="after")
-    def _validate_kind_map(self) -> ReasoningLevelSpec:
-        if self.kind == "int_budget" and not self.level_budgets:
-            raise ValueError("kind='int_budget' requires a non-empty level_budgets map")
-        if self.kind == "effort" and not self.level_to_effort:
-            raise ValueError("kind='effort' requires a non-empty level_to_effort map")
-        if self.kind == "enum" and not self.level_to_enum:
-            raise ValueError("kind='enum' requires a non-empty level_to_enum map")
         return self
 
 
@@ -88,9 +67,6 @@ class CapabilityDescriptor(BaseModel):
     """Vendor quirks for one endpoint. Empty default = legacy no-op."""
 
     reasoning: ReasoningCapability | None = None
-    reasoning_off_payload: dict[str, Any] = Field(default_factory=dict)
-    reasoning_on_payload: dict[str, Any] = Field(default_factory=dict)
-    reasoning_level: ReasoningLevelSpec | None = None
 
     temperature: TemperatureSpec = Field(default_factory=TemperatureSpec)
 
@@ -156,8 +132,11 @@ def apply_reasoning_control(
     kwargs: dict[str, Any],
     capability: CapabilityDescriptor | ReasoningCapability,
     control: ReasoningControl,
+    *,
+    model: Model | None = None,
 ) -> list[CapabilityWarning]:
     """Apply provider-independent reasoning controls to a provider payload."""
+    del model
 
     reasoning = (
         capability.reasoning
@@ -243,32 +222,6 @@ def lint_capability(
     return warnings
 
 
-def _resolve_level_value(spec: ReasoningLevelSpec, level: ThinkingLevel) -> Any | None:
-    """Return the wire value for ``level`` per ``spec``, or None to skip writing."""
-    if spec.kind == "int_budget":
-        if spec.level_budgets is None:
-            raise RuntimeError(
-                "ReasoningLevelSpec(kind='int_budget') reached _resolve_level_value "
-                "with no level_budgets — validator was bypassed"
-            )
-        return spec.level_budgets.get(level)
-    if spec.kind == "effort":
-        if spec.level_to_effort is None:
-            raise RuntimeError(
-                "ReasoningLevelSpec(kind='effort') reached _resolve_level_value "
-                "with no level_to_effort — validator was bypassed"
-            )
-        return spec.level_to_effort.get(level)
-    if spec.kind == "enum":
-        if spec.level_to_enum is None:
-            raise RuntimeError(
-                "ReasoningLevelSpec(kind='enum') reached _resolve_level_value "
-                "with no level_to_enum — validator was bypassed"
-            )
-        return spec.level_to_enum.get(level)
-    return None
-
-
 def _handle_unsupported_mode(
     reasoning: ReasoningCapability,
     mode: ReasoningMode,
@@ -306,17 +259,3 @@ def _write_dotted_path(target: dict[str, Any], path: str, value: Any) -> None:
         cursor = cursor[part]
     cursor[parts[-1]] = value
 
-
-def write_reasoning_level(
-    kwargs: dict[str, Any],
-    spec: ReasoningLevelSpec,
-    level: ThinkingLevel,
-) -> None:
-    """Write the resolved wire value for ``level`` at ``spec.path`` inside ``kwargs``.
-
-    If the level is not in the spec's level map (i.e. unsupported), no write happens.
-    """
-    value = _resolve_level_value(spec, level)
-    if value is None:
-        return
-    _write_dotted_path(kwargs, spec.path, value)

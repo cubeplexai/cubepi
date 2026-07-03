@@ -13,6 +13,7 @@ from cubepi.providers.base import (
     Message,
     MessageStream,
     Model,
+    ReasoningControl,
     StreamEvent,
     StreamOptions,
     TextContent,
@@ -702,11 +703,9 @@ class _GenerateOnlyProvider(FauxProvider):
         options: StreamOptions | None = None,
         max_output_tokens: int | None = None,
         temperature: float | None = None,
-        thinking=None,
-        thinking_budgets=None,
+        reasoning: ReasoningControl | None = None,
     ) -> AssistantMessage:
-        del model, messages, system_prompt, tools, tool_choice, temperature, thinking
-        del thinking_budgets
+        del model, messages, system_prompt, tools, tool_choice, temperature, reasoning
         self.seen_max_output_tokens = max_output_tokens
         self.seen_options = options
         return AssistantMessage(content=[TextContent(text="via generate")])

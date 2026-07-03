@@ -38,9 +38,9 @@ from cubepi.providers.base import (
     Model,
     OnPayloadCallback,
     OnResponseCallback,
+    ReasoningControl,
     StreamOptions,
     TextContent,
-    ThinkingLevel,
     ToolCall,
     ToolResultMessage,
     Usage,
@@ -129,7 +129,7 @@ class AgentState:
     model: Model = field(
         default_factory=lambda: Model(id="unknown", provider_id="unknown")
     )
-    thinking: ThinkingLevel = "off"
+    reasoning: ReasoningControl = field(default_factory=ReasoningControl)
     is_streaming: bool = False
     streaming_message: Message | None = None
     error_message: str | None = None
@@ -172,7 +172,7 @@ class Agent(Generic[TMessage]):
         model: BoundModel | FallbackBoundModel,
         system_prompt: str = "",
         tools: list[AgentTool] | None = None,
-        thinking: ThinkingLevel = "off",
+        reasoning: ReasoningControl | None = None,
         convert_to_llm: Callable[..., list[Message]] | None = None,
         transform_context: Callable | None = None,
         transform_system_prompt: Callable | None = None,
@@ -199,7 +199,7 @@ class Agent(Generic[TMessage]):
         self._state = AgentState(
             system_prompt=system_prompt,
             model=model.spec,
-            thinking=thinking,
+            reasoning=reasoning or ReasoningControl(),
         )
         if messages is not None:
             if thread_id is not None and checkpointer is not None:
@@ -588,7 +588,7 @@ class Agent(Generic[TMessage]):
         )
         # Build transient agent. Forward the parent's resolved execution
         # options + middleware-composed hooks so the probe behaves like the
-        # parent would (tool_execution, thinking, transform/response hooks,
+        # parent would (tool_execution, reasoning, transform/response hooks,
         # on_payload/on_response, queue modes). Passing the resolved hooks
         # as explicit args means we pass middleware=[] to avoid composing
         # middleware twice — the parent's composed result already lives on
@@ -607,7 +607,7 @@ class Agent(Generic[TMessage]):
             model=self._model,
             system_prompt=self._state.system_prompt,
             tools=fork_tools,
-            thinking=self._state.thinking,
+            reasoning=self._state.reasoning,
             convert_to_llm=self.convert_to_llm,
             transform_context=self.transform_context,
             transform_system_prompt=self.transform_system_prompt,
@@ -732,7 +732,7 @@ class Agent(Generic[TMessage]):
 
     def _build_stream_options(self, signal: asyncio.Event) -> StreamOptions:
         return StreamOptions(
-            thinking=self._state.thinking,
+            reasoning=self._state.reasoning,
             signal=signal,
             on_payload=self.on_payload,
             on_response=self.on_response,
