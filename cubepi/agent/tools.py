@@ -679,6 +679,9 @@ async def _execute_parallel(
         except asyncio.CancelledError:
             raise
         except Exception:
+            # Salvage is best-effort by contract: a failure while emitting
+            # already-completed results must never mask the CancelledError
+            # being re-raised below (mirrors _complete_cancelled_tool_calls).
             pass
         raise
 
@@ -743,6 +746,9 @@ async def _execute_parallel(
         try:
             await _emit_tool_result_messages(finalized_list, emit_fn)
         except Exception:
+            # Best-effort: sibling persistence must never swallow the
+            # control exception — the suspend/abort machinery depends on
+            # it propagating; unanswered ids are backfilled on resume.
             pass
         raise control_exc
 
