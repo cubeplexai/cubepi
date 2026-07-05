@@ -203,17 +203,25 @@ async def run_agent_loop_resume(
             new_messages=new_messages,
             set_outcome=set_outcome,
         )
-    except HitlDetached:  # pragma: no cover — E2E tested
+    except HitlDetached as exc:  # pragma: no cover — E2E tested
         # The Agent caller (Agent.detach) emitted AgentSuspendedEvent already.
         # Loop exits silently — assistant message and pending state remain
-        # intact for the next respond() call.
+        # intact for the next respond() call. Sibling tool_results that
+        # completed before the detach were emitted by the executor; append
+        # them so callers persisting the returned messages keep them.
+        for msg in exc.partial_tool_results:
+            context.messages.append(msg)
+            new_messages.append(msg)
         if set_outcome is not None:
             set_outcome("suspended")
         return new_messages
-    except HitlAborted:  # pragma: no cover — E2E tested
+    except HitlAborted as exc:  # pragma: no cover — E2E tested
         # The Agent caller (Agent.abort_pending) emitted AgentAbortedEvent
         # already. Loop exits silently — synthetic deny + terminal aborted
         # assistant message already appended by abort_pending.
+        for msg in exc.partial_tool_results:
+            context.messages.append(msg)
+            new_messages.append(msg)
         if set_outcome is not None:
             set_outcome("abandoned")
         return new_messages
@@ -442,17 +450,26 @@ async def _run_loop(
             emit=emit,
             set_outcome=set_outcome,
         )
-    except HitlDetached:
+    except HitlDetached as exc:
         # AgentSuspendedEvent already emitted by Agent.detach() — exit silently
         # so AgentEndEvent doesn't double-signal termination. Assistant message
         # and pending state remain intact for the next respond() call.
+        # Sibling tool_results that completed before the detach were emitted
+        # (and checkpointed) by the executor; append them so callers reading
+        # current_context/new_messages keep them too.
+        for msg in exc.partial_tool_results:
+            current_context.messages.append(msg)
+            new_messages.append(msg)
         if set_outcome is not None:
             set_outcome("suspended")
         return
-    except HitlAborted:
+    except HitlAborted as exc:
         # AgentAbortedEvent already emitted by Agent.abort_pending() — exit
         # silently. Synthetic deny + terminal aborted assistant message are
         # already appended; conversation is closed.
+        for msg in exc.partial_tool_results:
+            current_context.messages.append(msg)
+            new_messages.append(msg)
         if set_outcome is not None:
             set_outcome("abandoned")
         return

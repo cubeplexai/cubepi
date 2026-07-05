@@ -121,20 +121,34 @@ the bare `await` loop. Every task settles before any outcome is processed;
 results stay in tool_call order. Then classify each slot:
 
 1. **`_FinalizedOutcome`** — success path, unchanged.
-2. **Ordinary failure** (any exception that is not `HitlControlException`,
-   `CancelledError`, `KeyboardInterrupt`, or `SystemExit`) — synthesize an
-   error outcome for that tool_call id:
-   `AgentToolResult(content=[TextContent(text=str(exc))], is_error=True)`,
-   plus a paired `ToolExecutionEndEvent` (the Start was emitted inside
-   `_run`; an unpaired Start would leave `state.pending_tool_calls` and trace
-   spans open — same invariant the prepare-phase comment protects).
-   With Part 2 in place this is defense-in-depth: tool-body and hook failures
-   are already converted inside the task.
+2. **Framework failure** (any exception that is not `HitlControlException`,
+   `CancelledError`, `KeyboardInterrupt`, or `SystemExit`) — with Part 2 in
+   place, tool-body and hook failures are converted to error results *at the
+   source*, inside the task. So an exception landing in the classification
+   stage is framework-side — in practice `emit_fn` raising while processing
+   a Start/End event. Emitter failures propagate at every other
+   `emit_event` call site, and synthesizing a bogus `tool_result` for one
+   would let the run continue with event processing broken; so it is
+   recorded and **re-raised after every task has settled** (no leaks, no
+   conversion). A framework failure takes precedence over a pending
+   suspend: durably suspending a run whose event pipeline is failing is not
+   safe.
 3. **`HitlControlException`** — the suspend contract requires propagation, so
    it cannot become an error result. Order of operations: first emit the
    `ToolResultMessage`s for every *other* settled slot (each `MessageEndEvent`
    checkpoints immediately via `Agent._process_event`, `agent.py:1207-1209`),
-   then re-raise the HITL exception. The HITL call's own tool_call
+   then re-raise the HITL exception. This emission is deliberately **not**
+   best-effort: if a sibling's persistence fails, suspending anyway would
+   durably record a batch whose completed work is missing (resume would
+   re-run side-effecting tools), so the persistence failure propagates and
+   the run fails rather than suspends. The emitted sibling results are also
+   attached to the exception as
+   `HitlControlException.partial_tool_results`; the stateless loop entry
+   points (`_run_loop` / `run_agent_loop_resume` HITL handlers) append them
+   to the message lists they return, so callers persisting the loop's
+   return value — who never see the raised-through batch — keep the
+   completed siblings' results. (The sequential executor attaches the same
+   attribute for its already-emitted prefix.) The HITL call's own tool_call
    deliberately stays unanswered and gets no End event — identical to today's
    sequential detach shape — and the existing detach/resume/abort paths
    answer it (synthetic-deny backfill scans unanswered ids of the last

@@ -689,13 +689,20 @@ class TestParallelFaultIsolation:
             ]
         )
         events = []
-        with pytest.raises(HitlDetached):
+        with pytest.raises(HitlDetached) as excinfo:
             await execute_tool_calls(
                 ctx,
                 self._three_call_msg(),
                 tool_execution="parallel",
                 emit=lambda e: events.append(e),
             )
+
+        # Persisted sibling results ride on the exception so the stateless
+        # loop entry points can return them to their callers.
+        assert [m.tool_call_id for m in excinfo.value.partial_tool_results] == [
+            "t1",
+            "t3",
+        ]
 
         # Every sibling settled before the re-raise; nothing leaked.
         assert side_effects == ["fast", "slow"]
@@ -884,9 +891,10 @@ class TestFaultIsolationEdgeCases:
         result_ids = [e.message.tool_call_id for e in events if e.type == "message_end"]
         assert result_ids == ["t1"]
 
-    async def test_hitl_reraise_survives_emit_failure(self):
-        """Persisting sibling results is best-effort: an emit failure must
-        not swallow the control exception the suspend machinery needs."""
+    async def test_hitl_sibling_persistence_failure_propagates(self):
+        """Suspending after a sibling result failed to persist would durably
+        record a batch missing completed work — the persistence failure must
+        win over the suspend."""
         from cubepi.hitl.exceptions import HitlDetached
 
         async def hitl_raiser(tool_call_id, params, *, signal=None, on_update=None):
@@ -894,7 +902,7 @@ class TestFaultIsolationEdgeCases:
 
         def flaky_emit(event):
             if event.type == "message_start":
-                raise RuntimeError("listener blew up")
+                raise RuntimeError("checkpointer rejected the append")
 
         ctx = make_context(
             [
@@ -902,13 +910,66 @@ class TestFaultIsolationEdgeCases:
                 make_echo_tool(name="b", execute_fn=hitl_raiser),
             ]
         )
-        with pytest.raises(HitlDetached):
+        with pytest.raises(RuntimeError, match="checkpointer rejected"):
             await execute_tool_calls(
                 ctx,
                 self._two_call_msg(),
                 tool_execution="parallel",
                 emit=flaky_emit,
             )
+
+    async def test_worker_emit_failure_propagates_after_settle(self):
+        """emit_fn failures inside a worker are framework-side, not tool
+        failures: no bogus tool_result is synthesized, the exception
+        propagates — but only after every sibling has settled."""
+        side_effects = []
+
+        async def slow_ok(tool_call_id, params, *, signal=None, on_update=None):
+            await asyncio.sleep(0.03)
+            side_effects.append("slow settled")
+            return AgentToolResult(content=[TextContent(text="ok")])
+
+        def flaky_emit(event):
+            if event.type == "tool_execution_end" and event.tool_call_id == "t1":
+                raise RuntimeError("listener blew up")
+
+        ctx = make_context(
+            [
+                make_echo_tool(name="a"),
+                make_echo_tool(name="b", execute_fn=slow_ok),
+            ]
+        )
+        with pytest.raises(RuntimeError, match="listener blew up"):
+            await execute_tool_calls(
+                ctx,
+                self._two_call_msg(),
+                tool_execution="parallel",
+                emit=flaky_emit,
+            )
+        assert side_effects == ["slow settled"]
+
+    async def test_sequential_hitl_carries_partial_results(self):
+        """The sequential executor attaches already-emitted results to an
+        escaping HITL control exception too."""
+        from cubepi.hitl.exceptions import HitlDetached
+
+        async def hitl_raiser(tool_call_id, params, *, signal=None, on_update=None):
+            raise HitlDetached()
+
+        ctx = make_context(
+            [
+                make_echo_tool(name="a"),
+                make_echo_tool(name="b", execute_fn=hitl_raiser),
+            ]
+        )
+        with pytest.raises(HitlDetached) as excinfo:
+            await execute_tool_calls(
+                ctx,
+                self._two_call_msg(),
+                tool_execution="sequential",
+                emit=lambda e: None,
+            )
+        assert [m.tool_call_id for m in excinfo.value.partial_tool_results] == ["t1"]
 
     async def test_cancel_reraise_survives_emit_failure(self):
         """Same best-effort contract on the outer-cancel salvage path."""

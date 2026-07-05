@@ -752,3 +752,51 @@ class TestStreamFallback:
         ]
         assert len(message_starts) == 1
         assert len(message_ends) == 1
+
+
+class TestLoopHitlPartialResults:
+    async def test_detach_returns_salvaged_sibling_results(self):
+        """A parallel batch that detaches mid-flight must not drop completed
+        siblings' tool_results from the messages the stateless loop returns —
+        callers persisting the return value would otherwise resume with
+        dangling tool_calls and re-run side-effecting work."""
+        from cubepi.hitl.exceptions import HitlDetached
+
+        async def detaching_execute(
+            tool_call_id, params, *, signal=None, on_update=None
+        ):
+            raise HitlDetached()
+
+        detach_tool = AgentTool(
+            name="detach",
+            description="Detaches for human input",
+            parameters=EchoParams,
+            execute=detaching_execute,
+        )
+        provider = FauxProvider(provider_id="faux")
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [
+                        faux_tool_call("echo", {"value": "hi"}, id="t-ok"),
+                        faux_tool_call("detach", {"value": "x"}, id="t-detach"),
+                    ],
+                    stop_reason="tool_use",
+                ),
+            ]
+        )
+        context = AgentContext(
+            system_prompt="", messages=[], tools=[make_echo_tool(), detach_tool]
+        )
+        messages = await run_agent_loop(
+            prompts=[make_user_message("go")],
+            context=context,
+            model=provider.model("faux-1"),
+            convert_to_llm=identity_converter,
+            emit=lambda e: None,
+        )
+
+        roles = [m.role for m in messages]
+        assert roles == ["user", "assistant", "tool_result"]
+        assert messages[2].tool_call_id == "t-ok"
+        assert "echoed: hi" in messages[2].content[0].text
