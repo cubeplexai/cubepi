@@ -474,70 +474,79 @@ async def _execute_sequential(
     finalized_list: list[_FinalizedOutcome] = []
     messages: list[ToolResultMessage] = []
 
-    for idx, tc in enumerate(tool_calls):
-        if preresolved is not None:
-            rtc, was_resolved, resolver_error = preresolved[idx]
-        else:
-            # Lazy: resolve only when this call's turn comes, after every
-            # earlier call in the batch has fully executed.
-            rtc, was_resolved, resolver_error = await _resolve_tool_call(
-                tc, context, resolve_tool_call, signal
+    try:
+        for idx, tc in enumerate(tool_calls):
+            if preresolved is not None:
+                rtc, was_resolved, resolver_error = preresolved[idx]
+            else:
+                # Lazy: resolve only when this call's turn comes, after every
+                # earlier call in the batch has fully executed.
+                rtc, was_resolved, resolver_error = await _resolve_tool_call(
+                    tc, context, resolve_tool_call, signal
+                )
+
+            await emit_event(
+                emit_fn,
+                ToolExecutionStartEvent(
+                    tool_call_id=rtc.id, tool_name=rtc.name, args=rtc.arguments
+                ),
             )
 
-        await emit_event(
-            emit_fn,
-            ToolExecutionStartEvent(
-                tool_call_id=rtc.id, tool_name=rtc.name, args=rtc.arguments
-            ),
-        )
-
-        preparation = resolver_error or await _prepare_tool_call(
-            context,
-            assistant_message,
-            rtc,
-            before_tool_call,
-            signal,
-            resolved=was_resolved,
-        )
-
-        if isinstance(preparation, _ImmediateOutcome):
-            finalized = _FinalizedOutcome(
-                tool_call=rtc,
-                result=preparation.result,
-                is_error=preparation.is_error,
-                blocked_by_hook=preparation.blocked_by_hook,
-                block_reason=preparation.block_reason,
-                hitl_trace=preparation.hitl_trace,
-            )
-        else:
-            result, is_error = await _execute_prepared(preparation, signal, emit_fn)
-            finalized = await _finalize(
+            preparation = resolver_error or await _prepare_tool_call(
                 context,
                 assistant_message,
-                preparation,
-                result,
-                is_error,
-                after_tool_call,
+                rtc,
+                before_tool_call,
                 signal,
+                resolved=was_resolved,
             )
 
-        await emit_event(
-            emit_fn,
-            ToolExecutionEndEvent(
-                tool_call_id=rtc.id,
-                tool_name=rtc.name,
-                result=finalized.result,
-                is_error=finalized.is_error,
-                terminate=bool(finalized.result.terminate),
-                blocked_by_hook=finalized.blocked_by_hook,
-                block_reason=finalized.block_reason,
-            ),
-        )
-        tool_msg = _make_tool_result_message(finalized)
-        await emit_event(emit_fn, MessageStartEvent(message=tool_msg))
-        await emit_event(emit_fn, MessageEndEvent(message=tool_msg))
-        finalized_list.append(finalized)
-        messages.append(tool_msg)
+            if isinstance(preparation, _ImmediateOutcome):
+                finalized = _FinalizedOutcome(
+                    tool_call=rtc,
+                    result=preparation.result,
+                    is_error=preparation.is_error,
+                    blocked_by_hook=preparation.blocked_by_hook,
+                    block_reason=preparation.block_reason,
+                    hitl_trace=preparation.hitl_trace,
+                )
+            else:
+                result, is_error = await _execute_prepared(preparation, signal, emit_fn)
+                finalized = await _finalize(
+                    context,
+                    assistant_message,
+                    preparation,
+                    result,
+                    is_error,
+                    after_tool_call,
+                    signal,
+                )
+
+            await emit_event(
+                emit_fn,
+                ToolExecutionEndEvent(
+                    tool_call_id=rtc.id,
+                    tool_name=rtc.name,
+                    result=finalized.result,
+                    is_error=finalized.is_error,
+                    terminate=bool(finalized.result.terminate),
+                    blocked_by_hook=finalized.blocked_by_hook,
+                    block_reason=finalized.block_reason,
+                ),
+            )
+            tool_msg = _make_tool_result_message(finalized)
+            await emit_event(emit_fn, MessageStartEvent(message=tool_msg))
+            await emit_event(emit_fn, MessageEndEvent(message=tool_msg))
+            finalized_list.append(finalized)
+            messages.append(tool_msg)
+
+    except HitlControlException as exc:
+        # Completed calls' results were already emitted (and
+        # checkpointed) per-iteration; carry them on the exception so
+        # the stateless loop entry points can return them to callers
+        # that persist the loop's return value across the suspend.
+        exc.partial_tool_results = tuple(messages)
+        raise
 
     return ToolCallBatch(messages=messages, terminate=_should_terminate(finalized_list))
 
@@ -687,6 +696,7 @@ async def _execute_parallel(
 
     finalized_list: list[_FinalizedOutcome] = []
     control_exc: BaseException | None = None
+    framework_exc: BaseException | None = None
     for entry, slot in zip(entries, scheduled):
         if isinstance(slot, _FinalizedOutcome):
             finalized_list.append(slot)
@@ -710,18 +720,23 @@ async def _execute_parallel(
             if control_exc is None:
                 control_exc = exc
             continue
+        if not isinstance(exc, asyncio.CancelledError):
+            # Tool and hook failures are converted to error results at the
+            # source (_execute_prepared/_finalize), so anything else landing
+            # here is framework-side — typically emit_fn raising while
+            # processing a Start/End event. Emitter failures propagate at
+            # every other emit_event call site; synthesizing a bogus
+            # tool_result here would let the run continue with event
+            # processing broken. Deferred until every task has settled.
+            if framework_exc is None:
+                framework_exc = exc
+            continue
         # Per-task isolation: a stray CancelledError (tool self-cancel with
-        # no outer cancel — a tool bug) or any exception that slipped past
-        # _execute_prepared/_finalize degrades to an error result for THIS
-        # call only.
-        text = (
-            "[Tool execution cancelled]"
-            if isinstance(exc, asyncio.CancelledError)
-            else str(exc)
-        )
+        # no outer cancel — a tool bug) degrades to an error result for
+        # THIS call only.
         synthesized = _FinalizedOutcome(
             tool_call=entry.tool_call,
-            result=_error_result(text),
+            result=_error_result("[Tool execution cancelled]"),
             is_error=True,
             hitl_trace=entry.hitl_trace,
         )
@@ -739,17 +754,27 @@ async def _execute_parallel(
         )
         finalized_list.append(synthesized)
 
+    if framework_exc is not None:
+        # Event processing is broken, so emitting sibling results below
+        # would fail too. Every task has already settled (no leaks) —
+        # propagate, taking precedence over a suspend: durably suspending
+        # a run whose event pipeline is failing is not safe.
+        raise framework_exc
+
     if control_exc is not None:
-        # Persist the siblings (each MessageEndEvent checkpoints
-        # immediately), best-effort, then let the control exception
-        # propagate exactly as the suspend/abort machinery expects.
-        try:
-            await _emit_tool_result_messages(finalized_list, emit_fn)
-        except Exception:
-            # Best-effort: sibling persistence must never swallow the
-            # control exception — the suspend/abort machinery depends on
-            # it propagating; unanswered ids are backfilled on resume.
-            pass
+        # Persist the siblings BEFORE propagating the suspend (each
+        # MessageEndEvent checkpoints immediately). Deliberately NOT
+        # best-effort: suspending after a sibling's persistence failed
+        # would durably record a batch whose completed work is missing —
+        # resume would re-run tools whose side effects already happened.
+        # A persistence failure propagates instead (consistent with every
+        # other MessageEndEvent site): the run fails rather than suspends.
+        emitted = await _emit_tool_result_messages(finalized_list, emit_fn)
+        if isinstance(control_exc, HitlControlException):
+            # Stateless loop entry points append these to the message
+            # lists they return, so callers persisting the return value
+            # keep the completed siblings' results across the suspend.
+            control_exc.partial_tool_results = tuple(emitted)
         raise control_exc
 
     messages = await _emit_tool_result_messages(finalized_list, emit_fn)
