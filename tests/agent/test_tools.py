@@ -847,3 +847,156 @@ class TestParallelFaultIsolation:
         # layer's backfill.
         result_ids = [e.message.tool_call_id for e in events if e.type == "message_end"]
         assert result_ids == ["t1"]
+
+
+class TestFaultIsolationEdgeCases:
+    """Cover the defensive branches of the fault-isolation machinery."""
+
+    @staticmethod
+    def _two_call_msg():
+        return make_assistant_msg(
+            [
+                ToolCall(id="t1", name="a", arguments={"value": "x"}),
+                ToolCall(id="t2", name="b", arguments={"value": "x"}),
+            ]
+        )
+
+    async def test_after_tool_call_hitl_propagates_with_siblings_persisted(self):
+        """_finalize must re-raise HITL control exceptions from the hook —
+        they are a suspend, not a tool failure — after siblings persist."""
+        from cubepi.hitl.exceptions import HitlDetached
+
+        async def after(after_ctx, *, signal=None):
+            if after_ctx.tool_call.id == "t2":
+                raise HitlDetached()
+            return None
+
+        ctx = make_context([make_echo_tool(name="a"), make_echo_tool(name="b")])
+        events = []
+        with pytest.raises(HitlDetached):
+            await execute_tool_calls(
+                ctx,
+                self._two_call_msg(),
+                tool_execution="parallel",
+                after_tool_call=after,
+                emit=lambda e: events.append(e),
+            )
+        result_ids = [e.message.tool_call_id for e in events if e.type == "message_end"]
+        assert result_ids == ["t1"]
+
+    async def test_hitl_reraise_survives_emit_failure(self):
+        """Persisting sibling results is best-effort: an emit failure must
+        not swallow the control exception the suspend machinery needs."""
+        from cubepi.hitl.exceptions import HitlDetached
+
+        async def hitl_raiser(tool_call_id, params, *, signal=None, on_update=None):
+            raise HitlDetached()
+
+        def flaky_emit(event):
+            if event.type == "message_start":
+                raise RuntimeError("listener blew up")
+
+        ctx = make_context(
+            [
+                make_echo_tool(name="a"),
+                make_echo_tool(name="b", execute_fn=hitl_raiser),
+            ]
+        )
+        with pytest.raises(HitlDetached):
+            await execute_tool_calls(
+                ctx,
+                self._two_call_msg(),
+                tool_execution="parallel",
+                emit=flaky_emit,
+            )
+
+    async def test_cancel_reraise_survives_emit_failure(self):
+        """Same best-effort contract on the outer-cancel salvage path."""
+        started = asyncio.Event()
+
+        async def fast_ok(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="ok")])
+
+        async def hang(tool_call_id, params, *, signal=None, on_update=None):
+            started.set()
+            await asyncio.Event().wait()
+
+        def flaky_emit(event):
+            if event.type == "message_start":
+                raise RuntimeError("listener blew up")
+
+        ctx = make_context(
+            [
+                make_echo_tool(name="a", execute_fn=fast_ok),
+                make_echo_tool(name="b", execute_fn=hang),
+            ]
+        )
+        runner = asyncio.create_task(
+            execute_tool_calls(
+                ctx,
+                self._two_call_msg(),
+                tool_execution="parallel",
+                emit=flaky_emit,
+            )
+        )
+        await started.wait()
+        await asyncio.sleep(0.02)
+        runner.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await runner
+
+    async def test_cancel_reraise_survives_emit_cancelled_error(self):
+        """A second cancel landing during salvage emission re-raises cleanly."""
+        started = asyncio.Event()
+
+        async def fast_ok(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="ok")])
+
+        async def hang(tool_call_id, params, *, signal=None, on_update=None):
+            started.set()
+            await asyncio.Event().wait()
+
+        def cancelling_emit(event):
+            if event.type == "message_start":
+                raise asyncio.CancelledError()
+
+        ctx = make_context(
+            [
+                make_echo_tool(name="a", execute_fn=fast_ok),
+                make_echo_tool(name="b", execute_fn=hang),
+            ]
+        )
+        runner = asyncio.create_task(
+            execute_tool_calls(
+                ctx,
+                self._two_call_msg(),
+                tool_execution="parallel",
+                emit=cancelling_emit,
+            )
+        )
+        await started.wait()
+        await asyncio.sleep(0.02)
+        runner.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await runner
+
+
+class TestBeforeToolCallEditedArgs:
+    async def test_edited_args_revalidated_and_used(self):
+        async def before(before_ctx, *, signal=None):
+            return BeforeToolCallResult(edited_args={"value": "rewritten"})
+
+        ctx = make_context([make_echo_tool()])
+        msg = make_assistant_msg(
+            [ToolCall(id="t1", name="echo", arguments={"value": "original"})]
+        )
+        batch = await execute_tool_calls(
+            ctx,
+            msg,
+            tool_execution="sequential",
+            before_tool_call=before,
+            emit=lambda e: None,
+        )
+        assert len(batch.messages) == 1
+        assert not batch.messages[0].is_error
+        assert "rewritten" in batch.messages[0].content[0].text
