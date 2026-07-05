@@ -1,0 +1,14 @@
+{
+  "version.label": {
+    "message": "0.13.0（最新）",
+    "description": "The label for version 0.13.0"
+  },
+  "version.banner.main": {
+    "message": "You are viewing the documentation for CubePi {versionLabel}.",
+    "description": "The label used to describe the document version"
+  },
+  "version.banner.unmaintained": {
+    "message": "You are viewing the documentation for CubePi {versionLabel}, which is no longer actively maintained.",
+    "description": "The label used to describe the document version"
+  }
+}
