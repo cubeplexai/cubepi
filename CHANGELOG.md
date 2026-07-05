@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-05
+
+### Added
+
+- **Reasoning capability primitives** — `ReasoningProfile`, `ThinkingControl`,
+  and `AppliedReasoningControl` types for fine-grained reasoning configuration.
+  Models that support extended thinking (Anthropic extended-thinking API) now
+  expose budget, level, and token tracking through the provider layer.
+- **Reasoning controls render in all providers** — `BoundModel` streams now
+  carry reasoning state per-turn. Rendered thinking blocks are available in
+  message content for inspection and tracing.
+- **Run-scoped compaction and real-token triggering** — `CompactionMiddleware`
+  can now compress history *within* a single long agentic run (previously
+  compression only occurred at run boundaries). Compaction triggers on true
+  context fill (input + cache_read + cache_write from the last turn) instead of
+  cache-blind character estimates, so prompt caching can't mask genuine
+  over-limit context.
+
+### Fixed
+
+- **Tool-batch fault isolation.** One escaping exception in a parallel tool
+  batch (HitlControlException, CancelledError, or BaseException from
+  after_tool_call) used to abort the bare-await collection loop, dropping every
+  ToolResultMessage in the batch — including succeeded siblings — and leaving
+  dangling tool_calls in the checkpoint. Now `_execute_parallel` settles every
+  task and synthesizes error results for failures, preserving all checkpoint
+  state and emitting events in correct order on suspend/resume.
+- **Parallel HITL approval replay.** Fixed answer ledger replay to correctly
+  handle parallel tool batches with mixed approved/pending tool calls. Added
+  explicit answer ledger persistence across all checkpointer backends
+  (sqlite/postgres/mysql) so HITL resume paths have a durable record of prior
+  approvals.
+- **Checkpointer corruption detection.** Load paths now wrap per-row
+  deserialization in CheckpointCorruptionError with thread_id/backend context.
+  Unknown roles are now treated as corruption in all backends instead of
+  silently passing through.
+- **Reasoning field gating.** Fixed rendering of reasoning fields to only
+  appear when `model.reasoning` is enabled, preventing type mismatches on
+  models that don't support extended thinking.
+- **Checkpointer v5 schema support.** Restored compatibility with v5 schema
+  migrations across all backends.
+
 ## [0.12.0] - 2026-06-24
 
 ### Added
@@ -635,7 +677,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/cubeplexai/cubepi/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/cubeplexai/cubepi/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/cubeplexai/cubepi/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/cubeplexai/cubepi/compare/v0.9.0...v0.10.0
