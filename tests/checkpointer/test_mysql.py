@@ -511,8 +511,11 @@ async def test_empty_version_table_raises_uninitialized(clean_mysql_db) -> None:
 
 @pytest.mark.asyncio
 async def test_load_unknown_role_raises(clean_mysql_db) -> None:
-    """A message row with an unrecognized role string → ValueError on load."""
+    """A message row with an unrecognized role string → typed corruption
+    error on load, naming the row."""
     import msgpack
+
+    from cubepi.checkpointer.exceptions import CheckpointCorruptionError
 
     from cubepi.checkpointer.mysql import MySQLCheckpointer
     from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
@@ -533,8 +536,10 @@ async def test_load_unknown_role_raises(clean_mysql_db) -> None:
         await conn.ensure_closed()
 
     async with MySQLCheckpointer(clean_mysql_db) as cp:
-        with pytest.raises(ValueError, match="unknown role in DB"):
+        with pytest.raises(CheckpointCorruptionError, match="unknown role in DB") as ei:
             await cp.load("t-bad")
+    assert isinstance(ei.value.__cause__, ValueError)
+    assert ei.value.row_ref == "cubepi_messages.seq=1"
 
 
 @pytest.mark.asyncio
@@ -559,3 +564,44 @@ async def test_missing_version_column_raises_uninitialized(clean_mysql_db) -> No
     with pytest.raises(CubepiSchemaUninitialized):
         async with MySQLCheckpointer(clean_mysql_db):
             pass
+
+
+@pytest.mark.asyncio
+async def test_mysql_load_corrupt_row_raises_typed(clean_mysql_db) -> None:
+    """One bad payload row surfaces as CheckpointCorruptionError naming the
+    row — not a raw msgpack error that hides which row is bad."""
+    from cubepi.checkpointer.exceptions import CheckpointCorruptionError
+    from cubepi.checkpointer.mysql import MySQLCheckpointer
+    from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
+    from cubepi.providers.base import TextContent, UserMessage
+
+    await _setup_schema(clean_mysql_db)
+    async with MySQLCheckpointer(clean_mysql_db) as cp:
+        await cp.append(
+            "t-corrupt",
+            [
+                UserMessage(content=[TextContent(text="ok")]),
+                UserMessage(content=[TextContent(text="will corrupt")]),
+            ],
+        )
+        conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
+        try:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE cubepi_messages SET payload = %s "
+                    "WHERE thread_id = 't-corrupt' AND seq = ("
+                    "  SELECT max_seq FROM (SELECT max(seq) AS max_seq "
+                    "  FROM cubepi_messages WHERE thread_id = 't-corrupt') AS sub)",
+                    (b"\xc1 not msgpack",),
+                )
+        finally:
+            await conn.ensure_closed()
+
+        with pytest.raises(CheckpointCorruptionError) as excinfo:
+            await cp.load("t-corrupt")
+
+    err = excinfo.value
+    assert err.thread_id == "t-corrupt"
+    assert err.backend == "mysql"
+    assert err.row_ref.startswith("cubepi_messages.seq=")
+    assert err.__cause__ is not None

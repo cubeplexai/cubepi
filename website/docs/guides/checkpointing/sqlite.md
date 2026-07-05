@@ -212,6 +212,13 @@ sqlite3 agent.db "VACUUM"
 - **Forgetting to set `thread_id`** — Without it, the agent has no
   persistence binding. The checkpointer is silently ignored. Always
   pass both.
+- **`CheckpointCorruptionError` on `load()`** — A persisted message row
+  failed to deserialize (bad JSON, schema-invalid data, or an unknown
+  role). The error's `row_ref` (e.g. `messages.id=42`) locates the bad
+  row so you can inspect or repair it with plain SQL; `thread_id` and
+  `__cause__` carry the rest of the context. CubePi never skips corrupt
+  rows silently — dropping a message that carries `tool_calls` would
+  leave the transcript in a state every provider rejects.
 
 ## See also
 

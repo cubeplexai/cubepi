@@ -11,6 +11,7 @@ from pydantic import TypeAdapter
 
 from cubepi.checkpointer.base import CheckpointData
 from cubepi.checkpointer.exceptions import (
+    CheckpointCorruptionError,
     CheckpointerLockTimeoutError,
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
@@ -152,7 +153,7 @@ class SQLiteCheckpointer:
         assert self._db is not None
         async with self._lock:
             cursor = await self._db.execute(
-                "SELECT message_json FROM messages WHERE thread_id = ? ORDER BY id",
+                "SELECT id, message_json FROM messages WHERE thread_id = ? ORDER BY id",
                 (thread_id,),
             )
             rows = await cursor.fetchall()
@@ -169,8 +170,7 @@ class SQLiteCheckpointer:
 
             messages = []
             for row in rows:
-                msg_data = json.loads(row[0])
-                messages.append(_deserialize_message(msg_data))
+                messages.append(_deserialize_row(thread_id, row[0], row[1]))
 
             extra = json.loads(extra_row[0]) if extra_row else {}
             parent = extra_row[1] if extra_row else None
@@ -413,7 +413,7 @@ class SQLiteCheckpointer:
                 )
             cutoff = row[0]
             cur = await self._db.execute(
-                "SELECT message_json FROM messages WHERE thread_id = ? "
+                "SELECT id, message_json FROM messages WHERE thread_id = ? "
                 "AND (run_id IS NULL OR run_id IN ("
                 "  SELECT run_id FROM runs WHERE thread_id = ? "
                 "  AND completion_seq IS NOT NULL "
@@ -422,7 +422,7 @@ class SQLiteCheckpointer:
                 (thread_id, thread_id, cutoff),
             )
             rows = await cur.fetchall()
-            return [_deserialize_message(json.loads(r[0])) for r in rows]
+            return [_deserialize_row(thread_id, r[0], r[1]) for r in rows]
 
     async def fork(
         self,
@@ -534,4 +534,18 @@ def _deserialize_message(data: dict[str, Any]) -> Message:
         return AssistantMessage.model_validate(data)
     elif role == "tool_result":
         return ToolResultMessage.model_validate(data)
-    return cast(Message, data)
+    # Unknown role is corruption, same as the postgres/mysql backends —
+    # passing the raw dict through would fail far from the cause.
+    raise ValueError(f"unknown role in DB: {role!r}")
+
+
+def _deserialize_row(thread_id: str, row_id: int, message_json: str) -> Message:
+    try:
+        return _deserialize_message(json.loads(message_json))
+    except Exception as exc:
+        raise CheckpointCorruptionError(
+            thread_id=thread_id,
+            backend="sqlite",
+            row_ref=f"messages.id={row_id}",
+            cause=exc,
+        ) from exc

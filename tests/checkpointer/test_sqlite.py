@@ -101,12 +101,61 @@ class TestSQLiteCheckpointer:
             assert loaded.content[0].text == "result"
 
     async def test_deserialize_unknown_role(self, db_path):
-        """A message with an unknown role should be returned as a plain dict."""
+        """Unknown roles are corruption, matching the postgres/mysql
+        backends — the old silent raw-dict passthrough let bad data flow
+        into the message list and fail far from the cause."""
+        from cubepi.checkpointer.exceptions import CheckpointCorruptionError
+
         async with SQLiteCheckpointer(db_path) as cp:
             raw_msg = {"role": "custom", "data": "test"}
             await cp.append("thread-1", [raw_msg])
 
-            data = await cp.load("thread-1")
-            assert data is not None
-            assert len(data.messages) == 1
-            assert data.messages[0] == {"role": "custom", "data": "test"}
+            with pytest.raises(CheckpointCorruptionError):
+                await cp.load("thread-1")
+
+
+class TestCheckpointCorruption:
+    async def test_corrupt_json_row_raises_typed(self, db_path):
+        from cubepi.checkpointer.exceptions import CheckpointCorruptionError
+
+        async with SQLiteCheckpointer(db_path) as cp:
+            await cp.append(
+                "thread-1",
+                [
+                    UserMessage(content=[TextContent(text="ok")]),
+                    UserMessage(content=[TextContent(text="will corrupt")]),
+                ],
+            )
+            await cp._db.execute(
+                'UPDATE messages SET message_json = \'{"role": "user"\' '
+                "WHERE id = (SELECT max(id) FROM messages WHERE thread_id = ?)",
+                ("thread-1",),
+            )
+            await cp._db.commit()
+
+            with pytest.raises(CheckpointCorruptionError) as excinfo:
+                await cp.load("thread-1")
+
+        err = excinfo.value
+        assert err.thread_id == "thread-1"
+        assert err.backend == "sqlite"
+        assert err.row_ref.startswith("messages.id=")
+        assert err.__cause__ is not None
+
+    async def test_unknown_role_raises_typed(self, db_path):
+        from cubepi.checkpointer.exceptions import CheckpointCorruptionError
+
+        async with SQLiteCheckpointer(db_path) as cp:
+            await cp.append("thread-1", [UserMessage(content=[TextContent(text="ok")])])
+            await cp._db.execute(
+                "UPDATE messages SET message_json = "
+                '\'{"role": "alien", "content": []}\' WHERE thread_id = ?',
+                ("thread-1",),
+            )
+            await cp._db.commit()
+
+            with pytest.raises(CheckpointCorruptionError) as excinfo:
+                await cp.load("thread-1")
+
+        assert isinstance(excinfo.value.__cause__, ValueError)
+        assert "alien" in str(excinfo.value)

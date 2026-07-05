@@ -348,3 +348,66 @@ async def test_empty_thread_load_returns_none(clean_db) -> None:
     async with PostgresCheckpointer(clean_db) as cp:
         data = await cp.load("nonexistent-thread")
     assert data is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_load_corrupt_row_raises_typed(clean_db) -> None:
+    """One bad payload row surfaces as CheckpointCorruptionError naming the
+    row — not a raw msgpack error that hides which row is bad."""
+    from cubepi.checkpointer.exceptions import CheckpointCorruptionError
+    from cubepi.checkpointer.postgres import PostgresCheckpointer
+    from cubepi.providers.base import TextContent, UserMessage
+
+    await _setup_schema(clean_db)
+    async with PostgresCheckpointer(clean_db) as cp:
+        await cp.append(
+            "t-corrupt",
+            [
+                UserMessage(content=[TextContent(text="ok")]),
+                UserMessage(content=[TextContent(text="will corrupt")]),
+            ],
+        )
+        conn = await asyncpg.connect(clean_db)
+        try:
+            await conn.execute(
+                "UPDATE cubepi_messages SET payload = $1 "
+                "WHERE thread_id = 't-corrupt' AND seq = ("
+                "  SELECT max(seq) FROM cubepi_messages "
+                "  WHERE thread_id = 't-corrupt')",
+                b"\xc1 not msgpack",
+            )
+        finally:
+            await conn.close()
+
+        with pytest.raises(CheckpointCorruptionError) as excinfo:
+            await cp.load("t-corrupt")
+
+    err = excinfo.value
+    assert err.thread_id == "t-corrupt"
+    assert err.backend == "postgres"
+    assert err.row_ref.startswith("cubepi_messages.seq=")
+    assert err.__cause__ is not None
+
+
+@pytest.mark.asyncio
+async def test_postgres_load_unknown_role_raises_typed(clean_db) -> None:
+    from cubepi.checkpointer.exceptions import CheckpointCorruptionError
+    from cubepi.checkpointer.postgres import PostgresCheckpointer
+    from cubepi.providers.base import TextContent, UserMessage
+
+    await _setup_schema(clean_db)
+    async with PostgresCheckpointer(clean_db) as cp:
+        await cp.append("t-role", [UserMessage(content=[TextContent(text="ok")])])
+        conn = await asyncpg.connect(clean_db)
+        try:
+            await conn.execute(
+                "UPDATE cubepi_messages SET role = 'alien' WHERE thread_id = 't-role'"
+            )
+        finally:
+            await conn.close()
+
+        with pytest.raises(CheckpointCorruptionError) as excinfo:
+            await cp.load("t-role")
+
+    assert isinstance(excinfo.value.__cause__, ValueError)
+    assert "alien" in str(excinfo.value)

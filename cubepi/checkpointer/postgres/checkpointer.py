@@ -16,6 +16,7 @@ from pydantic import TypeAdapter
 
 from cubepi.checkpointer.base import CheckpointData
 from cubepi.checkpointer.exceptions import (
+    CheckpointCorruptionError,
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
     RunNotClaimedError,
@@ -86,6 +87,29 @@ _ROLE_TO_CLS: dict[str, type[Message]] = {
     "assistant": AssistantMessage,
     "tool": ToolResultMessage,
 }
+
+
+def _deserialize_row(thread_id: str, r: Any) -> Message:
+    """Deserialize one cubepi_messages row; corruption raises typed."""
+    try:
+        cls = _ROLE_TO_CLS.get(r["role"])
+        if cls is None:
+            raise ValueError(f"unknown role in DB: {r['role']!r}")
+        data = msgpack.unpackb(bytes(r["payload"]), raw=False)
+        # The DB metadata column is the source of truth for Message.metadata.
+        # (payload also contains it, but column is the canonical view for querying.)
+        raw_meta = r["metadata"]
+        data["metadata"] = (
+            json.loads(raw_meta) if isinstance(raw_meta, str) else (raw_meta or {})
+        )
+        return cls.model_validate(data)
+    except Exception as exc:
+        raise CheckpointCorruptionError(
+            thread_id=thread_id,
+            backend="postgres",
+            row_ref=f"cubepi_messages.seq={r['seq']}",
+            cause=exc,
+        ) from exc
 
 
 class PostgresCheckpointer:
@@ -168,19 +192,7 @@ class PostgresCheckpointer:
         if not msg_rows and extra_row is None:
             return None
 
-        messages: list[Message] = []
-        for r in msg_rows:
-            cls = _ROLE_TO_CLS.get(r["role"])
-            if cls is None:
-                raise ValueError(f"unknown role in DB: {r['role']!r}")
-            data = msgpack.unpackb(bytes(r["payload"]), raw=False)
-            # The DB metadata column is the source of truth for Message.metadata.
-            # (payload also contains it, but column is the canonical view for querying.)
-            raw_meta = r["metadata"]
-            data["metadata"] = (
-                json.loads(raw_meta) if isinstance(raw_meta, str) else (raw_meta or {})
-            )
-            messages.append(cls.model_validate(data))
+        messages: list[Message] = [_deserialize_row(thread_id, r) for r in msg_rows]
 
         parent_thread_id: str | None = None
         if extra_row is not None:
@@ -388,18 +400,7 @@ class PostgresCheckpointer:
                 thread_id,
                 cutoff,
             )
-        messages: list[Message] = []
-        for r in rows:
-            cls = _ROLE_TO_CLS.get(r["role"])
-            if cls is None:
-                raise ValueError(f"unknown role in DB: {r['role']!r}")
-            data = msgpack.unpackb(bytes(r["payload"]), raw=False)
-            raw_meta = r["metadata"]
-            data["metadata"] = (
-                json.loads(raw_meta) if isinstance(raw_meta, str) else (raw_meta or {})
-            )
-            messages.append(cls.model_validate(data))
-        return messages
+        return [_deserialize_row(thread_id, r) for r in rows]
 
     async def fork(
         self,

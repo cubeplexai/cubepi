@@ -85,6 +85,34 @@ class CheckpointerLockTimeoutError(CheckpointerError):
     (SQLite busy_timeout, etc.)."""
 
 
+class CheckpointCorruptionError(CheckpointerError):
+    """A persisted message row failed to deserialize during load.
+
+    Raised instead of the raw decoder/validation error so hosts can
+    distinguish data corruption from operational failures and locate the
+    bad row (``row_ref`` names the backend table + primary key). Covers
+    bad payload encoding, schema-invalid message data, and unknown roles.
+    """
+
+    def __init__(
+        self,
+        *,
+        thread_id: str,
+        backend: str,
+        row_ref: str,
+        cause: BaseException,
+    ) -> None:
+        super().__init__(
+            f"corrupt checkpoint row for thread {thread_id!r} "
+            f"({backend}, {row_ref}): {cause}"
+        )
+        self.thread_id = thread_id
+        self.backend = backend
+        self.row_ref = row_ref
+        self.__cause__ = cause
+        self.__suppress_context__ = True
+
+
 class CompletionMarkerFailedError(CheckpointerError):
     """mark_run_complete() failed AFTER the run's final append succeeded.
     Carries `run_id` so callers using prompt(run_id=None) can recover

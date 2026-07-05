@@ -197,14 +197,19 @@ class TestCheckpointerIntegration:
         class BlockParams(BaseModel):
             pass
 
-        async def cancel_execute(tool_call_id, params, *, signal=None, on_update=None):
-            raise asyncio.CancelledError()
+        started = asyncio.Event()
+
+        async def blocking_execute(
+            tool_call_id, params, *, signal=None, on_update=None
+        ):
+            started.set()
+            await asyncio.Event().wait()  # blocks until the run is cancelled
 
         block_tool = AgentTool(
             name="block",
-            description="Never returns; simulates a cancelled tool call",
+            description="Never returns; cancelled mid-execution",
             parameters=BlockParams,
-            execute=cancel_execute,
+            execute=blocking_execute,
         )
 
         checkpointer = MemoryCheckpointer()
@@ -224,8 +229,11 @@ class TestCheckpointerIntegration:
             thread_id="thread-cancel",
         )
 
+        prompt_task = asyncio.create_task(agent.prompt("Run the blocking tool"))
+        await started.wait()
+        prompt_task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await agent.prompt("Run the blocking tool")
+            await prompt_task
 
         data = await checkpointer.load("thread-cancel")
         assert data is not None
@@ -247,14 +255,19 @@ class TestCheckpointerIntegration:
         class BlockParams(BaseModel):
             pass
 
-        async def cancel_execute(tool_call_id, params, *, signal=None, on_update=None):
-            raise asyncio.CancelledError()
+        started = asyncio.Event()
+
+        async def blocking_execute(
+            tool_call_id, params, *, signal=None, on_update=None
+        ):
+            started.set()
+            await asyncio.Event().wait()  # blocks until the run is cancelled
 
         block_tool = AgentTool(
             name="block",
-            description="Cancels on execution",
+            description="Never returns; cancelled mid-execution",
             parameters=BlockParams,
-            execute=cancel_execute,
+            execute=blocking_execute,
         )
 
         checkpointer = MemoryCheckpointer()
@@ -291,8 +304,11 @@ class TestCheckpointerIntegration:
             thread_id="thread-reuse",
         )
 
+        prompt_task = asyncio.create_task(agent.prompt("second"))
+        await started.wait()
+        prompt_task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await agent.prompt("second")
+            await prompt_task
 
         data = await checkpointer.load("thread-reuse")
         assert data is not None

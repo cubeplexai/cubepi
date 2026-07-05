@@ -269,6 +269,13 @@ def upgrade():
   `MetaData` instance precisely so it can coexist with your app's
   models without colliding. Don't merge them into your global metadata
   — pass both to Alembic separately.
+- **`CheckpointCorruptionError` on `load()`** — A persisted message row
+  failed to deserialize (bad msgpack payload, schema-invalid data, or an
+  unknown role). The error's `row_ref` (e.g. `cubepi_messages.seq=42`)
+  locates the bad row for inspection or surgical repair; `thread_id` and
+  `__cause__` carry the rest. CubePi never skips corrupt rows silently —
+  dropping a message that carries `tool_calls` would leave the
+  transcript in a state every provider rejects.
 
 ## See also
 

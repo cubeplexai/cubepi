@@ -20,6 +20,7 @@ from pydantic import TypeAdapter
 
 from cubepi.checkpointer.base import CheckpointData
 from cubepi.checkpointer.exceptions import (
+    CheckpointCorruptionError,
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
     RunNotClaimedError,
@@ -62,6 +63,26 @@ _ROLE_TO_CLS: dict[str, type[Message]] = {
     "assistant": AssistantMessage,
     "tool": ToolResultMessage,
 }
+
+
+def _deserialize_row(
+    thread_id: str, seq: int, role: str, metadata: Any, payload: Any
+) -> Message:
+    """Deserialize one cubepi_messages row; corruption raises typed."""
+    try:
+        cls = _ROLE_TO_CLS.get(role)
+        if cls is None:
+            raise ValueError(f"unknown role in DB: {role!r}")
+        data = msgpack.unpackb(bytes(payload), raw=False)
+        data["metadata"] = _decode_json(metadata)
+        return cls.model_validate(data)
+    except Exception as exc:
+        raise CheckpointCorruptionError(
+            thread_id=thread_id,
+            backend="mysql",
+            row_ref=f"cubepi_messages.seq={seq}",
+            cause=exc,
+        ) from exc
 
 
 def _parse_dsn(dsn: str) -> dict[str, Any]:
@@ -209,14 +230,10 @@ class MySQLCheckpointer:
         if not msg_rows and extra_row is None:
             return None
 
-        messages: list[Message] = []
-        for _seq, role, metadata, payload in msg_rows:
-            cls = _ROLE_TO_CLS.get(role)
-            if cls is None:
-                raise ValueError(f"unknown role in DB: {role!r}")
-            data = msgpack.unpackb(bytes(payload), raw=False)
-            data["metadata"] = _decode_json(metadata)
-            messages.append(cls.model_validate(data))
+        messages: list[Message] = [
+            _deserialize_row(thread_id, seq, role, metadata, payload)
+            for seq, role, metadata, payload in msg_rows
+        ]
 
         parent_thread_id: str | None = None
         if extra_row is not None:
@@ -472,15 +489,10 @@ class MySQLCheckpointer:
                     (thread_id, thread_id, cutoff),
                 )
                 rows = await cur.fetchall()
-        messages: list[Message] = []
-        for _seq, role, metadata, payload in rows:
-            cls = _ROLE_TO_CLS.get(role)
-            if cls is None:
-                raise ValueError(f"unknown role in DB: {role!r}")
-            data = msgpack.unpackb(bytes(payload), raw=False)
-            data["metadata"] = _decode_json(metadata)
-            messages.append(cls.model_validate(data))
-        return messages
+        return [
+            _deserialize_row(thread_id, seq, role, metadata, payload)
+            for seq, role, metadata, payload in rows
+        ]
 
     async def fork(
         self,

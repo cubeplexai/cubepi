@@ -298,9 +298,17 @@ async def _execute_prepared(
             # AgentToolResult(is_error=True) without raising must surface here
             # (otherwise the model sees a successful result).
             return result, bool(result.is_error)
-        except HitlControlException:
+        except (
+            HitlControlException,
+            asyncio.CancelledError,
+            KeyboardInterrupt,
+            SystemExit,
+        ):
             raise
-        except Exception as exc:
+        except BaseException as exc:
+            # BaseException, not Exception: a tool body raising a bare
+            # BaseException subclass must degrade to an error result too —
+            # anything that escapes here detonates the whole batch.
             return _error_result(str(exc)), True
     finally:
         if token is not None:
@@ -350,7 +358,14 @@ async def _finalize(
                     if after_result.is_error is not None
                     else is_error
                 )
-        except Exception as exc:
+        except (
+            HitlControlException,
+            asyncio.CancelledError,
+            KeyboardInterrupt,
+            SystemExit,
+        ):
+            raise
+        except BaseException as exc:
             result = _error_result(str(exc))
             is_error = True
 
@@ -628,24 +643,120 @@ async def _execute_parallel(
         return fin
 
     # Now that every prepare has succeeded, fan out the executions.
+    # `scheduled` stays index-aligned with `entries` so a failed task's
+    # _PreparedToolCall (tool_call id/name, hitl_trace) is recoverable when
+    # synthesizing its error outcome.
     scheduled: list[_FinalizedOutcome | asyncio.Task] = [
         entry
         if isinstance(entry, _FinalizedOutcome)
         else asyncio.create_task(_run(entry))
         for entry in entries
     ]
-    finalized_list: list[_FinalizedOutcome] = []
-    for entry in scheduled:
-        if isinstance(entry, asyncio.Task):
-            finalized_list.append(await entry)
-        else:
-            finalized_list.append(entry)
+    tasks = [s for s in scheduled if isinstance(s, asyncio.Task)]
 
+    # Settle EVERY task before processing any outcome: one failing tool must
+    # never drop its siblings' results (they were computed, and their side
+    # effects happened — losing the ToolResultMessage would leave dangling
+    # tool_calls in the checkpoint and duplicate the side effects on resume).
+    try:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    except asyncio.CancelledError:
+        # Outer cancel: gather already propagated it to the children.
+        # Settle them, salvage the results of tools that completed before
+        # the cancel landed, then re-raise. The Agent layer backfills the
+        # genuinely-unanswered ids (_complete_cancelled_tool_calls); without
+        # the salvage it would stamp "[cancelled]" over real, side-effecting
+        # completions. Best-effort: never mask the CancelledError.
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            salvaged = [
+                s if isinstance(s, _FinalizedOutcome) else s.result()
+                for s in scheduled
+                if isinstance(s, _FinalizedOutcome)
+                or (s.done() and not s.cancelled() and s.exception() is None)
+            ]
+            await _emit_tool_result_messages(salvaged, emit_fn)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        raise
+
+    finalized_list: list[_FinalizedOutcome] = []
+    control_exc: BaseException | None = None
+    for entry, slot in zip(entries, scheduled):
+        if isinstance(slot, _FinalizedOutcome):
+            finalized_list.append(slot)
+            continue
+        if slot.cancelled():
+            # Task.exception() would re-raise the CancelledError; outer
+            # cancellation re-raised above, so this is a tool self-cancel.
+            exc: BaseException | None = asyncio.CancelledError()
+        else:
+            exc = slot.exception()
+        if exc is None:
+            finalized_list.append(slot.result())
+            continue
+        assert isinstance(entry, _PreparedToolCall)
+        if isinstance(exc, (HitlControlException, KeyboardInterrupt, SystemExit)):
+            # Must propagate (suspend/interpreter contracts) — but only
+            # after every sibling result below has been emitted. The call
+            # itself deliberately stays unanswered, with no End event:
+            # same shape as a sequential detach; the HITL resume/abort
+            # paths backfill it. First raiser (batch order) wins.
+            if control_exc is None:
+                control_exc = exc
+            continue
+        # Per-task isolation: a stray CancelledError (tool self-cancel with
+        # no outer cancel — a tool bug) or any exception that slipped past
+        # _execute_prepared/_finalize degrades to an error result for THIS
+        # call only.
+        text = (
+            "[Tool execution cancelled]"
+            if isinstance(exc, asyncio.CancelledError)
+            else str(exc)
+        )
+        synthesized = _FinalizedOutcome(
+            tool_call=entry.tool_call,
+            result=_error_result(text),
+            is_error=True,
+            hitl_trace=entry.hitl_trace,
+        )
+        # Pair the Start emitted inside _run — an unpaired Start leaves
+        # state.pending_tool_calls and trace spans open.
+        await emit_event(
+            emit_fn,
+            ToolExecutionEndEvent(
+                tool_call_id=entry.tool_call.id,
+                tool_name=entry.tool_call.name,
+                result=synthesized.result,
+                is_error=True,
+                terminate=False,
+            ),
+        )
+        finalized_list.append(synthesized)
+
+    if control_exc is not None:
+        # Persist the siblings (each MessageEndEvent checkpoints
+        # immediately), best-effort, then let the control exception
+        # propagate exactly as the suspend/abort machinery expects.
+        try:
+            await _emit_tool_result_messages(finalized_list, emit_fn)
+        except Exception:
+            pass
+        raise control_exc
+
+    messages = await _emit_tool_result_messages(finalized_list, emit_fn)
+    return ToolCallBatch(messages=messages, terminate=_should_terminate(finalized_list))
+
+
+async def _emit_tool_result_messages(
+    finalized_list: list[_FinalizedOutcome], emit_fn: Callable
+) -> list[ToolResultMessage]:
     messages: list[ToolResultMessage] = []
     for finalized in finalized_list:
         tool_msg = _make_tool_result_message(finalized)
         await emit_event(emit_fn, MessageStartEvent(message=tool_msg))
         await emit_event(emit_fn, MessageEndEvent(message=tool_msg))
         messages.append(tool_msg)
-
-    return ToolCallBatch(messages=messages, terminate=_should_terminate(finalized_list))
+    return messages

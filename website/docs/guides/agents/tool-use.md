@@ -123,6 +123,27 @@ The event stream emits `tool_execution_start` for all of them up
 front, interleaved `tool_execution_update` events as each tool reports
 progress, then `tool_execution_end` per tool in completion order.
 
+### Fault isolation
+
+Failures are isolated per call: every tool in the batch runs to
+completion regardless of what its siblings do, and each call gets
+exactly one `tool_result` — a real one, or a synthesized error result
+if the tool (or an `after_tool_call` hook) raised something
+unexpected. One misbehaving tool never discards a sibling's completed
+work, and a persisted assistant message is never left with unanswered
+`tool_calls` (which providers reject on the next turn).
+
+Two exception classes still propagate, by design:
+
+- **HITL control exceptions** (a tool detaching for human input) — the
+  batch first waits for every sibling to finish and persists their
+  results, then the suspend propagates. Only the detaching call stays
+  unanswered, and the HITL resume/abort flow answers it later.
+- **Cancellation** — siblings are cancelled and awaited (no leaked
+  tasks); results of tools that completed before the cancel are
+  persisted so a resumed thread doesn't re-run them and duplicate
+  their side effects.
+
 ## Forcing sequential execution
 
 There are two ways to opt out of parallel mode:

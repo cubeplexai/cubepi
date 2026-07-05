@@ -1,5 +1,6 @@
 import asyncio
 
+import pytest
 from pydantic import BaseModel
 
 from cubepi.agent.tools import execute_tool_calls
@@ -644,3 +645,205 @@ class TestToolResultDetails:
 
         assert len(batch.messages) == 1
         assert batch.messages[0].details == {"execution_time": 42}
+
+
+class TestParallelFaultIsolation:
+    """One failing tool in a parallel batch must never drop sibling results,
+    leak running sibling tasks, or leave dangling tool_calls."""
+
+    @staticmethod
+    def _three_call_msg():
+        return make_assistant_msg(
+            [
+                ToolCall(id="t1", name="a", arguments={"value": "x"}),
+                ToolCall(id="t2", name="b", arguments={"value": "x"}),
+                ToolCall(id="t3", name="c", arguments={"value": "x"}),
+            ]
+        )
+
+    async def test_hitl_raise_preserves_and_persists_sibling_results(self):
+        from cubepi.hitl.exceptions import HitlDetached
+
+        side_effects = []
+
+        async def fast_ok(tool_call_id, params, *, signal=None, on_update=None):
+            side_effects.append("fast")
+            return AgentToolResult(content=[TextContent(text="fast-ok")])
+
+        async def hitl_raiser(tool_call_id, params, *, signal=None, on_update=None):
+            await asyncio.sleep(0.01)
+            raise HitlDetached()
+
+        async def slow_ok(tool_call_id, params, *, signal=None, on_update=None):
+            # Still running when the HITL exception fires — the batch must
+            # wait for it (no detached task, no lost side effect).
+            await asyncio.sleep(0.05)
+            side_effects.append("slow")
+            return AgentToolResult(content=[TextContent(text="slow-ok")])
+
+        ctx = make_context(
+            [
+                make_echo_tool(name="a", execute_fn=fast_ok),
+                make_echo_tool(name="b", execute_fn=hitl_raiser),
+                make_echo_tool(name="c", execute_fn=slow_ok),
+            ]
+        )
+        events = []
+        with pytest.raises(HitlDetached):
+            await execute_tool_calls(
+                ctx,
+                self._three_call_msg(),
+                tool_execution="parallel",
+                emit=lambda e: events.append(e),
+            )
+
+        # Every sibling settled before the re-raise; nothing leaked.
+        assert side_effects == ["fast", "slow"]
+        pending = [
+            t
+            for t in asyncio.all_tasks()
+            if t is not asyncio.current_task() and not t.done()
+        ]
+        assert pending == []
+
+        # Sibling ToolResultMessages were emitted (message_end checkpoints
+        # them at the Agent layer); the HITL call stays unanswered.
+        result_ids = [e.message.tool_call_id for e in events if e.type == "message_end"]
+        assert result_ids == ["t1", "t3"]
+        end_ids = [e.tool_call_id for e in events if e.type == "tool_execution_end"]
+        assert "t2" not in end_ids  # detach shape: Start without End
+
+    async def test_tool_body_base_exception_becomes_error_result(self):
+        class Weird(BaseException):
+            pass
+
+        async def raiser(tool_call_id, params, *, signal=None, on_update=None):
+            raise Weird("weird failure")
+
+        async def ok(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="ok")])
+
+        ctx = make_context(
+            [
+                make_echo_tool(name="a", execute_fn=ok),
+                make_echo_tool(name="b", execute_fn=raiser),
+                make_echo_tool(name="c", execute_fn=ok),
+            ]
+        )
+        batch = await execute_tool_calls(
+            ctx, self._three_call_msg(), tool_execution="parallel", emit=lambda e: None
+        )
+        assert [m.tool_call_id for m in batch.messages] == ["t1", "t2", "t3"]
+        by_id = {m.tool_call_id: m for m in batch.messages}
+        assert by_id["t2"].is_error
+        assert "weird failure" in by_id["t2"].content[0].text
+        assert not by_id["t1"].is_error
+        assert not by_id["t3"].is_error
+
+    async def test_after_tool_call_base_exception_isolated(self):
+        class Weird(BaseException):
+            pass
+
+        async def after(after_ctx, *, signal=None):
+            if after_ctx.tool_call.id == "t2":
+                raise Weird("hook blew up")
+            return None
+
+        ctx = make_context(
+            [
+                make_echo_tool(name="a"),
+                make_echo_tool(name="b"),
+                make_echo_tool(name="c"),
+            ]
+        )
+        for mode in ("parallel", "sequential"):
+            batch = await execute_tool_calls(
+                ctx,
+                self._three_call_msg(),
+                tool_execution=mode,
+                after_tool_call=after,
+                emit=lambda e: None,
+            )
+            by_id = {m.tool_call_id: m for m in batch.messages}
+            assert len(by_id) == 3, mode
+            assert by_id["t2"].is_error, mode
+            assert "hook blew up" in by_id["t2"].content[0].text
+            assert not by_id["t1"].is_error
+            assert not by_id["t3"].is_error
+
+    async def test_tool_self_cancel_becomes_error_result(self):
+        async def self_cancel(tool_call_id, params, *, signal=None, on_update=None):
+            raise asyncio.CancelledError()
+
+        async def ok(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="ok")])
+
+        ctx = make_context(
+            [
+                make_echo_tool(name="a", execute_fn=ok),
+                make_echo_tool(name="b", execute_fn=self_cancel),
+                make_echo_tool(name="c", execute_fn=ok),
+            ]
+        )
+        events = []
+        batch = await execute_tool_calls(
+            ctx,
+            self._three_call_msg(),
+            tool_execution="parallel",
+            emit=lambda e: events.append(e),
+        )
+        by_id = {m.tool_call_id: m for m in batch.messages}
+        assert len(by_id) == 3
+        assert by_id["t2"].is_error
+        assert "[Tool execution cancelled]" in by_id["t2"].content[0].text
+        # The synthesized outcome still pairs the Start emitted inside the
+        # task, so pending_tool_calls / trace spans don't leak.
+        starts = [e.tool_call_id for e in events if e.type == "tool_execution_start"]
+        ends = [e.tool_call_id for e in events if e.type == "tool_execution_end"]
+        assert sorted(starts) == sorted(ends) == ["t1", "t2", "t3"]
+
+    async def test_outer_cancel_salvages_completed_results(self):
+        started = asyncio.Event()
+        cancelled_flags = []
+
+        async def fast_ok(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="fast-ok")])
+
+        async def hang(tool_call_id, params, *, signal=None, on_update=None):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled_flags.append(tool_call_id)
+                raise
+            return AgentToolResult(content=[TextContent(text="unreachable")])
+
+        ctx = make_context(
+            [
+                make_echo_tool(name="a", execute_fn=fast_ok),
+                make_echo_tool(name="b", execute_fn=hang),
+                make_echo_tool(name="c", execute_fn=hang),
+            ]
+        )
+        events = []
+        runner = asyncio.create_task(
+            execute_tool_calls(
+                ctx,
+                self._three_call_msg(),
+                tool_execution="parallel",
+                emit=lambda e: events.append(e),
+            )
+        )
+        await started.wait()
+        await asyncio.sleep(0.02)  # let fast_ok finish
+        runner.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await runner
+
+        # Hanging siblings were cancelled, not leaked.
+        assert sorted(cancelled_flags) == ["t2", "t3"]
+        # The completed tool's real result was salvaged and emitted before
+        # the re-raise; the cancelled ones stay unanswered for the Agent
+        # layer's backfill.
+        result_ids = [e.message.tool_call_id for e in events if e.type == "message_end"]
+        assert result_ids == ["t1"]

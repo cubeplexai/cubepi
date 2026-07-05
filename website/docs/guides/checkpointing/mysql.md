@@ -270,6 +270,11 @@ def upgrade():
 - **Case-insensitive thread-ID collisions** — Thread IDs use the
   `utf8mb4_bin` collation so `UserA` and `usera` stay distinct. If you
   hand-roll the DDL, keep that collation.
+- **`CheckpointCorruptionError` on `load()`** — A persisted message row
+  failed to deserialize (bad msgpack payload, schema-invalid data, or an
+  unknown role). The error's `row_ref` (e.g. `cubepi_messages.seq=42`)
+  locates the bad row for inspection or surgical repair; `thread_id` and
+  `__cause__` carry the rest. CubePi never skips corrupt rows silently.
 
 ## See also
 
