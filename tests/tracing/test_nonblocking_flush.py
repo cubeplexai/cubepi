@@ -120,6 +120,43 @@ async def test_force_flush_does_not_stall_concurrent_tasks():
         await tracer.shutdown()
 
 
+async def test_meter_force_flush_calls_provider_off_the_loop_thread():
+    # Meter mirrors Tracer: its provider force_flush is synchronous and
+    # must run in a worker thread, never on the loop.
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+    from opentelemetry.sdk.resources import Resource
+
+    from cubepi.tracing import Meter
+    from cubepi.tracing.schema import SCHEMA_URL
+
+    reader = InMemoryMetricReader()
+    resource = Resource.create({"service.name": "test"}, schema_url=SCHEMA_URL)
+    provider = MeterProvider(resource=resource, metric_readers=[reader])
+    meter = Meter.__new__(Meter)
+    meter._provider = provider  # type: ignore[attr-defined]
+    meter._shutdown = False  # type: ignore[attr-defined]
+
+    loop_thread = threading.current_thread().name
+    flush_threads: list[str] = []
+    inner = provider.force_flush
+
+    def _spy(timeout_millis: int = 30_000) -> bool:
+        flush_threads.append(threading.current_thread().name)
+        return inner(timeout_millis=timeout_millis)
+
+    provider.force_flush = _spy  # type: ignore[method-assign]
+    try:
+        assert await meter.force_flush() is True
+        assert flush_threads, "provider.force_flush must have run"
+        assert flush_threads[0] != loop_thread, (
+            "sync metric flush must run in a worker thread, not on the loop"
+        )
+    finally:
+        provider.force_flush = inner  # type: ignore[method-assign]
+        provider.shutdown()
+
+
 async def test_trace_background_exits_before_export_completes():
     exporter = _SlowExporter(export_seconds=0.5)
     agent, tracer = _build(exporter)
