@@ -16,6 +16,7 @@ Histograms emitted (per OTel GenAI semconv):
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import time
 from dataclasses import dataclass, field
@@ -200,7 +201,12 @@ class Meter:
         return detach
 
     async def force_flush(self, timeout_seconds: float = 30.0) -> bool:
-        return self._provider.force_flush(timeout_millis=int(timeout_seconds * 1000))
+        # Sync provider flush can hold for seconds on a slow OTLP
+        # collector; run it in a worker thread so awaiting this never
+        # stalls the event loop (mirrors Tracer.force_flush).
+        return await asyncio.to_thread(
+            self._provider.force_flush, timeout_millis=int(timeout_seconds * 1000)
+        )
 
     async def shutdown(self, timeout_seconds: float = 30.0) -> None:
         if self._shutdown:

@@ -8,12 +8,13 @@ the agent's event stream.
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import contextlib
 import logging
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Literal
 
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -189,6 +190,10 @@ class Tracer:
             schema_url=SCHEMA_URL,
         )
         self._shutdown = False
+        # Strong refs to background flush Tasks (``trace(...,
+        # flush="background")``): the loop only holds weak refs, so an
+        # untracked task could be GC'd mid-flush.
+        self._pending_flushes: set[asyncio.Task[Any]] = set()
         self._atexit_flush_timeout_ms = int(atexit_flush_timeout_seconds * 1000)
         self._atexit_unregister: Callable[[], None] | None = None
         if atexit_flush:
@@ -313,18 +318,40 @@ class Tracer:
 
         return detach
 
+    def _track_flush_task(self, task: "asyncio.Task[Any]") -> None:
+        """Hold a strong reference to a background flush Task until it ends.
+
+        The event loop keeps only weak references to Tasks, so a
+        fire-and-forget flush could be garbage-collected mid-export
+        without this. ``shutdown()`` awaits whatever is still pending.
+        """
+        self._pending_flushes.add(task)
+        task.add_done_callback(self._pending_flushes.discard)
+
     async def force_flush(self, timeout_seconds: float = 30.0) -> bool:
         """Block until all currently buffered spans are exported.
+
+        The provider's ``force_flush`` is synchronous and can hold for
+        seconds when an exporter is slow (e.g. OTLP HTTP to a remote or
+        backlogged collector), so it runs in a worker thread — awaiting
+        this never stalls the event loop.
 
         Returns ``False`` on timeout.
         """
         timeout_millis = int(timeout_seconds * 1000)
-        return self._provider.force_flush(timeout_millis=timeout_millis)
+        return await asyncio.to_thread(
+            self._provider.force_flush, timeout_millis=timeout_millis
+        )
 
     async def shutdown(self, timeout_seconds: float = 30.0) -> None:
         """Flush and close all exporters. Tracer is unusable after this."""
         if self._shutdown:
             return
+        # Settle in-flight background flushes first (trace(...,
+        # flush="background")) so their spans can't race the provider
+        # shutdown below; failures were already logged by the supervisor.
+        if self._pending_flushes:
+            await asyncio.gather(*list(self._pending_flushes), return_exceptions=True)
         # SpanProcessor.shutdown is sync; flush first to bound wait.
         await self.force_flush(timeout_seconds=timeout_seconds)
         self._provider.shutdown()
@@ -738,6 +765,8 @@ def _build_resource(
 async def trace(
     tracer: "Tracer | None",
     agent: "Agent",
+    *,
+    flush: Literal["await", "background"] = "await",
 ) -> AsyncIterator[None]:
     """Best-effort tracing scope for one agent run.
 
@@ -747,6 +776,19 @@ async def trace(
     work inside the ``async with`` block. Passing ``tracer=None`` makes the
     block a no-op, which lets callers gate tracing on config without branching
     at the call site.
+
+    ``flush`` picks what exiting the block waits for:
+
+    - ``"await"`` (default) — block until this run's spans are exported.
+      The exit is only as fast as the slowest exporter; use it when the
+      caller has nothing latency-sensitive after the block.
+    - ``"background"`` — detach synchronously (listeners are off before
+      the next line) but let the export run as a supervised background
+      task. Use this on request/serving paths where a caller is waiting
+      on the block's completion: span export to a slow collector must
+      not gate a user-visible response. The tracer keeps a strong
+      reference to the task and ``await tracer.shutdown()`` settles any
+      still-pending flushes, so spans are not lost on clean shutdown.
 
     This does **not** shut the tracer down: the tracer is reusable across runs,
     so build it once (e.g. per process) and call ``await tracer.shutdown()``
@@ -760,7 +802,7 @@ async def trace(
     -------
     ::
 
-        async with trace(tracer, agent):
+        async with trace(tracer, agent, flush="background"):
             await agent.prompt("...")
     """
     if tracer is None:
@@ -780,10 +822,26 @@ async def trace(
         if detach is not None:
             try:
                 result = detach()
-                # In an async context ``detach()`` returns a flush Task; await
-                # it so this run's spans are exported before the block exits.
+                # In an async context ``detach()`` returns a flush Task.
                 if result is not None and hasattr(result, "__await__"):
-                    await result
+                    if flush == "background":
+                        # Supervise instead of awaiting: log failures
+                        # (matching this helper's swallow-and-log
+                        # contract) and keep a strong ref via the
+                        # tracer so the task can't be GC'd mid-export.
+                        async def _supervise(flush_task: Any) -> None:
+                            try:
+                                await flush_task
+                            except Exception as exc:  # noqa: BLE001
+                                _log_tracing_warning("background flush failed", exc)
+
+                        tracer._track_flush_task(
+                            asyncio.get_running_loop().create_task(_supervise(result))
+                        )
+                    else:
+                        # Await so this run's spans are exported before
+                        # the block exits.
+                        await result
             except Exception as exc:  # noqa: BLE001 — flush/detach must never break the run
                 _log_tracing_warning("detach/flush failed", exc)
 
