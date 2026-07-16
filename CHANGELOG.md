@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-07-15
+
+### Fixed
+
+- **Non-blocking tracing flush.** `Tracer.force_flush` and `Meter.force_flush`
+  now run the synchronous provider flush in a worker thread via
+  `asyncio.to_thread`, so awaiting either method never stalls the event loop
+  on a slow or backlogged OTLP collector.
+- **Background flush mode for `trace()`.** The `trace()` context manager
+  accepts a new `flush` parameter (`"await"` | `"background"`, default
+  `"await"`). With `flush="background"` the block exits immediately after
+  detaching listeners while span export continues as a supervised background
+  task — useful on request-serving paths where a caller is waiting on the
+  block's completion. The tracer keeps a strong reference to in-flight flush
+  tasks (`_pending_flushes`) so they can't be garbage-collected mid-export;
+  `await tracer.shutdown()` settles any still-pending flushes before closing
+  exporters, so no spans are lost on clean shutdown.
+
 ## [0.13.0] - 2026-07-05
 
 ### Added
@@ -677,7 +695,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/cubeplexai/cubepi/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/cubeplexai/cubepi/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/cubeplexai/cubepi/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/cubeplexai/cubepi/compare/v0.10.0...v0.11.0
