@@ -75,7 +75,9 @@ version picker, top-right](pathname:///)). CubePi 0.13 adds
 reasoning capability primitives and controls across all providers,
 run-scoped compaction with real-token triggering, tool-batch fault
 isolation that preserves all checkpoint state, and durable parallel
-HITL approval replay.
+HITL approval replay. 0.13.1 patches the tracing flush path: `force_flush`
+now runs off the event loop, and `trace()` gains a `flush="background"` mode
+for serving paths where span export must not gate a user-visible response.
 
 Source, issues, and discussion live on
 [GitHub](https://github.com/cubeplexai/cubepi).

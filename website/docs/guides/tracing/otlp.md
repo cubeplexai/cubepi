@@ -173,3 +173,29 @@ If even that gets missed — say a script raises before reaching `finally` —
 that sync-flushes buffered spans through `BatchSpanProcessor`. Doesn't run
 on `SIGKILL` / `os._exit`; for guaranteed delivery there, use
 `SimpleSpanProcessor` (sync export per span).
+
+### Background flush on serving paths
+
+On request-handling paths — FastAPI endpoints, gRPC handlers, any code where
+a caller is waiting on the `async with` block — awaiting the OTLP flush before
+returning ties your p99 to the slowest exporter. Use the standalone `trace()`
+helper with `flush="background"` instead:
+
+```python
+from cubepi.tracing import trace
+
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    async with trace(tracer, agent, flush="background"):
+        reply = await agent.prompt(req.message)
+    # Block exits immediately — span export runs as a supervised background
+    # task, decoupled from this response.
+    return {"reply": reply}
+```
+
+Both `force_flush` and the underlying `BatchSpanProcessor` export run in a
+worker thread (off the event loop), so a slow or backlogged collector can't
+stall a user-visible response. The tracer keeps a strong reference to each
+in-flight flush task so it can't be garbage-collected mid-export; `await
+tracer.shutdown()` settles any still-pending flushes before closing exporters,
+so no spans are lost on clean shutdown.

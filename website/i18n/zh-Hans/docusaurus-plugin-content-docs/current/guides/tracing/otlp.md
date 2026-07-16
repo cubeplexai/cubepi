@@ -163,3 +163,26 @@ finally:
 `Tracer(atexit_flush=True)`（默认）会注册进程退出处理程序，通过
 `BatchSpanProcessor` 同步 flush 缓冲 span。`SIGKILL` / `os._exit` 时不运行；
 如需保证必达，请使用 `SimpleSpanProcessor`（每个 span 同步导出）。
+
+### 服务路径的后台 flush
+
+在请求处理路径上——FastAPI 端点、gRPC handler、任何调用方在等待 `async with`
+块结果的代码——等待 OTLP flush 完成才返回会让你的 p99 被最慢的 exporter 拖累。
+改用独立的 `trace()` 辅助函数并传入 `flush="background"`：
+
+```python
+from cubepi.tracing import trace
+
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    async with trace(tracer, agent, flush="background"):
+        reply = await agent.prompt(req.message)
+    # 块立即退出——span 导出作为受监管的后台任务运行，与本次响应解耦。
+    return {"reply": reply}
+```
+
+`force_flush` 和底层 `BatchSpanProcessor` 的导出均在 worker 线程中运行（脱离
+event loop），因此即使 collector 缓慢或积压，也不会阻塞用户可见的响应。
+Tracer 持有每个进行中 flush 任务的强引用，防止其在导出过程中被 GC；
+`await tracer.shutdown()` 会在关闭 exporter 前等待所有未完成的 flush，
+确保 span 不丢失。

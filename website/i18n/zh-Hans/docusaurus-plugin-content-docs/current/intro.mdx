@@ -70,7 +70,9 @@ pip install cubepi
 最新已发布版本是 v<PackageVersion />（[从右上角版本选择器切换](pathname:///)）。
 CubePi 0.13 新增所有 provider 的推理能力原语和控制、运行内作用域的
 压缩和真实令牌触发、工具批处理故障隔离保留所有检查点状态、以及
-耐用的并行 HITL 批准重放。
+耐用的并行 HITL 批准重放。0.13.1 修复了 tracing flush 路径：`force_flush`
+现在脱离 event loop 运行，`trace()` 新增 `flush="background"` 模式，
+适用于不能让 span 导出阻塞用户响应的服务路径。
 
 源代码、Issue 和讨论都在
 [GitHub](https://github.com/cubeplexai/cubepi)。
