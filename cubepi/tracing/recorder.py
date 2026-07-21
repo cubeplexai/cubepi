@@ -1178,6 +1178,11 @@ class Recorder:
                     # response (JSON dict) for backends that prefer it,
                     # and the normalized output messages where derivable.
                     self._set_content_attr(span, CUBEPI_LLM_RAW_RESPONSE, body)
+                    output_message = _derive_output_message_from_body(body)
+                    if output_message:
+                        self._set_content_attr(
+                            span, GEN_AI_OUTPUT_MESSAGES, output_message
+                        )
             # Cooperative abort: providers may finish the response
             # listener with ``exc is None`` and a body whose finish
             # reason is ``"aborted"`` (faux + the agent's signal path).
@@ -1400,6 +1405,121 @@ class Recorder:
             return
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
         run.agent_span.set_attribute(CUBEPI_AGENT_SYSTEM_PROMPT_SHA256, digest)
+
+
+def _derive_output_message_from_body(body: dict) -> list[dict[str, Any]] | None:
+    """Reconstruct the semconv output-message shape (§10.5) directly from an
+    assembled provider response body, for the ``chat`` span's own
+    ``gen_ai.output.messages`` (§10.3).
+
+    The `chat` span only ever sees the raw provider-shaped ``body`` (via
+    ``subscribe_response``) — never the parsed cubepi ``AssistantMessage``
+    that ``messages_to_semconv`` normally converts, since that object is
+    built later in the agent loop. Mirrors the same three-way provider-shape
+    dispatch already used by ``_record_chat_response_attrs`` right above.
+
+    Returns ``None`` (never raises) when the shape isn't recognized or
+    carries no content — the caller treats that as "nothing to record",
+    identical to today's behavior.
+    """
+    # Anthropic-shaped: {"content": [...], "stop_reason": ..., "usage": {...}}
+    if (
+        "stop_reason" in body
+        and "usage" in body
+        and isinstance(body.get("content"), list)
+    ):
+        parts: list[dict[str, Any]] = []
+        for block in body["content"]:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "text" and block.get("text"):
+                parts.append({"type": "text", "content": block["text"]})
+            elif btype == "thinking" and block.get("thinking"):
+                parts.append({"type": "reasoning", "content": block["thinking"]})
+            elif btype == "tool_use":
+                parts.append(
+                    {
+                        "type": "tool_call",
+                        "id": block.get("id"),
+                        "name": block.get("name"),
+                        "arguments": block.get("input") or {},
+                    }
+                )
+        return [{"role": "assistant", "parts": parts}] if parts else None
+
+    # OpenAI chat.completion-shaped: {"choices": [{"message": {...}}]}
+    if "choices" in body and isinstance(body.get("choices"), list) and body["choices"]:
+        first = body["choices"][0]
+        message = first.get("message") if isinstance(first, dict) else None
+        if not isinstance(message, dict):
+            return None
+        parts = []
+        if message.get("content"):
+            parts.append({"type": "text", "content": message["content"]})
+        for tc in message.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") or {}
+            args = _try_parse_json(fn.get("arguments"))
+            parts.append(
+                {
+                    "type": "tool_call",
+                    "id": tc.get("id"),
+                    "name": fn.get("name"),
+                    "arguments": args,
+                }
+            )
+        return [{"role": "assistant", "parts": parts}] if parts else None
+
+    # OpenAI Responses-shaped: {"object": "response", "output": [...]}
+    if body.get("object") == "response" or isinstance(body.get("output"), list):
+        output = body.get("output")
+        if not isinstance(output, list):
+            return None
+        parts = []
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            itype = item.get("type")
+            if itype == "message":
+                for c in item.get("content") or []:
+                    if (
+                        isinstance(c, dict)
+                        and c.get("type") == "output_text"
+                        and c.get("text")
+                    ):
+                        parts.append({"type": "text", "content": c["text"]})
+            elif itype == "reasoning":
+                for s in item.get("summary") or []:
+                    if isinstance(s, dict) and s.get("text"):
+                        parts.append({"type": "reasoning", "content": s["text"]})
+            elif itype == "function_call":
+                args = _try_parse_json(item.get("arguments"))
+                parts.append(
+                    {
+                        "type": "tool_call",
+                        "id": item.get("call_id") or item.get("id"),
+                        "name": item.get("name"),
+                        "arguments": args,
+                    }
+                )
+        return [{"role": "assistant", "parts": parts}] if parts else None
+
+    return None
+
+
+def _try_parse_json(value: Any) -> Any:
+    """Tool call arguments arrive as a JSON-encoded string on the wire;
+    decode to match the object shape ``ToolCall.arguments`` uses elsewhere
+    (§10.5). Falls back to the raw value if it isn't valid JSON rather than
+    dropping it."""
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return value
+    return value or {}
 
 
 def _extract_system_prompt(payload: dict) -> str | None:
