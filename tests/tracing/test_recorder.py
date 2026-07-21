@@ -7,6 +7,7 @@ runs a scenario, then inspects the captured spans.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from opentelemetry.sdk.trace import ReadableSpan
@@ -826,6 +827,124 @@ class TestRequestMaxTokensCrossProvider:
         # The most recent chat span carries the value.
         attrs = _attrs(chats[-1])
         assert attrs.get("gen_ai.request.max_tokens") == 4096
+
+
+class TestChatSpanOutputMessages:
+    """Per spec §10.3/§10.5 (docs/specs/2026-05-18-cubepi-tracing-design.md),
+    the `chat` span's own `gen_ai.output.messages` should reflect what the
+    provider actually returned - independent of the turn/agent-level rollup,
+    which is built later from the agent's own message accumulation and isn't
+    available yet inside the `subscribe_response` callback. Previously only
+    `cubepi.llm.raw_response` was recorded here despite the code comment
+    already saying otherwise.
+    """
+
+    async def _drive(self, body: dict) -> dict[str, Any]:
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="t", agent_name="a", exporters=[exporter], record_content=True
+        )
+        tracer.attach(agent)
+
+        recorder = _find_attached_recorder(provider)
+        assert recorder is not None
+        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
+
+        await recorder._on_agent_event(AgentStartEvent())
+        await recorder._on_agent_event(TurnStartEvent())
+        recorder._on_provider_request({"messages": []}, MODEL)
+        recorder._on_provider_response(body, MODEL, None)
+        await tracer.shutdown()
+
+        chats = [s for s in exporter.spans if s.name.startswith("chat ")]
+        assert chats, "no chat span captured"
+        return _attrs(chats[-1])
+
+    async def test_openai_chat_completions_text(self):
+        attrs = await self._drive(
+            {
+                "id": "resp1",
+                "model": "faux-1",
+                "choices": [{"message": {"role": "assistant", "content": "hi there"}}],
+            }
+        )
+        raw = attrs.get("gen_ai.output.messages")
+        assert raw, "gen_ai.output.messages missing on chat span"
+        messages = json.loads(raw)
+        assert messages == [
+            {"role": "assistant", "parts": [{"type": "text", "content": "hi there"}]}
+        ]
+
+    async def test_openai_chat_completions_tool_call(self):
+        attrs = await self._drive(
+            {
+                "id": "resp1",
+                "model": "faux-1",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "function": {
+                                        "name": "search",
+                                        "arguments": '{"query": "weather"}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+            }
+        )
+        messages = json.loads(attrs["gen_ai.output.messages"])
+        assert messages == [
+            {
+                "role": "assistant",
+                "parts": [
+                    {
+                        "type": "tool_call",
+                        "id": "call_1",
+                        "name": "search",
+                        "arguments": {"query": "weather"},
+                    }
+                ],
+            }
+        ]
+
+    async def test_anthropic_shaped_text_and_thinking(self):
+        attrs = await self._drive(
+            {
+                "id": "msg1",
+                "type": "message",
+                "role": "assistant",
+                "model": "faux-1",
+                "content": [
+                    {"type": "thinking", "thinking": "let me think"},
+                    {"type": "text", "text": "the answer"},
+                ],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+        )
+        messages = json.loads(attrs["gen_ai.output.messages"])
+        assert messages == [
+            {
+                "role": "assistant",
+                "parts": [
+                    {"type": "reasoning", "content": "let me think"},
+                    {"type": "text", "content": "the answer"},
+                ],
+            }
+        ]
+
+    async def test_unrecognized_shape_sets_nothing(self):
+        attrs = await self._drive({"model": "faux-1", "weird": True})
+        assert "gen_ai.output.messages" not in attrs
 
 
 class TestDetachFlushGuarantee:
