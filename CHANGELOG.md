@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-07-23
+
+### Fixed
+
+- **`gen_ai.output.messages` now recorded on the `chat` span.** Per the
+  tracing design spec (§10.3/§10.5), the provider-level `chat` span's
+  `gen_ai.output.messages` should reflect what the provider actually
+  returned - independent of the turn/agent-level rollup. A code comment
+  in `_on_provider_response` already claimed it would record "the
+  normalized output messages where derivable", but only
+  `cubepi.llm.raw_response` was ever set on this span;
+  `gen_ai.output.messages` was written only on `invoke_agent` and
+  `cubepi.turn`. The recorder now reconstructs the semconv
+  output-message parts (text / reasoning / tool_call) directly from the
+  assembled response body via a new `_derive_output_message_from_body()`
+  helper, mirroring the existing three-way provider-shape dispatch
+  (Anthropic-shaped, OpenAI `chat.completion`-shaped, OpenAI
+  Responses-shaped). Unrecognized shapes or empty content set nothing,
+  identical to prior behavior (no regression).
+
 ## [0.13.1] - 2026-07-15
 
 ### Fixed
@@ -695,7 +715,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.2...HEAD
+[0.13.2]: https://github.com/cubeplexai/cubepi/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/cubeplexai/cubepi/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/cubeplexai/cubepi/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/cubeplexai/cubepi/compare/v0.11.0...v0.12.0
