@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **OpenAI `chat_completions`/`responses` capability profiles no longer emit
+  `reasoning_effort: "minimal"`.** OpenAI renamed the lowest reasoning-effort
+  tier to `"none"` (gpt-5.5+), and some OpenAI-compatible proxies reject the
+  now-stale `"minimal"` value outright. The built-in "off" mode payload and
+  the `minimal` → wire-value mapping in `_OPENAI_EFFORT_VALUES` both now emit
+  `"none"`.
+
 ## [0.13.2] - 2026-07-23
 
 ### Fixed

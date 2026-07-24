@@ -153,14 +153,14 @@ async def test_default_profile_writes_reasoning_effort():
 
 
 @pytest.mark.asyncio
-async def test_default_profile_off_writes_minimal_reasoning():
+async def test_default_profile_off_writes_none_reasoning():
     p = OpenAIResponsesProvider(api_key="x")
     payload = await _capture_payload_responses(
         p,
         _model(reasoning=True),
         reasoning=ReasoningControl(mode="off", effort="minimal", summary="none"),
     )
-    assert payload["reasoning"] == {"effort": "minimal"}
+    assert payload["reasoning"] == {"effort": "none"}
 
 
 # ---------------------------------------------------------------------------

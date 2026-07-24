@@ -161,14 +161,14 @@ async def test_openai_chat_default_profile_writes_reasoning_effort() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_chat_off_writes_minimal_effort() -> None:
+async def test_openai_chat_off_writes_none_effort() -> None:
     payload = await _capture_payload_openai(
         OpenAIProvider(api_key="x", base_url="http://example"),
         _model(reasoning=True),
         reasoning=ReasoningControl(mode="off", effort="minimal", summary="none"),
     )
 
-    assert payload["reasoning_effort"] == "minimal"
+    assert payload["reasoning_effort"] == "none"
 
 
 @pytest.mark.asyncio

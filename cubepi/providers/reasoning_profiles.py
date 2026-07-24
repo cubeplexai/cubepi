@@ -7,7 +7,10 @@ from cubepi.providers.capability import CapabilityDescriptor, ReasoningCapabilit
 
 
 _OPENAI_EFFORT_VALUES: dict[ReasoningEffort, str] = {
-    "minimal": "minimal",
+    # OpenAI renamed the lowest reasoning_effort tier from "minimal" to
+    # "none" (gpt-5.5+); some OpenAI-compatible backends reject "minimal"
+    # outright.
+    "minimal": "none",
     "low": "low",
     "medium": "medium",
     "high": "high",
@@ -50,7 +53,7 @@ def get_capability_profile(
 _PROFILES: dict[tuple[str, str], CapabilityDescriptor] = {
     ("openai", "chat_completions"): CapabilityDescriptor(
         reasoning=ReasoningCapability(
-            mode_payloads={"off": {"reasoning_effort": "minimal"}},
+            mode_payloads={"off": {"reasoning_effort": "none"}},
             effort_path="reasoning_effort",
             effort_values=_OPENAI_EFFORT_VALUES,
             apply_effort_when_off=False,
@@ -59,7 +62,7 @@ _PROFILES: dict[tuple[str, str], CapabilityDescriptor] = {
     ),
     ("openai", "responses"): CapabilityDescriptor(
         reasoning=ReasoningCapability(
-            mode_payloads={"off": {"reasoning": {"effort": "minimal"}}},
+            mode_payloads={"off": {"reasoning": {"effort": "none"}}},
             effort_path="reasoning.effort",
             effort_values=_OPENAI_EFFORT_VALUES,
             summary_path="reasoning.summary",

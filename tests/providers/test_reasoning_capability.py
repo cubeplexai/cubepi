@@ -31,7 +31,7 @@ def test_apply_reasoning_writes_effort_when_off_for_chat_profile():
         ReasoningControl(mode="off", effort="minimal"),
     )
 
-    assert payload == {"reasoning_effort": "minimal"}
+    assert payload == {"reasoning_effort": "none"}
 
 
 def test_apply_reasoning_writes_nested_summary_and_include_payload():

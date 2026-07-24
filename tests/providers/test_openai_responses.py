@@ -854,7 +854,7 @@ class TestReasoningParams:
 
     @pytest.mark.asyncio
     async def test_no_reasoning_when_off(self):
-        """mode=off maps to minimal effort for reasoning-only Responses models."""
+        """mode=off maps to "none" effort for reasoning-only Responses models."""
         events = [
             _make_event(
                 "response.completed",
@@ -898,7 +898,7 @@ class TestReasoningParams:
             await ms.result()
 
             call_kwargs = mock_client.responses.create.call_args[1]
-            assert call_kwargs["reasoning"] == {"effort": "minimal"}
+            assert call_kwargs["reasoning"] == {"effort": "none"}
             assert "include" not in call_kwargs
 
     @pytest.mark.asyncio
