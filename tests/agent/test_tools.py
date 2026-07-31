@@ -36,8 +36,14 @@ def make_echo_tool(
     )
 
 
-def make_assistant_msg(tool_calls: list[ToolCall]) -> AssistantMessage:
-    return AssistantMessage(content=tool_calls, stop_reason="tool_use")
+def make_assistant_msg(
+    tool_calls: list[ToolCall], *, run_id: str | None = None
+) -> AssistantMessage:
+    return AssistantMessage(
+        content=tool_calls,
+        stop_reason="tool_use",
+        run_id=run_id,
+    )
 
 
 def make_context(tools: list[AgentTool]) -> AgentContext:
@@ -621,6 +627,141 @@ class TestToolEvents:
         start_idx = types.index("tool_execution_start")
         end_idx = types.index("tool_execution_end")
         assert start_idx < end_idx
+
+
+class TestToolResultRunId:
+    async def test_parallel_outcomes_inherit_assistant_run_id_before_emission(self):
+        async def fail_execute(tool_call_id, params, *, signal=None, on_update=None):
+            raise RuntimeError("tool failed")
+
+        async def before(before_ctx, *, signal=None):
+            if before_ctx.tool_call.id == "t5":
+                return BeforeToolCallResult(
+                    block=True,
+                    reason="blocked by policy",
+                    hitl_trace={"request_id": "approval-1"},
+                )
+            if before_ctx.tool_call.id == "t6":
+                raise RuntimeError("hook failed")
+            return None
+
+        ctx = make_context(
+            [
+                make_echo_tool(),
+                make_echo_tool(name="fail", execute_fn=fail_execute),
+            ]
+        )
+        msg = make_assistant_msg(
+            [
+                ToolCall(id="t1", name="echo", arguments={"value": "ok"}),
+                ToolCall(id="t2", name="echo", arguments={}),
+                ToolCall(id="t3", name="missing", arguments={}),
+                ToolCall(id="t4", name="fail", arguments={"value": "boom"}),
+                ToolCall(id="t5", name="echo", arguments={"value": "blocked"}),
+                ToolCall(id="t6", name="echo", arguments={"value": "hook"}),
+            ],
+            run_id="R-tools",
+        )
+        events = []
+
+        batch = await execute_tool_calls(
+            ctx,
+            msg,
+            tool_execution="parallel",
+            before_tool_call=before,
+            emit=lambda event: events.append(event),
+        )
+
+        assert [message.tool_call_id for message in batch.messages] == [
+            "t1",
+            "t2",
+            "t3",
+            "t4",
+            "t5",
+            "t6",
+        ]
+        assert [message.run_id for message in batch.messages] == ["R-tools"] * 6
+        assert [message.is_error for message in batch.messages] == [
+            False,
+            True,
+            True,
+            True,
+            True,
+            True,
+        ]
+        by_id = {message.tool_call_id: message for message in batch.messages}
+        assert by_id["t1"].content[0].text == "echoed: ok"
+        assert "field required" in by_id["t2"].content[0].text
+        assert "not found" in by_id["t3"].content[0].text
+        assert "tool failed" in by_id["t4"].content[0].text
+        assert by_id["t5"].content[0].text == "blocked by policy"
+        assert by_id["t5"].details == {"hitl": {"request_id": "approval-1"}}
+        assert by_id["t6"].content[0].text == "hook failed"
+
+        message_events = [
+            event for event in events if event.type in ("message_start", "message_end")
+        ]
+        assert [
+            (event.type, event.message.tool_call_id, event.message.run_id)
+            for event in message_events
+        ] == [
+            (event_type, tool_call_id, "R-tools")
+            for tool_call_id in ("t1", "t2", "t3", "t4", "t5", "t6")
+            for event_type in ("message_start", "message_end")
+        ]
+
+    async def test_sequential_multiple_results_inherit_assistant_run_id(self):
+        ctx = make_context([make_echo_tool()])
+        msg = make_assistant_msg(
+            [
+                ToolCall(id="t1", name="echo", arguments={"value": "first"}),
+                ToolCall(id="t2", name="echo", arguments={"value": "second"}),
+            ],
+            run_id="R-sequential",
+        )
+        events = []
+
+        batch = await execute_tool_calls(
+            ctx,
+            msg,
+            tool_execution="sequential",
+            emit=lambda event: events.append(event),
+        )
+
+        assert [message.run_id for message in batch.messages] == [
+            "R-sequential",
+            "R-sequential",
+        ]
+        message_events = [
+            event for event in events if event.type in ("message_start", "message_end")
+        ]
+        assert [event.message.run_id for event in message_events] == [
+            "R-sequential"
+        ] * 4
+
+    @pytest.mark.parametrize("tool_execution", ["parallel", "sequential"])
+    async def test_unstamped_assistant_does_not_fabricate_run_id(self, tool_execution):
+        ctx = make_context([make_echo_tool()])
+        msg = make_assistant_msg(
+            [
+                ToolCall(id="t1", name="echo", arguments={"value": "first"}),
+                ToolCall(id="t2", name="echo", arguments={"value": "second"}),
+            ]
+        )
+        events = []
+
+        batch = await execute_tool_calls(
+            ctx,
+            msg,
+            tool_execution=tool_execution,
+            emit=lambda event: events.append(event),
+        )
+
+        assert [message.run_id for message in batch.messages] == [None, None]
+        message_events = [
+            event for event in events if event.type in ("message_start", "message_end")
+        ]
+        assert all(event.message.run_id is None for event in message_events)
 
 
 class TestToolResultDetails:

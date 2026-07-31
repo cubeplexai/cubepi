@@ -128,7 +128,9 @@ def _merge_hitl_details(
     return {"_non_dict_details": base, "hitl": hitl}
 
 
-def _make_tool_result_message(finalized: _FinalizedOutcome) -> ToolResultMessage:
+def _make_tool_result_message(
+    finalized: _FinalizedOutcome, *, run_id: str | None
+) -> ToolResultMessage:
     details = _merge_hitl_details(finalized.result.details, finalized.hitl_trace)
     return ToolResultMessage(
         tool_call_id=finalized.tool_call.id,
@@ -137,6 +139,7 @@ def _make_tool_result_message(finalized: _FinalizedOutcome) -> ToolResultMessage
         details=details,
         is_error=finalized.is_error,
         timestamp=time.time(),
+        run_id=run_id,
     )
 
 
@@ -534,7 +537,9 @@ async def _execute_sequential(
                     block_reason=finalized.block_reason,
                 ),
             )
-            tool_msg = _make_tool_result_message(finalized)
+            tool_msg = _make_tool_result_message(
+                finalized, run_id=assistant_message.run_id
+            )
             await emit_event(emit_fn, MessageStartEvent(message=tool_msg))
             await emit_event(emit_fn, MessageEndEvent(message=tool_msg))
             finalized_list.append(finalized)
@@ -684,7 +689,9 @@ async def _execute_parallel(
                 if isinstance(s, _FinalizedOutcome)
                 or (s.done() and not s.cancelled() and s.exception() is None)
             ]
-            await _emit_tool_result_messages(salvaged, emit_fn)
+            await _emit_tool_result_messages(
+                salvaged, emit_fn, run_id=assistant_message.run_id
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -769,7 +776,9 @@ async def _execute_parallel(
         # resume would re-run tools whose side effects already happened.
         # A persistence failure propagates instead (consistent with every
         # other MessageEndEvent site): the run fails rather than suspends.
-        emitted = await _emit_tool_result_messages(finalized_list, emit_fn)
+        emitted = await _emit_tool_result_messages(
+            finalized_list, emit_fn, run_id=assistant_message.run_id
+        )
         if isinstance(control_exc, HitlControlException):
             # Stateless loop entry points append these to the message
             # lists they return, so callers persisting the return value
@@ -777,16 +786,21 @@ async def _execute_parallel(
             control_exc.partial_tool_results = tuple(emitted)
         raise control_exc
 
-    messages = await _emit_tool_result_messages(finalized_list, emit_fn)
+    messages = await _emit_tool_result_messages(
+        finalized_list, emit_fn, run_id=assistant_message.run_id
+    )
     return ToolCallBatch(messages=messages, terminate=_should_terminate(finalized_list))
 
 
 async def _emit_tool_result_messages(
-    finalized_list: list[_FinalizedOutcome], emit_fn: Callable
+    finalized_list: list[_FinalizedOutcome],
+    emit_fn: Callable,
+    *,
+    run_id: str | None,
 ) -> list[ToolResultMessage]:
     messages: list[ToolResultMessage] = []
     for finalized in finalized_list:
-        tool_msg = _make_tool_result_message(finalized)
+        tool_msg = _make_tool_result_message(finalized, run_id=run_id)
         await emit_event(emit_fn, MessageStartEvent(message=tool_msg))
         await emit_event(emit_fn, MessageEndEvent(message=tool_msg))
         messages.append(tool_msg)

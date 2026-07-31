@@ -1196,8 +1196,14 @@ class Agent(Generic[TMessage]):
             active = self._state.active_run_id
             if active is not None:
                 if msg.run_id is None:
-                    msg = msg.model_copy(update={"run_id": active})
-                    event = event.model_copy(update={"message": msg})
+                    if isinstance(msg, AssistantMessage):
+                        # The loop retains this provider-owned object for tool
+                        # execution and the next model call. Stamp it in place
+                        # so tool results can inherit the owning turn's run ID.
+                        msg.run_id = active
+                    else:
+                        msg = msg.model_copy(update={"run_id": active})
+                        event = event.model_copy(update={"message": msg})
                 elif msg.run_id != active:
                     raise ValueError(
                         f"message.run_id={msg.run_id!r} does not match "
