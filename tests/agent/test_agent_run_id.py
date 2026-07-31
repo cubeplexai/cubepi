@@ -71,6 +71,110 @@ async def test_appended_messages_carry_run_id():
 
 
 @pytest.mark.asyncio
+async def test_live_tool_results_carry_owning_run_id():
+    from pydantic import BaseModel
+
+    from cubepi.agent.types import AgentTool, AgentToolResult
+    from cubepi.checkpointer.memory import MemoryCheckpointer
+    from cubepi.providers.base import ToolResultMessage
+    from cubepi.providers.faux import faux_assistant_message, faux_tool_call
+
+    class EchoParams(BaseModel):
+        value: str
+
+    async def execute(tool_call_id, params, *, signal=None, on_update=None):
+        return AgentToolResult(content=[TextContent(text=params.value)])
+
+    live_provider_run_ids = []
+    hook_snapshots = []
+
+    def finish(messages, model):
+        assistant = next(
+            m
+            for m in reversed(messages)
+            if isinstance(m, AssistantMessage) and m.stop_reason == "tool_use"
+        )
+        tool_result = next(
+            m for m in reversed(messages) if isinstance(m, ToolResultMessage)
+        )
+        live_provider_run_ids.append((assistant.run_id, tool_result.run_id))
+        return faux_assistant_message("done")
+
+    async def should_stop_after_turn(ctx):
+        if ctx.tool_results:
+            hook_snapshots.append(
+                (
+                    [m.run_id for m in ctx.tool_results],
+                    [
+                        m.run_id
+                        for m in ctx.context.messages
+                        if isinstance(m, ToolResultMessage)
+                    ],
+                    [
+                        m.run_id
+                        for m in ctx.new_messages
+                        if isinstance(m, ToolResultMessage)
+                    ],
+                )
+            )
+        return False
+
+    provider = FauxProvider()
+    provider.set_responses(
+        [
+            faux_assistant_message(
+                faux_tool_call("echo", {"value": "ok"}, id="call-1"),
+                stop_reason="tool_use",
+            ),
+            finish,
+        ]
+    )
+    checkpointer = MemoryCheckpointer()
+    agent = Agent(
+        model=provider.model("faux-model"),
+        tools=[
+            AgentTool(
+                name="echo",
+                description="Echo a value",
+                parameters=EchoParams,
+                execute=execute,
+            )
+        ],
+        checkpointer=checkpointer,
+        thread_id="run-id-tool-cycle",
+        should_stop_after_turn=should_stop_after_turn,
+    )
+    events = []
+    agent.subscribe(lambda event, signal=None: events.append(event))
+
+    await agent.prompt("use the tool", run_id="R1")
+
+    state_tool_result = next(
+        message
+        for message in agent.state.messages
+        if isinstance(message, ToolResultMessage)
+    )
+    checkpoint = await checkpointer.load("run-id-tool-cycle")
+    checkpoint_tool_result = next(
+        message
+        for message in checkpoint.messages
+        if isinstance(message, ToolResultMessage)
+    )
+    assert state_tool_result.run_id == checkpoint_tool_result.run_id == "R1"
+
+    assert live_provider_run_ids == [("R1", "R1")]
+    assert hook_snapshots == [(["R1"], ["R1"], ["R1"])]
+
+    tool_message_events = [
+        event.message
+        for event in events
+        if event.type in ("message_start", "message_end")
+        and isinstance(event.message, ToolResultMessage)
+    ]
+    assert [message.run_id for message in tool_message_events] == ["R1", "R1"]
+
+
+@pytest.mark.asyncio
 async def test_prompt_rejects_mismatched_run_id_before_claim():
     """Caller pre-stamps a Message with a different run_id than the
     one supplied to prompt(). Reject BEFORE claim_run so no row is
