@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-08-02
+
 ### Fixed
 
 - **OpenAI `chat_completions`/`responses` capability profiles no longer emit
@@ -15,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now-stale `"minimal"` value outright. The built-in "off" mode payload and
   the `minimal` → wire-value mapping in `_OPENAI_EFFORT_VALUES` both now emit
   `"none"`.
+- **Live `ToolResultMessage`s now carry the owning turn's `run_id`.** On a
+  run-aware Agent, tool results emitted during the live turn (events, hooks,
+  live context, and the next provider call) previously had `run_id=None`
+  while the checkpointer copy was stamped correctly. The assistant message is
+  now stamped in place at the message-end seam so tool-result construction
+  can inherit the active run ID for every sequential, parallel, salvage, and
+  HITL-sibling outcome. Direct `execute_tool_calls` with an unstamped
+  assistant still produces `run_id=None`.
 
 ## [0.13.2] - 2026-07-23
 
@@ -724,7 +734,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.2...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.3...HEAD
+[0.13.3]: https://github.com/cubeplexai/cubepi/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/cubeplexai/cubepi/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/cubeplexai/cubepi/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/cubeplexai/cubepi/compare/v0.12.0...v0.13.0
