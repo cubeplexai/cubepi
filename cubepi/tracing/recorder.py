@@ -844,7 +844,11 @@ class Recorder:
         # "error", mark turn ERROR. Abort path leaves UNSET + sets
         # cubepi.aborted on the invoke_agent root.
         if stop_reason == "error":
-            err_msg = getattr(msg, "error_message", None) or "model error"
+            err_msg = (
+                getattr(msg, "error_message", None) or "model error"
+                if self._record_content
+                else "model error"
+            )
             run.turn_span.set_status(Status(StatusCode.ERROR, err_msg[:256]))
             run.turn_span.set_attribute(ERROR_TYPE, "cubepi.error")
         elif stop_reason == "aborted":
@@ -1267,17 +1271,24 @@ class Recorder:
                 span.set_attribute(CUBEPI_ABORTED, True)
                 span.set_attribute(ERROR_TYPE, "cubepi.aborted")
             else:
-                span.set_status(Status(StatusCode.ERROR, str(exc)[:256]))
+                description = (
+                    str(exc)[:256] if self._record_content else "provider error"
+                )
+                span.set_status(Status(StatusCode.ERROR, description))
                 span.set_attribute(ERROR_TYPE, cubepi_error_type_for(exc))
+                exception_attrs = {"exception.type": type(exc).__name__}
+                if self._record_content:
+                    exception_attrs.update(
+                        {
+                            "exception.message": str(exc),
+                            "exception.stacktrace": "".join(
+                                traceback.format_exception(exc)
+                            ),
+                        }
+                    )
                 span.add_event(
                     name=EVENT_GEN_AI_EXCEPTION,
-                    attributes={
-                        "exception.type": type(exc).__name__,
-                        "exception.message": str(exc),
-                        "exception.stacktrace": "".join(
-                            traceback.format_exception(exc)
-                        ),
-                    },
+                    attributes=exception_attrs,
                 )
         finally:
             span.end()

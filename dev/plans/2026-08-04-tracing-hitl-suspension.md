@@ -50,6 +50,8 @@ OpenTelemetry SDK, pytest, Ruff, mypy, uv.
 - Move assistant output accumulation to `MessageEndEvent` so suspension before
   `TurnEndEvent` still records the partial output.
 - Do not change `_close_open_spans()` cancellation semantics.
+- When `record_content=False`, preserve typed ERROR classification while using
+  generic status descriptions and omitting exception messages/stack traces.
 
 ## Task 4: Document the lifecycle contract
 

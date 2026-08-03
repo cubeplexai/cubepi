@@ -147,6 +147,9 @@ The recorder treats cancellation as a control signal, not a failure:
 - A provider raising → chat/turn/root close with **status ERROR**, an
   `exception` event on the chat span, and `error.type` derived from the
   exception class (`timeout`, `connection_error`, fully-qualified class name, …).
+  With the default `record_content=False`, the status description is generic and
+  the event contains only `exception.type`; raw exception messages and stack
+  traces are included only when content recording is explicitly enabled.
 - An MCP `tools/call` returning `isError=true` → CLIENT span closes
   ERROR + `error.type=mcp.is_error`.
 
@@ -182,7 +185,8 @@ Optional, opt-in via `Tracer(record_content=True)`:
 `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`,
 `gen_ai.tool.definitions`, `gen_ai.tool.call.arguments`,
 `gen_ai.tool.call.result`, `cubepi.llm.raw_request`,
-`cubepi.llm.raw_response`. See [Content & Redaction](./content-recording).
+`cubepi.llm.raw_response`, provider exception messages, and provider exception
+stack traces. See [Content & Redaction](./content-recording).
 
 ## Multiple agents, one process
 
