@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Durable HITL pauses now finalize traces as suspended rather than aborted.**
+  `Agent.detach()` commits the pending request first, then the owning activation
+  emits a terminal suspension event after runtime-state cleanup. Open agent,
+  turn, chat, and tool spans end with `cubepi.run.outcome="suspended"`; observer
+  failures cannot hide the terminal event, cancellation still propagates, and
+  `respond()` opens a distinct correlated activation trace.
+
 ## [0.13.3] - 2026-08-02
 
 ### Fixed

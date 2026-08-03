@@ -34,6 +34,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 from cubepi.agent.types import (
     AgentEndEvent,
     AgentStartEvent,
+    AgentSuspendedEvent,
     MessageEndEvent,
     MessageStartEvent,
     TurnEndEvent,
@@ -66,6 +67,7 @@ from cubepi.tracing.schema import (
     CUBEPI_LLM_THINKING_LEVEL,
     CUBEPI_OUTPUT_MESSAGES_COUNT,
     CUBEPI_RUN_ID,
+    CUBEPI_RUN_OUTCOME,
     CUBEPI_TOOL_BLOCK_REASON,
     CUBEPI_TOOL_BLOCKED_BY_HOOK,
     CUBEPI_TOOL_EXECUTION_MODE,
@@ -413,6 +415,8 @@ class Recorder:
                 self._on_message_end(event)
             elif isinstance(event, TurnEndEvent):
                 self._on_turn_end(event)
+            elif isinstance(event, AgentSuspendedEvent):
+                self._on_agent_suspended()
             elif isinstance(event, AgentEndEvent):
                 self._on_agent_end(event)
             # MessageUpdateEvent / ToolExecutionUpdateEvent: IGNORED.
@@ -679,6 +683,49 @@ class Recorder:
             if history:
                 self._run.transcript.extend(history)
 
+    def _on_agent_suspended(self) -> None:
+        """Finalize a durable HITL pause without classifying it as abort."""
+        run = self._run
+        if run is None:
+            return
+        for span in list(run.tool_spans.values()):
+            try:
+                span.set_attribute(CUBEPI_RUN_OUTCOME, "suspended")
+                span.end()
+            except Exception:
+                pass
+        run.tool_spans.clear()
+        if run.chat_span is not None:
+            try:
+                run.chat_span.set_attribute(CUBEPI_RUN_OUTCOME, "suspended")
+                run.chat_span.end()
+            except Exception:
+                pass
+            run.chat_span = None
+            run.chat_open_ns = None
+            run.chat_first_chunk_recorded = False
+        if run.turn_span is not None:
+            try:
+                run.turn_span.set_attribute(CUBEPI_RUN_OUTCOME, "suspended")
+                run.turn_span.end()
+            except Exception:
+                pass
+            run.turn_span = None
+        run.agent_span.set_attribute(CUBEPI_RUN_OUTCOME, "suspended")
+        run.agent_span.set_attribute(
+            CUBEPI_OUTPUT_MESSAGES_COUNT, len(run.output_messages)
+        )
+        run.agent_span.end()
+        self._sweep_tool_span_tokens(run)
+        if run.stream_file is not None:
+            try:
+                run.stream_file.close()
+            except Exception:
+                pass
+            run.stream_file = None
+        self._reset_active_run()
+        self._run = None
+
     def _on_agent_end(self, event: AgentEndEvent) -> None:
         run = self._run
         if run is None:
@@ -760,9 +807,8 @@ class Recorder:
         if run is None or run.turn_span is None:
             return
         msg = event.message
-        # Track output messages: assistant + any tool_results from this turn.
-        run.turn_output_messages.append(msg)
-        run.output_messages.append(msg)
+        # Assistant output is captured at MessageEnd so a HITL suspension before
+        # TurnEnd still records it. Add only this turn's tool results here.
         for tr in getattr(event, "tool_results", []) or []:
             run.turn_output_messages.append(tr)
             run.output_messages.append(tr)
@@ -948,6 +994,8 @@ class Recorder:
         msg = event.message
         if getattr(msg, "role", None) == "assistant":
             run.transcript.append(msg)
+            run.turn_output_messages.append(msg)
+            run.output_messages.append(msg)
 
     # ------------------------------------------------------------------
     # Provider listeners — drive the chat span lifetime

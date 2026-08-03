@@ -51,10 +51,12 @@ async with PostgresCheckpointer("postgresql://...") as cp:
     # tool_name="bash", args={"cmd":"rm /tmp/foo"}, ...)
 
     # Graceful suspend — persist the assistant message + unresolved
-    # tool_calls, keep pending_request in DB, emit AgentSuspendedEvent.
+    # tool_calls and keep pending_request in DB. detach() commits the
+    # HitlDetached transition; prompt() then emits AgentSuspendedEvent
+    # after recording outcome=suspended.
     # The HTTP handler returns 200 { status: "awaiting_approval" }.
     await agent.detach()
-    await task  # prompt() unwinds with HitlDetached
+    await task
 
 
 # ---------- Process 2: HTTP POST /respond ----------

@@ -34,7 +34,7 @@ agent listeners. A `_run_lock` (`asyncio.Lock`) serialises `prompt`,
 | Method | Signature | Description |
 |---|---|---|
 | `load_pending_hitl_request()` | `async → HitlRequest \| None` | Reads the pending from the checkpointer (even post-detach). |
-| `detach()` | `async → None` | Emits `AgentSuspendedEvent(pending_request=...)` then triggers `HitlDetached` on the channel future. The loop exits silently; assistant message retains unresolved tool calls; `pending_request` stays persisted. |
+| `detach()` | `async → None` | Snapshots the pending request and triggers `HitlDetached` on the channel future. After the owning run task records `outcome=suspended` and clears its active run, it emits `AgentSuspendedEvent(pending_request=...)`. The assistant message retains unresolved tool calls and `pending_request` stays persisted. |
 | `respond(*, question_id=, answer=)` | `async → None` | Resumes a suspended run. Validates qid matches persistent pending, attaches answer to channel, re-enters the loop via `run_agent_loop_resume`. |
 | `abort_pending(reason=)` | `async → None` | Closes the conversation. Two-phase: Phase 1 signals in-flight await (no lock). Phase 2 appends synthetic deny tool_results + terminal `stop_reason="aborted"` assistant (under lock). |
 
@@ -50,14 +50,15 @@ Four new events are emitted on the agent's event stream:
 |---|---|---|
 | `HitlRequestEvent` | Channel receives a new `confirm/approve/ask`. | `request: HitlRequest` |
 | `HitlAnswerEvent` | `channel.answer()` or `channel.cancel()` fires. | `question_id: str`, `answer: Any`, `cancelled: bool`, `timed_out: bool` |
-| `AgentSuspendedEvent` | `agent.detach()` called while HITL was pending. | `pending_request: HitlRequest` |
+| `AgentSuspendedEvent` | A detach-triggered run has committed `outcome=suspended`. | `pending_request: HitlRequest` |
 | `AgentAbortedEvent` | `agent.abort_pending()` closes the conversation. | `reason: str` |
 
 These are all included in the `AgentEvent` union, so typed listeners
 automatically cover them. `HitlRequestEvent` and `HitlAnswerEvent` are
 emitted by the channel through the agent's emit binding. `AgentSuspendedEvent`
-and `AgentAbortedEvent` are emitted by the Agent layer (not the loop — the
-Agent has the channel handle to populate the real `pending_request` payload).
+and `AgentAbortedEvent` are emitted by the Agent layer. Suspension payload is
+snapshotted by `detach()`, then published by the owning run task only after the
+suspended transition is committed.
 
 ## Trace spans
 
