@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import pytest
 from opentelemetry import trace as _trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
@@ -245,6 +246,26 @@ class TestMCPIsErrorResponse:
         attrs = _attrs(span)
         assert attrs["error.type"] == "mcp.is_error"
 
+    async def test_protocol_error_message_is_private_by_default(self, monkeypatch):
+        from cubepi.mcp._tracing import mark_span_mcp_error, mcp_client_span
+
+        provider, exporter = _make_provider()
+        _patch_mcp_trace(monkeypatch, provider)
+        secret = "Authorization: Bearer MCPPROTOCOLSECRET"
+
+        async with mcp_client_span(
+            method="tools/call",
+            tool_name="search",
+        ) as span:
+            mark_span_mcp_error(span, secret)
+
+        captured = next(s for s in exporter.spans if s.name.startswith("tools/call "))
+        assert captured.status.status_code == StatusCode.ERROR
+        assert captured.status.description == "mcp protocol error"
+        assert secret not in repr(dict(captured.attributes or {}))
+        for event in captured.events:
+            assert secret not in repr(dict(event.attributes or {}))
+
     async def test_iserror_false_keeps_span_unset(self, monkeypatch):
         provider, exporter = _make_provider()
         _patch_mcp_trace(monkeypatch, provider)
@@ -436,6 +457,160 @@ class TestTracerProviderRouting:
         assert client_ctx.trace_id == tool_ctx.trace_id
         assert client_span.parent is not None
         assert client_span.parent.span_id == tool_ctx.span_id
+
+    async def test_mcp_exception_is_private_without_content_opt_in(self):
+        from cubepi.agent.agent import Agent
+        from cubepi.providers.base import ToolCall
+        from cubepi.providers.faux import FauxProvider, faux_assistant_message
+        from cubepi.tracing import Tracer
+
+        secret = "Authorization: Bearer MCPSECRET"
+        exporter = _CaptureExporter()
+
+        async def call_remote(name, args):
+            raise RuntimeError(secret)
+
+        mcp_tool = make_mcp_agent_tool(
+            name="search",
+            description="search",
+            input_schema={
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+            },
+            call_remote=call_remote,
+        )
+        provider = FauxProvider(provider_id="faux")
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    [ToolCall(id="tc1", name="search", arguments={"q": "x"})],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("done"),
+            ]
+        )
+        agent = Agent(
+            model=provider.model("faux-1"),
+            system_prompt="s",
+            tools=[mcp_tool],
+        )
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[exporter],
+            record_content=False,
+        )
+        detach = tracer.attach(agent)
+        try:
+            await agent.prompt("go")
+            await agent.wait_for_idle()
+        finally:
+            detach()
+            await tracer.shutdown()
+
+        span = next(s for s in exporter.spans if s.name.startswith("tools/call "))
+        assert span.status.status_code == StatusCode.ERROR
+        assert span.status.description == "mcp client error"
+        assert secret not in repr(dict(span.attributes or {}))
+        exception_event = next(
+            event for event in span.events if event.name == "exception"
+        )
+        assert exception_event.attributes["exception.type"] == "RuntimeError"
+        for event in span.events:
+            assert secret not in repr(dict(event.attributes or {}))
+
+    async def test_mcp_exception_details_remain_available_with_content_opt_in(self):
+        from cubepi.agent.agent import Agent
+        from cubepi.providers.base import ToolCall
+        from cubepi.providers.faux import FauxProvider, faux_assistant_message
+        from cubepi.tracing import Tracer
+
+        secret = "diagnostic mcp failure"
+        exporter = _CaptureExporter()
+
+        async def call_remote(name, args):
+            raise RuntimeError(secret)
+
+        mcp_tool = make_mcp_agent_tool(
+            name="search",
+            description="search",
+            input_schema={
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+            },
+            call_remote=call_remote,
+        )
+        provider = FauxProvider(provider_id="faux")
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    [ToolCall(id="tc1", name="search", arguments={"q": "x"})],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("done"),
+            ]
+        )
+        agent = Agent(
+            model=provider.model("faux-1"),
+            system_prompt="s",
+            tools=[mcp_tool],
+        )
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[exporter],
+            record_content=True,
+        )
+        detach = tracer.attach(agent)
+        try:
+            await agent.prompt("go")
+            await agent.wait_for_idle()
+        finally:
+            detach()
+            await tracer.shutdown()
+
+        span = next(s for s in exporter.spans if s.name.startswith("tools/call "))
+        assert secret in (span.status.description or "")
+        assert any(
+            secret in repr(dict(event.attributes or {})) for event in span.events
+        )
+
+    async def test_unparented_mcp_exception_fails_closed_with_opted_in_tracer(self):
+        """Without a tool-span owner, the global provider stack cannot prove
+        which concurrent Tracer owns the call, so content must stay disabled."""
+        from cubepi.agent.agent import Agent
+        from cubepi.mcp._tracing import mcp_client_span
+        from cubepi.providers.faux import FauxProvider
+        from cubepi.tracing import Tracer
+
+        secret = "Authorization: Bearer UNPARENTEDMCPSECRET"
+        exporter = _CaptureExporter()
+        provider = FauxProvider(provider_id="faux")
+        agent = Agent(model=provider.model("faux-1"), system_prompt="s")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[exporter],
+            record_content=True,
+        )
+        detach = tracer.attach(agent)
+        try:
+            with pytest.raises(RuntimeError, match="UNPARENTEDMCPSECRET"):
+                async with mcp_client_span(
+                    method="connect",
+                    server_address="example.com",
+                ):
+                    raise RuntimeError(secret)
+        finally:
+            detach()
+            await tracer.shutdown()
+
+        span = next(s for s in exporter.spans if s.name == "connect")
+        assert span.status.status_code == StatusCode.ERROR
+        assert span.status.description == "mcp client error"
+        event = next(event for event in span.events if event.name == "exception")
+        assert dict(event.attributes or {}) == {"exception.type": "RuntimeError"}
+        assert secret not in repr(dict(span.attributes or {}))
 
     async def test_two_attaches_detach_one_keeps_other_routing(self):
         """When a Tracer is attached to two agents and one is detached,
@@ -1004,7 +1179,11 @@ class TestMCPSpanParentage:
         )
         try:
             # Innermost lookup is the inner tool while it is live.
-            assert mcp_tracing._get_tool_span_entry() == ("span-inner", "prov-inner")
+            assert mcp_tracing._get_tool_span_entry() == (
+                "span-inner",
+                "prov-inner",
+                False,
+            )
 
             async def _end_inner() -> None:
                 mcp_tracing.unregister_tool_span(tok_inner)
@@ -1013,7 +1192,11 @@ class TestMCPSpanParentage:
             await _asyncio.create_task(_end_inner())
 
             # Must fall back to the OUTER tool, not None.
-            assert mcp_tracing._get_tool_span_entry() == ("span-outer", "prov-outer")
+            assert mcp_tracing._get_tool_span_entry() == (
+                "span-outer",
+                "prov-outer",
+                False,
+            )
         finally:
             mcp_tracing.unregister_tool_span(tok_outer)
 

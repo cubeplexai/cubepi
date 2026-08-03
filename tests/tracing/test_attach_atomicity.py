@@ -73,7 +73,7 @@ async def test_tracer_attach_unwinds_recorder_on_mcp_register_failure(monkeypatc
     try:
         import cubepi.mcp._tracing as mcp_tracing
 
-        def _boom(_provider):  # noqa: ANN001, ANN202
+        def _boom(_provider, **_kwargs):  # noqa: ANN001, ANN202
             raise RuntimeError("register_provider failed")
 
         monkeypatch.setattr(mcp_tracing, "register_provider", _boom)
@@ -129,7 +129,7 @@ async def test_tracer_attach_cleanup_swallows_recorder_detach_error(monkeypatch)
 
         import cubepi.mcp._tracing as mcp_tracing
 
-        def _boom(_provider):  # noqa: ANN001, ANN202
+        def _boom(_provider, **_kwargs):  # noqa: ANN001, ANN202
             raise RuntimeError("register_provider failed")
 
         monkeypatch.setattr(mcp_tracing, "register_provider", _boom)

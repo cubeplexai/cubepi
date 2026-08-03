@@ -122,6 +122,30 @@ class TestContentDisabled:
             for event in span.events:
                 assert secret not in repr(dict(event.attributes or {}))
 
+    async def test_turn_error_message_is_private_when_record_content_false(self):
+        secret = "Authorization: Bearer TURNSECRET"
+        agent, provider, exporter, tracer = await _build(record_content=False)
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    "oops",
+                    stop_reason="error",
+                    error_message=secret,
+                )
+            ]
+        )
+
+        await agent.prompt("private prompt")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        turn = next(span for span in exporter.spans if span.name == "cubepi.turn")
+        assert turn.status.status_code.name == "ERROR"
+        assert turn.status.description == "model error"
+        assert secret not in repr(dict(turn.attributes or {}))
+        for event in turn.events:
+            assert secret not in repr(dict(event.attributes or {}))
+
 
 class TestRootContent:
     async def test_invoke_agent_records_input_output_system(self):

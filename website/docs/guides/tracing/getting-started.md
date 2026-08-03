@@ -137,21 +137,23 @@ instrumented MCP server can continue the trace.
 
 The recorder treats cancellation as a control signal, not a failure:
 
-- `agent.abort()` mid-stream → spans close with `cubepi.aborted=true` and
-  `error.type=cubepi.aborted`, **status UNSET** (per OTel guidance — cancellation
-  isn't an error).
+- `agent.abort()` or a cancelled one-shot call → affected spans close with
+  `cubepi.aborted=true` and `error.type=cubepi.aborted`, **status UNSET**, and no
+  exception event (per OTel guidance — cancellation isn't an error).
 - `agent.detach()` at a durable HITL prompt → open spans close with
   `cubepi.run.outcome=suspended` and no aborted/error classification. A later
   `respond()` is a new activation trace; correlate the two with metadata such as
   a host run or conversation ID.
-- A provider raising → chat/turn/root close with **status ERROR**, an
-  `exception` event on the chat span, and `error.type` derived from the
-  exception class (`timeout`, `connection_error`, fully-qualified class name, …).
-  With the default `record_content=False`, the status description is generic and
-  the event contains only `exception.type`; raw exception messages and stack
-  traces are included only when content recording is explicitly enabled.
-- An MCP `tools/call` returning `isError=true` → CLIENT span closes
-  ERROR + `error.type=mcp.is_error`.
+- A provider or one-shot call raising → affected spans close with **status
+  ERROR** and `error.type` derived from the exception class (`timeout`,
+  `connection_error`, fully-qualified class name, …). With the default
+  `record_content=False`, status descriptions are generic and exception events
+  contain only `exception.type`; raw exception messages and stack traces are
+  included only when content recording is explicitly enabled.
+- An MCP transport raising follows the same privacy rule on its CLIENT span. An
+  MCP `tools/call` returning `isError=true` closes the CLIENT span with ERROR +
+  `error.type=mcp.is_error`; its status description is also generic unless
+  content recording is enabled.
 
 In every case, `detach()` and `tracer.shutdown()` close any span the activation
 left open, so cancelled and suspended runs remain visible in your backend rather
@@ -185,8 +187,9 @@ Optional, opt-in via `Tracer(record_content=True)`:
 `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`,
 `gen_ai.tool.definitions`, `gen_ai.tool.call.arguments`,
 `gen_ai.tool.call.result`, `cubepi.llm.raw_request`,
-`cubepi.llm.raw_response`, provider exception messages, and provider exception
-stack traces. See [Content & Redaction](./content-recording).
+`cubepi.llm.raw_response`, provider/MCP/one-shot exception messages and stack
+traces, and stream-log tool-argument/error previews. See
+[Content & Redaction](./content-recording).
 
 ## Multiple agents, one process
 
