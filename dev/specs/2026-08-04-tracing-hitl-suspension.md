@@ -33,12 +33,15 @@ left the old `_RunState` retained in that task's context.
   cancellation priority.
 - Clear the pending-request snapshot on every owning activation failure/exit and
   avoid unhandled `HitlDetached` future warnings.
-- Preserve the existing run cancellation cleanup and classification.
+- Preserve run cancellation cleanup and classification; align one-shot
+  cancellation with Agent/MCP semantics by recording aborted control flow
+  without an exception event.
 - Remove tool-span and MCP-provider registrations during normal tracing detach.
 - Count the assistant tool-call message as partial activation output.
 - Keep tracing observational: recorder failures must not affect the agent.
-- Keep raw provider error messages and stack traces behind `record_content=True`;
-  privacy-default traces retain only typed error classification.
+- Keep raw provider, turn, one-shot, MCP, and stream-log diagnostics behind
+  `record_content=True`; privacy-default traces retain only typed error
+  classification and structural stream timing/size evidence.
 
 ## Non-goals
 

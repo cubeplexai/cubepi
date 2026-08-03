@@ -15,10 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   turn, chat, and tool spans end with `cubepi.run.outcome="suspended"`; observer
   failures cannot hide the terminal event, cancellation still propagates, and
   `respond()` opens a distinct correlated activation trace.
-- **Raw provider error details now follow the content-recording opt-in.** With
-  `record_content=False`, traces retain typed error classification and ERROR
-  status but use bounded generic descriptions and omit exception messages and
-  stack traces. `record_content=True` preserves the prior diagnostic detail.
+- **Raw tracing diagnostics now follow the content-recording opt-in.** With
+  `record_content=False`, provider, turn, one-shot, and MCP spans retain typed
+  error classification and ERROR status but use bounded generic descriptions
+  and omit exception messages and stack traces. Stream logs retain structural
+  timing/size fields while omitting tool-argument previews and raw error text.
+  `record_content=True` preserves the prior diagnostic detail for failures.
+- **One-shot cancellation now matches Agent and MCP cancellation semantics.** It
+  records `cubepi.aborted=true` with status UNSET and does not emit an exception
+  event, because cancellation is a control signal rather than a failure.
 
 ## [0.13.3] - 2026-08-02
 

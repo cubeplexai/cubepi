@@ -7,10 +7,11 @@ sidebar_position: 4
 # Recording Prompts, Responses, and Tool Payloads
 
 By default CubePi's tracing emits structural attributes only — operation
-names, models, token counts, finish reasons, durations. **No prompt content,
-no model output, no tool arguments or results leave the process.** This is
-deliberate: many agent setups handle PII, customer data, or trade-secret
-prompts that don't belong in a third-party observability backend.
+names, models, token counts, finish reasons, durations, and typed error classes.
+**No prompt content, model output, tool arguments/results, raw exception text,
+or exception stack traces leave the process.** This is deliberate: many agent
+setups handle PII, customer data, or trade-secret prompts that don't belong in
+a third-party observability backend.
 
 When you _do_ want content captured — for offline evaluation, debugging a
 flaky tool call, or building a labelled dataset — opt in explicitly with
@@ -37,6 +38,10 @@ attributes per the OTel GenAI semconv:
 | `cubepi.turn` | `gen_ai.input.messages` (per-turn slice), `gen_ai.output.messages` (per-turn slice) |
 | `chat <model>` | `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.tool.definitions`, `cubepi.llm.raw_request`, `cubepi.llm.raw_response` |
 | `execute_tool <tool_name>` | `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` |
+
+Developer-authored agent and tool descriptions are treated as operational
+metadata and are exported regardless of `record_content`; do not place secrets
+or per-request user data in description strings.
 
 The `chat` span's `gen_ai.input.messages` contains the **full chronological
 context** the provider request actually carried — including prior assistant
@@ -131,8 +136,10 @@ tracer = Tracer(
 
 `record_stream` writes `<stream_dir>/<run_id>.stream.jsonl` (one JSON line per
 `StreamEvent`). Every line carries `t` (elapsed seconds from run start) and
-`type`. Tool-call lines also include `ci` (content index), `id`, `name`, delta
-sizes, and argument previews:
+`type`. Tool-call lines also include structural fields such as `ci` (content
+index), `id`, `name`, delta sizes, and accumulated argument length. When
+`record_content=True`, they additionally include argument previews, and error
+events include the raw provider error message:
 
 ```json
 {"t": 5.873, "type": "toolcall_start", "ci": 1, "id": "toolu_...", "name": "show_widget"}
@@ -144,8 +151,11 @@ This makes it straightforward to confirm whether argument chunks ever arrived, o
 whether the same event fired twice (e.g. a provider that sends `finish_reason`
 twice produces two `toolcall_end` lines for the same `ci`).
 
-`record_stream` is independent of `record_content` — turn it on only in debugging
-sessions. Files can grow large for long-running, tool-heavy agents.
+`record_stream` is independent of `record_content`: it can retain structural
+chunk timing and size evidence without content recording. Raw tool-argument
+previews and raw error messages still require `record_content=True`. Turn stream
+recording on only in debugging sessions; files can grow large for long-running,
+tool-heavy agents.
 
 ## Auditing what's recorded
 

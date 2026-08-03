@@ -289,7 +289,10 @@ class Tracer:
             from cubepi.mcp import _tracing as mcp_tracing
 
             assert mcp_tracing is not None
-            mcp_token = mcp_tracing.register_provider(self._provider)
+            mcp_token = mcp_tracing.register_provider(
+                self._provider,
+                record_content=self._record_content,
+            )
         except ImportError:  # pragma: no cover — mcp module always present
             pass
         except BaseException:
@@ -612,9 +615,18 @@ class Tracer:
                     root_span.set_attribute(CUBEPI_ABORTED, True)
                     root_span.set_attribute(ERROR_TYPE, "cubepi.aborted")
                 else:
-                    root_span.set_status(Status(StatusCode.ERROR, str(_exc)[:256]))
+                    description = str(_exc)[:256] if do_record else "oneshot error"
+                    root_span.set_status(Status(StatusCode.ERROR, description))
                     root_span.set_attribute(ERROR_TYPE, type(_exc).__name__)
-                root_span.record_exception(_exc)
+                    if do_record:
+                        root_span.record_exception(_exc)
+                    else:
+                        root_span.add_event(
+                            "exception",
+                            attributes={
+                                "exception.type": type(_exc).__name__,
+                            },
+                        )
             except Exception:  # pragma: no cover — defensive
                 pass
             raise

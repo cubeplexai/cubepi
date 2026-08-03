@@ -264,14 +264,15 @@ async def test_oneshot_generate_error_event_raises_and_marks_root() -> None:
 
     provider = FauxProvider(provider_id="faux")
     tracer, exporter = _make_tracer()
+    secret = "Authorization: Bearer ONESHOTSECRET"
 
     error_stream = MessageStream()
-    error_stream.push(StreamEvent(type="error", error_message="boom"))
+    error_stream.push(StreamEvent(type="error", error_message=secret))
     error_stream.set_result(
-        AssistantMessage(content=[], stop_reason="error", error_message="boom")
+        AssistantMessage(content=[], stop_reason="error", error_message=secret)
     )
     with patch.object(provider, "stream", new=AsyncMock(return_value=error_stream)):
-        with pytest.raises(RuntimeError, match="boom"):
+        with pytest.raises(RuntimeError, match="ONESHOTSECRET"):
             async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
                 await session.generate(
                     system="sys",
@@ -286,8 +287,46 @@ async def test_oneshot_generate_error_event_raises_and_marks_root() -> None:
     assert len(roots) == 1
     root = roots[0]
     assert root.status.status_code == StatusCode.ERROR
+    assert root.status.description == "oneshot error"
     attrs = dict(root.attributes or {})
     assert attrs.get("error.type") == "RuntimeError"
+    assert secret not in repr(attrs)
+    for event in root.events:
+        assert secret not in repr(dict(event.attributes or {}))
+
+
+@pytest.mark.asyncio
+async def test_oneshot_error_details_remain_available_with_content_opt_in() -> None:
+    from opentelemetry.trace import StatusCode
+    from unittest.mock import AsyncMock, patch
+
+    provider = FauxProvider(provider_id="faux")
+    tracer, exporter = _make_tracer(record_content=True)
+    diagnostic = "diagnostic oneshot failure"
+
+    error_stream = MessageStream()
+    error_stream.push(StreamEvent(type="error", error_message=diagnostic))
+    error_stream.set_result(
+        AssistantMessage(content=[], stop_reason="error", error_message=diagnostic)
+    )
+    with patch.object(provider, "stream", new=AsyncMock(return_value=error_stream)):
+        with pytest.raises(RuntimeError, match="diagnostic oneshot failure"):
+            async with tracer.oneshot(model=provider.model(MODEL.id)) as session:
+                await session.generate(
+                    system="sys",
+                    messages=[UserMessage(content=[TextContent(text="q")])],
+                    max_output_tokens=10,
+                )
+
+    await tracer.force_flush()
+    await tracer.shutdown()
+
+    root = next(s for s in exporter.spans if s.name == "invoke_agent")
+    assert root.status.status_code == StatusCode.ERROR
+    assert diagnostic in (root.status.description or "")
+    assert any(
+        diagnostic in repr(dict(event.attributes or {})) for event in root.events
+    )
 
 
 @pytest.mark.asyncio
@@ -598,9 +637,11 @@ async def test_oneshot_cancelled_generate_closes_chat_span() -> None:
     # matching the agent path's contract.
     roots = [s for s in exporter.spans if s.name == "invoke_agent"]
     assert len(roots) == 1
-    attrs = dict(roots[0].attributes or {})
+    root = roots[0]
+    attrs = dict(root.attributes or {})
     assert attrs.get("cubepi.aborted") is True
     assert attrs.get("error.type") == "cubepi.aborted"
+    assert not any(event.name == "exception" for event in root.events)
 
 
 @pytest.mark.asyncio

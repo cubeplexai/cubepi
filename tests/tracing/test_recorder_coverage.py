@@ -483,12 +483,16 @@ class TestStreamRecording:
         assert len(files) == 1
         files[0].read_text()  # raises if file handle leaked
 
-    async def test_stream_toolcall_events_recorded(self, tmp_path):
-        """toolcall_start / toolcall_delta / toolcall_end events reach the stream file."""
+    async def test_stream_toolcall_events_hide_arguments_without_content_opt_in(
+        self, tmp_path
+    ):
+        """Stream timing stays available without persisting tool arguments."""
         from pydantic import BaseModel
 
+        secret = "Bearer STREAMSECRET"
+
         class P(BaseModel):
-            pass
+            authorization: str
 
         async def noop(tool_call_id: str, params: P, *, signal=None, on_update=None):
             return AgentToolResult(content=[TextContent(text="done")])
@@ -498,7 +502,13 @@ class TestStreamRecording:
         provider.append_responses(
             [
                 faux_assistant_message(
-                    [ToolCall(id="tc1", name="noop", arguments={"x": 1})],
+                    [
+                        ToolCall(
+                            id="tc1",
+                            name="noop",
+                            arguments={"authorization": secret},
+                        )
+                    ],
                     stop_reason="tool_use",
                 ),
                 faux_assistant_message("all done"),
@@ -520,17 +530,22 @@ class TestStreamRecording:
 
         files = list(tmp_path.glob("*.stream.jsonl"))
         assert len(files) == 1
-        events = [
-            json.loads(line) for line in files[0].read_text().splitlines() if line
-        ]
+        raw_stream = files[0].read_text()
+        assert secret not in raw_stream
+        events = [json.loads(line) for line in raw_stream.splitlines() if line]
         types = [e["type"] for e in events]
         assert "toolcall_start" in types
         assert "toolcall_delta" in types
         assert "toolcall_end" in types
-        # toolcall_end should carry accumulated arg char count
+        # Structural telemetry remains, but argument deltas/previews are content.
+        delta_ev = next(e for e in events if e["type"] == "toolcall_delta")
+        assert "chars" in delta_ev
+        assert "accumulated" in delta_ev
+        assert "preview" not in delta_ev
         end_ev = next(e for e in events if e["type"] == "toolcall_end")
         assert "args_chars" in end_ev
         assert end_ev["args_chars"] > 0
+        assert "args_preview" not in end_ev
 
     async def test_no_stream_file_without_record_stream(self, tmp_path):
         """Default (record_stream=False) must not create any stream file."""
@@ -585,6 +600,7 @@ class TestStreamRecording:
             service_name="t",
             agent_name="a",
             exporters=[],
+            record_content=True,
             record_stream=True,
             stream_dir=tmp_path,
         )
@@ -602,7 +618,40 @@ class TestStreamRecording:
         types = [e["type"] for e in events]
         assert "error" in types
         err_ev = next(e for e in events if e["type"] == "error")
-        assert "error_message" in err_ev
+        assert err_ev["error_message"] == "boom"
+
+    async def test_stream_error_hides_message_without_content_opt_in(self, tmp_path):
+        secret = "Authorization: Bearer STREAMSECRET"
+        provider = FauxProvider(provider_id="faux")
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    "oops",
+                    stop_reason="error",
+                    error_message=secret,
+                )
+            ]
+        )
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s")
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        tracer.attach(agent)
+
+        await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        stream_file = next(tmp_path.glob("*.stream.jsonl"))
+        raw_stream = stream_file.read_text()
+        assert secret not in raw_stream
+        events = [json.loads(line) for line in raw_stream.splitlines() if line]
+        err_ev = next(e for e in events if e["type"] == "error")
+        assert err_ev["error_message"] == "provider error"
 
     async def test_stream_write_exception_swallowed(self, tmp_path):
         """If the stream file write raises, _write_stream_event swallows it silently."""

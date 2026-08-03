@@ -65,18 +65,17 @@ except ImportError:  # pragma: no cover — exercised only without the extra.
 # multiple agents (each attach pushes a token; each detach pops just
 # its own entry) and supports detaches in any order without clearing
 # routing for the still-attached agents.
-_provider_stack: list[tuple[object, Any]] = []
+_provider_stack: list[tuple[object, Any, bool]] = []
 
 
-def register_provider(provider: Any) -> object:
-    """Push ``provider`` onto the routing stack as the preferred source
-    for MCP spans. Returns an opaque token that
-    :func:`unregister_provider` uses to remove this exact entry.
+def register_provider(provider: Any, *, record_content: bool = False) -> object:
+    """Push ``provider`` and its content policy onto the routing stack.
 
-    Called by :meth:`cubepi.tracing.Tracer.attach`.
+    Returns an opaque token that :func:`unregister_provider` uses to remove
+    this exact entry. Called by :meth:`cubepi.tracing.Tracer.attach`.
     """
     token = object()
-    _provider_stack.append((token, provider))
+    _provider_stack.append((token, provider, record_content))
     return token
 
 
@@ -93,26 +92,28 @@ def unregister_provider(token: object | None = None) -> None:
     if token is None:
         _provider_stack.pop()
         return
-    for i, (t, _p) in enumerate(_provider_stack):
+    for i, (t, _p, _record_content) in enumerate(_provider_stack):
         if t is token:
             _provider_stack.pop(i)
             return
 
 
-def _get_tracer(scope_name: str) -> Any:
-    """Resolve the tracer to use for emitting an MCP span.
-
-    Prefers the most recently-registered provider over OTel's global
-    default (which is a no-op unless the user separately called
-    ``set_tracer_provider``).
-    """
+def _get_tracer_route(scope_name: str) -> tuple[Any, bool]:
+    """Resolve the tracer and content policy for an MCP span."""
     if _provider_stack:
-        return _provider_stack[-1][1].get_tracer(scope_name)
-    return _otel_trace.get_tracer(scope_name)
+        _token, provider, record_content = _provider_stack[-1]
+        return provider.get_tracer(scope_name), record_content
+    return _otel_trace.get_tracer(scope_name), False
+
+
+def _get_tracer(scope_name: str) -> Any:
+    """Resolve the tracer to use for emitting an MCP span."""
+    tracer, _record_content = _get_tracer_route(scope_name)
+    return tracer
 
 
 # When the cubepi Recorder opens an ``execute_tool`` span, it publishes
-# ``(span, owning_provider)`` here so an MCP tool call running inside
+# ``(span, owning_provider, record_content)`` here so an MCP tool call running inside
 # the AgentTool body can make its CLIENT span a child of this span
 # (rather than starting an orphan root trace — recorder doesn't bother
 # installing ``execute_tool`` as the OTel current span; see
@@ -122,7 +123,7 @@ def _get_tracer(scope_name: str) -> Any:
 #
 # Lookup uses a per-task ``ContextVar`` holding a STACK of opaque
 # handles (outermost first, innermost last), with the actual
-# ``(span, provider)`` payload stored in a module-level
+# ``(span, provider, record_content)`` payload stored in a module-level
 # ``_active_entries`` dict. The dict is the source of truth for which
 # handles are still live; the contextvar stack records nesting order
 # per task.
@@ -148,9 +149,12 @@ def _get_tracer(scope_name: str) -> Any:
 # is found. Dead handles linger only in a task's local stack tuple and
 # are GC'd when that task ends; ``_active_entries`` stays bounded by
 # live registrations.
-_active_entries: dict[object, tuple[Any, Any]] = {}
+_active_entries: dict[object, tuple[Any, Any, bool]] = {}
 _handle_stack: contextvars.ContextVar[tuple[object, ...]] = contextvars.ContextVar(
     "_cubepi_mcp_tool_handle_stack", default=()
+)
+_record_content_context: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_cubepi_mcp_record_content", default=False
 )
 
 
@@ -158,6 +162,8 @@ def register_tool_span(
     tool_call_id: str,
     span: Any,
     provider: Any = None,
+    *,
+    record_content: bool = False,
 ) -> tuple[object, contextvars.Token[tuple[object, ...]]]:
     """Publish ``span`` (and its owning ``provider``) as the current
     ``execute_tool`` parent for the calling task.
@@ -173,7 +179,7 @@ def register_tool_span(
     """
     del tool_call_id
     handle = object()
-    _active_entries[handle] = (span, provider)
+    _active_entries[handle] = (span, provider, record_content)
     cv_token = _handle_stack.set(_handle_stack.get() + (handle,))
     return (handle, cv_token)
 
@@ -205,9 +211,10 @@ def unregister_tool_span(
         pass
 
 
-def _get_tool_span_entry() -> tuple[Any, Any] | None:
-    """Return the (span, provider) entry for the current task, or
-    ``None`` when no live ``execute_tool`` is in scope.
+def _get_tool_span_entry() -> tuple[Any, Any, bool] | None:
+    """Return the active span, provider, and content policy for this task.
+
+    Returns ``None`` when no live ``execute_tool`` is in scope.
 
     Walks the per-task handle stack inner→outer and returns the first
     handle whose payload is still live in ``_active_entries``. A nested
@@ -287,16 +294,19 @@ async def mcp_client_span(
     del parent_tool_call_id
     entry = _get_tool_span_entry()
     if entry is not None:
-        parent_span, parent_provider = entry
+        parent_span, parent_provider, record_content = entry
         parent_context = _otel_trace.set_span_in_context(parent_span)
-        tracer = (
-            parent_provider.get_tracer(_SCOPE_NAME)
-            if parent_provider is not None
-            else _get_tracer(_SCOPE_NAME)
-        )
+        if parent_provider is not None:
+            tracer = parent_provider.get_tracer(_SCOPE_NAME)
+        else:
+            tracer, _fallback_record_content = _get_tracer_route(_SCOPE_NAME)
     else:
         parent_context = None
         tracer = _get_tracer(_SCOPE_NAME)
+        # Without an execute_tool parent there is no task-scoped owner.
+        # The provider stack is process-global, so borrowing its content flag
+        # could leak details from a different concurrent Tracer. Fail closed.
+        record_content = False
     attrs: dict[str, Any] = {
         _MCP_METHOD_NAME: method,
         _GEN_AI_OPERATION_NAME: "execute_tool",
@@ -318,35 +328,48 @@ async def mcp_client_span(
         attributes=attrs,
         context=parent_context,
     )
+    content_token = _record_content_context.set(record_content)
     try:
-        # Disable use_span's default record_exception / set_status_on_exception
-        # so we are the single source of the exception event and ERROR
-        # status — otherwise OTel would auto-record on context exit AND
-        # this ``except`` block would record again, double-counting.
-        with _otel_trace.use_span(
-            span,
-            record_exception=False,
-            set_status_on_exception=False,
-        ):
-            yield span
-    except BaseException as exc:
         try:
-            error_type = _error_type_for(exc)
-            span.set_attribute(_ERROR_TYPE, error_type)
-            # Cancellation is a control signal, not a failure — match the
-            # convention from the chat / turn / invoke_agent spans: leave
-            # Status UNSET and mark cubepi.aborted=true, do NOT record an
-            # exception event.
-            if error_type == "cubepi.aborted":
-                span.set_attribute("cubepi.aborted", True)
-            else:
-                span.set_status(Status(StatusCode.ERROR, str(exc)[:256]))
-                span.record_exception(exc)
-        finally:
+            # Disable use_span's default record_exception / set_status_on_exception
+            # so we are the single source of the exception event and ERROR
+            # status — otherwise OTel would auto-record on context exit AND
+            # this ``except`` block would record again, double-counting.
+            with _otel_trace.use_span(
+                span,
+                record_exception=False,
+                set_status_on_exception=False,
+            ):
+                yield span
+        except BaseException as exc:
+            try:
+                error_type = _error_type_for(exc)
+                span.set_attribute(_ERROR_TYPE, error_type)
+                # Cancellation is a control signal, not a failure — match the
+                # convention from the chat / turn / invoke_agent spans: leave
+                # Status UNSET and mark cubepi.aborted=true, do NOT record an
+                # exception event.
+                if error_type == "cubepi.aborted":
+                    span.set_attribute("cubepi.aborted", True)
+                else:
+                    description = (
+                        str(exc)[:256] if record_content else "mcp client error"
+                    )
+                    span.set_status(Status(StatusCode.ERROR, description))
+                    if record_content:
+                        span.record_exception(exc)
+                    else:
+                        span.add_event(
+                            "exception",
+                            attributes={"exception.type": type(exc).__name__},
+                        )
+            finally:
+                span.end()
+            raise
+        else:
             span.end()
-        raise
-    else:
-        span.end()
+    finally:
+        _record_content_context.reset(content_token)
 
 
 def mark_span_mcp_error(span: Any, message: str) -> None:
@@ -362,7 +385,10 @@ def mark_span_mcp_error(span: Any, message: str) -> None:
     """
     if span is None or not _OTEL_AVAILABLE:
         return
-    span.set_status(Status(StatusCode.ERROR, message[:256]))
+    description = (
+        message[:256] if _record_content_context.get() else "mcp protocol error"
+    )
+    span.set_status(Status(StatusCode.ERROR, description))
     span.set_attribute(_ERROR_TYPE, "mcp.is_error")
 
 

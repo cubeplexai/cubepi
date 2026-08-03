@@ -585,7 +585,7 @@ class Recorder:
 
             entry = _mcp_tracing._get_tool_span_entry()
             if entry is not None:
-                tool_span, _tool_provider = entry
+                tool_span, _tool_provider, _record_content = entry
                 parent_ctx = trace.set_span_in_context(tool_span)
         except ImportError:  # pragma: no cover — mcp module always present
             parent_ctx = None
@@ -845,7 +845,7 @@ class Recorder:
         # cubepi.aborted on the invoke_agent root.
         if stop_reason == "error":
             err_msg = (
-                getattr(msg, "error_message", None) or "model error"
+                (getattr(msg, "error_message", None) or "model error")
                 if self._record_content
                 else "model error"
             )
@@ -907,6 +907,7 @@ class Recorder:
                 event.tool_call_id,
                 span,
                 provider=self._tracer._provider,
+                record_content=self._record_content,
             )
             run.tool_span_tokens[event.tool_call_id] = cv_token
         except ImportError:  # pragma: no cover — mcp module always present
@@ -1170,9 +1171,10 @@ class Recorder:
                     "ci": ci,
                     "chars": len(delta),
                     "accumulated": run.stream_tool_accumulated[ci],
-                    "preview": delta[:60],
                 }
             )
+            if self._record_content:
+                rec["preview"] = delta[:60]
 
         elif event.type == "toolcall_end":
             id_, name, args_str = "", "", ""
@@ -1188,15 +1190,20 @@ class Recorder:
                     "id": id_,
                     "name": name,
                     "args_chars": total,
-                    "args_preview": args_str[:80],
                 }
             )
+            if self._record_content:
+                rec["args_preview"] = args_str[:80]
 
         elif event.type in ("text_delta", "thinking_delta"):
             rec["chars"] = len(event.delta or "")
 
         elif event.type == "error":
-            rec["error_message"] = event.error_message or ""
+            rec["error_message"] = (
+                (event.error_message or "provider error")
+                if self._record_content
+                else "provider error"
+            )
 
         try:
             run.stream_file.write(json.dumps(rec) + "\n")  # type: ignore[union-attr]

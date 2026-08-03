@@ -49,9 +49,12 @@ OpenTelemetry SDK, pytest, Ruff, mypy, uv.
 - Sweep tool-span registrations, close stream state, and clear the active run.
 - Move assistant output accumulation to `MessageEndEvent` so suspension before
   `TurnEndEvent` still records the partial output.
-- Do not change `_close_open_spans()` cancellation semantics.
+- Do not change `_close_open_spans()` cancellation semantics; make one-shot
+  cancellation match the same aborted-without-exception-event contract.
 - When `record_content=False`, preserve typed ERROR classification while using
-  generic status descriptions and omitting exception messages/stack traces.
+  generic status descriptions and omitting exception messages/stack traces from
+  provider, turn, one-shot, and MCP spans; keep stream telemetry structural by
+  omitting raw argument/error previews.
 
 ## Task 4: Document the lifecycle contract
 
