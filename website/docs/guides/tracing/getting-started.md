@@ -140,15 +140,19 @@ The recorder treats cancellation as a control signal, not a failure:
 - `agent.abort()` mid-stream → spans close with `cubepi.aborted=true` and
   `error.type=cubepi.aborted`, **status UNSET** (per OTel guidance — cancellation
   isn't an error).
+- `agent.detach()` at a durable HITL prompt → open spans close with
+  `cubepi.run.outcome=suspended` and no aborted/error classification. A later
+  `respond()` is a new activation trace; correlate the two with metadata such as
+  a host run or conversation ID.
 - A provider raising → chat/turn/root close with **status ERROR**, an
   `exception` event on the chat span, and `error.type` derived from the
   exception class (`timeout`, `connection_error`, fully-qualified class name, …).
 - An MCP `tools/call` returning `isError=true` → CLIENT span closes
   ERROR + `error.type=mcp.is_error`.
 
-Either way, `detach()` and `tracer.shutdown()` always close any span the run
-left open, so cancelled runs are still visible in your backend rather than
-silently disappearing.
+In every case, `detach()` and `tracer.shutdown()` close any span the activation
+left open, so cancelled and suspended runs remain visible in your backend rather
+than silently disappearing.
 
 ## What's on each span
 

@@ -50,6 +50,13 @@ from cubepi.types import JsonObject, StructuredValue
 
 TMessage = TypeVar("TMessage")
 
+
+def _consume_control_exception(future: asyncio.Future[StructuredValue]) -> None:
+    """Mark a detach control exception retrieved without changing awaiters."""
+    if not future.cancelled():
+        future.exception()
+
+
 if TYPE_CHECKING:
     from cubepi.deferred.types import DeferredStrategy, DeferredToolGroup
     from cubepi.providers.fallback import FallbackBoundModel
@@ -287,6 +294,7 @@ class Agent(Generic[TMessage]):
             and hasattr(self.checkpointer, "mark_run_complete")
         )
         self._channel = channel
+        self._pending_suspension_event: HitlRequest | None = None
         # _bind_emit is a _BaseChannel internal, not part of the HitlChannel
         # protocol. Third-party channels that only implement the public
         # protocol won't have it — skip the wiring instead of crashing.
@@ -383,6 +391,19 @@ class Agent(Generic[TMessage]):
                 run_id=run_id,
                 cause=exc,
             ) from exc
+
+    async def _emit_suspended_event(self, outcome: RunOutcome) -> None:
+        """Publish suspension only after the run transition is committed."""
+        if outcome != "suspended":
+            self._pending_suspension_event = None
+            return
+        pending = self._pending_suspension_event
+        if pending is None:
+            return
+        self._pending_suspension_event = None
+        from cubepi.agent.types import AgentSuspendedEvent
+
+        await self._process_event(AgentSuspendedEvent(pending_request=pending))
 
     def _validate_hitl_bindings(self, run_id: str | None, *, caller: str) -> None:
         """Reject HITL-bound tools/middleware that disagree with `run_id`.
@@ -518,6 +539,7 @@ class Agent(Generic[TMessage]):
                 await self._run_prompt(messages)
         except BaseException:
             # Spec §3.7: leave active_run_id SET on failure.
+            self._pending_suspension_event = None
             raise
         else:
             outcome: RunOutcome = self._state.last_outcome or "abandoned"
@@ -526,6 +548,7 @@ class Agent(Generic[TMessage]):
             # the clear line below is unreachable on the exception path.
             await self._dispatch_outcome(outcome, effective_run_id)
             self._state.active_run_id = None
+            await self._emit_suspended_event(outcome)
             return effective_run_id
 
     async def fork(
@@ -723,11 +746,13 @@ class Agent(Generic[TMessage]):
         except BaseException:
             # Spec §3.7 parity: leave active_run_id SET on failure so callers
             # can observe which run failed.
+            self._pending_suspension_event = None
             raise
         else:
             outcome: RunOutcome = self._state.last_outcome or "abandoned"
             await self._dispatch_outcome(outcome, effective_run_id)
             self._state.active_run_id = None
+            await self._emit_suspended_event(outcome)
             return effective_run_id
 
     def _build_stream_options(self, signal: asyncio.Event) -> StreamOptions:
@@ -803,8 +828,6 @@ class Agent(Generic[TMessage]):
         )
 
     async def detach(self) -> None:
-        from cubepi.agent.types import AgentSuspendedEvent
-
         if self._channel is None:
             raise HitlError("agent has no channel bound")
         pending = self._channel.pending
@@ -814,11 +837,14 @@ class Agent(Generic[TMessage]):
             or self._channel._future.done()
         ):
             return  # nothing to detach
-        # Emit the suspended event BEFORE triggering the exception, so listeners
-        # see the real pending payload (codex pass 2 BLOCKING: previous draft
-        # emitted from the loop with pending=None — fundamentally wrong).
-        await self._process_event(AgentSuspendedEvent(pending_request=pending))
-        self._channel._future.set_exception(HitlDetached())
+        # Snapshot the payload before the channel clears its in-memory pending slot,
+        # then commit the control-flow transition. The owning prompt/resume task
+        # publishes AgentSuspendedEvent only after it records the suspended outcome
+        # and clears active_run_id, so observers cannot report an uncommitted pause.
+        self._pending_suspension_event = pending
+        future = self._channel._future
+        future.add_done_callback(_consume_control_exception)
+        future.set_exception(HitlDetached())
 
     async def load_pending_hitl_request(self) -> HitlRequest | None:
         if self.checkpointer is None or self.thread_id is None:
@@ -898,14 +924,16 @@ class Agent(Generic[TMessage]):
                 await self._run_hitl_resume()
             except BaseException:
                 # Spec §3.7: leave active_run_id SET on raise.
+                self._pending_suspension_event = None
                 raise
             else:
                 # Legacy guard: pending persisted without run_id (older
                 # save_pending_request callers) cannot drive dispatch.
+                outcome: RunOutcome = self._state.last_outcome or "abandoned"
                 if recovered_run_id is not None:
-                    outcome: RunOutcome = self._state.last_outcome or "abandoned"
                     await self._dispatch_outcome(outcome, recovered_run_id)
                 self._state.active_run_id = None
+                await self._emit_suspended_event(outcome)
 
     async def abort_pending(
         self, reason: str = "aborted by host"
@@ -1233,7 +1261,23 @@ class Agent(Generic[TMessage]):
         await self._emit_to_listeners(event)
 
     async def _emit_to_listeners(self, event: AgentEvent) -> None:
-        for listener in self._listeners:
-            result = listener(event, self._active_signal)
-            if asyncio.iscoroutine(result):
-                await result
+        cancellation: asyncio.CancelledError | None = None
+        first_error: Exception | None = None
+        for listener in tuple(self._listeners):
+            try:
+                result = listener(event, self._active_signal)
+                if asyncio.iscoroutine(result):
+                    await result
+            except asyncio.CancelledError as exc:
+                if cancellation is None:
+                    cancellation = exc
+            except Exception as exc:
+                # One observer must not hide an event from later observers.
+                # Preserve existing error propagation after every listener had
+                # the chance to see the same committed state transition.
+                if first_error is None:
+                    first_error = exc
+        if cancellation is not None:
+            raise cancellation
+        if first_error is not None:
+            raise first_error
