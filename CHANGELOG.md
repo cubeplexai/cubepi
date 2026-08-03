@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   turn, chat, and tool spans end with `cubepi.run.outcome="suspended"`; observer
   failures cannot hide the terminal event, cancellation still propagates, and
   `respond()` opens a distinct correlated activation trace.
+- **Raw provider error details now follow the content-recording opt-in.** With
+  `record_content=False`, traces retain typed error classification and ERROR
+  status but use bounded generic descriptions and omit exception messages and
+  stack traces. `record_content=True` preserves the prior diagnostic detail.
 
 ## [0.13.3] - 2026-08-02
 

@@ -37,6 +37,8 @@ left the old `_RunState` retained in that task's context.
 - Remove tool-span and MCP-provider registrations during normal tracing detach.
 - Count the assistant tool-call message as partial activation output.
 - Keep tracing observational: recorder failures must not affect the agent.
+- Keep raw provider error messages and stack traces behind `record_content=True`;
+  privacy-default traces retain only typed error classification.
 
 ## Non-goals
 

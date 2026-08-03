@@ -102,6 +102,26 @@ class TestContentDisabled:
                     f"{span.name} should not carry {forbidden} with record_content=False"
                 )
 
+    async def test_error_details_are_private_when_record_content_false(self):
+        secret = "Authorization: Bearer TOPSECRET"
+        agent, provider, exporter, tracer = await _build(record_content=False)
+
+        def explode(*_args):
+            raise RuntimeError(secret)
+
+        provider.append_responses([explode])
+
+        await agent.prompt("private prompt")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        assert any(span.status.status_code.name == "ERROR" for span in exporter.spans)
+        for span in exporter.spans:
+            assert secret not in (span.status.description or "")
+            assert secret not in repr(dict(span.attributes or {}))
+            for event in span.events:
+                assert secret not in repr(dict(event.attributes or {}))
+
 
 class TestRootContent:
     async def test_invoke_agent_records_input_output_system(self):
