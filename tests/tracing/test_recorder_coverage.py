@@ -547,6 +547,60 @@ class TestStreamRecording:
         assert end_ev["args_chars"] > 0
         assert "args_preview" not in end_ev
 
+    async def test_stream_toolcall_previews_require_content_opt_in(self, tmp_path):
+        from pydantic import BaseModel
+
+        secret = "Bearer OPTED-IN-STREAM"
+
+        class P(BaseModel):
+            authorization: str
+
+        async def noop(tool_call_id: str, params: P, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="done")])
+
+        tool = AgentTool(name="noop", description="d", parameters=P, execute=noop)
+        provider = FauxProvider(provider_id="faux")
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    [
+                        ToolCall(
+                            id="tc1",
+                            name="noop",
+                            arguments={"authorization": secret},
+                        )
+                    ],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("all done"),
+            ]
+        )
+        agent = Agent(model=provider.model(MODEL.id), system_prompt="s", tools=[tool])
+        tracer = Tracer(
+            service_name="t",
+            agent_name="a",
+            exporters=[],
+            record_content=True,
+            record_stream=True,
+            stream_dir=tmp_path,
+        )
+        tracer.attach(agent)
+
+        await agent.prompt("go")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        stream_file = next(tmp_path.glob("*.stream.jsonl"))
+        events = [
+            json.loads(line) for line in stream_file.read_text().splitlines() if line
+        ]
+        delta_previews = "".join(
+            event["preview"] for event in events if event["type"] == "toolcall_delta"
+        )
+        end_ev = next(event for event in events if event["type"] == "toolcall_end")
+        assert "OPTED-IN-STREAM" in delta_previews
+        assert "OPTED-IN-STREAM" in end_ev["args_preview"]
+
     async def test_no_stream_file_without_record_stream(self, tmp_path):
         """Default (record_stream=False) must not create any stream file."""
         provider = FauxProvider(provider_id="faux")

@@ -197,6 +197,31 @@ class TestChatContent:
         assert resp["id"] == "faux-1"
         assert resp["role"] == "assistant"
 
+    async def test_provider_exception_details_require_content_opt_in(self):
+        secret = "Authorization: Bearer OPTED-IN-ERROR"
+        agent, provider, exporter, tracer = await _build(record_content=True)
+
+        def explode(*_args):
+            raise RuntimeError(secret)
+
+        provider.append_responses([explode])
+
+        await agent.prompt("private prompt")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        chat = next(span for span in exporter.spans if span.name.startswith("chat "))
+        exception = next(
+            event
+            for event in chat.events
+            if event.name == "gen_ai.client.operation.exception"
+        )
+        attrs = dict(exception.attributes or {})
+        assert attrs["exception.type"] == "RuntimeError"
+        assert attrs["exception.message"] == secret
+        assert secret in attrs["exception.stacktrace"]
+        assert chat.status.description == secret
+
 
 class TestToolContent:
     async def test_execute_tool_carries_arguments_and_result(self):
