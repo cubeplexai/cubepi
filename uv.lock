@@ -522,7 +522,7 @@ wheels = [
 
 [[package]]
 name = "cubepi"
-version = "0.13.3"
+version = "0.13.4"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
