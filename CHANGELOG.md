@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`cubepi.run_id` now follows the agent business run id.** On
+  `AgentStart`, the recorder stamps `agent.state.active_run_id` (the same
+  string as `prompt(run_id=…)` / `Message.run_id`) onto every span in the
+  activation. A tracer-private uuid is minted only as a fallback when
+  `active_run_id` is unset (e.g. oneshot still mints its own session id).
+  Hosts can filter traces with the same id they use for SSE, messages, and
+  billing. OTel `trace_id` / `span_id` remain the tree identity; JSONL still
+  shards by `trace_id`.
+
 ### Fixed
 
 - **Durable HITL pauses now finalize traces as suspended rather than aborted.**

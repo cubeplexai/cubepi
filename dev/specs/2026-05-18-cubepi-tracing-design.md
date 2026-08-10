@@ -585,7 +585,7 @@ Notation: **R** = Required, **CR** = Conditionally Required, **Rec** = Recommend
 | `gen_ai.conversation.id` | string | CR | `thread_id` |
 | `gen_ai.request.model` | string | CR | model id of first chat call (if pre-known) |
 | `error.type` | string | CR (on error) | see §12.3 |
-| `cubepi.run_id` | string | **R** | uuid generated at root open |
+| `cubepi.run_id` | string | **R** | agent `active_run_id` when set (host/`prompt` business run id); else uuid fallback at root open |
 | `cubepi.thread_id` | string | Rec | same as `gen_ai.conversation.id`, duplicated for `cubepi.*` namespace ergonomics |
 | `cubepi.agent.tools` | string[] | Opt | tool names registered |
 | `cubepi.agent.system_prompt.sha256` | string | Opt | first 16 hex of `sha256(system_prompt)` |

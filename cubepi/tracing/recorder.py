@@ -190,7 +190,8 @@ class Recorder:
     """Subscribe to agent + provider events and produce OTel spans.
 
     Lifetime: one :class:`Recorder` per :meth:`Tracer.attach` call. The
-    recorder maintains per-run state keyed by a generated run_id; one
+    recorder maintains per-run state keyed by the business run_id
+    (``agent.state.active_run_id`` when set, else a fallback uuid); one
     agent can host many sequential runs over the recorder's lifetime.
     """
 
@@ -572,7 +573,18 @@ class Recorder:
         self._close_open_spans(self._run)
         self._sweep_tool_span_tokens(self._run)
 
-        run_id = str(uuid.uuid4())
+        # Prefer the agent's business run id (prompt/resume/respond set
+        # active_run_id before AgentStartEvent). Same string as
+        # Message.run_id / host SSE ids — not a second tracer-private uuid.
+        # Fallback only if active_run_id is unset (defensive / odd attach).
+        agent_run_id: str | None = None
+        agent = self._agent
+        if agent is not None:
+            try:
+                agent_run_id = getattr(agent.state, "active_run_id", None)
+            except Exception:  # pragma: no cover — never break tracing
+                agent_run_id = None
+        run_id = agent_run_id if agent_run_id else str(uuid.uuid4())
         # Open the root invoke_agent span. Caller-context propagation
         # (parent_trace_id / parent_span_id from a host service) lands
         # here in a future run_scope feature.
