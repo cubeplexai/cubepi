@@ -85,9 +85,12 @@ The run produces one JSONL file per trace (sharded by `trace_id`):
     8e1c9a3f4b2d…d976a.jsonl   ← one trace, one file, one span per line
 ```
 
-A trace is the whole run, including any nested subagent runs (they inherit the
-parent's `trace_id`, so they land in the same file). Each span still carries
-`cubepi.run_id` as an attribute if you want to filter by individual run.
+A trace is the whole OTel tree, including any nested subagent runs (they
+inherit the parent's `trace_id`, so they land in the same file). Each span
+also carries `cubepi.run_id` — the **same** id as `agent.prompt(run_id=…)` /
+`Message.run_id` (hosts that pass a run id will see it here; otherwise the
+agent-minted id). Use it to filter by individual business run inside a
+trace that may hold several nested activations.
 
 Open it with any tool that reads OTLP/JSON or with `jq` directly:
 
@@ -164,9 +167,10 @@ than silently disappearing.
 Defaults (no opt-in needed):
 
 - `invoke_agent` (root) — `gen_ai.operation.name`, `gen_ai.provider.name`,
-  `gen_ai.agent.name`, `cubepi.run_id`, `cubepi.agent.system_prompt.sha256`,
-  `cubepi.agent.tools` (names list), `cubepi.input_messages.count`,
-  `cubepi.output_messages.count`
+  `gen_ai.agent.name`, `cubepi.run_id` (business run id from
+  `prompt`/`resume`/`respond`, not a separate tracer uuid),
+  `cubepi.agent.system_prompt.sha256`, `cubepi.agent.tools` (names list),
+  `cubepi.input_messages.count`, `cubepi.output_messages.count`
 - `cubepi.turn` — `cubepi.turn.index`, `cubepi.turn.stop_reason`,
   `cubepi.turn.tool_calls.count`, `cubepi.turn.terminated_by_tool`,
   `cubepi.run_id`

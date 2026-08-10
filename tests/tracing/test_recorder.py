@@ -1478,6 +1478,63 @@ class TestTracingContext:
         assert attrs.get("cubepi.metadata.turn.index") == "x"
 
 
+class TestBusinessRunIdAlignment:
+    """cubepi.run_id must equal the agent/host business run id.
+
+    See dev/specs/2026-08-10-unify-trace-run-id.md — no second tracer-
+    private uuid when active_run_id is set.
+    """
+
+    async def test_host_run_id_stamped_on_all_spans(self):
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        returned = await agent.prompt("x", run_id="host-run-42")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        assert returned == "host-run-42"
+        assert exporter.spans
+        run_ids = {_attrs(s).get("cubepi.run_id") for s in exporter.spans}
+        assert run_ids == {"host-run-42"}
+
+    async def test_agent_minted_run_id_matches_prompt_return(self):
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses([faux_assistant_message("ok")])
+
+        returned = await agent.prompt("x")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        assert returned
+        run_ids = {_attrs(s).get("cubepi.run_id") for s in exporter.spans}
+        assert run_ids == {returned}
+
+    async def test_sequential_runs_do_not_leak_run_id(self):
+        agent, provider, exporter, tracer = await _build()
+        provider.append_responses(
+            [
+                faux_assistant_message("a"),
+                faux_assistant_message("b"),
+            ]
+        )
+
+        r1 = await agent.prompt("one", run_id="run-a")
+        await agent.wait_for_idle()
+        r2 = await agent.prompt("two", run_id="run-b")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        assert r1 == "run-a" and r2 == "run-b"
+        by_run: dict[str, int] = {}
+        for s in exporter.spans:
+            rid = _attrs(s).get("cubepi.run_id")
+            assert rid in ("run-a", "run-b")
+            by_run[rid] = by_run.get(rid, 0) + 1
+        assert by_run.get("run-a", 0) >= 1
+        assert by_run.get("run-b", 0) >= 1
+
+
 class TestLifecycle:
     async def test_shutdown_is_idempotent(self):
         agent, provider, exporter, tracer = await _build()
