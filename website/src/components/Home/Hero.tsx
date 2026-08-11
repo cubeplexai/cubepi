@@ -43,6 +43,17 @@ export default function Hero() {
             CubePi 是一个 Pythonic 原生异步 Agent 框架，专为高性能、高可读性和生产级持久化而设计。
             它以线性 <code>while</code> 循环建模 agent 逻辑，提供比图结构 agent 运行时更轻量的替代方案，
             开发者可以轻松追踪和调试。
+            {' '}
+            CubePi 驱动{' '}
+            <a
+              href="https://github.com/cubeplexai/cubeplex"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              CubePlex
+            </a>
+            ，面向团队工作区的云原生托管 Agent 平台——技能、共享记忆、MCP 工具、持久化沙箱、权限治理，
+            并可在 Docker Compose 或 Kubernetes 上自托管。
           </>
         ) : (
           <>
@@ -51,6 +62,18 @@ export default function Hero() {
             a leaner alternative to graph-based agent runtimes by modeling agent
             logic as a linear <code>while</code> loop that developers can easily
             trace and debug.
+            {' '}
+            CubePi powers{' '}
+            <a
+              href="https://github.com/cubeplexai/cubeplex"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              CubePlex
+            </a>
+            , a cloud-native platform for managed agents in team workspaces — skills,
+            shared memory, MCP tools, persistent sandboxes, governed access, and
+            self-hosted deploy on Docker Compose or Kubernetes.
           </>
         )}
       </p>

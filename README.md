@@ -13,6 +13,11 @@
 
 CubePi is a Pythonic, async-native agent framework designed for high performance, readability, and production-grade persistence. It provides a leaner alternative to graph-based agent runtimes by modeling agent logic as a linear while loop that developers can easily trace and debug.
 
+CubePi powers [CubePlex](https://github.com/cubeplexai/cubeplex), a cloud-native
+platform for managed agents in team workspaces — skills, shared memory, MCP
+tools, persistent sandboxes, governed access, and self-hosted deploy on Docker
+Compose or Kubernetes.
+
 ## Why CubePi
 
 | | langgraph | CubePi |
