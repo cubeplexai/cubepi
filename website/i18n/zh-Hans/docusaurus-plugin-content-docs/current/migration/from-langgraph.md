@@ -210,10 +210,12 @@ CubePi 在已完成的 run 边界处分叉，而非任意 mid-run 检查点。`f
 创建可继续对话的持久化分支；`fork_once` 运行单次探针并丢弃所有内容。
 参见[会话分叉](../guides/agents/forking)。
 
-## langgraph 有而 CubePi 暂无的功能
+## LangGraph 仍优于 CubePi 的能力
 
-- **多 agent 监管模式。** 没有"agent 派生 agent"的原生抽象。
-  你可以通过运行多个共享工具的 `Agent` 实例来实现。
+- **图原生的多智能体编排。** CubePi 提供 `SubagentMiddleware`，支持工具驱动的委派：
+  父 Agent 可以将自包含任务分派给具有专属 prompt、model、tools 和 middleware 的
+  类型化子 Agent。CubePi 目前尚未提供 LangGraph 那种显式、可持久化的图模型，
+  用于 supervisor 路由、条件分支、并行 fan-out/fan-in 以及图级状态管理。
 - **可视化图渲染。** 没有 `app.get_graph().draw_mermaid()` 的等价物。
   CubePi 的流程是线性的，画出来也只是一条直线。
 - **原生 trace 可视化 UI。** CubePi 不像 LangSmith / Langfuse 那样

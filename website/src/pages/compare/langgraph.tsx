@@ -95,7 +95,7 @@ await agent.prompt("Weather in Tokyo?")
     {
       h2: 'When LangGraph is the better fit',
       body: [
-        'LangGraph is the better choice if you genuinely need arbitrary multi-agent supervisor graphs or visual graph rendering — CubePi keeps its flow linear by design and emits vendor-neutral OpenTelemetry rather than shipping its own trace UI. CubePi has `Agent.fork()` and `Agent.fork_once()` for branching at completed-run boundaries; LangGraph supports finer-grained mid-run checkpoint forks if you need that granularity. If your agent is fundamentally a loop, CubePi removes the graph machinery you were not really using.',
+        'LangGraph is the better choice if you need explicit, durable multi-agent graphs for supervisor routing, conditional branches, or parallel fan-out/fan-in, or if you need visual graph rendering. CubePi supports tool-driven delegation through `SubagentMiddleware`: a parent agent can dispatch self-contained work to typed child agents with dedicated prompts, models, tools, and middleware. CubePi keeps its core flow linear by design and emits vendor-neutral OpenTelemetry rather than shipping its own trace UI. CubePi has `Agent.fork()` and `Agent.fork_once()` for branching at completed-run boundaries; LangGraph supports finer-grained mid-run checkpoint forks if you need that granularity. If your agent is fundamentally a loop, CubePi removes the graph machinery you were not really using.',
       ],
     },
   ],
@@ -198,7 +198,7 @@ await agent.prompt("Weather in Tokyo?")
     {
       h2: '什么时候 LangGraph 更合适',
       body: [
-        '如果你确实需要任意的多 agent supervisor 图或可视化图渲染,LangGraph 更合适 —— CubePi 在设计上保持流程线性,并输出厂商中立的 OpenTelemetry,而不是自带一套 trace UI。CubePi 已有 `Agent.fork()` 和 `Agent.fork_once()` 在已完成的 run 边界处分叉;如果你需要 mid-run 粒度的任意检查点分叉,LangGraph 粒度更细。但如果你的 agent 本质上就是一个循环,CubePi 帮你去掉了那些你其实没真正用上的图机制。',
+        '如果你需要用于 supervisor 路由、条件分支或并行 fan-out/fan-in 的显式、可持久化多智能体图，或需要可视化图渲染，LangGraph 更合适。CubePi 通过 `SubagentMiddleware` 支持工具驱动的委派：父 Agent 可以将自包含任务分派给具有专属 prompt、model、tools 和 middleware 的类型化子 Agent。CubePi 在设计上保持核心流程线性，并输出厂商中立的 OpenTelemetry，而不是自带一套 trace UI。CubePi 已有 `Agent.fork()` 和 `Agent.fork_once()` 在已完成的 run 边界处分叉；如果你需要 mid-run 粒度的任意检查点分叉，LangGraph 粒度更细。但如果你的 agent 本质上就是一个循环，CubePi 帮你去掉了那些你其实没真正用上的图机制。',
       ],
     },
   ],

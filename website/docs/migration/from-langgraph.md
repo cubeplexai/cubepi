@@ -215,11 +215,14 @@ checkpoints. `fork` creates a persistent branch you can continue;
 `fork_once` runs a single probe and discards everything. See
 [Conversation Forking](../guides/agents/forking).
 
-## What langgraph does that CubePi doesn't (yet)
+## What LangGraph still offers beyond CubePi
 
-- **Multi-agent supervisor patterns.** No first-class "agents
-  spawning agents" abstraction. You can build it by running multiple
-  `Agent` instances with shared tools.
+- **Graph-native multi-agent orchestration.** CubePi includes
+  `SubagentMiddleware` for tool-driven delegation: a parent agent can dispatch
+  self-contained tasks to typed child agents with dedicated prompts, models,
+  tools, and middleware. What CubePi does not yet provide is LangGraph's
+  explicit, durable graph model for supervisor routing, conditional branches,
+  parallel fan-out/fan-in, and graph-level state management.
 - **Visual graph rendering.** No `app.get_graph().draw_mermaid()`
   equivalent. CubePi's flow is linear so the picture would be a single
   line anyway.
