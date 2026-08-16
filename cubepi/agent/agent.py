@@ -311,6 +311,7 @@ class Agent(Generic[TMessage]):
         self._listeners: list[Callable] = []
         self._active_signal: asyncio.Event | None = None
         self._active_done: asyncio.Event | None = None
+        self._fallback_active_index: int = 0
 
     @property
     def state(self) -> AgentState:
