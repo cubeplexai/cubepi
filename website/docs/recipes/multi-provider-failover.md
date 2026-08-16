@@ -49,9 +49,11 @@ Policy in one turn:
    misses model-specific 400s more often than a true schema bug that fails
    every provider.
 3. **Stick** to the first *successful* leg for later `stream` / `generate`
-   calls in the same `Agent.prompt` / run. The next user turn resets to
-   `chain[0]`. Subagents start their own run and do **not** inherit the
-   parent's sticky index.
+   calls in the same `Agent.prompt`. HITL `respond()` continues that run and
+   keeps the sticky index. The next user `prompt` resets to `chain[0]`.
+   Subagents start their own run and do **not** inherit the parent's index.
+   Sticky requires `begin_fallback_run()` (Agent does this); standalone
+   `FallbackBoundModel` calls do not stick.
 
 ## Default trigger conditions
 

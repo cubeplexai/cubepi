@@ -579,6 +579,8 @@ class OpenAIResponsesProvider(BaseProvider):
                     error_code=ev.error_code,
                     status_code=ev.status_code,
                     retry_after=ev.retry_after,
+                    tokens_in=ev.tokens_in,
+                    context_window=ev.context_window,
                     usage=Usage(),
                     timestamp=time.time(),
                     provider_id=ev.provider_id or model.provider_id,

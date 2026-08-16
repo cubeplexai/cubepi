@@ -45,9 +45,11 @@ await agent.prompt("Capital of Mongolia?")
 2. **再 hop** 到下一条。residual `ProviderBadRequest` 和 `ModelNotFound`
    立刻 hop（不同模型重试）——分类漏报「其实是这个模型/网关的问题」比
    「全链都会炸的真 schema 错误」更常见。
-3. **粘住**本轮第一次**成功**的那条腿：同一 `Agent.prompt` / run 里后续
-   `stream` / `generate` 直接打这条。下一次用户回合重置回 `chain[0]`。
-   Subagent 自己开 run，**不继承**父级 sticky index。
+3. **粘住**本轮第一次**成功**的那条腿：同一 `Agent.prompt` 里后续
+   `stream` / `generate` 直接打这条。HITL `respond()` 继续该 run，保留
+   sticky。下一次用户 `prompt` 重置回 `chain[0]`。Subagent 自己开 run，
+   **不继承**父级 index。Sticky 依赖 `begin_fallback_run()`（Agent 会调）；
+   单独调用 `FallbackBoundModel` 不会粘。
 
 ## 默认触发条件
 

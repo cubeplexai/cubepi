@@ -109,6 +109,8 @@ class AssistantMessage(BaseModel):
     error_code: str | None = None
     status_code: int | None = None
     retry_after: float | None = None
+    tokens_in: int | None = None
+    context_window: int | None = None
     usage: Usage | None = None
     timestamp: float | None = None
     provider_id: str = ""

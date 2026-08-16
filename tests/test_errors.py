@@ -382,3 +382,15 @@ class TestErrorCodeExtraction:
         exc = _FakeExc("content policy violation", status_code=400)
         with pytest.raises(ContentFiltered):
             classify_and_raise(exc, model=_model())
+
+    def test_503_does_not_exist_is_unavailable_not_model_not_found(self) -> None:
+        exc = _FakeExc("replica does not exist", status_code=503)
+        with pytest.raises(ProviderUnavailable):
+            classify_and_raise(exc, model=_model())
+
+    def test_generic_not_found_code_without_model_hint_is_bad_request(self) -> None:
+        exc = _FakeExc("missing resource", status_code=404)
+        exc.body = {"error": {"code": "not_found_error"}}
+        with pytest.raises(ProviderBadRequest) as ei:
+            classify_and_raise(exc, model=_model())
+        assert not isinstance(ei.value, ModelNotFound)

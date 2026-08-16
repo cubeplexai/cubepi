@@ -715,6 +715,12 @@ async def test_context_length_skips_too_small_fallback() -> None:
         await fbm.stream(_messages())
     assert ei.value.errors
     assert all(isinstance(e, ContextLengthExceeded) for e in ei.value.errors)
+    assert getattr(b.provider, "_error", None) is small_err
+    # 16k window cannot fit 200k — must not be invoked.
+    assert not hasattr(b.provider, "calls") or getattr(b.provider, "calls", 0) == 0
+    # _RaisingProvider has no counter; wrap via call_count if present
+    if hasattr(b.provider, "call_count"):
+        assert b.provider.call_count == 0  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
@@ -790,8 +796,29 @@ async def test_sticky_after_successful_failover() -> None:
         s2 = await fbm.stream(_messages())
         r2 = await s2.result()
         assert r2.provider_id == "fallback"
-        # second call must not probe primary again
-        assert primary.provider  # constructed
+    finally:
+        end_fallback_run(token)
+
+
+@pytest.mark.asyncio
+async def test_sticky_second_call_skips_primary() -> None:
+    from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+
+    err = ProviderUnavailable("down", provider="primary", model="m")
+    primary_p = _CountingRaiseProvider(err, fail_times=99, provider_id="primary")
+    primary = BoundModel(provider=primary_p, spec=Model(id="m", provider_id="primary"))
+    fb = FauxProvider(provider_id="fallback")
+    fb.set_responses([faux_assistant_message("ok"), faux_assistant_message("ok2")])
+    fallback = fb.model("model-1")
+    fbm = FallbackBoundModel(
+        chain=(primary, fallback), max_retries_per_model=0, retry_backoff=0.0
+    )
+    token = begin_fallback_run()
+    try:
+        await (await fbm.stream(_messages())).result()
+        after_first = primary_p.calls
+        await (await fbm.stream(_messages())).result()
+        assert primary_p.calls == after_first
     finally:
         end_fallback_run(token)
 
@@ -823,6 +850,36 @@ async def test_new_run_resets_sticky_to_primary() -> None:
 
 
 @pytest.mark.asyncio
+async def test_new_run_after_failover_probes_primary_again() -> None:
+    from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+
+    err = ProviderUnavailable("down", provider="primary", model="m")
+    primary_p = _CountingRaiseProvider(err, fail_times=99, provider_id="primary")
+    primary = BoundModel(provider=primary_p, spec=Model(id="m", provider_id="primary"))
+    fb = FauxProvider(provider_id="fallback")
+    fb.set_responses([faux_assistant_message("ok"), faux_assistant_message("ok2")])
+    fbm = FallbackBoundModel(
+        chain=(primary, fb.model("model-1")),
+        max_retries_per_model=0,
+        retry_backoff=0.0,
+    )
+    token = begin_fallback_run()
+    try:
+        r1 = await (await fbm.stream(_messages())).result()
+        assert r1.provider_id == "fallback"
+    finally:
+        end_fallback_run(token)
+    after_run1 = primary_p.calls
+    token = begin_fallback_run()
+    try:
+        r2 = await (await fbm.stream(_messages())).result()
+        assert r2.provider_id == "fallback"
+        assert primary_p.calls > after_run1
+    finally:
+        end_fallback_run(token)
+
+
+@pytest.mark.asyncio
 async def test_generate_exhaustion_preserves_errors() -> None:
     e1 = RateLimited("a", provider="p", model="m1")
     e2 = RateLimited("b", provider="p", model="m2")
@@ -834,3 +891,17 @@ async def test_generate_exhaustion_preserves_errors() -> None:
         await fbm.generate(_messages())
     assert len(ei.value.errors) == 2
     assert isinstance(ei.value.__cause__, RateLimited)
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_errors_are_one_per_leg() -> None:
+    e1 = RateLimited("a", provider="p", model="m1")
+    e2 = RateLimited("b", provider="p", model="m2")
+    fbm = FallbackBoundModel(
+        chain=(_raising(e1, "m1"), _raising(e2, "m2")),
+        max_retries_per_model=3,
+        retry_backoff=0.0,
+    )
+    with pytest.raises(ProviderUnavailable) as ei:
+        await fbm.generate(_messages())
+    assert len(ei.value.errors) == 2
