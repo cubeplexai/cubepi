@@ -34,24 +34,42 @@ agent = Agent(model=model, system_prompt="You answer concisely.")
 await agent.prompt("Capital of Mongolia?")
 ```
 
-`FallbackBoundModel` peeks at the first stream event from each provider. If it
-is a `type="error"` event, or if `stream()` raises a retriable error, the next
-model in the chain is tried. Once a non-error first event arrives the stream is
-forwarded as-is — mid-stream errors are not retried.
+`FallbackBoundModel` peeks at the first stream event from each provider. Typed
+error fields on that event (`error_type`, `error_code`, `status_code`, …) use
+the **same predicate** as a raised exception. Once a non-error first event
+arrives the stream is forwarded as-is — mid-stream errors are not retried.
+
+Policy in one turn:
+
+1. **Same-model retry** (default 3 retries / 4 attempts) for transient
+   `RateLimited` and `ProviderUnavailable` only. `RateLimited.retry_after` is
+   honoured, capped by `max_retry_after` (default 5s).
+2. **Then hop** to the next chain entry. Residual `ProviderBadRequest` and
+   `ModelNotFound` hop immediately (no same-model retry) — classification
+   misses model-specific 400s more often than a true schema bug that fails
+   every provider.
+3. **Stick** to the first *successful* leg for later `stream` / `generate`
+   calls in the same `Agent.prompt` / run. The next user turn resets to
+   `chain[0]`. Subagents start their own run and do **not** inherit the
+   parent's sticky index.
 
 ## Default trigger conditions
 
-By default failover is triggered on:
+By default **failover** is triggered on:
 
-| Error | Why |
-|---|---|
-| `RateLimited` | Quota hit; another provider can serve |
-| `ProviderUnavailable` | 5xx / timeout / connection failure |
-| `ContextLengthExceeded` | Fallback may have a larger context window |
+| Error | Same-model retry | Hop |
+|---|---|---|
+| `RateLimited` | Yes | After retries |
+| `ProviderUnavailable` | Yes | After retries |
+| `ContextLengthExceeded` | No | Yes, but skip legs whose `context_window` cannot fit `tokens_in` |
+| `ModelNotFound` | No | Yes |
+| `ProviderBadRequest` (residual 4xx) | No | Yes |
+| `ProviderAuthFailed` | No | No (fail-closed) |
+| `ContentFiltered` | No | No (fail-closed; opt in via `trigger_errors`) |
 
-Auth failures (`ProviderAuthFailed`) and bad requests (`ProviderBadRequest`)
-are **not** triggered by default — a bad key or a malformed request will fail
-the same way on every provider in the chain.
+This is an intentional change from earlier releases: residual 4xx used to
+hard-fail the turn. A true schema bug still exhausts the chain quickly; the
+aggregated `ProviderUnavailable.errors` list keeps every leg.
 
 ## Custom trigger conditions
 
@@ -88,14 +106,21 @@ async def record_failover(failed, next_model, error):
 
 model = FallbackBoundModel(
     chain=(primary, fallback),
+    max_retries_per_model=3,   # 3 retries after the first failure (4 attempts)
+    max_retry_after=5.0,
     on_failover=record_failover,
 )
 ```
 
 `on_failover` receives `(failed: BoundModel, next_model: BoundModel | None,
-error: BaseException | str)`. Both sync and async callables are accepted.
-Exceptions raised inside the callback are logged and swallowed — a broken
-callback never aborts the failover.
+error: BaseException | str)` and fires **only on a chain hop**, not on each
+same-model retry. Optional `on_retry(failed, error, attempt, wait_s)` covers
+retries. Both sync and async callables are accepted. Exceptions raised inside
+either callback are logged and swallowed.
+
+When every leg fails, CubePi raises `ProviderUnavailable` whose `.errors`
+list holds the per-leg failures (typed when possible). `__cause__` is the
+last typed error.
 
 ## `provider` and `spec` always reflect the primary
 
@@ -136,8 +161,9 @@ export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
 uv run python examples/multi_provider_failover.py
 ```
 
-The example deliberately uses a bad key for the primary to trigger failover,
-then answers correctly via the real fallback.
+The example deliberately uses a bad key for the primary. Auth is fail-closed
+by default, so the example **opts in** via `trigger_errors` to include
+`ProviderAuthFailed`, then answers correctly via the real fallback.
 
 ## See also
 
