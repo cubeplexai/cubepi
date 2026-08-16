@@ -7,7 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from cubepi.errors import (
+    ContentFiltered,
     ContextLengthExceeded,
+    ModelNotFound,
     ProviderAuthFailed,
     ProviderBadRequest,
     ProviderError,
@@ -212,10 +214,11 @@ class TestClassifyProviderBadRequest:
             classify_and_raise(exc, model=_model())
         assert ei.value.status_code == 400
 
-    def test_404_raises_provider_bad_request(self) -> None:
+    def test_404_model_not_found(self) -> None:
         exc = _FakeExc("model not found", status_code=404)
-        with pytest.raises(ProviderBadRequest):
+        with pytest.raises(ModelNotFound) as ei:
             classify_and_raise(exc, model=_model())
+        assert isinstance(ei.value, ProviderBadRequest)
 
 
 class TestClassifyUnknown:
@@ -244,6 +247,8 @@ class TestProviderErrorInheritance:
             ProviderAuthFailed,
             ProviderUnavailable,
             ProviderBadRequest,
+            ModelNotFound,
+            ContentFiltered,
         ):
             err = cls("msg", provider="p", model="m")
             assert isinstance(err, ProviderError)
@@ -360,4 +365,20 @@ class TestSDKConnectionErrors:
         """anthropic.APITimeoutError has 'Timeout' in class name."""
         exc = type("APITimeoutError", (Exception,), {})("timed out")
         with pytest.raises(ProviderUnavailable):
+            classify_and_raise(exc, model=_model())
+
+
+class TestErrorCodeExtraction:
+    def test_openai_error_code(self) -> None:
+        from cubepi.errors import extract_error_code
+
+        exc = _FakeExc("nope", status_code=400)
+        exc.body = {
+            "error": {"code": "model_not_found", "type": "invalid_request_error"}
+        }
+        assert extract_error_code(exc) == "model_not_found"
+
+    def test_content_filtered_from_message(self) -> None:
+        exc = _FakeExc("content policy violation", status_code=400)
+        with pytest.raises(ContentFiltered):
             classify_and_raise(exc, model=_model())

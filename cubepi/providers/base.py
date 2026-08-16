@@ -105,6 +105,10 @@ class AssistantMessage(BaseModel):
     content: list[Content | ThinkingContent | ToolCall]
     stop_reason: str = "stop"
     error_message: str | None = None
+    error_type: str | None = None
+    error_code: str | None = None
+    status_code: int | None = None
+    retry_after: float | None = None
     usage: Usage | None = None
     timestamp: float | None = None
     provider_id: str = ""
@@ -243,6 +247,61 @@ class StreamEvent(BaseModel):
     delta: str | None = None
     partial: AssistantMessage | None = None
     error_message: str | None = None
+    error_type: str | None = None
+    error_code: str | None = None
+    status_code: int | None = None
+    retry_after: float | None = None
+    provider_id: str | None = None
+    model_id: str | None = None
+    tokens_in: int | None = None
+    context_window: int | None = None
+
+
+def typed_error_event(
+    exc: BaseException,
+    *,
+    model: "Model",
+    error_message: str,
+) -> tuple[StreamEvent, dict[str, object]]:
+    """Build a typed error ``StreamEvent`` plus AssistantMessage kwargs."""
+
+    from cubepi.errors import annotate_error_event
+
+    fields = annotate_error_event(exc, fallback_message=error_message)
+    event = StreamEvent(
+        type="error",
+        error_message=str(fields.get("error_message") or error_message),
+        error_type=fields.get("error_type")
+        if isinstance(fields.get("error_type"), str)
+        else None,
+        error_code=fields.get("error_code")
+        if isinstance(fields.get("error_code"), str)
+        else None,
+        status_code=fields.get("status_code")
+        if isinstance(fields.get("status_code"), int)
+        else None,
+        retry_after=fields.get("retry_after")
+        if isinstance(fields.get("retry_after"), (int, float))
+        else None,
+        provider_id=str(fields.get("provider_id") or model.provider_id),
+        model_id=str(fields.get("model_id") or model.id),
+        tokens_in=fields.get("tokens_in")
+        if isinstance(fields.get("tokens_in"), int)
+        else None,
+        context_window=fields.get("context_window")
+        if isinstance(fields.get("context_window"), int)
+        else None,
+    )
+    msg_kwargs: dict[str, object] = {
+        "error_message": event.error_message,
+        "error_type": event.error_type,
+        "error_code": event.error_code,
+        "status_code": event.status_code,
+        "retry_after": event.retry_after,
+        "provider_id": event.provider_id or model.provider_id,
+        "model_id": event.model_id or model.id,
+    }
+    return event, msg_kwargs
 
 
 def format_provider_error(

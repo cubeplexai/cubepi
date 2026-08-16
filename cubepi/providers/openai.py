@@ -35,6 +35,7 @@ from cubepi.providers.base import (
     apply_sender_attribution,
     invoke_on_payload,
     invoke_on_response,
+    typed_error_event,
 )
 from cubepi.providers.reasoning_profiles import get_capability_profile
 
@@ -532,18 +533,17 @@ class OpenAIProvider(BaseProvider):
                     except Exception as _classified:
                         exc = _classified
                 err_text = self._error_message(exc, model)
+                ev, err_fields = typed_error_event(
+                    exc, model=model, error_message=err_text
+                )
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
-                    error_message=err_text,
                     usage=Usage(),
                     timestamp=time.time(),
-                    provider_id=model.provider_id,
-                    model_id=model.id,
+                    **err_fields,
                 )
-                await self._emit(
-                    ms, StreamEvent(type="error", error_message=err_text), model
-                )
+                await self._emit(ms, ev, model)
                 ms.set_result(error_msg)
                 if not isinstance(e, Exception):
                     raise

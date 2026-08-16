@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`FallbackBoundModel` retries the active model before hopping**, then
+  sticks to the first successful leg for the rest of the agent run
+  (`#211`). Transient `RateLimited` / `ProviderUnavailable` retry up to
+  `max_retries_per_model=3` (4 attempts) and honour a capped
+  `retry_after`. Residual `ProviderBadRequest` and `ModelNotFound` hop
+  without same-model retry; `ProviderAuthFailed` and `ContentFiltered`
+  stay fail-closed. Stream first-event errors now carry typed fields so
+  the same predicate applies to exceptions and error events. Exhaustion
+  raises `ProviderUnavailable` with `.errors` listing every leg. New
+  subclasses `ModelNotFound` and `ContentFiltered` inherit
+  `ProviderBadRequest`. `ProviderError.error_code` is extracted from
+  vendor bodies when present.
+
 ## [0.13.4] - 2026-08-10
 
 ### Changed
