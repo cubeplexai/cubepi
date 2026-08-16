@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.5] - 2026-08-16
+
 ### Changed
 
 - **`FallbackBoundModel` retries the active model before hopping**, then
@@ -780,7 +782,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.4...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.5...HEAD
+[0.13.5]: https://github.com/cubeplexai/cubepi/compare/v0.13.4...v0.13.5
 [0.13.4]: https://github.com/cubeplexai/cubepi/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/cubeplexai/cubepi/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/cubeplexai/cubepi/compare/v0.13.1...v0.13.2
