@@ -1,264 +1,144 @@
 ---
 title: 多 Provider 故障转移
-description: "在 CubePi 中配置多 provider 故障转移以提升弹性 —— provider 间自动降级。"
+description: "用内置 FallbackBoundModel 在 LLM provider 之间自动降级。"
 ---
 
 # Recipe：多 Provider 故障转移
 
-当 Anthropic 触发限速或发生故障时，自动切换到 OpenAI 而不让 agent 崩溃。
-我们将把两个 provider 封装在一个单独的 `Provider` 适配器后面，
-由该适配器自行实现重试/故障转移逻辑。
+主 provider 限流、不可用或撞上上下文窗口时，自动切到下一条，不要把 agent 打崩。
+CubePi 内置 `FallbackBoundModel`，不必再手写适配器。
 
-**预计耗时：** 10 分钟。
-**依赖：** `cubepi`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`。
+**预计耗时：** 5 分钟。
+**依赖：** `cubepi`，以及至少两套 provider API key。
 
-## 封装 provider
+## 内置：`FallbackBoundModel`
 
-```python title="failover.py"
-import asyncio
-import logging
-import time
-from typing import Sequence
-
-from cubepi.providers.base import (
-    AssistantMessage,
-    BaseProvider,
-    BoundModel,
-    Message,
-    MessageStream,
-    Model,
-    StreamEvent,
-    StreamOptions,
-    ToolDefinition,
-    Usage,
-)
+```python
+import os
+from cubepi import Agent, FallbackBoundModel
 from cubepi.providers.anthropic import AnthropicProvider
 from cubepi.providers.openai import OpenAIProvider
+
+anthropic = AnthropicProvider(api_key=os.environ["ANTHROPIC_API_KEY"])
+openai = OpenAIProvider(api_key=os.environ["OPENAI_API_KEY"])
+
+model = FallbackBoundModel(
+    chain=(
+        anthropic.model("claude-opus-4-8"),   # 主模型
+        openai.model("gpt-5"),                # 备援
+    )
+)
+
+agent = Agent(model=model, system_prompt="You answer concisely.")
+await agent.prompt("Capital of Mongolia?")
+```
+
+`FallbackBoundModel` 会看每条腿的**第一个** stream 事件。该事件上的类型字段
+（`error_type`、`error_code`、`status_code` …）和抛出的异常走**同一套判定**。
+一旦出现非 error 的首包，流原样转发——流中途出错不会再 hop。
+
+一轮里的策略：
+
+1. **先同模型重试**（默认 3 次重试 / 共 4 次尝试），仅针对瞬时的
+   `RateLimited` 和 `ProviderUnavailable`。会遵守
+   `RateLimited.retry_after`，并受 `max_retry_after`（默认 5s）封顶。
+2. **再 hop** 到下一条。residual `ProviderBadRequest` 和 `ModelNotFound`
+   立刻 hop（不同模型重试）——分类漏报「其实是这个模型/网关的问题」比
+   「全链都会炸的真 schema 错误」更常见。
+3. **粘住**本轮第一次**成功**的那条腿：同一 `Agent.prompt` / run 里后续
+   `stream` / `generate` 直接打这条。下一次用户回合重置回 `chain[0]`。
+   Subagent 自己开 run，**不继承**父级 sticky index。
+
+## 默认触发条件
+
+默认会 **failover（hop）** 的错误：
+
+| 错误 | 同模型重试 | Hop |
+|---|---|---|
+| `RateLimited` | 是 | 重试耗尽后 |
+| `ProviderUnavailable` | 是 | 重试耗尽后 |
+| `ContextLengthExceeded` | 否 | 是，但会跳过 `context_window` 装不下 `tokens_in` 的腿 |
+| `ModelNotFound` | 否 | 是 |
+| `ProviderBadRequest`（其余 4xx） | 否 | 是 |
+| `ProviderAuthFailed` | 否 | 否（fail-closed） |
+| `ContentFiltered` | 否 | 否（fail-closed；可用 `trigger_errors` 打开） |
+
+相对早期版本这是有意的行为变化：residual 4xx 以前会直接打死这一轮。
+真 schema 错误仍会很快耗尽整条链；聚合后的
+`ProviderUnavailable.errors` 会留下每一腿。
+
+## 自定义触发条件
+
+用 `trigger_errors` 覆盖默认集合：
+
+```python
+from cubepi import FallbackBoundModel
+from cubepi.errors import ProviderAuthFailed, ProviderUnavailable, RateLimited
+
+model = FallbackBoundModel(
+    chain=(primary, fallback),
+    trigger_errors=frozenset({RateLimited, ProviderUnavailable, ProviderAuthFailed}),
+)
+```
+
+## 监控 failover
+
+用 `on_failover` 接计费或告警：
+
+```python
+import logging
 
 log = logging.getLogger(__name__)
 
-
-class FailoverProvider(BaseProvider):
-    """按顺序尝试各 provider；在构造时或首个事件出错时进行故障转移。
-
-    内置 provider 会吞掉 API/网络错误，并将其作为
-    `StreamEvent(type="error")` 暴露在返回的流上 —— 而不是从
-    `provider.stream()` 抛出异常。因此我们先查看每个内部流的第一个事件，
-    只有当看到非错误事件时才确认切换到该 provider。
-
-    限制：*首个事件之后*发生的错误（如流传输过半时的限速、服务端断连）
-    会原样转发给 agent。对故障 provider 完整重放半条流式响应
-    需要缓冲整轮内容 —— 超出本 recipe 范围。
-    """
-
-    def __init__(self, primary: BoundModel, *fallbacks: BoundModel) -> None:
-        super().__init__(provider_id=primary.spec.provider_id)
-        self._chain: list[BoundModel] = [primary, *fallbacks]
-
-    async def stream(
-        self,
-        model: Model,
-        messages: list[Message],
-        *,
-        system_prompt: str = "",
-        tools: list[ToolDefinition] | None = None,
-        options: StreamOptions | None = None,
-    ) -> MessageStream:
-        last_error: str | None = None
-
-        for bound_model in self._chain:
-            provider = bound_model.provider
-            mapped_model = bound_model.spec
-            # 构造时失败（罕见 —— 大多数错误留在生产者任务内部）。
-            try:
-                inner = await provider.stream(
-                    mapped_model,
-                    messages,
-                    system_prompt=system_prompt,
-                    tools=tools,
-                    options=options,
-                )
-            except Exception as e:
-                log.warning("provider %s failed at construction: %s", mapped_model.provider_id, e)
-                last_error = repr(e)
-                continue
-
-            # 查看第一个事件以判断流是否健康。
-            iterator = inner.__aiter__()
-            try:
-                first = await iterator.__anext__()
-            except StopAsyncIteration:
-                last_error = "stream ended before producing any events"
-                continue
-
-            if first.type == "error":
-                log.warning("provider %s errored on first event: %s",
-                            mapped_model.provider_id, first.error_message)
-                last_error = first.error_message or "stream error"
-                continue
-
-            # 健康 —— 提交到此 provider。通过全新的外层 MessageStream
-            # 转发 `first` 及后续事件，让调用方看到从头开始的完整流。
-            outer = MessageStream()
-
-            async def _forward(first_event=first, src=iterator, src_stream=inner):
-                try:
-                    outer.push(first_event)
-                    async for ev in src:
-                        outer.push(ev)
-                    final = await src_stream.result()
-                    outer.set_result(final)
-                except Exception as exc:
-                    fallback_msg = AssistantMessage(
-                        content=[],
-                        stop_reason="error",
-                        error_message=str(exc),
-                        usage=Usage(),
-                        timestamp=time.time(),
-                    )
-                    outer.push(StreamEvent(type="error", error_message=str(exc)))
-                    outer.set_result(fallback_msg)
-
-            outer.attach_task(asyncio.create_task(_forward()))
-            return outer
-
-        raise RuntimeError(f"all providers exhausted; last error: {last_error!r}")
-```
-
-## 使用方式
-
-```python title="main.py"
-import asyncio
-import os
-
-from cubepi import Agent
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.providers.openai import OpenAIProvider
-from failover import FailoverProvider
-
-
-async def main():
-    anthropic = AnthropicProvider(
-        provider_id="anthropic",
-        api_key=os.environ["ANTHROPIC_API_KEY"],
-    )
-    openai = OpenAIProvider(
-        provider_id="openai",
-        api_key=os.environ["OPENAI_API_KEY"],
-    )
-    failover = FailoverProvider(
-        anthropic.model("claude-sonnet-4-6"),
-        openai.model("gpt-5"),
+async def record_failover(failed, next_model, error):
+    log.warning(
+        "provider failover: %s/%s → %s/%s (%s)",
+        failed.spec.provider_id, failed.spec.id,
+        next_model.spec.provider_id if next_model else "none",
+        next_model.spec.id if next_model else "—",
+        error,
     )
 
-    # 此处传入的 model 会被 FailoverProvider 内部覆盖；可传任意占位符。
-    # 我们使用主 provider 的 model，以便用量统计标签与正常路径保持一致。
-    agent = Agent(
-        model=failover.model("claude-sonnet-4-6"),
-        system_prompt="You answer concisely.",
-    )
-    agent.subscribe(lambda e, s=None: None)
-    await agent.prompt("Capital of Mongolia?")
-    last = agent.state.messages[-1]
-    print(last.content[0].text)
-
-
-asyncio.run(main())
+model = FallbackBoundModel(
+    chain=(primary, fallback),
+    max_retries_per_model=3,   # 首次失败后再重试 3 次（共 4 次）
+    max_retry_after=5.0,
+    on_failover=record_failover,
+)
 ```
 
-## 更智能的故障转移策略
+`on_failover` 的参数是 `(failed: BoundModel, next_model: BoundModel | None,
+error: BaseException | str)`，**只在真正 hop 时**触发，同模型重试不会调它。
+同模型重试用可选的 `on_retry(failed, error, attempt, wait_s)`。
+同步 / 异步回调都可以；回调里抛错会被记日志并吞掉。
 
-上面的示例在**任何**错误事件时都会降级。这对于 `RateLimitError`、
-`APIConnectionError` 或 5xx 是合理的 —— 但对于 `BadRequestError`
-则未必正确（代码有误；下一个 provider 也会以同样方式失败）。
+整条链都失败时抛 `ProviderUnavailable`，`.errors` 是每条腿的失败
+（能分类则带类型），`__cause__` 是最后一条 typed error。
 
-首个事件的 `error_message` 来自底层 SDK 异常的 `str(exc)`。
-可以按子字符串过滤，或者 —— 更好的做法 —— 封装每个 provider 的
-`_produce` 方法，为错误打上类别标签：
+## `provider` 和 `spec` 始终指向主模型
 
-```python
-NON_RETRYABLE_HINTS = ("bad request", "invalid_request_error", "401", "403")
-
-if first.type == "error":
-    msg = (first.error_message or "").lower()
-    if any(h in msg for h in NON_RETRYABLE_HINTS):
-        raise RuntimeError(f"non-retryable error from {mapped_model.provider_id}: {msg}")
-    last_error = first.error_message
-    continue
-```
-
-更健壮的方法是 fork 内置 provider 并从 `_produce` 中重新抛出
-特定的 SDK 异常，使其作为真正的 Python 异常到达 `provider.stream()` ——
-但这需要对 CubePi 本身做较大改动。
-
-## 添加熔断器
-
-不要持续重试一个明显已宕机的 provider。一个简单的计数器：
-
-```python
-import time
-
-class CircuitBreaker:
-    def __init__(self, failure_threshold: int = 3, recovery_seconds: float = 60) -> None:
-        self._failures = 0
-        self._opened_at: float | None = None
-        self._threshold = failure_threshold
-        self._recovery = recovery_seconds
-
-    def can_attempt(self) -> bool:
-        if self._opened_at and time.monotonic() - self._opened_at < self._recovery:
-            return False
-        if self._opened_at:
-            self._opened_at = None   # half-open
-        return True
-
-    def record_failure(self) -> None:
-        self._failures += 1
-        if self._failures >= self._threshold:
-            self._opened_at = time.monotonic()
-            self._failures = 0
-
-    def record_success(self) -> None:
-        self._failures = 0
-```
-
-在 `FailoverProvider` 中为每个 provider 持有一个 `CircuitBreaker`，
-若 `can_attempt()` 返回 False 则跳过该 provider。
-
-## 按工具故障转移不适用
-
-本 recipe 处理的是 **provider** 故障。工具故障是另一回事 ——
-参见 [Middleware → 重试](../guides/middleware/examples#retries-with-backoff)
-了解该模式。
+`FallbackBoundModel.provider` / `.spec` 代理 `chain[0]`。读
+`agent._model.provider` 或 `agent._model.spec` 的 tracing / 计费代码看到的
+仍是用户选的主模型。真正应答的那条腿写在返回的
+`AssistantMessage.provider_id` / `model_id` 上。
 
 ## 常见陷阱
 
-- **不同 provider 的工具 schema 不同** —— 两个内置 provider 都接受相同的
-  `ToolDefinition`，但 extra-body 定制（如 OpenAI 的
-  `parallel_tool_calls=False`）不会带到 Anthropic。请将跨 provider 的
-  行为放在 [`transform_context`](../guides/middleware/hooks#transform_context)
-  中，而非 `extra_body`。
-- **成本不同** —— 从 Anthropic 故障转移到 OpenAI 会改变每 token 的费用。
-  跟踪是哪个 provider 响应（通过 `on_response` 或
-  `AssistantMessage.provider_id`）并据此计费。
-- **流一致性** —— 封装器通过全新的 `MessageStream` 转发事件，因此
-  消费者无论哪个 provider 响应都能看到相同的 `StreamEvent` 结构。
-  原始的 `start` 事件由内部 provider 原样传递。
-- **流传输中途的错误无法恢复** —— 一旦看到健康的首个事件，封装器即
-  提交到该 provider。如果在长响应传输途中出错，agent 会看到该错误。
-  完整的中途重放需要缓冲 —— 超出本 recipe 范围。
-
-## 另请参见
-
-- [Providers / Anthropic](../guides/providers/anthropic) 和
-  [OpenAI](../guides/providers/openai) —— provider 专属细节。
-- [编写自定义 Provider](../guides/providers/custom) —— 本封装器使用的同一 Protocol。
+- **不同 provider 的工具 schema** — 两个内置 provider 都吃同一套
+  `ToolDefinition`，但厂商私货（如 OpenAI `parallel_tool_calls=False`）
+  带不到 Anthropic。跨 provider 行为放在 `transform_context` middleware，
+  不要塞 `extra_body`。
+- **成本不同** — hop 会改单价。用 `AssistantMessage.provider_id` 记账；
+  `on_failover` 是记录切换的合适位置。
+- **流中途错误不重试** — 看到健康首包就提交该 provider，后半段错误原样转发。
+- **`ContextLengthExceeded` 会跳过装不下的腿** — 已知 `tokens_in` 且下一腿
+  `context_window` 更小时不会打它。标准窗口主模型请配大窗口备援。
+- **Sticky 只作用于本轮，不是长期偏好** — 下一次 `Agent.prompt` 仍从用户选的
+  主模型开始。除非产品层显式持久化，不要把 active index 存下来。
 
 ## 运行示例
 
-仓库中有一份完整可运行的代码，位于
-[`examples/multi_provider_failover.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/multi_provider_failover.py)。
-示例故意使用错误的主 provider key 触发故障转移，再通过备用 provider 正确返回结果。
+仓库里有可运行版本：
 
 ```bash
 git clone https://github.com/cubeplexai/cubepi && cd cubepi
@@ -267,3 +147,12 @@ uv sync
 export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]
 uv run python examples/multi_provider_failover.py
 ```
+
+示例故意给主模型一个坏 key。鉴权默认 fail-closed，所以示例通过
+`trigger_errors` **显式加入** `ProviderAuthFailed`，再由真实备援给出答案。
+
+## 另请参见
+
+- [Providers 总览](../guides/providers/overview) — provider 配置与 `CapabilityDescriptor`。
+- [Providers / Anthropic](../guides/providers/anthropic) 和 [OpenAI](../guides/providers/openai) — 厂商细节。
+- [编写自定义 Provider](../guides/providers/custom) — 内置不够用时。
