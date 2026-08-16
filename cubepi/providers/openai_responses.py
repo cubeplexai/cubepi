@@ -570,15 +570,19 @@ class OpenAIResponsesProvider(BaseProvider):
                     except Exception as _classified:
                         exc = _classified
                 err_text = self._error_message(exc, model)
-                ev, err_fields = typed_error_event(
-                    exc, model=model, error_message=err_text
-                )
+                ev = typed_error_event(exc, model=model, error_message=err_text)
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
+                    error_message=ev.error_message,
+                    error_type=ev.error_type,
+                    error_code=ev.error_code,
+                    status_code=ev.status_code,
+                    retry_after=ev.retry_after,
                     usage=Usage(),
                     timestamp=time.time(),
-                    **err_fields,
+                    provider_id=ev.provider_id or model.provider_id,
+                    model_id=ev.model_id or model.id,
                 )
                 await self._emit(ms, ev, model)
                 ms.set_result(error_msg)

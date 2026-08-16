@@ -262,46 +262,32 @@ def typed_error_event(
     *,
     model: "Model",
     error_message: str,
-) -> tuple[StreamEvent, dict[str, object]]:
-    """Build a typed error ``StreamEvent`` plus AssistantMessage kwargs."""
+) -> StreamEvent:
+    """Build a typed error ``StreamEvent`` from a classified exception."""
 
     from cubepi.errors import annotate_error_event
 
     fields = annotate_error_event(exc, fallback_message=error_message)
-    event = StreamEvent(
+    error_type = fields.get("error_type")
+    error_code = fields.get("error_code")
+    status_code = fields.get("status_code")
+    retry_after = fields.get("retry_after")
+    tokens_in = fields.get("tokens_in")
+    context_window = fields.get("context_window")
+    return StreamEvent(
         type="error",
         error_message=str(fields.get("error_message") or error_message),
-        error_type=fields.get("error_type")
-        if isinstance(fields.get("error_type"), str)
-        else None,
-        error_code=fields.get("error_code")
-        if isinstance(fields.get("error_code"), str)
-        else None,
-        status_code=fields.get("status_code")
-        if isinstance(fields.get("status_code"), int)
-        else None,
-        retry_after=fields.get("retry_after")
-        if isinstance(fields.get("retry_after"), (int, float))
+        error_type=error_type if isinstance(error_type, str) else None,
+        error_code=error_code if isinstance(error_code, str) else None,
+        status_code=status_code if isinstance(status_code, int) else None,
+        retry_after=float(retry_after)
+        if isinstance(retry_after, (int, float))
         else None,
         provider_id=str(fields.get("provider_id") or model.provider_id),
         model_id=str(fields.get("model_id") or model.id),
-        tokens_in=fields.get("tokens_in")
-        if isinstance(fields.get("tokens_in"), int)
-        else None,
-        context_window=fields.get("context_window")
-        if isinstance(fields.get("context_window"), int)
-        else None,
+        tokens_in=tokens_in if isinstance(tokens_in, int) else None,
+        context_window=context_window if isinstance(context_window, int) else None,
     )
-    msg_kwargs: dict[str, object] = {
-        "error_message": event.error_message,
-        "error_type": event.error_type,
-        "error_code": event.error_code,
-        "status_code": event.status_code,
-        "retry_after": event.retry_after,
-        "provider_id": event.provider_id or model.provider_id,
-        "model_id": event.model_id or model.id,
-    }
-    return event, msg_kwargs
 
 
 def format_provider_error(
