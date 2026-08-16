@@ -394,3 +394,105 @@ class TestErrorCodeExtraction:
         with pytest.raises(ProviderBadRequest) as ei:
             classify_and_raise(exc, model=_model())
         assert not isinstance(ei.value, ModelNotFound)
+
+    def test_nested_error_object_and_attr_error(self) -> None:
+        from cubepi.errors import extract_error_code
+
+        nested = _FakeExc("x", status_code=400)
+        nested.error = {"error": {"code": "model_not_available"}}
+        assert extract_error_code(nested) == "model_not_available"
+
+        class _Obj:
+            code = None
+            type = "content_filter"
+            param = None
+
+        attr = _FakeExc("filtered", status_code=400)
+        attr.error = _Obj()
+        assert extract_error_code(attr) == "content_filter"
+
+    def test_type_fallback_and_param_model(self) -> None:
+        from cubepi.errors import extract_error_code
+
+        typ = _FakeExc("x", status_code=400)
+        typ.error = {"type": "invalid_model"}
+        assert extract_error_code(typ) == "invalid_model"
+
+        param = _FakeExc("x", status_code=400)
+        param.error = {"type": "invalid_request_error", "param": "model"}
+        assert extract_error_code(param) == "invalid_request_error"
+
+        other = _FakeExc("x", status_code=400)
+        other.error = {"type": "overloaded_error"}
+        assert extract_error_code(other) == "overloaded_error"
+
+    def test_looks_like_model_not_found_gates(self) -> None:
+        from cubepi.errors import _looks_like_model_not_found
+
+        assert _looks_like_model_not_found(status=500, code="model_not_found", msg="x")
+        assert _looks_like_model_not_found(
+            status=400, code=None, msg="x", param="model"
+        )
+        assert _looks_like_model_not_found(
+            status=404, code="not_found_error", msg="unknown model id"
+        )
+        assert _looks_like_model_not_found(
+            status=400, code=None, msg="invalid model xyz"
+        )
+
+    def test_content_filtered_by_code(self) -> None:
+        from cubepi.errors import _looks_like_content_filtered
+
+        assert _looks_like_content_filtered(code="content_filter", msg="nope")
+
+    def test_classify_string_error_branches(self) -> None:
+        from cubepi.errors import classify_string_error
+
+        assert isinstance(
+            classify_string_error("maximum context length exceeded"),
+            ContextLengthExceeded,
+        )
+        assert isinstance(
+            classify_string_error("slow down", status_code=429), RateLimited
+        )
+        assert isinstance(
+            classify_string_error("nope", status_code=401), ProviderAuthFailed
+        )
+        assert isinstance(
+            classify_string_error("blocked by content_policy"), ContentFiltered
+        )
+        assert isinstance(
+            classify_string_error("unknown model foo", status_code=404), ModelNotFound
+        )
+        assert isinstance(
+            classify_string_error("boom", status_code=503), ProviderUnavailable
+        )
+
+    def test_error_from_stream_fields_context_length(self) -> None:
+        from cubepi.errors import error_from_stream_fields
+
+        err = error_from_stream_fields(
+            error_message="too long",
+            error_type="ContextLengthExceeded",
+            tokens_in=99,
+            context_window=10,
+        )
+        assert isinstance(err, ContextLengthExceeded)
+        assert err.tokens_in == 99
+
+    def test_annotate_error_event_typed_and_raw(self) -> None:
+        from cubepi.errors import annotate_error_event
+
+        rl = RateLimited("wait", retry_after=1.5, provider="p", model="m")
+        fields = annotate_error_event(rl)
+        assert fields["error_type"] == "RateLimited"
+        assert fields["retry_after"] == 1.5
+
+        cle = ContextLengthExceeded("long", tokens_in=10, context_window=8)
+        fields = annotate_error_event(cle)
+        assert fields["tokens_in"] == 10
+
+        raw = RuntimeError("nope")
+        fields = annotate_error_event(raw, fallback_message="x")
+        assert fields["error_message"] == "x"
+        assert fields["error_type"] is None
