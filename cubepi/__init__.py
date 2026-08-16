@@ -43,7 +43,9 @@ from cubepi.providers import (
     synthetic_user_message,
 )
 from cubepi.errors import (
+    ContentFiltered,
     ContextLengthExceeded,
+    ModelNotFound,
     ProviderAuthFailed,
     ProviderBadRequest,
     ProviderError,
@@ -86,6 +88,7 @@ __all__ = [
     "BaseProvider",
     "BoundModel",
     "CapabilityDescriptor",
+    "ContentFiltered",
     "ContextLengthExceeded",
     "DEFAULT_TRIGGER_ERRORS",
     "FallbackBoundModel",
@@ -102,6 +105,7 @@ __all__ = [
     "MessageStream",
     "Middleware",
     "Model",
+    "ModelNotFound",
     "Provider",
     "ProviderAuthFailed",
     "ProviderBadRequest",

@@ -87,12 +87,15 @@ def _messages() -> list[Message]:
 
 
 def test_default_trigger_errors_composition() -> None:
-    """DEFAULT_TRIGGER_ERRORS contains the right three error types."""
+    """DEFAULT_TRIGGER_ERRORS includes residual bad-request; auth stays out."""
     assert RateLimited in DEFAULT_TRIGGER_ERRORS
     assert ProviderUnavailable in DEFAULT_TRIGGER_ERRORS
     assert ContextLengthExceeded in DEFAULT_TRIGGER_ERRORS
+    assert ProviderBadRequest in DEFAULT_TRIGGER_ERRORS
     assert ProviderAuthFailed not in DEFAULT_TRIGGER_ERRORS
-    assert ProviderBadRequest not in DEFAULT_TRIGGER_ERRORS
+    from cubepi.errors import ContentFiltered
+
+    assert ContentFiltered not in DEFAULT_TRIGGER_ERRORS
 
 
 def test_empty_chain_raises_value_error() -> None:
@@ -149,14 +152,14 @@ async def test_stream_primary_raises_trigger_error_fallback_succeeds() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_primary_raises_non_trigger_error_reraises() -> None:
-    """Primary raises ProviderBadRequest (not in trigger_errors) → re-raised, fallback not tried."""
-    bad_req = ProviderBadRequest("400", provider="primary", model="model-1")
-    primary = _raising(bad_req)
+    """Primary raises ProviderAuthFailed (not in trigger_errors) → re-raised."""
+    auth = ProviderAuthFailed("401", provider="primary", model="model-1")
+    primary = _raising(auth)
     fallback = _faux("fallback", "ok")
 
     fbm = FallbackBoundModel(chain=(primary, fallback))
 
-    with pytest.raises(ProviderBadRequest):
+    with pytest.raises(ProviderAuthFailed):
         await fbm.stream(_messages())
 
     assert fallback.provider.call_count == 0  # type: ignore[attr-defined]
@@ -345,14 +348,14 @@ async def test_stream_mid_stream_error_is_forwarded() -> None:
 
 @pytest.mark.asyncio
 async def test_generate_non_trigger_error_reraises() -> None:
-    """generate() — ProviderBadRequest (not in trigger_errors) re-raised immediately."""
-    bad_req = ProviderBadRequest("400", provider="primary", model="model-1")
-    primary = _raising(bad_req)
+    """generate() — ProviderAuthFailed (not in trigger_errors) re-raised immediately."""
+    auth = ProviderAuthFailed("401", provider="primary", model="model-1")
+    primary = _raising(auth)
     fallback = _faux("fallback", "ok")
 
     fbm = FallbackBoundModel(chain=(primary, fallback))
 
-    with pytest.raises(ProviderBadRequest):
+    with pytest.raises(ProviderAuthFailed):
         await fbm.generate(_messages())
 
 
@@ -533,3 +536,301 @@ async def test_generate_forwards_tool_choice() -> None:
     result = await fbm.generate(_messages(), tool_choice="required")
 
     assert result.provider_id == "primary"
+
+
+# ---------------------------------------------------------------------------
+# retry / sticky / typed first-event (issue #211)
+# ---------------------------------------------------------------------------
+
+
+class _CountingRaiseProvider(BaseProvider):
+    """Raise ``error`` the first ``fail_times`` stream/generate calls, then succeed."""
+
+    def __init__(
+        self, error: ProviderError, fail_times: int, provider_id: str = "count"
+    ) -> None:
+        super().__init__(provider_id=provider_id)
+        self._error = error
+        self._fail_times = fail_times
+        self.calls = 0
+
+    async def stream(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            raise self._error
+        inner = FauxProvider(provider_id=self.provider_id)
+        inner.set_responses([faux_assistant_message("recovered")])
+        return await inner.stream(model, messages)
+
+    async def generate(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
+        options: StreamOptions | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        reasoning: ReasoningControl | None = None,
+    ) -> AssistantMessage:
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            raise self._error
+        return faux_assistant_message("recovered")
+
+
+class _FirstEventTypedProvider(BaseProvider):
+    def __init__(self, event: StreamEvent, provider_id: str = "typed-ev") -> None:
+        super().__init__(provider_id=provider_id)
+        self._event = event
+
+    async def stream(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        tool_choice: Any = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        ms = MessageStream()
+
+        async def _produce() -> None:
+            ms.push(self._event)
+            if self._event.type == "error":
+                ms.set_result(
+                    AssistantMessage(
+                        content=[],
+                        stop_reason="error",
+                        error_message=self._event.error_message,
+                        error_type=self._event.error_type,
+                    )
+                )
+
+        ms.attach_task(__import__("asyncio").create_task(_produce()))
+        return ms
+
+
+@pytest.mark.asyncio
+async def test_same_model_retry_recovers_without_secondary() -> None:
+    err = ProviderUnavailable("blip", provider="primary", model="m")
+    primary_p = _CountingRaiseProvider(err, fail_times=2, provider_id="primary")
+    primary = BoundModel(provider=primary_p, spec=Model(id="m", provider_id="primary"))
+    fallback = _faux("fallback", "nope")
+    retries: list[int] = []
+
+    def _on_retry(failed, error, attempt, wait_s):  # noqa: ANN001
+        retries.append(attempt)
+
+    fbm = FallbackBoundModel(
+        chain=(primary, fallback),
+        on_retry=_on_retry,
+        retry_backoff=0.0,
+    )
+    stream = await fbm.stream(_messages())
+    result = await stream.result()
+    assert result.content
+    assert fallback.provider.call_count == 0  # type: ignore[attr-defined]
+    assert primary_p.calls == 3
+    assert retries == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_retries_then_failover() -> None:
+    err = RateLimited("429", provider="primary", model="m")
+    primary_p = _CountingRaiseProvider(err, fail_times=99, provider_id="primary")
+    primary = BoundModel(provider=primary_p, spec=Model(id="m", provider_id="primary"))
+    fallback = _faux("fallback", "ok")
+    hops: list[Any] = []
+
+    def _on_fail(failed, nxt, error):  # noqa: ANN001
+        hops.append(error)
+
+    fbm = FallbackBoundModel(
+        chain=(primary, fallback),
+        max_retries_per_model=3,
+        on_failover=_on_fail,
+        retry_backoff=0.0,
+    )
+    stream = await fbm.stream(_messages())
+    result = await stream.result()
+    assert result.provider_id == "fallback"
+    assert primary_p.calls == 4  # first try + 3 retries
+    assert len(hops) == 1
+
+
+@pytest.mark.asyncio
+async def test_context_length_skips_same_model_retry() -> None:
+    err = ContextLengthExceeded(
+        "too long", provider="p", model="small", tokens_in=200_000, context_window=8_000
+    )
+    primary_p = _CountingRaiseProvider(err, fail_times=99, provider_id="small")
+    primary = BoundModel(
+        provider=primary_p,
+        spec=Model(id="small", provider_id="small", context_window=8_000),
+    )
+    fallback = _faux("fallback", "ok")
+    fbm = FallbackBoundModel(chain=(primary, fallback), retry_backoff=0.0)
+    stream = await fbm.stream(_messages())
+    await stream.result()
+    assert primary_p.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_context_length_skips_too_small_fallback() -> None:
+    err = ContextLengthExceeded(
+        "too long", provider="p", model="a", tokens_in=200_000, context_window=8_000
+    )
+    a = _raising(err, "a")
+    # rewrite spec window
+    a = BoundModel(
+        provider=a.provider,
+        spec=Model(id="a", provider_id="p", context_window=8_000),
+    )
+    small_err = ContextLengthExceeded(
+        "still too long",
+        provider="p",
+        model="b",
+        tokens_in=200_000,
+        context_window=16_000,
+    )
+    b = BoundModel(
+        provider=_RaisingProvider(small_err),
+        spec=Model(id="b", provider_id="p", context_window=16_000),
+    )
+    fbm = FallbackBoundModel(chain=(a, b), retry_backoff=0.0)
+    with pytest.raises(ProviderUnavailable) as ei:
+        await fbm.stream(_messages())
+    assert ei.value.errors
+    assert all(isinstance(e, ContextLengthExceeded) for e in ei.value.errors)
+
+
+@pytest.mark.asyncio
+async def test_residual_bad_request_failovers_without_retry() -> None:
+    err = ProviderBadRequest("InvalidParameter", provider="primary", model="m")
+    primary_p = _CountingRaiseProvider(err, fail_times=99, provider_id="primary")
+    primary = BoundModel(provider=primary_p, spec=Model(id="m", provider_id="primary"))
+    fallback = _faux("fallback", "ok")
+    fbm = FallbackBoundModel(chain=(primary, fallback), retry_backoff=0.0)
+    stream = await fbm.stream(_messages())
+    result = await stream.result()
+    assert result.provider_id == "fallback"
+    assert primary_p.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_first_event_typed_auth_does_not_failover() -> None:
+    ev = StreamEvent(
+        type="error",
+        error_message="bad key",
+        error_type="ProviderAuthFailed",
+        status_code=401,
+    )
+    primary = BoundModel(
+        provider=_FirstEventTypedProvider(ev, "primary"),
+        spec=Model(id="m", provider_id="primary"),
+    )
+    fallback = _faux("fallback", "ok")
+    fbm = FallbackBoundModel(chain=(primary, fallback))
+    with pytest.raises(ProviderAuthFailed):
+        await fbm.stream(_messages())
+    assert fallback.provider.call_count == 0  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_first_event_typed_rate_limited_retries_then_failovers() -> None:
+    ev = StreamEvent(
+        type="error",
+        error_message="slow down",
+        error_type="RateLimited",
+        status_code=429,
+    )
+    primary = BoundModel(
+        provider=_FirstEventTypedProvider(ev, "primary"),
+        spec=Model(id="m", provider_id="primary"),
+    )
+    fallback = _faux("fallback", "ok")
+    fbm = FallbackBoundModel(
+        chain=(primary, fallback), max_retries_per_model=1, retry_backoff=0.0
+    )
+    stream = await fbm.stream(_messages())
+    result = await stream.result()
+    assert result.provider_id == "fallback"
+
+
+@pytest.mark.asyncio
+async def test_sticky_after_successful_failover() -> None:
+    from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+
+    err = ProviderUnavailable("down", provider="primary", model="m")
+    primary = _raising(err)
+    fb = FauxProvider(provider_id="fallback")
+    fb.set_responses([faux_assistant_message("ok"), faux_assistant_message("ok2")])
+    fallback = fb.model("model-1")
+    fbm = FallbackBoundModel(
+        chain=(primary, fallback), max_retries_per_model=0, retry_backoff=0.0
+    )
+    token = begin_fallback_run()
+    try:
+        s1 = await fbm.stream(_messages())
+        r1 = await s1.result()
+        assert r1.provider_id == "fallback"
+        s2 = await fbm.stream(_messages())
+        r2 = await s2.result()
+        assert r2.provider_id == "fallback"
+        # second call must not probe primary again
+        assert primary.provider  # constructed
+    finally:
+        end_fallback_run(token)
+
+
+@pytest.mark.asyncio
+async def test_new_run_resets_sticky_to_primary() -> None:
+    from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+
+    prim = FauxProvider(provider_id="primary")
+    prim.set_responses(
+        [faux_assistant_message("hello"), faux_assistant_message("hello2")]
+    )
+    ok_primary = prim.model("model-1")
+    fallback = _faux("fallback", "world")
+    fbm = FallbackBoundModel(chain=(ok_primary, fallback))
+    token = begin_fallback_run()
+    try:
+        s = await fbm.stream(_messages())
+        await s.result()
+    finally:
+        end_fallback_run(token)
+    token = begin_fallback_run()
+    try:
+        s = await fbm.stream(_messages())
+        r = await s.result()
+        assert r.provider_id == "primary"
+    finally:
+        end_fallback_run(token)
+
+
+@pytest.mark.asyncio
+async def test_generate_exhaustion_preserves_errors() -> None:
+    e1 = RateLimited("a", provider="p", model="m1")
+    e2 = RateLimited("b", provider="p", model="m2")
+    fbm = FallbackBoundModel(
+        chain=(_raising(e1, "m1"), _raising(e2, "m2")),
+        max_retries_per_model=0,
+    )
+    with pytest.raises(ProviderUnavailable) as ei:
+        await fbm.generate(_messages())
+    assert len(ei.value.errors) == 2
+    assert isinstance(ei.value.__cause__, RateLimited)

@@ -764,6 +764,15 @@ class Agent(Generic[TMessage]):
         )
 
     async def _run_prompt(self, messages: list[Message]) -> None:
+        from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+
+        token = begin_fallback_run()
+        try:
+            await self._run_prompt_body(messages)
+        finally:
+            end_fallback_run(token)
+
+    async def _run_prompt_body(self, messages: list[Message]) -> None:
         sink = self._outcome_sink()
         await self._run_with_lifecycle(
             lambda signal: run_agent_loop(
@@ -789,6 +798,15 @@ class Agent(Generic[TMessage]):
         )
 
     async def _run_continuation(self) -> None:
+        from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+
+        token = begin_fallback_run()
+        try:
+            await self._run_continuation_body()
+        finally:
+            end_fallback_run(token)
+
+    async def _run_continuation_body(self) -> None:
         sink = self._outcome_sink()
         await self._run_with_lifecycle(
             lambda signal: run_agent_loop_continue(
@@ -1083,6 +1101,15 @@ class Agent(Generic[TMessage]):
             await self._process_event(AgentAbortedEvent(reason=reason))
 
     async def _run_hitl_resume(self) -> None:
+        from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+
+        token = begin_fallback_run()
+        try:
+            await self._run_hitl_resume_body()
+        finally:
+            end_fallback_run(token)
+
+    async def _run_hitl_resume_body(self) -> None:
         sink = self._outcome_sink()
         await self._run_with_lifecycle(
             lambda signal: run_agent_loop_resume(

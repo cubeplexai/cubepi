@@ -117,9 +117,12 @@ really responded.
 - **Mid-stream errors aren't retried** — Once a healthy first event arrives,
   `FallbackBoundModel` commits to that provider. Errors during the rest of
   the stream are forwarded to the agent as-is.
-- **`ContextLengthExceeded` is only useful if the fallback is larger** — If
-  both providers have the same context window the failover will fail the same
-  way. Consider pairing a standard-window primary with a large-context fallback.
+- **`ContextLengthExceeded` skips legs that cannot fit** — if `tokens_in` is
+  known and the next model's `context_window` is smaller, that leg is not
+  called. Pair a standard-window primary with a large-context fallback.
+- **Sticky is per run, not a long-term preference** — the next
+  `Agent.prompt` starts at the user-selected primary again. Do not persist
+  the active index unless the product layer opts in.
 
 ## Run the example
 

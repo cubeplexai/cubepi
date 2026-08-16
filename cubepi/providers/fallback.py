@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import logging
 import time
@@ -8,10 +9,13 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from cubepi.errors import (
+    ContentFiltered,
     ContextLengthExceeded,
+    ProviderBadRequest,
     ProviderError,
     ProviderUnavailable,
     RateLimited,
+    error_from_stream_fields,
 )
 from cubepi.providers.base import (
     AssistantMessage,
@@ -29,51 +33,165 @@ from cubepi.providers.base import (
     chain_providers,  # re-exported for back-compat; canonical home is base.py
 )
 
+
 _log = logging.getLogger("cubepi.providers.fallback")
 
 
-DEFAULT_TRIGGER_ERRORS: frozenset[type[ProviderError]] = frozenset(
-    {RateLimited, ProviderUnavailable, ContextLengthExceeded}
+DEFAULT_RETRY_ERRORS: frozenset[type[ProviderError]] = frozenset(
+    {RateLimited, ProviderUnavailable}
 )
+
+DEFAULT_TRIGGER_ERRORS: frozenset[type[ProviderError]] = frozenset(
+    {
+        RateLimited,
+        ProviderUnavailable,
+        ContextLengthExceeded,
+        ProviderBadRequest,
+    }
+)
+
+# ContentFiltered / ProviderAuthFailed stay fail-closed unless the caller
+# opts in. ModelNotFound inherits ProviderBadRequest so it is included.
+
+
+_FallbackOnFailover = Callable[
+    [BoundModel, BoundModel | None, BaseException | str], Awaitable[None] | None
+]
+_FallbackOnRetry = Callable[
+    [BoundModel, BaseException, int, float], Awaitable[None] | None
+]
+
+
+class _FallbackRunState:
+    """Per-task sticky index. Isolated across concurrent agent runs."""
+
+    __slots__ = ("active_index",)
+
+    def __init__(self) -> None:
+        self.active_index = 0
+
+
+_run_state: contextvars.ContextVar[_FallbackRunState | None] = contextvars.ContextVar(
+    "cubepi_fallback_run_state", default=None
+)
+
+
+def begin_fallback_run() -> contextvars.Token[_FallbackRunState | None]:
+    """Reset sticky state for a new agent run / user turn. Returns a reset token."""
+
+    return _run_state.set(_FallbackRunState())
+
+
+def end_fallback_run(token: contextvars.Token[_FallbackRunState | None]) -> None:
+    _run_state.reset(token)
+
+
+def reset_active() -> None:
+    """Point the current run back at ``chain[0]`` (no-op if no run state)."""
+
+    state = _run_state.get()
+    if state is not None:
+        state.active_index = 0
+
+
+def _current_state() -> _FallbackRunState | None:
+    return _run_state.get()
+
+
+def _is_trigger(err: BaseException, trigger: tuple[type[ProviderError], ...]) -> bool:
+    # ContentFiltered is a ProviderBadRequest subclass but stays fail-closed
+    # unless the caller explicitly lists it in trigger_errors.
+    if isinstance(err, ContentFiltered):
+        return ContentFiltered in trigger
+    return isinstance(err, trigger)
+
+
+def _is_retryable(err: BaseException, retry: tuple[type[ProviderError], ...]) -> bool:
+    return isinstance(err, retry)
+
+
+def _context_too_small(err: BaseException, bound: BoundModel) -> bool:
+    if not isinstance(err, ContextLengthExceeded):
+        return False
+    need = err.tokens_in
+    window = bound.spec.context_window or None
+    if need is None or not window:
+        return False
+    return int(window) < int(need)
+
+
+def _typed_from_event(event: StreamEvent, bound: BoundModel) -> ProviderError:
+    return error_from_stream_fields(
+        error_message=event.error_message,
+        error_type=event.error_type,
+        error_code=event.error_code,
+        status_code=event.status_code,
+        retry_after=event.retry_after,
+        provider_id=event.provider_id or bound.spec.provider_id,
+        model_id=event.model_id or bound.spec.id,
+        tokens_in=event.tokens_in,
+        context_window=event.context_window,
+    )
+
+
+def _typed_from_message(msg: AssistantMessage, bound: BoundModel) -> ProviderError:
+    return error_from_stream_fields(
+        error_message=msg.error_message,
+        error_type=msg.error_type,
+        error_code=msg.error_code,
+        status_code=msg.status_code,
+        retry_after=msg.retry_after,
+        provider_id=msg.provider_id or bound.spec.provider_id,
+        model_id=msg.model_id or bound.spec.id,
+    )
+
+
+@dataclass(frozen=True)
+class FailoverAttempt:
+    model_id: str
+    provider_id: str
+    error: BaseException
+    duration_ms: float
+    attempt: int
+    phase: str  # "retry" | "failover"
 
 
 @dataclass(frozen=True)
 class FallbackBoundModel:
-    """Ordered chain of BoundModels — tries each in turn on retriable errors.
+    """Ordered chain of BoundModels — retry the active leg, then hop.
 
-    chain[0] is the primary model. On a trigger_errors exception or a first-event
-    error from stream(), the next model in the chain is tried transparently.
-    For generate(), an error AssistantMessage (stop_reason="error") also triggers
-    failover. Mid-stream errors (after the first non-error event) are forwarded
-    as-is.
+    chain[0] is the user-selected primary. Transient errors
+    (``DEFAULT_RETRY_ERRORS``) are retried on the same model before the next
+    chain entry is tried. Residual ``ProviderBadRequest`` / ``ModelNotFound``
+    hop without same-model retry. Mid-stream errors (after the first
+    non-error event) are forwarded as-is.
+
+    Sticky active leg: after a successful response from chain[i], later
+    ``stream`` / ``generate`` calls in the same agent run (or same task, when
+    used standalone) start at *i*. A new ``Agent.prompt`` resets to chain[0]
+    via :func:`begin_fallback_run`.
 
     provider and spec proxy chain[0] so tracing/billing code that reads
     agent._model.provider / agent._model.spec continues to work unchanged.
-
-    Tracer / Meter coverage: Recorder.attach() and Meter.attach() detect
-    FallbackBoundModel and subscribe to every unique BaseProvider in the
-    chain (via chain_providers() below), so post-failover chat spans and
-    provider metrics land in the trace / metric stream like primary-leg
-    calls do.
     """
 
     chain: tuple[BoundModel, ...]
     trigger_errors: frozenset[type[ProviderError]] = DEFAULT_TRIGGER_ERRORS
-    on_failover: (
-        Callable[
-            [BoundModel, BoundModel | None, BaseException | str], Awaitable[None] | None
-        ]
-        | None
-    ) = None
+    retry_errors: frozenset[type[ProviderError]] = DEFAULT_RETRY_ERRORS
+    max_retries_per_model: int = 3
+    max_retry_after: float = 5.0
+    retry_backoff: float = 0.0
+    sticky_within_run: bool = True
+    on_failover: _FallbackOnFailover | None = None
+    on_retry: _FallbackOnRetry | None = None
 
     def __post_init__(self) -> None:
-        # An empty chain is a configuration mistake: provider/spec proxy,
-        # stream(), and generate() would all IndexError or silently exhaust
-        # without ever attempting a call. Fail fast at construction time.
         if not self.chain:
             raise ValueError(
                 "FallbackBoundModel.chain must contain at least one BoundModel"
             )
+        if self.max_retries_per_model < 0:
+            raise ValueError("max_retries_per_model must be >= 0")
 
     @property
     def provider(self) -> Provider:
@@ -83,7 +201,12 @@ class FallbackBoundModel:
     def spec(self) -> Model:
         return self.chain[0].spec
 
-    async def _notify(
+    def reset_active(self) -> None:
+        """Reset the current-run sticky pointer to ``chain[0]``."""
+
+        reset_active()
+
+    async def _notify_failover(
         self,
         failed: BoundModel,
         next_model: BoundModel | None,
@@ -116,6 +239,92 @@ class FallbackBoundModel:
                     cb_exc,
                 )
 
+    async def _notify_retry(
+        self,
+        failed: BoundModel,
+        error: BaseException,
+        attempt: int,
+        wait_s: float,
+    ) -> None:
+        _log.info(
+            "cubepi.providers.fallback: same-model retry  model=%s/%s  "
+            "attempt=%s/%s  wait=%.2fs  reason=%s",
+            failed.spec.provider_id,
+            failed.spec.id,
+            attempt,
+            self.max_retries_per_model,
+            wait_s,
+            error,
+        )
+        if self.on_retry is not None:
+            try:
+                result = self.on_retry(failed, error, attempt, wait_s)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as cb_exc:  # noqa: BLE001
+                _log.warning(
+                    "cubepi.providers.fallback: on_retry callback raised; swallowed: %s",
+                    cb_exc,
+                )
+
+    def _wait_s(self, err: BaseException, retry_i: int) -> float:
+        wait = self.retry_backoff * (2 ** max(0, retry_i - 1))
+        if isinstance(err, RateLimited) and err.retry_after is not None:
+            wait = max(wait, float(err.retry_after))
+        return min(wait, self.max_retry_after)
+
+    def _start_index(self) -> int:
+        if not self.sticky_within_run:
+            return 0
+        state = _current_state()
+        if state is None:
+            return 0
+        idx = state.active_index
+        if idx < 0 or idx >= len(self.chain):
+            return 0
+        return idx
+
+    def _stick(self, index: int) -> None:
+        if not self.sticky_within_run:
+            return
+        state = _current_state()
+        if state is not None:
+            state.active_index = index
+
+    def _exhaust(self, failures: list[FailoverAttempt]) -> ProviderUnavailable:
+        last = failures[-1].error if failures else "no providers in chain"
+        last_typed = next(
+            (f.error for f in reversed(failures) if isinstance(f.error, ProviderError)),
+            None,
+        )
+        exc = ProviderUnavailable(
+            f"all providers exhausted; last error: {last!r}",
+            errors=[f.error for f in failures],
+        )
+        if last_typed is not None:
+            exc.__cause__ = last_typed
+        return exc
+
+    def _record(
+        self,
+        failures: list[FailoverAttempt],
+        bound: BoundModel,
+        err: BaseException,
+        duration_ms: float,
+        attempt: int,
+        phase: str,
+    ) -> None:
+        failures.append(
+            FailoverAttempt(
+                model_id=bound.spec.id,
+                provider_id=bound.spec.provider_id,
+                error=err,
+                duration_ms=duration_ms,
+                attempt=attempt,
+                phase=phase,
+            )
+        )
+
     async def stream(
         self,
         messages: list[Message],
@@ -125,72 +334,98 @@ class FallbackBoundModel:
         tool_choice: ToolChoice | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream:
-        last_error: BaseException | str = "no providers in chain"
         trigger = tuple(self.trigger_errors)
+        retry = tuple(self.retry_errors)
+        failures: list[FailoverAttempt] = []
+        start = self._start_index()
 
-        for attempt, bound in enumerate(self.chain, start=1):
-            next_bound = self.chain[attempt] if attempt < len(self.chain) else None
+        for index in range(start, len(self.chain)):
+            bound = self.chain[index]
+            next_bound = self.chain[index + 1] if index + 1 < len(self.chain) else None
+            same_retries = 0
 
-            try:
-                inner = await bound.stream(
-                    messages,
-                    system_prompt=system_prompt,
-                    tools=tools,
-                    tool_choice=tool_choice,
-                    options=options,
-                )
-            except trigger as exc:
-                last_error = exc
-                await self._notify(bound, next_bound, exc, attempt)
-                continue
-            except Exception:
-                raise
-
-            iterator = inner.__aiter__()
-            try:
-                first = await iterator.__anext__()
-            except StopAsyncIteration:
-                last_error = "stream ended before producing any events"
-                await self._notify(bound, next_bound, last_error, attempt)
-                continue
-
-            if first.type == "error":
-                last_error = first.error_message or "stream error"
-                await self._notify(bound, next_bound, last_error, attempt)
-                continue
-
-            outer = MessageStream()
-
-            async def _forward(
-                first_ev: StreamEvent = first,
-                src: Any = iterator,
-                src_stream: MessageStream = inner,
-                out: MessageStream = outer,
-            ) -> None:
+            while True:
+                t0 = time.monotonic()
+                err: BaseException | None = None
+                first: StreamEvent | None = None
                 try:
-                    out.push(first_ev)
-                    async for ev in src:
-                        out.push(ev)
-                    out.set_result(await src_stream.result())
-                except BaseException as exc:  # noqa: BLE001
-                    err_msg = AssistantMessage(
-                        content=[],
-                        stop_reason="error",
-                        error_message=str(exc),
-                        usage=Usage(),
-                        timestamp=time.time(),
+                    inner = await bound.stream(
+                        messages,
+                        system_prompt=system_prompt,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        options=options,
                     )
-                    out.push(StreamEvent(type="error", error_message=str(exc)))
-                    out.set_result(err_msg)
-                    if not isinstance(exc, Exception):
-                        raise
+                except Exception as exc:
+                    err = exc
+                else:
+                    iterator = inner.__aiter__()
+                    try:
+                        first = await iterator.__anext__()
+                    except StopAsyncIteration:
+                        err = ProviderUnavailable(
+                            "stream ended before producing any events"
+                        )
+                    else:
+                        if first.type == "error":
+                            err = _typed_from_event(first, bound)
+                        else:
+                            self._stick(index)
+                            outer = MessageStream()
 
-            outer.attach_task(asyncio.create_task(_forward()))
-            return outer
+                            async def _forward(
+                                first_ev: StreamEvent = first,
+                                src: Any = iterator,
+                                src_stream: MessageStream = inner,
+                                out: MessageStream = outer,
+                            ) -> None:
+                                try:
+                                    out.push(first_ev)
+                                    async for ev in src:
+                                        out.push(ev)
+                                    out.set_result(await src_stream.result())
+                                except BaseException as fwd_exc:  # noqa: BLE001
+                                    err_msg = AssistantMessage(
+                                        content=[],
+                                        stop_reason="error",
+                                        error_message=str(fwd_exc),
+                                        usage=Usage(),
+                                        timestamp=time.time(),
+                                    )
+                                    out.push(
+                                        StreamEvent(
+                                            type="error",
+                                            error_message=str(fwd_exc),
+                                        )
+                                    )
+                                    out.set_result(err_msg)
+                                    if not isinstance(fwd_exc, Exception):
+                                        raise
 
-        raise ProviderUnavailable(
-            f"all providers exhausted; last error: {last_error!r}"
-        )
+                            outer.attach_task(asyncio.create_task(_forward()))
+                            return outer
+
+                assert err is not None
+                duration_ms = (time.monotonic() - t0) * 1000
+                hop = await self._decide(
+                    bound=bound,
+                    next_bound=next_bound,
+                    err=err,
+                    duration_ms=duration_ms,
+                    same_retries=same_retries,
+                    failures=failures,
+                    trigger=trigger,
+                    retry=retry,
+                    chain_pos=index + 1,
+                )
+                if hop == "retry":
+                    same_retries += 1
+                    continue
+                if hop == "failover":
+                    break
+                raise err
+
+        raise self._exhaust(failures)
 
     async def generate(
         self,
@@ -204,40 +439,93 @@ class FallbackBoundModel:
         temperature: float | None = None,
         reasoning: ReasoningControl | None = None,
     ) -> AssistantMessage:
-        last_error: BaseException | str = "no providers in chain"
         trigger = tuple(self.trigger_errors)
+        retry = tuple(self.retry_errors)
+        failures: list[FailoverAttempt] = []
+        start = self._start_index()
 
-        for attempt, bound in enumerate(self.chain, start=1):
-            next_bound = self.chain[attempt] if attempt < len(self.chain) else None
+        for index in range(start, len(self.chain)):
+            bound = self.chain[index]
+            next_bound = self.chain[index + 1] if index + 1 < len(self.chain) else None
+            same_retries = 0
 
-            try:
-                result = await bound.generate(
-                    messages,
-                    system_prompt=system_prompt,
-                    tools=tools,
-                    tool_choice=tool_choice,
-                    options=options,
-                    max_output_tokens=max_output_tokens,
-                    temperature=temperature,
-                    reasoning=reasoning,
+            while True:
+                t0 = time.monotonic()
+                err: BaseException | None = None
+                try:
+                    result = await bound.generate(
+                        messages,
+                        system_prompt=system_prompt,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        options=options,
+                        max_output_tokens=max_output_tokens,
+                        temperature=temperature,
+                        reasoning=reasoning,
+                    )
+                except Exception as exc:
+                    err = exc
+                else:
+                    if result.stop_reason == "error":
+                        err = _typed_from_message(result, bound)
+                    else:
+                        self._stick(index)
+                        return result
+
+                assert err is not None
+                duration_ms = (time.monotonic() - t0) * 1000
+                hop = await self._decide(
+                    bound=bound,
+                    next_bound=next_bound,
+                    err=err,
+                    duration_ms=duration_ms,
+                    same_retries=same_retries,
+                    failures=failures,
+                    trigger=trigger,
+                    retry=retry,
+                    chain_pos=index + 1,
                 )
-            except trigger as exc:
-                last_error = exc
-                await self._notify(bound, next_bound, exc, attempt)
-                continue
-            except Exception:
-                raise
+                if hop == "retry":
+                    same_retries += 1
+                    continue
+                if hop == "failover":
+                    break
+                raise err
 
-            if result.stop_reason == "error":
-                last_error = result.error_message or "generate error"
-                await self._notify(bound, next_bound, last_error, attempt)
-                continue
+        raise self._exhaust(failures)
 
-            return result
+    async def _decide(
+        self,
+        *,
+        bound: BoundModel,
+        next_bound: BoundModel | None,
+        err: BaseException,
+        duration_ms: float,
+        same_retries: int,
+        failures: list[FailoverAttempt],
+        trigger: tuple[type[ProviderError], ...],
+        retry: tuple[type[ProviderError], ...],
+        chain_pos: int,
+    ) -> str:
+        if _context_too_small(err, bound):
+            self._record(failures, bound, err, duration_ms, same_retries, "failover")
+            await self._notify_failover(bound, next_bound, err, chain_pos)
+            return "failover"
 
-        raise ProviderUnavailable(
-            f"all providers exhausted; last error: {last_error!r}"
-        )
+        if _is_retryable(err, retry) and same_retries < self.max_retries_per_model:
+            wait_s = self._wait_s(err, same_retries + 1)
+            self._record(failures, bound, err, duration_ms, same_retries + 1, "retry")
+            await self._notify_retry(bound, err, same_retries + 1, wait_s)
+            if wait_s > 0:
+                await asyncio.sleep(wait_s)
+            return "retry"
+
+        if _is_trigger(err, trigger):
+            self._record(failures, bound, err, duration_ms, same_retries, "failover")
+            await self._notify_failover(bound, next_bound, err, chain_pos)
+            return "failover"
+
+        return "raise"
 
 
 # ``chain_providers`` lives in :mod:`cubepi.providers.base` so the tracing /
@@ -245,7 +533,12 @@ class FallbackBoundModel:
 # import above re-exports it under ``cubepi.providers.fallback.chain_providers``
 # for back-compat with existing call sites.
 __all__ = [
+    "DEFAULT_RETRY_ERRORS",
     "DEFAULT_TRIGGER_ERRORS",
+    "FailoverAttempt",
     "FallbackBoundModel",
+    "begin_fallback_run",
+    "end_fallback_run",
+    "reset_active",
     "chain_providers",
 ]
