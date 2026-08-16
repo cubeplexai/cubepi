@@ -905,3 +905,213 @@ async def test_exhaustion_errors_are_one_per_leg() -> None:
     with pytest.raises(ProviderUnavailable) as ei:
         await fbm.generate(_messages())
     assert len(ei.value.errors) == 2
+
+
+@pytest.mark.asyncio
+async def test_generate_skips_too_small_middle_leg() -> None:
+    err = ContextLengthExceeded(
+        "too long", provider="p", model="a", tokens_in=200_000, context_window=8_000
+    )
+    a = BoundModel(
+        provider=_RaisingProvider(err),
+        spec=Model(id="a", provider_id="p", context_window=8_000),
+    )
+    mid_p = _CountingRaiseProvider(
+        ContextLengthExceeded("mid", tokens_in=200_000, context_window=16_000),
+        fail_times=99,
+        provider_id="mid",
+    )
+    b = BoundModel(
+        provider=mid_p, spec=Model(id="b", provider_id="p", context_window=16_000)
+    )
+    big = _faux("big", "ok")
+    big = BoundModel(
+        provider=big.provider,
+        spec=Model(id="c", provider_id="big", context_window=400_000),
+    )
+    fbm = FallbackBoundModel(chain=(a, b, big), retry_backoff=0.0)
+    result = await fbm.generate(_messages())
+    assert mid_p.calls == 0
+    assert result.provider_id == "big"
+
+
+@pytest.mark.asyncio
+async def test_content_filtered_does_not_hop_unless_listed() -> None:
+    from cubepi.errors import ContentFiltered
+
+    err = ContentFiltered("blocked", provider="primary", model="m")
+    primary = _raising(err)
+    fallback = _faux("fallback", "ok")
+    fbm = FallbackBoundModel(chain=(primary, fallback))
+    with pytest.raises(ContentFiltered):
+        await fbm.stream(_messages())
+    assert fallback.provider.call_count == 0  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_content_filtered_hops_when_opted_in() -> None:
+    from cubepi.errors import ContentFiltered
+
+    err = ContentFiltered("blocked", provider="primary", model="m")
+    primary = _raising(err)
+    fallback = _faux("fallback", "ok")
+    fbm = FallbackBoundModel(
+        chain=(primary, fallback),
+        trigger_errors=frozenset({ContentFiltered}),
+    )
+    stream = await fbm.stream(_messages())
+    result = await stream.result()
+    assert result.provider_id == "fallback"
+
+
+@pytest.mark.asyncio
+async def test_reset_active_and_index_helpers() -> None:
+    from cubepi.providers.fallback import (
+        begin_fallback_run,
+        end_fallback_run,
+        get_active_index,
+        reset_active,
+        set_active_index,
+    )
+
+    assert get_active_index() == 0
+    token = begin_fallback_run()
+    try:
+        set_active_index(2)
+        assert get_active_index() == 2
+        reset_active()
+        assert get_active_index() == 0
+        fbm = FallbackBoundModel(chain=(_faux("p", "hi"),))
+        fbm.reset_active()
+        assert get_active_index() == 0
+    finally:
+        end_fallback_run(token)
+
+
+def test_negative_retries_rejected() -> None:
+    with pytest.raises(ValueError, match="max_retries_per_model"):
+        FallbackBoundModel(chain=(_faux("p", "hi"),), max_retries_per_model=-1)
+
+
+@pytest.mark.asyncio
+async def test_on_retry_callback_exception_is_swallowed() -> None:
+    err = ProviderUnavailable("blip", provider="primary", model="m")
+    primary_p = _CountingRaiseProvider(err, fail_times=1, provider_id="primary")
+    primary = BoundModel(provider=primary_p, spec=Model(id="m", provider_id="primary"))
+
+    def _bad(failed, error, attempt, wait_s):  # noqa: ANN001
+        raise RuntimeError("retry hook broken")
+
+    fbm = FallbackBoundModel(
+        chain=(primary,), on_retry=_bad, retry_backoff=0.0, max_retries_per_model=2
+    )
+    stream = await fbm.stream(_messages())
+    result = await stream.result()
+    assert result.content
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_honors_retry_after_cap() -> None:
+    err = RateLimited("429", provider="primary", model="m", retry_after=30.0)
+    primary_p = _CountingRaiseProvider(err, fail_times=1, provider_id="primary")
+    primary = BoundModel(provider=primary_p, spec=Model(id="m", provider_id="primary"))
+    waits: list[float] = []
+
+    def _on_retry(failed, error, attempt, wait_s):  # noqa: ANN001
+        waits.append(wait_s)
+
+    fbm = FallbackBoundModel(
+        chain=(primary,),
+        on_retry=_on_retry,
+        retry_backoff=0.0,
+        max_retry_after=0.0,
+        max_retries_per_model=1,
+    )
+    stream = await fbm.stream(_messages())
+    await stream.result()
+    assert waits == [0.0]
+
+
+def test_sticky_disabled_always_starts_at_zero() -> None:
+    fbm = FallbackBoundModel(chain=(_faux("p", "hi"),), sticky_within_run=False)
+    assert fbm._start_index() == 0
+
+
+@pytest.mark.asyncio
+async def test_async_on_retry_is_awaited() -> None:
+    seen: list[int] = []
+    err = ProviderUnavailable("blip", provider="primary", model="m")
+    primary_p = _CountingRaiseProvider(err, fail_times=1, provider_id="primary")
+    primary = BoundModel(provider=primary_p, spec=Model(id="m", provider_id="primary"))
+
+    async def _cb(failed, error, attempt, wait_s):  # noqa: ANN001
+        seen.append(attempt)
+
+    fbm = FallbackBoundModel(
+        chain=(primary,), on_retry=_cb, retry_backoff=0.0, max_retries_per_model=2
+    )
+    await (await fbm.stream(_messages())).result()
+    assert seen == [1]
+
+
+def test_context_too_small_without_need_or_window() -> None:
+    from cubepi.providers.fallback import _context_too_small
+
+    bound = BoundModel(
+        provider=_RaisingProvider(ProviderUnavailable("x")),
+        spec=Model(id="m", provider_id="p", context_window=0),
+    )
+    assert (
+        _context_too_small(ContextLengthExceeded("long", tokens_in=10), bound) is False
+    )
+    bound2 = BoundModel(
+        provider=bound.provider,
+        spec=Model(id="m", provider_id="p", context_window=8_000),
+    )
+    assert (
+        _context_too_small(ContextLengthExceeded("long", tokens_in=None), bound2)
+        is False
+    )
+
+
+def test_start_index_clamps_out_of_range() -> None:
+    from cubepi.providers.fallback import (
+        begin_fallback_run,
+        end_fallback_run,
+        set_active_index,
+    )
+
+    fbm = FallbackBoundModel(chain=(_faux("p", "hi"),))
+    token = begin_fallback_run()
+    try:
+        set_active_index(99)
+        assert fbm._start_index() == 0
+    finally:
+        end_fallback_run(token)
+
+
+def test_stick_noop_when_disabled() -> None:
+    from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+
+    fbm = FallbackBoundModel(chain=(_faux("p", "hi"),), sticky_within_run=False)
+    token = begin_fallback_run()
+    try:
+        fbm._stick(1)
+        assert fbm._start_index() == 0
+    finally:
+        end_fallback_run(token)
+
+
+@pytest.mark.asyncio
+async def test_retry_sleeps_when_wait_positive() -> None:
+    err = RateLimited("429", provider="primary", model="m", retry_after=0.01)
+    primary_p = _CountingRaiseProvider(err, fail_times=1, provider_id="primary")
+    primary = BoundModel(provider=primary_p, spec=Model(id="m", provider_id="primary"))
+    fbm = FallbackBoundModel(
+        chain=(primary,),
+        retry_backoff=0.0,
+        max_retry_after=0.01,
+        max_retries_per_model=1,
+    )
+    await (await fbm.stream(_messages())).result()
+    assert primary_p.calls == 2
