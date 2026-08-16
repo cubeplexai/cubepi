@@ -171,11 +171,20 @@ _RATE_LIMIT_PATTERNS = (
     re.compile(r"too many requests", re.IGNORECASE),
 )
 
+_MODEL_NOT_FOUND_CODES = frozenset(
+    {
+        "model_not_found",
+        "model_not_available",
+        "invalid_model",
+    }
+)
+
 _MODEL_NOT_FOUND_PATTERNS = (
     re.compile(r"model[_ ]not[_ ]found", re.IGNORECASE),
-    re.compile(r"does not exist", re.IGNORECASE),
     re.compile(r"unknown model", re.IGNORECASE),
     re.compile(r"invalid model", re.IGNORECASE),
+    re.compile(r"model .+ does not exist", re.IGNORECASE),
+    re.compile(r"does not exist.+model", re.IGNORECASE),
 )
 
 _CONTENT_FILTER_PATTERNS = (
@@ -252,16 +261,10 @@ def _first_str(*values: object) -> str | None:
     return None
 
 
-def extract_error_code(exc: BaseException) -> str | None:
-    """Best-effort vendor ``error_code`` from an SDK exception.
-
-    Priority (OpenAI / OpenAI-compatible first, then Anthropic ``type``):
-
-    1. ``error.code`` / nested ``error.error.code`` / ``body.error.code``
-    2. ``error.type`` (Anthropic) / ``type``
-    3. ``param`` only when it identifies the model
-    4. Never the full human message
-    """
+def _vendor_error_parts(
+    exc: BaseException,
+) -> tuple[str | None, str | None, str | None]:
+    """Return ``(code, type, param)`` from a vendor SDK exception."""
 
     body = getattr(exc, "body", None)
     err = getattr(exc, "error", None)
@@ -300,34 +303,57 @@ def extract_error_code(exc: BaseException) -> str | None:
         nested_map.get("param") if nested_map else None,
         body_error.get("param") if body_error else None,
     )
+    return (
+        code.lower() if code else None,
+        typ.lower() if typ else None,
+        param.lower() if param else None,
+    )
 
+
+def extract_error_code(exc: BaseException) -> str | None:
+    """Best-effort vendor ``error_code`` from an SDK exception.
+
+    Priority (OpenAI / OpenAI-compatible first, then Anthropic ``type``):
+
+    1. ``error.code`` / nested ``error.error.code`` / ``body.error.code``
+    2. ``error.type`` (Anthropic) / ``type``
+    3. ``param`` only when it identifies the model
+    4. Never the full human message
+    """
+
+    code, typ, param = _vendor_error_parts(exc)
     if code:
-        return code.lower()
-    if typ and typ.lower() in _SPECIFIC_ERROR_CODES:
-        return typ.lower()
-    if typ in {"not_found_error", "not_found"}:
-        return typ.lower()
+        return code
+    if typ and typ in _SPECIFIC_ERROR_CODES:
+        return typ
     if param == "model" and typ:
-        return typ.lower()
-    if typ and typ.lower() not in {"invalid_request_error", "api_error", "error"}:
-        return typ.lower()
+        return typ
+    if typ and typ not in {
+        "invalid_request_error",
+        "api_error",
+        "error",
+        "not_found_error",
+        "not_found",
+    }:
+        return typ
     return None
 
 
 def _looks_like_model_not_found(
-    *, status: int | None, code: str | None, msg: str
+    *,
+    status: int | None,
+    code: str | None,
+    msg: str,
+    param: str | None = None,
 ) -> bool:
-    if code in {
-        "model_not_found",
-        "model_not_available",
-        "invalid_model",
-        "not_found_error",
-        "not_found",
-    }:
+    if code in _MODEL_NOT_FOUND_CODES:
         return True
-    if status == 404 and any(pat.search(msg) for pat in _MODEL_NOT_FOUND_PATTERNS):
+    if param == "model":
         return True
-    if any(pat.search(msg) for pat in _MODEL_NOT_FOUND_PATTERNS):
+    modelish = any(pat.search(msg) for pat in _MODEL_NOT_FOUND_PATTERNS)
+    if code in {"not_found_error", "not_found"} and modelish:
+        return True
+    if status in {400, 404} and modelish:
         return True
     return False
 
@@ -571,7 +597,9 @@ def classify_and_raise(
     status = _status_of(exc)
     provider = model.provider_id
     model_id = model.id
-    error_code = extract_error_code(exc)
+    error_code, _err_type, err_param = _vendor_error_parts(exc)
+    if error_code is None:
+        error_code = extract_error_code(exc)
 
     tokens_in = _estimate_input_tokens(messages)
     cw_val = getattr(model, "context_window", None)
@@ -633,15 +661,6 @@ def classify_and_raise(
             error_code=error_code,
         ) from exc
 
-    if _looks_like_model_not_found(status=status, code=error_code, msg=msg):
-        raise ModelNotFound(
-            msg,
-            provider=provider,
-            model=model_id,
-            status_code=status,
-            error_code=error_code,
-        ) from exc
-
     if isinstance(exc, (TimeoutError, ConnectionError)):
         raise ProviderUnavailable(
             msg,
@@ -666,6 +685,17 @@ def classify_and_raise(
 
     if status is not None and 500 <= status < 600:
         raise ProviderUnavailable(
+            msg,
+            provider=provider,
+            model=model_id,
+            status_code=status,
+            error_code=error_code,
+        ) from exc
+
+    if _looks_like_model_not_found(
+        status=status, code=error_code, msg=msg, param=err_param
+    ):
+        raise ModelNotFound(
             msg,
             provider=provider,
             model=model_id,

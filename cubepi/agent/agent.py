@@ -1101,12 +1101,19 @@ class Agent(Generic[TMessage]):
             await self._process_event(AgentAbortedEvent(reason=reason))
 
     async def _run_hitl_resume(self) -> None:
-        from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+        from cubepi.providers.fallback import (
+            begin_fallback_run,
+            end_fallback_run,
+            get_active_index,
+            set_active_index,
+        )
 
         token = begin_fallback_run()
+        set_active_index(self._fallback_active_index)
         try:
             await self._run_hitl_resume_body()
         finally:
+            self._fallback_active_index = get_active_index()
             end_fallback_run(token)
 
     async def _run_hitl_resume_body(self) -> None:

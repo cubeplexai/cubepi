@@ -94,6 +94,21 @@ def reset_active() -> None:
         state.active_index = 0
 
 
+def get_active_index() -> int:
+    """Return the current sticky index, or 0 if no run is open."""
+
+    state = _run_state.get()
+    return 0 if state is None else state.active_index
+
+
+def set_active_index(index: int) -> None:
+    """Restore a previously snapshotted sticky index into the current run."""
+
+    state = _run_state.get()
+    if state is not None:
+        state.active_index = max(0, index)
+
+
 def _current_state() -> _FallbackRunState | None:
     return _run_state.get()
 
@@ -143,7 +158,22 @@ def _typed_from_message(msg: AssistantMessage, bound: BoundModel) -> ProviderErr
         retry_after=msg.retry_after,
         provider_id=msg.provider_id or bound.spec.provider_id,
         model_id=msg.model_id or bound.spec.id,
+        tokens_in=msg.tokens_in,
+        context_window=msg.context_window,
     )
+
+
+def _window_cannot_fit(bound: BoundModel, tokens_in: int | None) -> bool:
+    window = bound.spec.context_window or None
+    if tokens_in is None or not window:
+        return False
+    return int(window) < int(tokens_in)
+
+
+def _needed_tokens(err: BaseException | None) -> int | None:
+    if isinstance(err, ContextLengthExceeded):
+        return err.tokens_in
+    return None
 
 
 @dataclass(frozen=True)
@@ -297,9 +327,12 @@ class FallbackBoundModel:
             (f.error for f in reversed(failures) if isinstance(f.error, ProviderError)),
             None,
         )
+        by_leg: dict[tuple[str, str], BaseException] = {}
+        for item in failures:
+            by_leg[(item.provider_id, item.model_id)] = item.error
         exc = ProviderUnavailable(
             f"all providers exhausted; last error: {last!r}",
-            errors=[f.error for f in failures],
+            errors=list(by_leg.values()),
         )
         if last_typed is not None:
             exc.__cause__ = last_typed
@@ -338,11 +371,24 @@ class FallbackBoundModel:
         retry = tuple(self.retry_errors)
         failures: list[FailoverAttempt] = []
         start = self._start_index()
+        needed: int | None = None
 
         for index in range(start, len(self.chain)):
             bound = self.chain[index]
             next_bound = self.chain[index + 1] if index + 1 < len(self.chain) else None
             same_retries = 0
+
+            if _window_cannot_fit(bound, needed):
+                skip = ContextLengthExceeded(
+                    "skipped: context_window cannot fit prior tokens_in",
+                    provider=bound.spec.provider_id,
+                    model=bound.spec.id,
+                    tokens_in=needed,
+                    context_window=bound.spec.context_window,
+                )
+                self._record(failures, bound, skip, 0.0, 0, "failover")
+                await self._notify_failover(bound, next_bound, skip, index + 1)
+                continue
 
             while True:
                 t0 = time.monotonic()
@@ -406,6 +452,7 @@ class FallbackBoundModel:
                             return outer
 
                 assert err is not None
+                needed = _needed_tokens(err) or needed
                 duration_ms = (time.monotonic() - t0) * 1000
                 hop = await self._decide(
                     bound=bound,
@@ -443,11 +490,24 @@ class FallbackBoundModel:
         retry = tuple(self.retry_errors)
         failures: list[FailoverAttempt] = []
         start = self._start_index()
+        needed: int | None = None
 
         for index in range(start, len(self.chain)):
             bound = self.chain[index]
             next_bound = self.chain[index + 1] if index + 1 < len(self.chain) else None
             same_retries = 0
+
+            if _window_cannot_fit(bound, needed):
+                skip = ContextLengthExceeded(
+                    "skipped: context_window cannot fit prior tokens_in",
+                    provider=bound.spec.provider_id,
+                    model=bound.spec.id,
+                    tokens_in=needed,
+                    context_window=bound.spec.context_window,
+                )
+                self._record(failures, bound, skip, 0.0, 0, "failover")
+                await self._notify_failover(bound, next_bound, skip, index + 1)
+                continue
 
             while True:
                 t0 = time.monotonic()
@@ -473,6 +533,7 @@ class FallbackBoundModel:
                         return result
 
                 assert err is not None
+                needed = _needed_tokens(err) or needed
                 duration_ms = (time.monotonic() - t0) * 1000
                 hop = await self._decide(
                     bound=bound,
