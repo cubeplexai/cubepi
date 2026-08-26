@@ -1157,3 +1157,274 @@ async def test_compressor_preserved_persists_across_compaction_rounds() -> None:
     result = await middleware2.transform_context(messages, ctx=ctx)
     summary_msg = result[0]
     assert "preserved data" in summary_msg.content[0].text
+
+
+async def test_trailing_synthetic_control_does_not_age_current_tool_results() -> None:
+    """A call-local control must not make same-turn tool evidence look old.
+
+    This is the production failure shape: one assistant proposes two tools, both
+    return large results, and an earlier transform appends a small synthetic
+    user control. The ordinary four-message history has no legal boundary at
+    ``min_compact_messages=4``; the control must not manufacture one.
+    """
+    from cubepi.providers.base import (
+        ToolCall,
+        ToolResultMessage,
+        synthetic_user_message,
+    )
+
+    provider = _FakeSummaryProvider(reply="summary must not run")
+    middleware = CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
+        max_tokens_before_compact=55_000,
+        keep_tail_tokens=8_000,
+        max_summary_tokens=1_024,
+        min_compact_messages=4,
+    )
+    report_a = "CURRENT_REPORT_A_SENTINEL|" + "A" * 106_277
+    report_b = "CURRENT_REPORT_B_SENTINEL|" + "B" * 38_796
+    control = synthetic_user_message(
+        '{"candidate_schema_version":1,"required_action":"evaluate current evidence"}',
+        source="freshness_candidate",
+    )
+    messages: list[Message] = [
+        _user("Compare the latest two reports."),
+        AssistantMessage(
+            content=[
+                ToolCall(id="c1", name="report_a", arguments={}),
+                ToolCall(id="c2", name="report_b", arguments={}),
+            ]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="report_a",
+            content=[TextContent(text=report_a)],
+        ),
+        ToolResultMessage(
+            tool_call_id="c2",
+            tool_name="report_b",
+            content=[TextContent(text=report_b)],
+        ),
+        control,
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    assert result == messages
+    assert result[-1] == control
+    assert report_a in result[2].content[0].text
+    assert report_b in result[3].content[0].text
+    assert provider.calls == []
+    assert "compaction" not in ctx.extra
+
+
+async def test_trailing_controls_count_toward_compaction_threshold() -> None:
+    """Controls stay in the size calculation even though they do not set the tail."""
+    from cubepi.middleware.compaction.tokens import real_context_estimate
+    from cubepi.providers.base import synthetic_user_message
+
+    provider = _FakeSummaryProvider(reply="combined view crossed threshold")
+    middleware = CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
+        max_tokens_before_compact=20,
+        keep_tail_tokens=4,
+        max_summary_tokens=128,
+        min_compact_messages=2,
+    )
+    history: list[Message] = [
+        _user("u1"),
+        _assistant("a1"),
+        _user("u2"),
+        _assistant("a2"),
+        _user("u3"),
+        _assistant("a3"),
+    ]
+    control = synthetic_user_message("C" * 100, source="large_call_control")
+    messages = [*history, control]
+    assert real_context_estimate(history) < 20
+    assert real_context_estimate(messages) >= 20
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    assert len(provider.calls) == 1
+    assert "compaction" in ctx.extra
+    assert result[-1] == control
+
+
+async def test_old_prefix_compacts_without_pruning_current_multi_tool_evidence() -> (
+    None
+):
+    """Older turns may compact while a current multi-tool turn stays raw."""
+    from cubepi.providers.base import (
+        ToolCall,
+        ToolResultMessage,
+        synthetic_user_message,
+    )
+
+    provider = _FakeSummaryProvider(reply="old prefix summary")
+    middleware = CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
+        max_tokens_before_compact=8_000,
+        keep_tail_tokens=6_000,
+        max_summary_tokens=512,
+        min_compact_messages=4,
+    )
+    report_a = "RAW_CURRENT_A|" + "A" * 5_000
+    report_b = "RAW_CURRENT_B|" + "B" * 5_000
+    control_a = synthetic_user_message("policy A", source="policy_a")
+    control_b = synthetic_user_message("policy B", source="policy_b")
+    messages: list[Message] = [
+        _user("old user 1 " * 700),
+        _assistant("old answer 1 " * 700),
+        _user("old user 2 " * 700),
+        _assistant("old answer 2 " * 700),
+        _user("current request"),
+        AssistantMessage(
+            content=[
+                ToolCall(id="c1", name="report_a", arguments={}),
+                ToolCall(id="c2", name="report_b", arguments={}),
+            ]
+        ),
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="report_a",
+            content=[TextContent(text=report_a)],
+        ),
+        ToolResultMessage(
+            tool_call_id="c2",
+            tool_name="report_b",
+            content=[TextContent(text=report_b)],
+        ),
+        control_a,
+        control_b,
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    result = await middleware.transform_context(messages, ctx=ctx)
+
+    assert len(provider.calls) == 1
+    assert isinstance(result[0], UserMessage)
+    assert result[0].metadata.get("synthetic_source") == "compaction_summary"
+    assert result[-2:] == [control_a, control_b]
+    result_a = next(
+        message
+        for message in result
+        if isinstance(message, ToolResultMessage) and message.tool_call_id == "c1"
+    )
+    result_b = next(
+        message
+        for message in result
+        if isinstance(message, ToolResultMessage) and message.tool_call_id == "c2"
+    )
+    assert result_a.content[0].text == report_a
+    assert result_b.content[0].text == report_b
+
+
+def test_split_only_detaches_trailing_synthetic_user_messages() -> None:
+    """Plain user tails and synthetic tool results remain ordinary history."""
+    from cubepi.middleware.compaction import (
+        _split_trailing_synthetic_user_controls,
+    )
+    from cubepi.providers.base import (
+        ToolCall,
+        ToolResultMessage,
+        synthetic_user_message,
+    )
+
+    synthetic_result = ToolResultMessage(
+        tool_call_id="c1",
+        tool_name="audit",
+        content=[TextContent(text="synthetic cleanup result")],
+        metadata={"synthetic": True},
+    )
+    tool_history: list[Message] = [
+        _user("q"),
+        AssistantMessage(content=[ToolCall(id="c1", name="audit", arguments={})]),
+        synthetic_result,
+    ]
+
+    history, controls = _split_trailing_synthetic_user_controls(tool_history)
+    assert history == tool_history
+    assert controls == []
+
+    plain_tail = [*tool_history, _user("real user tail")]
+    history, controls = _split_trailing_synthetic_user_controls(plain_tail)
+    assert history == plain_tail
+    assert controls == []
+
+    control_a = synthetic_user_message("a", source="a")
+    control_b = synthetic_user_message("b", source="b")
+    history, controls = _split_trailing_synthetic_user_controls(
+        [*plain_tail, control_a, control_b]
+    )
+    assert history == plain_tail
+    assert controls == [control_a, control_b]
+
+
+async def test_compaction_state_refs_survive_trailing_control_becoming_internal() -> (
+    None
+):
+    """Suffix splitting does not change persisted prefix indices or refs."""
+    from cubepi.providers.base import synthetic_user_message
+
+    provider = _FakeSummaryProvider(reply="stable summary")
+    compacting = CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=provider,
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
+        max_tokens_before_compact=1,
+        keep_tail_tokens=4,
+        max_summary_tokens=128,
+        min_compact_messages=2,
+    )
+    control = synthetic_user_message("continue", source="continuation")
+    messages: list[Message] = [
+        _user("turn 1"),
+        _assistant("reply 1"),
+        _user("turn 2"),
+        _assistant("reply 2"),
+        _user("turn 3"),
+        _assistant("reply 3"),
+        control,
+    ]
+    ctx = AgentContext(system_prompt="", messages=messages, extra={})
+
+    first = await compacting.transform_context(messages, ctx=ctx)
+    boundary = ctx.extra["compaction_until_msg_index"]
+    persisted_state = ctx.extra["compaction"]
+    assert first[-1] == control
+
+    under_threshold = CompactionMiddleware(
+        summary_model=BoundModel(
+            provider=_FakeSummaryProvider(),
+            spec=Model(id="summary-model", provider_id="faux"),
+        ),
+        max_tokens_before_compact=1_000_000,
+        keep_tail_tokens=4,
+        min_compact_messages=2,
+    )
+    repeated = await under_threshold.transform_context(messages, ctx=ctx)
+    assert repeated[0].metadata.get("synthetic_source") == "compaction_summary"
+    assert repeated[-1] == control
+    assert ctx.extra["compaction_until_msg_index"] == boundary
+    assert ctx.extra["compaction"] == persisted_state
+
+    with_response = [*messages, _assistant("response after control")]
+    resumed = await under_threshold.transform_context(with_response, ctx=ctx)
+    assert resumed[0].metadata.get("synthetic_source") == "compaction_summary"
+    assert control in resumed
+    assert resumed[-1] == with_response[-1]
+    assert ctx.extra["compaction_until_msg_index"] == boundary
+    assert ctx.extra["compaction"] == persisted_state
