@@ -73,6 +73,22 @@ a single agent turn, between tool-call iterations — along two dimensions:
   never splits a `tool_use` from its `tool_result`, so the compressed view always
   stays valid for the provider.
 
+### Trailing synthetic controls
+
+Transform middleware earlier in the chain may append synthetic `UserMessage`
+controls for the next model call. CubePi keeps a maximal trailing suffix of those
+controls outside the historical tail/boundary calculation: they cannot make tool
+evidence immediately before them look old and become eligible for pruning.
+
+The controls still count toward the real-token threshold, and CubePi reattaches them
+unchanged after the original or compressed history in exact order. Only trailing
+synthetic **user** messages receive this treatment. Internal synthetic messages remain
+ordinary history, and synthetic `ToolResultMessage`s are never detached from their
+tool calls.
+
+Use `synthetic_user_message(...)` for middleware-generated user-role controls so this
+behavior and the framework-wide synthetic marker stay consistent.
+
 ## Choosing thresholds
 
 Start with conservative values:

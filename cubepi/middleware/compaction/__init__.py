@@ -26,6 +26,8 @@ from cubepi.middleware.compaction.tokens import approx_tokens, real_context_esti
 from cubepi.providers.base import (
     BoundModel,
     Message,
+    UserMessage,
+    is_synthetic_message,
     synthetic_user_message,
 )
 
@@ -74,6 +76,28 @@ def _compressed_view(
         )
         return [summary, *messages[boundary:]]
     return list(messages)
+
+
+def _split_trailing_synthetic_user_controls(
+    messages: list[Message],
+) -> tuple[list[Message], list[UserMessage]]:
+    """Separate call-local user controls from the history they follow.
+
+    Only the maximal trailing suffix is detached. Internal synthetic messages
+    remain ordinary history, and synthetic tool results are never separated
+    from their tool calls.
+    """
+    split_at = len(messages)
+    trailing_controls: list[UserMessage] = []
+    while split_at > 0:
+        message = messages[split_at - 1]
+        if not isinstance(message, UserMessage) or not is_synthetic_message(message):
+            break
+        trailing_controls.append(message)
+        split_at -= 1
+
+    trailing_controls.reverse()
+    return list(messages[:split_at]), trailing_controls
 
 
 def _load_state(value: Any) -> CompactionState | None:
@@ -174,6 +198,7 @@ class CompactionMiddleware(Middleware):
         ctx: AgentContext,
         signal: asyncio.Event | None = None,
     ) -> list[Message]:
+        history, trailing_controls = _split_trailing_synthetic_user_controls(messages)
         state = _load_state(ctx.extra.get("compaction"))
         raw_boundary = ctx.extra.get("compaction_until_msg_index")
         boundary = (
@@ -183,8 +208,8 @@ class CompactionMiddleware(Middleware):
         if state is None and ("compaction" in ctx.extra or boundary > 0):
             boundary = 0
             _clear_state(ctx)
-        if boundary >= len(messages) or not _state_matches_history(
-            messages, state, boundary
+        if boundary >= len(history) or not _state_matches_history(
+            history, state, boundary
         ):
             boundary = 0
             state = None
@@ -200,7 +225,7 @@ class CompactionMiddleware(Middleware):
             effective_tail_tokens = max(1, self._max_tokens_before // 2)
         else:
             effective_tail_tokens = self._keep_tail_tokens
-        tail_start = tail_start_by_tokens(messages, effective_tail_tokens)
+        tail_start = tail_start_by_tokens(history, effective_tail_tokens)
 
         # Threshold check uses the UN-pruned view. Pre-pruning is a pre-pass
         # for the summariser and the post-compaction tail; running it when no
@@ -211,17 +236,23 @@ class CompactionMiddleware(Middleware):
         # turn's real usage) rather than the char heuristic: under prompt
         # caching the true fill is dominated by cache_read tokens that a char
         # estimate has no way to see.
-        unpruned_compressed = _compressed_view(messages, state, boundary)
+        unpruned_compressed = [
+            *_compressed_view(history, state, boundary),
+            *trailing_controls,
+        ]
         tokens_now = real_context_estimate(unpruned_compressed)
         if tokens_now < self._max_tokens_before:
             return unpruned_compressed
 
-        # Find boundary on the ORIGINAL messages. Pruning is deferred until
-        # we're committed to compacting — otherwise a bailout path (no safe
+        # Find the boundary on ordinary history only. Trailing synthetic user
+        # controls are call-local additions: they count toward the send size,
+        # but must not consume the protected tail or manufacture a boundary
+        # after current-turn evidence. Pruning is deferred until we're
+        # committed to compacting — otherwise a bailout path (no safe
         # boundary, or the anti-thrash guard firing) would silently return a
         # pruned view with no state recording the loss.
         new_boundary = safe_boundary(
-            messages,
+            history,
             tail_start=tail_start,
             min_compact=max(self._min_compact, boundary + 1),
         )
@@ -277,10 +308,10 @@ class CompactionMiddleware(Middleware):
         preserved: dict[int, str] = {}
         if self._prune_tool_outputs:
             pruned_messages, preserved = prune_tool_results(
-                messages, tail_start=tail_start, compressor=self._compressor
+                history, tail_start=tail_start, compressor=self._compressor
             )
         else:
-            pruned_messages = list(messages)
+            pruned_messages = list(history)
 
         # Filter preserved messages out of summarizer input — their content
         # is attached verbatim to the summary, so summarizing them would be
@@ -299,7 +330,7 @@ class CompactionMiddleware(Middleware):
                 new_state = await summarize(
                     model=self._summary_model,
                     messages_to_summarize=summarizer_messages,
-                    ref_messages=messages[boundary:new_boundary],
+                    ref_messages=history[boundary:new_boundary],
                     existing=state,
                     max_summary_tokens=self._max_summary_tokens,
                     system_prompt_override=self._summary_prompt,
@@ -318,7 +349,7 @@ class CompactionMiddleware(Middleware):
                 )
                 new_state = build_fallback_summary(
                     summarizer_messages,
-                    ref_messages=messages[boundary:new_boundary],
+                    ref_messages=history[boundary:new_boundary],
                     existing=state,
                 )
                 # The LLM was just attempted — restart the half-open wait.
@@ -326,7 +357,7 @@ class CompactionMiddleware(Middleware):
         else:
             new_state = build_fallback_summary(
                 summarizer_messages,
-                ref_messages=messages[boundary:new_boundary],
+                ref_messages=history[boundary:new_boundary],
                 existing=state,
             )
             ctx.extra["compaction_fallback_runs"] = (
@@ -337,8 +368,8 @@ class CompactionMiddleware(Middleware):
         prior_preserved = state.preserved_tool_results if state else []
         new_preserved = [
             PreservedToolResult(
-                tool_name=messages[idx].tool_name,  # type: ignore[union-attr]
-                tool_call_id=messages[idx].tool_call_id,  # type: ignore[union-attr]
+                tool_name=history[idx].tool_name,  # type: ignore[union-attr]
+                tool_call_id=history[idx].tool_call_id,  # type: ignore[union-attr]
                 text=text,
             )
             for idx, text in preserved.items()
@@ -348,7 +379,10 @@ class CompactionMiddleware(Middleware):
 
         ctx.extra["compaction"] = new_state.model_dump()
         ctx.extra["compaction_until_msg_index"] = new_boundary
-        result = _compressed_view(pruned_messages, new_state, new_boundary)
+        result = [
+            *_compressed_view(pruned_messages, new_state, new_boundary),
+            *trailing_controls,
+        ]
 
         # Anti-thrashing tracking — compare raw history to result tokens.
         tokens_after = approx_tokens(result)
