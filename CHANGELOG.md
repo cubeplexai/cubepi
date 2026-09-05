@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-09-04
+
+### Fixed
+
+- **Compaction no longer lets trailing synthetic user controls hide
+  current-turn evidence.** Transform middleware can append a synthetic
+  `UserMessage` after this turn's tool results. Compaction previously
+  treated that control as the protected tail and a legal boundary, so
+  the results immediately before it became eligible for size-only
+  pruning (`[tool] N chars`) even though they were still in durable
+  history. Trailing synthetic user messages are now split off before
+  tail, boundary, prune, and summarize decisions; they still count
+  toward the send-size threshold and are reattached unchanged (`#217`).
+- **GitHub Actions workflows now declare least-privilege permissions.**
+  CI and publish workflows explicitly request read-only repository
+  contents access.
+
 ## [0.13.5] - 2026-08-16
 
 ### Changed
@@ -782,7 +799,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.5...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.6...HEAD
+[0.13.6]: https://github.com/cubeplexai/cubepi/compare/v0.13.5...v0.13.6
 [0.13.5]: https://github.com/cubeplexai/cubepi/compare/v0.13.4...v0.13.5
 [0.13.4]: https://github.com/cubeplexai/cubepi/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/cubeplexai/cubepi/compare/v0.13.2...v0.13.3
