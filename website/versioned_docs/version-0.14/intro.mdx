@@ -6,8 +6,6 @@ slug: /
 sidebar_position: 0
 ---
 
-import PackageVersion from '@site/src/components/PackageVersion';
-
 # CubeLoop
 
 **CubeLoop** is a Pythonic, async-native agent framework designed for high
@@ -71,15 +69,15 @@ working tool-using agent in under five minutes.
 
 ## Status
 
-You are reading the **Next 🚧** channel — unreleased docs that track
-the `main` branch. APIs documented here can still change before they
-ship in a tagged release.
+You are reading the **CubeLoop 0.14** release docs. This is the latest stable
+documentation set for installing CubeLoop and building against the published
+0.14 API.
 
-The latest released version is v<PackageVersion /> ([switch to it from the
-version picker, top-right](pathname:///)). CubeLoop 0.14 renames CubePi /
-`cubepi` to CubeLoop / `cubeloop`: import path, PyPI project, CLI, docs
-site, OTel vendor namespace, and Postgres/MySQL table names. See the
-[migration guide](./migration/from-cubepi.md).
+CubeLoop 0.14 renames CubePi / `cubepi` to CubeLoop / `cubeloop`: import
+path, PyPI project, CLI, docs site (`https://cubeloop.dev`), OTel vendor
+namespace (`cubeloop.*`), and Postgres/MySQL table names (`cubeloop_*`).
+`pip install cubepi` 0.14+ is a transitional wrapper that depends on
+`cubeloop` and warns. See the [migration guide](./migration/from-cubepi.md).
 
 Source, issues, and discussion live on
 [GitHub](https://github.com/cubeplexai/cubeloop).

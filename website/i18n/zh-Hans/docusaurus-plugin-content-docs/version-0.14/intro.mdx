@@ -6,8 +6,6 @@ slug: /
 sidebar_position: 0
 ---
 
-import PackageVersion from '@site/src/components/PackageVersion';
-
 # CubeLoop
 
 **CubeLoop** 是一个 Pythonic、原生异步的 Agent 框架，为高性能、可读性和
@@ -66,13 +64,14 @@ pip install cubeloop
 
 ## 状态
 
-你正在浏览的是 **Next 🚧** 频道 —— 跟踪 `main` 分支的未发布文档。
-这里描述的 API 在打 tag 发布之前还可能变动。
+你正在浏览的是 **CubeLoop 0.14** 发布文档。这是 CubeLoop 最新的稳定文档集，
+用于安装 CubeLoop 和构建 0.14 发布 API。
 
-最新已发布版本是 v<PackageVersion />（[从右上角版本选择器切换](pathname:///)）。
 CubeLoop 0.14 将 CubePi / `cubepi` 重命名为 CubeLoop / `cubeloop`：导入路径、
-PyPI 项目、CLI、文档站、OTel vendor 命名空间、以及 Postgres/MySQL 表名。
-详见 [迁移指南](./migration/from-cubepi.md)。
+PyPI 项目、CLI、文档站（`https://cubeloop.dev`）、OTel vendor 命名空间
+（`cubeloop.*`）、以及 Postgres/MySQL 表名（`cubeloop_*`）。
+`pip install cubepi` 0.14+ 是依赖 `cubeloop` 并告警的过渡包装。详见
+[迁移指南](./migration/from-cubepi.md)。
 
 源代码、Issue 和讨论都在
 [GitHub](https://github.com/cubeplexai/cubeloop)。
