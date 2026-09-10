@@ -206,7 +206,8 @@ def upgrade():
             op.execute(stmt)
 ```
 
-不要对 v5 数据库跑 v6 的 `CREATE TABLE` helper。详见
+不要对 v5 数据库跑 v6 的 `CREATE TABLE` helper。Host Alembic 的常见坑
+（autogenerate 可能 DROP `cubepi_*`、downgrade 用 DROP 而不是反向 rename）写在
 [从 cubepi 迁移](../../migration/from-cubepi)。
 
 ## 常见陷阱

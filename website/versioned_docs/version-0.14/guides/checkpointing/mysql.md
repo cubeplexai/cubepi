@@ -279,7 +279,9 @@ def upgrade():
             op.execute(stmt)
 ```
 
-Do not run the v6 `CREATE TABLE` helpers against a v5 database. See the
+Do not run the v6 `CREATE TABLE` helpers against a v5 database.
+Host Alembic traps (autogenerate dropping `cubepi_*` tables, downgrade that
+`DROP`s instead of reverse-renaming) are in the
 [migration guide](../../migration/from-cubepi).
 
 ## Common pitfalls

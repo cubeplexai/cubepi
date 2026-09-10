@@ -218,7 +218,10 @@ def upgrade():
 ```
 
 不要对 v5 数据库跑 v6 的 `CREATE TABLE` helper——旧表已经在，只是名字还是 `cubepi_*`。
-详见 [从 cubepi 迁移](../../migration/from-cubepi)。
+
+Host Alembic 的常见坑（历史 `create_message_partitions_op()` 现在发出 cubeloop
+名字、autogenerate 可能 DROP `cubepi_threads`、downgrade 用 DROP 而不是反向
+rename 分区）写在 [从 cubepi 迁移](../../migration/from-cubepi)。
 
 ## 常见坑
 

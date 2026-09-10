@@ -265,7 +265,11 @@ def upgrade():
 
 Do not run the v6 `CREATE TABLE` helpers against a v5 database — they
 would try to create tables that already exist under the old names.
-See the [migration guide](../../migration/from-cubepi).
+
+Host Alembic traps (historical `create_message_partitions_op()` now
+emitting cubeloop names, autogenerate dropping `cubepi_threads`,
+downgrade that `DROP`s instead of reverse-renaming partitions) are
+documented in the [migration guide](../../migration/from-cubepi).
 
 ## Common pitfalls
 

@@ -121,6 +121,11 @@ CubeLoop bumps `EXPECTED_SCHEMA_VERSION` when the schema changes; the
 checkpointer refuses to connect if the row in `cubeloop_schema_version`
 doesn't match. Each bump is one host migration.
 
+Host Alembic traps when moving a pre-0.14 database (historical
+`create_message_partitions_op()` now emitting cubeloop names,
+autogenerate dropping `cubepi_threads`, reverse-rename vs DROP on
+downgrade) are in `website/docs/migration/from-cubepi.md`.
+
 **v1 → v2** (HITL): adds `pending_request JSONB NULL` to `cubepi_threads`.
 
 ```python
