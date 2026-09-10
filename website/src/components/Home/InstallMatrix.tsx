@@ -3,10 +3,10 @@ import { useIsZhHans } from '@site/src/hooks/useIsZhHans';
 import styles from './InstallMatrix.module.css';
 
 const ROWS: { tool: string; cmd: string }[] = [
-  { tool: 'pip',    cmd: 'pip install cubepi' },
-  { tool: 'uv',     cmd: 'uv add cubepi' },
-  { tool: 'poetry', cmd: 'poetry add cubepi' },
-  { tool: 'extras', cmd: 'pip install cubepi[sqlite,postgres,mcp,tracing,tracing-otlp]' },
+  { tool: 'pip',    cmd: 'pip install cubeloop' },
+  { tool: 'uv',     cmd: 'uv add cubeloop' },
+  { tool: 'poetry', cmd: 'poetry add cubeloop' },
+  { tool: 'extras', cmd: 'pip install cubeloop[sqlite,postgres,mcp,tracing,tracing-otlp]' },
 ];
 
 export default function InstallMatrix() {

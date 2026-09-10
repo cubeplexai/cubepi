@@ -5,9 +5,9 @@ attrs on each span layer per the OTel GenAI semconv:
 
 - ``invoke_agent`` (root): gen_ai.input.messages / gen_ai.output.messages
   / gen_ai.system_instructions
-- ``cubepi.turn``: gen_ai.input.messages / gen_ai.output.messages
+- ``cubeloop.turn``: gen_ai.input.messages / gen_ai.output.messages
 - ``chat``: gen_ai.system_instructions / gen_ai.input.messages /
-  gen_ai.tool.definitions / cubepi.llm.raw_request / cubepi.llm.raw_response
+  gen_ai.tool.definitions / cubeloop.llm.raw_request / cubeloop.llm.raw_response
 - ``execute_tool``: gen_ai.tool.call.arguments / gen_ai.tool.call.result
 
 Plus a ``redact`` hook on the Tracer for per-attribute filtering.
@@ -22,11 +22,11 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from pydantic import BaseModel
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import Model, TextContent, ToolCall
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
-from cubepi.tracing import Tracer
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import Model, TextContent, ToolCall
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.tracing import Tracer
 
 
 MODEL = Model(id="faux-1", provider_id="faux")
@@ -95,8 +95,8 @@ class TestContentDisabled:
                 "gen_ai.tool.definitions",
                 "gen_ai.tool.call.arguments",
                 "gen_ai.tool.call.result",
-                "cubepi.llm.raw_request",
-                "cubepi.llm.raw_response",
+                "cubeloop.llm.raw_request",
+                "cubeloop.llm.raw_response",
             ):
                 assert forbidden not in attrs, (
                     f"{span.name} should not carry {forbidden} with record_content=False"
@@ -139,7 +139,7 @@ class TestContentDisabled:
         await agent.wait_for_idle()
         await tracer.shutdown()
 
-        turn = next(span for span in exporter.spans if span.name == "cubepi.turn")
+        turn = next(span for span in exporter.spans if span.name == "cubeloop.turn")
         assert turn.status.status_code.name == "ERROR"
         assert turn.status.description == "model error"
         assert secret not in repr(dict(turn.attributes or {}))
@@ -190,10 +190,10 @@ class TestChatContent:
         attrs = _attrs(chat)
         assert "gen_ai.system_instructions" in attrs
         assert "gen_ai.input.messages" in attrs
-        raw = json.loads(attrs["cubepi.llm.raw_request"])
+        raw = json.loads(attrs["cubeloop.llm.raw_request"])
         assert raw["model"] == MODEL.id
         assert "messages" in raw
-        resp = json.loads(attrs["cubepi.llm.raw_response"])
+        resp = json.loads(attrs["cubeloop.llm.raw_response"])
         assert resp["id"] == "faux-1"
         assert resp["role"] == "assistant"
 
@@ -275,7 +275,7 @@ class TestTurnContent:
         await agent.wait_for_idle()
         await tracer.shutdown()
 
-        turn = next(s for s in exporter.spans if s.name == "cubepi.turn")
+        turn = next(s for s in exporter.spans if s.name == "cubeloop.turn")
         inp = _json_attr(turn, "gen_ai.input.messages")
         assert inp[0]["parts"][0]["content"] == "hi"
         out = _json_attr(turn, "gen_ai.output.messages")
@@ -376,9 +376,9 @@ class TestChatInputForContinuedHistory:
     """
 
     async def test_resume_chat_input_includes_prior_history(self):
-        from cubepi.providers.base import UserMessage as _U
-        from cubepi.providers.base import AssistantMessage as _A
-        from cubepi.providers.base import ToolResultMessage as _TR
+        from cubeloop.providers.base import UserMessage as _U
+        from cubeloop.providers.base import AssistantMessage as _A
+        from cubeloop.providers.base import ToolResultMessage as _TR
 
         agent, provider, exporter, tracer = await _build(record_content=True)
         # Pre-load the agent with conversation history via the
@@ -459,7 +459,7 @@ class TestRedaction:
 
     async def test_redact_can_drop_attribute(self):
         def redact(key: str, value: Any) -> Any:
-            if key == "cubepi.llm.raw_request":
+            if key == "cubeloop.llm.raw_request":
                 return None
             return value
 
@@ -472,7 +472,7 @@ class TestRedaction:
         await tracer.shutdown()
 
         chat = next(s for s in exporter.spans if s.name.startswith("chat "))
-        assert "cubepi.llm.raw_request" not in _attrs(chat)
+        assert "cubeloop.llm.raw_request" not in _attrs(chat)
         assert "gen_ai.input.messages" in _attrs(chat)
 
     async def test_redact_exception_is_swallowed(self):
@@ -494,16 +494,16 @@ class TestRedaction:
 
 class TestContentHelpers:
     def test_messages_to_semconv_handles_all_block_types(self):
-        from cubepi.providers.base import (
+        from cubeloop.providers.base import (
             AssistantMessage,
             ThinkingContent,
         )
-        from cubepi.providers.base import ToolCall as _ToolCall
-        from cubepi.providers.base import (
+        from cubeloop.providers.base import ToolCall as _ToolCall
+        from cubeloop.providers.base import (
             ToolResultMessage,
             UserMessage,
         )
-        from cubepi.tracing.content import messages_to_semconv
+        from cubeloop.tracing.content import messages_to_semconv
 
         msgs = [
             UserMessage(content=[TextContent(text="hi")]),
@@ -543,7 +543,7 @@ class TestContentHelpers:
         }
 
     def test_tool_definitions_anthropic_shape(self):
-        from cubepi.tracing.content import tool_definitions_to_semconv
+        from cubeloop.tracing.content import tool_definitions_to_semconv
 
         payload = {
             "tools": [
@@ -564,7 +564,7 @@ class TestContentHelpers:
         ]
 
     def test_tool_definitions_openai_chat_shape(self):
-        from cubepi.tracing.content import tool_definitions_to_semconv
+        from cubeloop.tracing.content import tool_definitions_to_semconv
 
         payload = {
             "tools": [
@@ -588,7 +588,7 @@ class TestContentHelpers:
         ]
 
     def test_serialize_for_attribute_fallback(self):
-        from cubepi.tracing.content import serialize_for_attribute
+        from cubeloop.tracing.content import serialize_for_attribute
 
         class NotJsonable:
             pass

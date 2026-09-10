@@ -1,6 +1,6 @@
 ---
 title: Prompt Caching
-description: "How CubePi maximises prompt cache hit rates — append-only message storage, automatic cache breakpoints, and how to avoid breaking the cache."
+description: "How CubeLoop maximises prompt cache hit rates — append-only message storage, automatic cache breakpoints, and how to avoid breaking the cache."
 ---
 
 # Prompt Caching
@@ -11,8 +11,8 @@ The savings are significant: Anthropic charges cached tokens at
 **10% of the normal input price**, and cache hits also reduce
 time-to-first-token.
 
-CubePi is designed from the ground up to maximise cache hit rates.
-This guide explains how caching works, why CubePi's architecture
+CubeLoop is designed from the ground up to maximise cache hit rates.
+This guide explains how caching works, why CubeLoop's architecture
 keeps the cache warm, and what you can do (or avoid doing) to
 preserve those hits.
 
@@ -52,7 +52,7 @@ ordering, whitespace, a timestamp field — the resulting byte sequence
 differs from the previous request and **every cache breakpoint from
 that point on misses**.
 
-CubePi's checkpointer is append-only: it only ever adds new messages
+CubeLoop's checkpointer is append-only: it only ever adds new messages
 to the end of the thread. The in-memory `agent.state.messages` list
 grows by appending; it is never rebuilt or reshuffled. This means the
 prefix of every request is guaranteed to be byte-identical to the
@@ -82,7 +82,7 @@ entry will be a hit on turn N+2.
 ### Configuration
 
 ```python
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop.providers.anthropic import AnthropicProvider
 
 # Default: short TTL (5 min), automatic breakpoints
 provider = AnthropicProvider(api_key="…")
@@ -113,13 +113,13 @@ Cache hit rate for a turn:
 `cache_read_tokens / (input_tokens + cache_read_tokens + cache_write_tokens)`.
 
 :::tip
-`input_tokens` in CubePi's `Usage` is the **uncached** portion — tokens that
+`input_tokens` in CubeLoop's `Usage` is the **uncached** portion — tokens that
 were actually processed by the model this turn. The full prompt token count is
 `input_tokens + cache_read_tokens + cache_write_tokens`. On a 100 % cache hit,
 `input_tokens` is 0.
 :::
 
-You can also see these fields in the `cubepi trace` CLI output and in
+You can also see these fields in the `cubeloop trace` CLI output and in
 the OTel spans emitted by `Tracer`. Note that the OTel span attribute
 `gen_ai.usage.input_tokens` follows the GenAI Semantic Convention and reports
 the **inclusive** total (uncached + cached):
@@ -134,14 +134,14 @@ gen_ai.usage.cache_read.input_tokens = 7 980  (cached subset)
 ## OpenAI: automatic caching
 
 OpenAI caches automatically for prompts longer than 1 024 tokens —
-no explicit `cache_control` markers are needed. CubePi surfaces the
+no explicit `cache_control` markers are needed. CubeLoop surfaces the
 hit data through the same `Usage` interface:
 
 ```python
 usage.cache_read_tokens   # maps to prompt_tokens_details.cached_tokens
 ```
 
-There is nothing to configure on the CubePi side. Keep the system
+There is nothing to configure on the CubeLoop side. Keep the system
 prompt and tool definitions stable across turns and OpenAI's cache
 will warm up naturally.
 
@@ -186,8 +186,8 @@ If the default three-breakpoint strategy does not fit your use case,
 implement `CacheMarkerPolicy` and pass it to the provider:
 
 ```python
-from cubepi.providers.anthropic import CacheMarkerPolicy, AnthropicProvider
-from cubepi.providers.base import Message
+from cubeloop.providers.anthropic import CacheMarkerPolicy, AnthropicProvider
+from cubeloop.providers.base import Message
 
 class SystemOnlyPolicy:
     """Cache only the system prompt — useful when tool lists change often."""

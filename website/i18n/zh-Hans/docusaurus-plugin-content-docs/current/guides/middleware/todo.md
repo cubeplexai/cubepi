@@ -14,8 +14,8 @@ description: "使用 TodoListMiddleware 给 agent 添加 write_todos 工具，�
 `TodoListMiddleware` 需要一个 `extra_ref` 可调用对象，它必须返回 `AgentContext.extra` 的实时引用。middleware 和工具都通过这个引用读写状态，从而在 checkpoint 后存活。
 
 ```python
-from cubepi import Agent
-from cubepi.middleware import TodoListMiddleware
+from cubeloop import Agent
+from cubeloop.middleware import TodoListMiddleware
 
 agent_extra: dict = {}
 
@@ -31,9 +31,9 @@ agent = Agent(
 当 agent 使用 checkpointer 时，`extra_ref` 必须指向 `AgentContext.extra` 的同一个对象，这样 todo 状态才能跨会话持久化和恢复：
 
 ```python
-from cubepi import Agent
-from cubepi.checkpointer import PostgresCheckpointer
-from cubepi.middleware import TodoListMiddleware
+from cubeloop import Agent
+from cubeloop.checkpointer import PostgresCheckpointer
+from cubeloop.middleware import TodoListMiddleware
 
 ctx_holder: dict[str, dict] = {}
 

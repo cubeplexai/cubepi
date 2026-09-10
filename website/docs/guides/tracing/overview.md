@@ -1,12 +1,12 @@
 ---
 title: Tracing Overview
-description: "Overview of CubePi's OpenTelemetry-native tracing system — spans, attributes, exporters, and semantic conventions."
+description: "Overview of CubeLoop's OpenTelemetry-native tracing system — spans, attributes, exporters, and semantic conventions."
 sidebar_position: 1
 ---
 
 # Tracing Overview
 
-CubePi emits [OpenTelemetry](https://opentelemetry.io/) spans that follow the
+CubeLoop emits [OpenTelemetry](https://opentelemetry.io/) spans that follow the
 [GenAI Semantic Conventions v1.41](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
 so any OTel-compatible backend (Jaeger, Tempo, Honeycomb, Datadog, AWS X-Ray,
 Azure Monitor, …) can ingest agent runs without custom instrumentation.
@@ -17,14 +17,14 @@ can pivot, query, and join with the rest of your service traces:
 ```
 trace
 └── invoke_agent  14425.8ms  [0x1cd97cdb]         ← one per agent.prompt()
-    ├── cubepi.turn  1283.1ms  [0x5cfda93e]        ← one per LLM round-trip
+    ├── cubeloop.turn  1283.1ms  [0x5cfda93e]        ← one per LLM round-trip
     │   ├── chat deepseek-v4-flash  1208.7ms  tok 6845/68  [0x0d130229]
     │   └── execute_tool subagent  9610.2ms  subagent  [0x38bdd10a]
     │       └── invoke_agent  9601.0ms  [0x8094f99b]   ← subagent run, nested
-    │           └── cubepi.turn  9598.4ms  [0x57c5cfc7]
+    │           └── cubeloop.turn  9598.4ms  [0x57c5cfc7]
     │               ├── chat deepseek-v4-flash  1190.3ms  [0x8205ca6b]
     │               └── execute_tool web_search  6500.2ms  web_search  [0xca4e59fc]
-    └── cubepi.turn  491.9ms  ERROR  [0xce25f242]
+    └── cubeloop.turn  491.9ms  ERROR  [0xce25f242]
         └── chat deepseek-v4-flash  427.2ms  ERROR  [0x0bff68ec]
             └── error: Error code: 400 - ... `tool_use` ids were found without
                 `tool_result` blocks immediately after: call_01_...
@@ -37,15 +37,15 @@ Each layer carries standard `gen_ai.*` attributes — `gen_ai.operation.name`,
 ## What ships out of the box
 
 - **Tracer** — builds an SDK `TracerProvider`, attaches one
-  `BatchSpanProcessor` per exporter, wires the CubePi event stream into spans.
+  `BatchSpanProcessor` per exporter, wires the CubeLoop event stream into spans.
 - **Meter** — sibling for OTel histograms:
   `gen_ai.client.operation.duration`, `gen_ai.client.operation.time_to_first_chunk`,
   `gen_ai.client.token.usage`.
 - **JsonlSpanExporter** — write one JSON line per span to
-  `./cubepi-traces/<date>/<trace_id>.jsonl`. Files are sharded by `trace_id`,
+  `./cubeloop-traces/<date>/<trace_id>.jsonl`. Files are sharded by `trace_id`,
   so one file holds a whole trace — the run plus any nested subagent runs
   (which inherit the trace). Useful for local dev and offline debugging; works
-  with any OTel viewer that reads JSONL, and with the [`cubepi trace`
+  with any OTel viewer that reads JSONL, and with the [`cubeloop trace`
   CLI](./cli).
 - **OTLP** — bring your own exporter via `opentelemetry-exporter-otlp-proto-http`
   (HTTP) or `…-grpc` and hand it to `Tracer(exporters=[…])`.
@@ -60,7 +60,7 @@ Each layer carries standard `gen_ai.*` attributes — `gen_ai.operation.name`,
   who forget `await tracer.shutdown()` still get their spans exported on
   normal exit / Ctrl-C / unhandled exception.
 - **`tracing_context()`** — set per-run tags and metadata
-  (`cubepi.tags = ("beta-arm",)`, `cubepi.metadata.user_id = "u-42"`)
+  (`cubeloop.tags = ("beta-arm",)`, `cubeloop.metadata.user_id = "u-42"`)
   via a contextvar-scoped block. Concurrent agents each see their own
   values.
 - **Middleware-owned providers traced automatically** — middleware that
@@ -69,7 +69,7 @@ Each layer carries standard `gen_ai.*` attributes — `gen_ai.operation.name`,
   `chat` spans land in the same trace as the agent's main call.
   `CompactionMiddleware` uses this to surface its summarizer LLM call as
   a `chat <summary-model>` span nested under
-  `cubepi.compaction.summarize` — see the [compaction
+  `cubeloop.compaction.summarize` — see the [compaction
   guide](../middleware/compaction#tracing).
 
 ## What it costs
@@ -102,7 +102,7 @@ Each layer carries standard `gen_ai.*` attributes — `gen_ai.operation.name`,
 
 - [Getting Started](./getting-started) — install the extra and emit your
   first spans
-- [OTLP & Backends](./otlp) — point CubePi at Jaeger, Tempo, Honeycomb, …
+- [OTLP & Backends](./otlp) — point CubeLoop at Jaeger, Tempo, Honeycomb, …
 - [Content Recording & Redaction](./content-recording) — record prompts and
   responses safely
 - [Metrics](./metrics) — histograms via `Meter`

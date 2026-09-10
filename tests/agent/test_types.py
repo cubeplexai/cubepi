@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-from cubepi.agent.types import (
+from cubeloop.agent.types import (
     AgentContext,
     AgentEndEvent,
     AgentStartEvent,
@@ -17,7 +17,7 @@ from cubepi.agent.types import (
     TurnEndEvent,
     TurnStartEvent,
 )
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     StreamEvent,
     TextContent,

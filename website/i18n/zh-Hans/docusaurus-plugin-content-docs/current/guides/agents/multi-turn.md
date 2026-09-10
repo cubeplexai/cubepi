@@ -1,11 +1,11 @@
 ---
 title: 多轮对话
-description: "使用 CubePi 的有状态 agent 循环和消息历史构建多轮对话 agent。"
+description: "使用 CubeLoop 的有状态 agent 循环和消息历史构建多轮对话 agent。"
 ---
 
 # 多轮对话
 
-在 CubePi 中，一个"轮次"（turn）是：用户输入 → 模型响应（可能包含工具调用）→ 可选的对工具结果的后续模型响应。agent 的 `_messages` 列表在多轮对话中不断增长。本指南介绍如何正确驱动多轮对话流程，以及如何在 agent 处于思考过程中注入输入。
+在 CubeLoop 中，一个"轮次"（turn）是：用户输入 → 模型响应（可能包含工具调用）→ 可选的对工具结果的后续模型响应。agent 的 `_messages` 列表在多轮对话中不断增长。本指南介绍如何正确驱动多轮对话流程，以及如何在 agent 处于思考过程中注入输入。
 
 ## 基本模式
 
@@ -17,7 +17,7 @@ await agent.prompt("What's my name?")
 # → "Your name is Sam."
 ```
 
-历史消息保存在 `agent.state.messages` 中。CubePi 会追加每条用户消息、每条 assistant 消息以及每个工具结果。每次调用时 provider 都会收到完整的消息列表，因此 context window 的大小至关重要（参见下方的[上下文管理](#context-management)）。
+历史消息保存在 `agent.state.messages` 中。CubeLoop 会追加每条用户消息、每条 assistant 消息以及每个工具结果。每次调用时 provider 都会收到完整的消息列表，因此 context window 的大小至关重要（参见下方的[上下文管理](#context-management)）。
 
 ## 运行中修正：`agent.steer()`
 
@@ -74,7 +74,7 @@ async with SQLiteCheckpointer("conv.db") as cp:
 
 ## 上下文管理 {#context-management}
 
-CubePi **不会**代替你截断或摘要上下文。每次轮次都会将完整消息列表发送给模型。几种应对策略：
+CubeLoop **不会**代替你截断或摘要上下文。每次轮次都会将完整消息列表发送给模型。几种应对策略：
 
 - **手动截断** —— 实现一个 [`transform_context`](../middleware/hooks#transform_context) middleware，返回一个滑动窗口。
 - **摘要 pass** —— 定期注入摘要消息，并通过 `transform_context` 丢弃旧消息。
@@ -94,7 +94,7 @@ await agent.wait_for_idle()  # awaits the run-cleanup
 ## 从磁盘恢复状态
 
 ```python
-from cubepi.checkpointer import SQLiteCheckpointer
+from cubeloop.checkpointer import SQLiteCheckpointer
 
 async with SQLiteCheckpointer("conv.db") as cp:
     agent = Agent(

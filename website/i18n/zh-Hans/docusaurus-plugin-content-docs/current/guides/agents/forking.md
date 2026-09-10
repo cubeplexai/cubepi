@@ -5,7 +5,7 @@ description: "在已完成 run 的边界处分叉会话 — 持久化分支、�
 
 # 会话分叉
 
-**分叉**在一个已完成 run 的边界处创建会话分支。CubePi 提供两种方式：
+**分叉**在一个已完成 run 的边界处创建会话分支。CubeLoop 提供两种方式：
 
 - **`Agent.fork(...)`** — *持久化*分叉。将源线程中截止指定 `run_id`
   的消息复制到全新线程，后续可以继续与新线程对话。
@@ -142,8 +142,8 @@ class ForkOnceResult:
 
 ```python
 import uuid
-from cubepi import Agent
-from cubepi.hitl import CheckpointedChannel, ask_user_tool
+from cubeloop import Agent
+from cubeloop.hitl import CheckpointedChannel, ask_user_tool
 
 run_id = uuid.uuid4().hex
 channel = CheckpointedChannel(checkpointer=cp, thread_id="conv_123", run_id=run_id)
@@ -184,7 +184,7 @@ In-memory（`InMemoryChannel`）HITL 没有此要求 —— 不涉及持久化�
 
 ## 历史数据行为 {#legacy-data-behaviour}
 
-CubePi 能优雅处理此功能上线前的旧消息（`run_id` 列未填充，即
+CubeLoop 能优雅处理此功能上线前的旧消息（`run_id` 列未填充，即
 `run_id IS NULL`）：
 
 - **混合线程** — 已有旧消息后又接收了升级后 `prompt()` 的线程，可从任意

@@ -14,5 +14,5 @@ comment:
   require_changes: false
 
 ignore:
-  - "cubepi/cli/**"
-  - "cubepi/middleware/todo.py"
+  - "cubeloop/cli/**"
+  - "cubeloop/middleware/todo.py"

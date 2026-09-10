@@ -11,7 +11,7 @@ back — no JSON parsing, no schema wrangling.
 
 ```python
 from pydantic import BaseModel
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.providers.base import TextContent, UserMessage
 
 class Sentiment(BaseModel):
     label: str
@@ -69,7 +69,7 @@ await model.generate_structured(
 `generate_structured()` raises `StructuredOutputError` in two cases:
 
 ```python
-from cubepi.providers.base import StructuredOutputError
+from cubeloop.providers.base import StructuredOutputError
 
 try:
     result = await model.generate_structured(MySchema, messages=[...])

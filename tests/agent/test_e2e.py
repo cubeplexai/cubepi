@@ -2,9 +2,9 @@ import asyncio
 
 from pydantic import BaseModel
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import (
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import (
     AssistantMessage,
     Model,
     ReasoningControl,
@@ -13,7 +13,7 @@ from cubepi.providers.base import (
     ToolResultMessage,
     UserMessage,
 )
-from cubepi.providers.faux import (
+from cubeloop.providers.faux import (
     FauxProvider,
     faux_assistant_message,
     faux_text,

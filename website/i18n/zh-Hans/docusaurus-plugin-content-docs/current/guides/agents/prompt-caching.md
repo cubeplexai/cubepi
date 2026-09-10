@@ -1,6 +1,6 @@
 ---
 title: Prompt 缓存
-description: "CubePi 如何最大化 prompt 缓存命中率——追加式消息存储、自动缓存断点，以及如何避免破坏缓存。"
+description: "CubeLoop 如何最大化 prompt 缓存命中率——追加式消息存储、自动缓存断点，以及如何避免破坏缓存。"
 ---
 
 # Prompt 缓存
@@ -9,8 +9,8 @@ Prompt 缓存让 LLM provider 在 stable prefix 上复用 KV 计算，而不是�
 都重新处理。收益非常可观：Anthropic 对命中缓存的 token 按**正常输入价格
 的 10%** 收费，命中也会降低 time-to-first-token。
 
-CubePi 从底层架构就为最大化缓存命中而设计。这篇指南讲解缓存是怎么工作
-的、为什么 CubePi 的架构能让缓存常驻，以及你可以做什么（或不要做什么）
+CubeLoop 从底层架构就为最大化缓存命中而设计。这篇指南讲解缓存是怎么工作
+的、为什么 CubeLoop 的架构能让缓存常驻，以及你可以做什么（或不要做什么）
 来保住命中率。
 
 ---
@@ -45,7 +45,7 @@ Request N:   [system] [tools] [msg 1] [msg 2] [msg 3]
 序列就跟上一次的请求不一样了，于是**从那一位置开始的所有缓存断点全部
 miss**。
 
-CubePi 的 checkpointer 是追加式的：只往 thread 末尾添加新消息。内存里
+CubeLoop 的 checkpointer 是追加式的：只往 thread 末尾添加新消息。内存里
 的 `agent.state.messages` 列表通过 append 增长，从不重建、从不重排。
 这意味着每一次请求的前缀都和上一轮字节一致——这是命中缓存最基础的
 要求。
@@ -70,7 +70,7 @@ tool），所以命中缓存。最后一条消息的断点向前移了一位，�
 ### 配置
 
 ```python
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop.providers.anthropic import AnthropicProvider
 
 # 默认：short TTL（5 分钟），自动断点
 provider = AnthropicProvider(api_key="…")
@@ -101,13 +101,13 @@ print(usage.cache_write_tokens)  # 本轮写入缓存的 token
 `cache_read_tokens / (input_tokens + cache_read_tokens + cache_write_tokens)`。
 
 :::tip
-CubePi 的 `Usage.input_tokens` 是**未命中缓存**的那部分——本轮真正被模型
+CubeLoop 的 `Usage.input_tokens` 是**未命中缓存**的那部分——本轮真正被模型
 处理的 token。完整 prompt token 数是
 `input_tokens + cache_read_tokens + cache_write_tokens`。100% 命中时
 `input_tokens` 为 0。
 :::
 
-`cubepi trace` CLI 输出和 `Tracer` 发出的 OTel span 里也能看到这些字段。
+`cubeloop trace` CLI 输出和 `Tracer` 发出的 OTel span 里也能看到这些字段。
 注意 OTel span 属性 `gen_ai.usage.input_tokens` 遵循 GenAI 语义约定，
 报的是**包含**未命中和命中的总数：
 
@@ -121,13 +121,13 @@ gen_ai.usage.cache_read.input_tokens = 7 980  （命中那部分）
 ## OpenAI：自动缓存
 
 OpenAI 对超过 1 024 token 的 prompt 自动缓存——不需要显式的
-`cache_control` 标记。CubePi 通过同一个 `Usage` 接口暴露命中数据：
+`cache_control` 标记。CubeLoop 通过同一个 `Usage` 接口暴露命中数据：
 
 ```python
 usage.cache_read_tokens   # 对应 prompt_tokens_details.cached_tokens
 ```
 
-CubePi 端没什么可配。保持 system prompt 和 tool 定义在轮次间稳定，
+CubeLoop 端没什么可配。保持 system prompt 和 tool 定义在轮次间稳定，
 OpenAI 的缓存会自然预热起来。
 
 ---
@@ -164,8 +164,8 @@ OpenAI 的缓存会自然预热起来。
 provider：
 
 ```python
-from cubepi.providers.anthropic import CacheMarkerPolicy, AnthropicProvider
-from cubepi.providers.base import Message
+from cubeloop.providers.anthropic import CacheMarkerPolicy, AnthropicProvider
+from cubeloop.providers.base import Message
 
 class SystemOnlyPolicy:
     """只缓存 system prompt——tool 列表经常变时有用。"""

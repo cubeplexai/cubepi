@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from cubepi.middleware.compaction import CompactionState
-from cubepi.middleware.compaction.summarizer import (
+from cubeloop.middleware.compaction import CompactionState
+from cubeloop.middleware.compaction.summarizer import (
     _format_message_for_summary,
     summarize,
 )
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     BoundModel,
     Message,
@@ -228,14 +228,14 @@ def test_tool_call_empty_arguments() -> None:
 
 
 def test_dynamic_budget_floor_for_small_content() -> None:
-    from cubepi.middleware.compaction.summarizer import _dynamic_summary_budget
+    from cubeloop.middleware.compaction.summarizer import _dynamic_summary_budget
 
     small = [UserMessage(content=[TextContent(text="hi")])]
     assert _dynamic_summary_budget(small) == 1024
 
 
 def test_dynamic_budget_scales_with_content() -> None:
-    from cubepi.middleware.compaction.summarizer import _dynamic_summary_budget
+    from cubeloop.middleware.compaction.summarizer import _dynamic_summary_budget
 
     # 40 000 chars ≈ 20 000 tokens → budget = 20 000 * 0.15 = 3 000
     large = [UserMessage(content=[TextContent(text="x" * 40_000)])]
@@ -245,13 +245,13 @@ def test_dynamic_budget_scales_with_content() -> None:
 
 
 def test_dynamic_budget_empty_input_floor() -> None:
-    from cubepi.middleware.compaction.summarizer import _dynamic_summary_budget
+    from cubeloop.middleware.compaction.summarizer import _dynamic_summary_budget
 
     assert _dynamic_summary_budget([]) == 1024
 
 
 def test_dynamic_budget_ceiling() -> None:
-    from cubepi.middleware.compaction.summarizer import _dynamic_summary_budget
+    from cubeloop.middleware.compaction.summarizer import _dynamic_summary_budget
 
     huge = [UserMessage(content=[TextContent(text="x" * 200_000)])]
     assert _dynamic_summary_budget(huge) == 4096
@@ -311,7 +311,7 @@ async def test_summarize_ref_messages_used_for_refs() -> None:
     transcript_text = provider.calls[0]["messages"][0].content[0].text
     assert "pruned content" in transcript_text
     # But refs are computed from the ORIGINAL messages
-    from cubepi.middleware.compaction.state import message_refs
+    from cubeloop.middleware.compaction.state import message_refs
 
     assert state.summarized_message_refs == message_refs(original)
 
@@ -320,7 +320,7 @@ async def test_summarize_ref_messages_used_for_refs() -> None:
 
 
 def test_fallback_summary_includes_user_requests() -> None:
-    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+    from cubeloop.middleware.compaction.summarizer import build_fallback_summary
 
     msgs: list[Message] = [
         UserMessage(content=[TextContent(text="Please write a hello world script")]),
@@ -332,8 +332,8 @@ def test_fallback_summary_includes_user_requests() -> None:
 
 
 def test_fallback_summary_includes_tool_names() -> None:
-    from cubepi.middleware.compaction.summarizer import build_fallback_summary
-    from cubepi.providers.base import ToolResultMessage
+    from cubeloop.middleware.compaction.summarizer import build_fallback_summary
+    from cubeloop.providers.base import ToolResultMessage
 
     msgs: list[Message] = [
         UserMessage(content=[TextContent(text="run the tests")]),
@@ -352,8 +352,8 @@ def test_fallback_summary_includes_tool_names() -> None:
 
 
 def test_fallback_summary_merges_existing() -> None:
-    from cubepi.middleware.compaction.state import CompactionState
-    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+    from cubeloop.middleware.compaction.state import CompactionState
+    from cubeloop.middleware.compaction.summarizer import build_fallback_summary
 
     existing = CompactionState(summary="prior context", is_fallback=False)
     msgs: list[Message] = [UserMessage(content=[TextContent(text="new task")])]
@@ -363,7 +363,7 @@ def test_fallback_summary_merges_existing() -> None:
 
 
 def test_fallback_summary_caps_user_requests_at_five() -> None:
-    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+    from cubeloop.middleware.compaction.summarizer import build_fallback_summary
 
     msgs: list[Message] = [
         UserMessage(content=[TextContent(text=f"request {i}")]) for i in range(10)
@@ -375,8 +375,8 @@ def test_fallback_summary_caps_user_requests_at_five() -> None:
 
 
 def test_fallback_summary_uses_ref_messages_for_refs() -> None:
-    from cubepi.middleware.compaction.state import message_refs
-    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+    from cubeloop.middleware.compaction.state import message_refs
+    from cubeloop.middleware.compaction.summarizer import build_fallback_summary
 
     transcript = [UserMessage(content=[TextContent(text="pruned content")])]
     original = [UserMessage(content=[TextContent(text="full original")])]
@@ -388,7 +388,7 @@ def test_fallback_summary_uses_ref_messages_for_refs() -> None:
 
 
 def test_summary_has_eight_sections() -> None:
-    from cubepi.middleware.compaction.summarizer import SUMMARIZER_SYSTEM_PROMPT
+    from cubeloop.middleware.compaction.summarizer import SUMMARIZER_SYSTEM_PROMPT
 
     for section in (
         "Goal",
@@ -404,7 +404,7 @@ def test_summary_has_eight_sections() -> None:
 
 
 def test_system_prompt_marks_output_as_non_instruction() -> None:
-    from cubepi.middleware.compaction.summarizer import SUMMARIZER_SYSTEM_PROMPT
+    from cubeloop.middleware.compaction.summarizer import SUMMARIZER_SYSTEM_PROMPT
 
     # Collapse whitespace so line breaks don't fail the substring assertions.
     text = " ".join(SUMMARIZER_SYSTEM_PROMPT.lower().split())
@@ -450,7 +450,7 @@ async def test_summarize_uses_existing_summary_suffix_override() -> None:
 def test_shrink_strings_recurses_into_lists() -> None:
     """The list branch of _shrink_strings shrinks string leaves inside lists,
     leaves non-string leaves intact."""
-    from cubepi.middleware.compaction.summarizer import _shrink_strings
+    from cubeloop.middleware.compaction.summarizer import _shrink_strings
 
     long_text = "x" * 500
     obj = ["short", long_text, 42, True, None, [long_text]]
@@ -468,7 +468,7 @@ def test_shrink_strings_recurses_into_lists() -> None:
 def test_format_arguments_non_json_serialisable_falls_back_to_str() -> None:
     """A value json.dumps can't handle (e.g. a custom object) falls back to
     str() instead of raising — defensive against odd backend payloads."""
-    from cubepi.middleware.compaction.summarizer import _format_arguments
+    from cubeloop.middleware.compaction.summarizer import _format_arguments
 
     class _NotJson:
         def __repr__(self) -> str:
@@ -488,7 +488,7 @@ def test_fallback_summary_does_not_embed_prior_fallback() -> None:
     """A fallback that follows another fallback must NOT embed the prior
     fallback text under 'Prior context:'. Otherwise each LLM-outage turn
     doubles the summary size — the chain compounds verbatim across runs."""
-    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+    from cubeloop.middleware.compaction.summarizer import build_fallback_summary
 
     # Run 1: clean fallback.
     msgs_1: list[Message] = [
@@ -525,7 +525,7 @@ def test_fallback_summary_does_not_embed_prior_fallback() -> None:
 
 def test_fallback_summary_user_lines_capped_after_merging() -> None:
     """Cap of 5 user lines holds across the merge with a prior fallback."""
-    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+    from cubeloop.middleware.compaction.summarizer import build_fallback_summary
 
     msgs_1 = [UserMessage(content=[TextContent(text=f"older {i}")]) for i in range(4)]
     state_1 = build_fallback_summary(msgs_1, existing=None)
@@ -547,8 +547,8 @@ def test_fallback_summary_after_real_summary_still_embeds_prior() -> None:
     """When the prior was a REAL summary (is_fallback=False), the new
     fallback still embeds it under 'Prior context:' — only fallback-after-
     fallback is the unbounded-growth path."""
-    from cubepi.middleware.compaction.state import CompactionState
-    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+    from cubeloop.middleware.compaction.state import CompactionState
+    from cubeloop.middleware.compaction.summarizer import build_fallback_summary
 
     real_prior = CompactionState(summary="## Goal\nbuild the thing", is_fallback=False)
     msgs = [UserMessage(content=[TextContent(text="next task")])]
@@ -561,8 +561,8 @@ def test_fallback_preserves_real_prior_across_multiple_outage_turns() -> None:
     """Codex P2: real summary → fallback → fallback. The 2nd fallback must
     still carry the real summary's prior context, otherwise an outage of
     more than one compaction cycle drops everything summarised before it."""
-    from cubepi.middleware.compaction.state import CompactionState
-    from cubepi.middleware.compaction.summarizer import build_fallback_summary
+    from cubeloop.middleware.compaction.state import CompactionState
+    from cubeloop.middleware.compaction.summarizer import build_fallback_summary
 
     # Step 1: a real LLM summary covering "early work".
     real_summary = CompactionState(

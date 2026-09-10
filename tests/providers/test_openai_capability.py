@@ -6,19 +6,19 @@ the provider's internal state. Stream-time assertions come in Task 6.
 
 import pytest
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     Model,
     ReasoningControl,
     StreamOptions,
     TextContent,
     UserMessage,
 )
-from cubepi.providers.capability import (
+from cubeloop.providers.capability import (
     CapabilityDescriptor,
     ReasoningCapability,
     TemperatureSpec,
 )
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop.providers.openai import OpenAIProvider
 
 
 def test_provider_accepts_capability_kwarg():

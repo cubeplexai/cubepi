@@ -1,6 +1,6 @@
 ---
 title: Anthropic
-description: "通过 AnthropicProvider 在 CubePi 中使用 Claude 模型——支持思考、缓存和工具调用。"
+description: "通过 AnthropicProvider 在 CubeLoop 中使用 Claude 模型——支持思考、缓存和工具调用。"
 ---
 
 # Anthropic Provider
@@ -11,7 +11,7 @@ description: "通过 AnthropicProvider 在 CubePi 中使用 Claude 模型——�
 ## 构造
 
 ```python
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(
     api_key="sk-ant-…",          # 也可让 SDK 自己读 ANTHROPIC_API_KEY
@@ -35,13 +35,13 @@ model = provider.model(
 )
 ```
 
-第一个参数就是你传给 SDK 的模型名。`provider_id` 是 CubePi 内部用的
+第一个参数就是你传给 SDK 的模型名。`provider_id` 是 CubeLoop 内部用的
 自由标签 —— 保持稳定即可,需要时可以让 tracing 和错误信息显示一个
 明确的来源标签。
 
 ## 扩展思考
 
-CubePi 把 `ThinkingLevel` 枚举映射到 Anthropic 的 `budget_tokens`:
+CubeLoop 把 `ThinkingLevel` 枚举映射到 Anthropic 的 `budget_tokens`:
 
 | Level | 默认 budget |
 |---|---|
@@ -60,9 +60,9 @@ agent = Agent(model=model, thinking="medium")
 要自定义 budget,可以通过自己的 `on_payload` hook 传入
 `StreamOptions(thinking_budgets=ThinkingBudgets(low=4096, medium=12288))`。
 
-思考打开时,CubePi **会把 `temperature` 字段省掉** —— 因为 Anthropic
+思考打开时,CubeLoop **会把 `temperature` 字段省掉** —— 因为 Anthropic
 API 在扩展思考模式下不接受非默认的 temperature（[兼容性文档](https://platform.claude.com/docs/en/build-with-claude/extended-thinking#feature-compatibility)）。
-关闭思考时再按 `Model.temperature` 走;CubePi 自己处理切换。
+关闭思考时再按 `Model.temperature` 走;CubeLoop 自己处理切换。
 
 思考内容以 `thinking_start` / `thinking_delta` / `thinking_end` 事件
 流式产出,最终作为 `ThinkingContent` 块保存在 `AssistantMessage.content`
@@ -89,7 +89,7 @@ AnthropicProvider(provider_id="anthropic", api_key=…, cache_retention="none") 
 
 需要自定义缓存策略(比如换个断点策略)？实现 `CacheMarkerPolicy`
 Protocol 然后 `cache_policy=…` 传入。默认策略类位于
-`cubepi.providers.anthropic.DefaultCacheMarkerPolicy`。
+`cubeloop.providers.anthropic.DefaultCacheMarkerPolicy`。
 
 ## 用 `on_payload` 自定义请求
 
@@ -125,7 +125,7 @@ agent = Agent(model=model, on_response=my_response)
 
 ## 指向 Bedrock / Vertex / 代理
 
-Anthropic SDK 接受 `base_url`,CubePi 透传：
+Anthropic SDK 接受 `base_url`,CubeLoop 透传：
 
 ```python
 provider = AnthropicProvider(
@@ -139,10 +139,10 @@ provider = AnthropicProvider(
 
 ## 常见坑
 
-- **`temperature` 被忽略** —— 预期之内。思考打开时 CubePi 故意 drop
+- **`temperature` 被忽略** —— 预期之内。思考打开时 CubeLoop 故意 drop
   掉,这是 API 约束,不是 bug。
 - **`xhigh` 和 `high` 看起来一样** —— Anthropic 没有更高一档的 budget,
-  所以 CubePi 把 `xhigh` clamp 到 `high`,token budget 相同。
+  所以 CubeLoop 把 `xhigh` clamp 到 `high`,token budget 相同。
 - **缓存未命中** —— 缓存按 (内容, ttl) 索引。改 system prompt 会让
   整块失效;改工具列表则从工具往后失效。要最大化命中,保持这两个
   跨轮稳定。

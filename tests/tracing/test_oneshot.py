@@ -8,7 +8,7 @@ import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     Message,
     MessageStream,
@@ -20,9 +20,9 @@ from cubepi.providers.base import (
     ToolDefinition,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
-from cubepi.tracing import Tracer
-from cubepi.tracing.tracer import _OneShotSession
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.tracing import Tracer
+from cubeloop.tracing.tracer import _OneShotSession
 
 
 MODEL = Model(id="faux-1", provider_id="faux")
@@ -118,14 +118,14 @@ async def test_oneshot_produces_root_and_chat_spans() -> None:
     root = by_name["invoke_agent"]
     attrs = dict(root.attributes or {})
     assert attrs.get("gen_ai.operation.name") == "invoke_agent"
-    assert attrs.get("cubepi.oneshot.operation") == "test_op"
-    # operation also exposed under cubepi.metadata.* for --meta CLI filter
-    assert attrs.get("cubepi.metadata.oneshot_operation") == "test_op"
-    assert attrs.get("cubepi.metadata.conversation_id") == "conv-123"
-    assert attrs.get("cubepi.metadata.user_id") == "usr-456"
-    assert "cubepi.run_id" in attrs
+    assert attrs.get("cubeloop.oneshot.operation") == "test_op"
+    # operation also exposed under cubeloop.metadata.* for --meta CLI filter
+    assert attrs.get("cubeloop.metadata.oneshot_operation") == "test_op"
+    assert attrs.get("cubeloop.metadata.conversation_id") == "conv-123"
+    assert attrs.get("cubeloop.metadata.user_id") == "usr-456"
+    assert "cubeloop.run_id" in attrs
     # Successful one-shot must NOT be marked aborted by the cleanup sweeper.
-    assert attrs.get("cubepi.aborted") is None
+    assert attrs.get("cubeloop.aborted") is None
     assert attrs.get("error.type") is None
 
     chat = by_name[f"chat {MODEL.id}"]
@@ -162,8 +162,8 @@ async def test_oneshot_metadata_on_root_span() -> None:
     roots = [s for s in exporter.spans if s.name == "invoke_agent"]
     assert len(roots) == 1
     attrs = dict(roots[0].attributes or {})
-    assert attrs["cubepi.oneshot.operation"] == "consolidate_memory"
-    assert attrs["cubepi.metadata.conversation_id"] == "conv-abc"
+    assert attrs["cubeloop.oneshot.operation"] == "consolidate_memory"
+    assert attrs["cubeloop.metadata.conversation_id"] == "conv-abc"
 
 
 @pytest.mark.asyncio
@@ -192,8 +192,8 @@ async def test_oneshot_user_metadata_cannot_shadow_reserved_oneshot_operation() 
     roots = [s for s in exporter.spans if s.name == "invoke_agent"]
     assert len(roots) == 1
     attrs = dict(roots[0].attributes or {})
-    assert attrs["cubepi.metadata.oneshot_operation"] == "real_op"
-    assert attrs["cubepi.oneshot.operation"] == "real_op"
+    assert attrs["cubeloop.metadata.oneshot_operation"] == "real_op"
+    assert attrs["cubeloop.oneshot.operation"] == "real_op"
 
 
 @pytest.mark.asyncio
@@ -633,14 +633,14 @@ async def test_oneshot_cancelled_generate_closes_chat_span() -> None:
     await tracer.shutdown()
 
     # Root span must be exported; chat span if opened must also be ended.
-    # Cancellation is tracked as cubepi.aborted (not StatusCode.ERROR),
+    # Cancellation is tracked as cubeloop.aborted (not StatusCode.ERROR),
     # matching the agent path's contract.
     roots = [s for s in exporter.spans if s.name == "invoke_agent"]
     assert len(roots) == 1
     root = roots[0]
     attrs = dict(root.attributes or {})
-    assert attrs.get("cubepi.aborted") is True
-    assert attrs.get("error.type") == "cubepi.aborted"
+    assert attrs.get("cubeloop.aborted") is True
+    assert attrs.get("error.type") == "cubeloop.aborted"
     assert not any(event.name == "exception" for event in root.events)
 
 
@@ -648,7 +648,7 @@ async def test_oneshot_cancelled_generate_closes_chat_span() -> None:
 async def test_oneshot_cancel_mid_stream_marks_open_chat_span_aborted() -> None:
     """When cancellation happens after the chat span has been opened by the
     provider request listener but before the response listener has closed
-    it, the oneshot cleanup must close it and stamp cubepi.aborted."""
+    it, the oneshot cleanup must close it and stamp cubeloop.aborted."""
     import asyncio
 
     # Slow provider: streams the response one token at a time so we can
@@ -674,12 +674,12 @@ async def test_oneshot_cancel_mid_stream_marks_open_chat_span_aborted() -> None:
     await tracer.force_flush()
     await tracer.shutdown()
 
-    # Chat span must have been ended with cubepi.aborted=true
+    # Chat span must have been ended with cubeloop.aborted=true
     chat_spans = [s for s in exporter.spans if s.name.startswith("chat ")]
     assert chat_spans, "expected at least one chat span (opened by request listener)"
     chat_attrs = dict(chat_spans[0].attributes or {})
-    assert chat_attrs.get("cubepi.aborted") is True
-    assert chat_attrs.get("error.type") == "cubepi.aborted"
+    assert chat_attrs.get("cubeloop.aborted") is True
+    assert chat_attrs.get("error.type") == "cubeloop.aborted"
 
 
 @pytest.mark.asyncio
@@ -687,7 +687,7 @@ async def test_oneshot_does_not_interfere_with_concurrent_agent() -> None:
     """Oneshot's active-run gate must not bleed into a concurrent Agent run."""
     import asyncio
 
-    from cubepi.agent.agent import Agent
+    from cubeloop.agent.agent import Agent
 
     provider = FauxProvider(provider_id="faux")
     # Push responses for both agent and oneshot

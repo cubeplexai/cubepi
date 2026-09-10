@@ -1,22 +1,22 @@
 ---
 title: From langgraph
-description: "Learn how to migrate your agents from LangGraph to CubePi — concept mapping, side-by-side code comparisons, and a step-by-step porting guide for the Pythonic async-native alternative."
+description: "Learn how to migrate your agents from LangGraph to CubeLoop — concept mapping, side-by-side code comparisons, and a step-by-step porting guide for the Pythonic async-native alternative."
 ---
 
 # Migrating from langgraph
 
-CubePi and [langgraph](https://github.com/langchain-ai/langgraph) both
+CubeLoop and [langgraph](https://github.com/langchain-ai/langgraph) both
 build tool-using LLM agents, but they have different mental models.
-This page maps langgraph concepts onto CubePi so you can port code
+This page maps langgraph concepts onto CubeLoop so you can port code
 without having to re-learn from scratch.
 
 ## Mental-model shift
 
-| langgraph | CubePi | Why |
+| langgraph | CubeLoop | Why |
 |---|---|---|
-| **State graph** with nodes, edges, channels | **Agent loop** that's a plain `while` loop you can read | A linear loop is easier to reason about than a graph; CubePi never branches at runtime — control flow lives in middleware |
+| **State graph** with nodes, edges, channels | **Agent loop** that's a plain `while` loop you can read | A linear loop is easier to reason about than a graph; CubeLoop never branches at runtime — control flow lives in middleware |
 | **Channels** (typed state slots) | **`AgentContext.extra`** + `AgentState.messages` | A single dict + a single message list cover every state shape we've seen |
-| **`StateGraph.add_node(name, fn)`** | A middleware hook or a tool | Functions in langgraph nodes split into two roles in CubePi: tool execution (when the model decides) vs. middleware (always-on transforms) |
+| **`StateGraph.add_node(name, fn)`** | A middleware hook or a tool | Functions in langgraph nodes split into two roles in CubeLoop: tool execution (when the model decides) vs. middleware (always-on transforms) |
 | **`add_edge(a, b)`** / `add_conditional_edges` | Built-in: tools → next turn → tools → … | The conditional shape (tool calls → re-prompt) is the loop; you don't reify it |
 | **`MemorySaver` / `SqliteSaver` / `PostgresSaver`** | `MemoryCheckpointer` / `SQLiteCheckpointer` / `PostgresCheckpointer` | Same idea, append-only schema instead of full snapshots |
 | **`config: {"configurable": {"thread_id": …}}`** | `Agent(thread_id=…)` | First-class agent parameter |
@@ -24,7 +24,7 @@ without having to re-learn from scratch.
 | **Tools as `@tool` decorated functions** | `AgentTool` with Pydantic params + async execute | Closer to OpenAI/Anthropic native shape |
 | **`HumanMessage`, `AIMessage`** | `UserMessage`, `AssistantMessage` | Same role-tagged messages, just renamed |
 | **Interrupts via `interrupt_before` / `interrupt_after`** | `agent.steer(...)`, `agent.follow_up(...)`, `agent.abort()` | Imperative control instead of declarative interrupt points |
-| **Time travel / fork** at any checkpoint | **`Agent.fork()`** / **`Agent.fork_once()`** at run boundaries | CubePi keys off completed `run_id`s; see [Forking](../guides/agents/forking) |
+| **Time travel / fork** at any checkpoint | **`Agent.fork()`** / **`Agent.fork_once()`** at run boundaries | CubeLoop keys off completed `run_id`s; see [Forking](../guides/agents/forking) |
 | **`config_schema`** | Constructor parameters on `Agent` | No separate schema layer |
 
 ## Side-by-side: a tool-using agent
@@ -69,12 +69,12 @@ for chunk in app.stream({"messages": [("user", "Weather in Tokyo?")]}):
     print(chunk)
 ```
 
-### CubePi
+### CubeLoop
 
 ```python
 import asyncio
-from cubepi import Agent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 @tool
@@ -98,7 +98,7 @@ plain `str` return is wrapped for you. (For tools that need a shared params
 model or dynamic construction, the longhand `AgentTool(...)` is still there —
 see [Tool Use](../guides/agents/tool-use).)
 
-CubePi version removes:
+CubeLoop version removes:
 
 - The `StateGraph`, edges, nodes, `END` sentinel, conditional edges.
 - The `ToolNode` registry — tools go directly to the `Agent`.
@@ -115,13 +115,13 @@ CubePi version removes:
 from langgraph.checkpoint.sqlite import SqliteSaver
 graph.compile(checkpointer=SqliteSaver.from_conn_string(":memory:"))
 
-# CubePi
-from cubepi.checkpointer import SQLiteCheckpointer
+# CubeLoop
+from cubeloop.checkpointer import SQLiteCheckpointer
 async with SQLiteCheckpointer("agent.db") as cp:
     agent = Agent(..., checkpointer=cp, thread_id="conv-1")
 ```
 
-CubePi's append-only model is O(1) per message, regardless of
+CubeLoop's append-only model is O(1) per message, regardless of
 conversation length. langgraph saves full snapshots, which scales
 linearly with history.
 
@@ -133,7 +133,7 @@ for chunk in app.stream(state, stream_mode="messages"):
     if chunk["event"] == "on_chat_model_stream":
         print(chunk["data"]["chunk"].content, end="")
 
-# CubePi
+# CubeLoop
 def on_event(event, signal=None):
     if event.type == "message_update" and event.stream_event.type == "text_delta":
         print(event.stream_event.delta, end="")
@@ -150,7 +150,7 @@ One subscriber, one stream — no mode flag.
 # langgraph
 graph.compile(interrupt_before=["tools"])
 
-# CubePi
+# CubeLoop
 class HumanApproval(Middleware):
     async def before_tool_call(self, ctx, *, signal=None):
         approved = await ask_human(f"Run {ctx.tool_call.name}({ctx.args})?")
@@ -172,7 +172,7 @@ graph.add_edge("summary", END)
 ```
 
 ```python
-# CubePi
+# CubeLoop
 class SummariseAtEnd(Middleware):
     async def should_stop_after_turn(self, ctx) -> bool:
         msg = ctx.message
@@ -194,14 +194,14 @@ config = {"configurable": {"thread_id": "t1", "checkpoint_id": "<id>"}}
 app.update_state(config, {"messages": [...]})
 result = app.invoke(None, config)
 
-# CubePi — persistent fork at a completed-run boundary
+# CubeLoop — persistent fork at a completed-run boundary
 await agent.fork(
     src_thread_id="conv_123",
     new_thread_id="conv_456",
     after_run_id="R1",
 )
 
-# CubePi — ephemeral one-shot probe (writes nothing)
+# CubeLoop — ephemeral one-shot probe (writes nothing)
 result = await agent.fork_once(
     src_thread_id="conv_123",
     message="What if you had said yes?",
@@ -210,23 +210,23 @@ result = await agent.fork_once(
 print(result.text)
 ```
 
-CubePi forks at completed-run boundaries rather than arbitrary mid-run
+CubeLoop forks at completed-run boundaries rather than arbitrary mid-run
 checkpoints. `fork` creates a persistent branch you can continue;
 `fork_once` runs a single probe and discards everything. See
 [Conversation Forking](../guides/agents/forking).
 
-## What LangGraph still offers beyond CubePi
+## What LangGraph still offers beyond CubeLoop
 
-- **Graph-native multi-agent orchestration.** CubePi includes
+- **Graph-native multi-agent orchestration.** CubeLoop includes
   `SubagentMiddleware` for tool-driven delegation: a parent agent can dispatch
   self-contained tasks to typed child agents with dedicated prompts, models,
-  tools, and middleware. What CubePi does not yet provide is LangGraph's
+  tools, and middleware. What CubeLoop does not yet provide is LangGraph's
   explicit, durable graph model for supervisor routing, conditional branches,
   parallel fan-out/fan-in, and graph-level state management.
 - **Visual graph rendering.** No `app.get_graph().draw_mermaid()`
-  equivalent. CubePi's flow is linear so the picture would be a single
+  equivalent. CubeLoop's flow is linear so the picture would be a single
   line anyway.
-- **First-party UI for traces.** CubePi doesn't render its own trace
+- **First-party UI for traces.** CubeLoop doesn't render its own trace
   visualizer the way LangSmith / Langfuse do; instead it emits
   vendor-neutral OpenTelemetry — point any OTLP backend
   (LangSmith's OTel endpoint, Langfuse v3, Jaeger, Tempo,
@@ -234,7 +234,7 @@ checkpoints. `fork` creates a persistent branch you can continue;
   `Tracer(exporters=[OTLPSpanExporter(...)])`. See
   [Tracing → OTLP & Backends](../guides/tracing/otlp).
 
-## What CubePi does that langgraph doesn't
+## What CubeLoop does that langgraph doesn't
 
 - **Native OpenTelemetry tracing** — `Tracer` + `Meter` emit OTel
   spans + GenAI-semconv attributes out of the box, ingestible by

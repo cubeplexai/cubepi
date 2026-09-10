@@ -1,8 +1,8 @@
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.providers.base import AssistantMessage, TextContent
-from cubepi.providers.faux import FauxProvider
+from cubeloop.agent.agent import Agent
+from cubeloop.providers.base import AssistantMessage, TextContent
+from cubeloop.providers.faux import FauxProvider
 
 
 def _ok_faux() -> FauxProvider:
@@ -56,7 +56,7 @@ async def test_prompt_leaves_active_run_id_set_on_raise(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_appended_messages_carry_run_id():
-    from cubepi.checkpointer.memory import MemoryCheckpointer
+    from cubeloop.checkpointer.memory import MemoryCheckpointer
 
     cp = MemoryCheckpointer()
     a = Agent(
@@ -74,10 +74,10 @@ async def test_appended_messages_carry_run_id():
 async def test_live_tool_results_carry_owning_run_id():
     from pydantic import BaseModel
 
-    from cubepi.agent.types import AgentTool, AgentToolResult
-    from cubepi.checkpointer.memory import MemoryCheckpointer
-    from cubepi.providers.base import ToolResultMessage
-    from cubepi.providers.faux import faux_assistant_message, faux_tool_call
+    from cubeloop.agent.types import AgentTool, AgentToolResult
+    from cubeloop.checkpointer.memory import MemoryCheckpointer
+    from cubeloop.providers.base import ToolResultMessage
+    from cubeloop.providers.faux import faux_assistant_message, faux_tool_call
 
     class EchoParams(BaseModel):
         value: str
@@ -179,8 +179,8 @@ async def test_prompt_rejects_mismatched_run_id_before_claim():
     """Caller pre-stamps a Message with a different run_id than the
     one supplied to prompt(). Reject BEFORE claim_run so no row is
     written and the run_id is still reusable."""
-    from cubepi.checkpointer.memory import MemoryCheckpointer
-    from cubepi.providers.base import TextContent, UserMessage
+    from cubeloop.checkpointer.memory import MemoryCheckpointer
+    from cubeloop.providers.base import TextContent, UserMessage
 
     cp = MemoryCheckpointer()
     a = Agent(
@@ -207,8 +207,8 @@ async def test_process_event_rejects_mismatched_message_run_id():
     message already carries a DIFFERENT run_id (defensive — a provider
     or middleware bug that produced the wrong stamp must not silently
     write to the persisted history)."""
-    from cubepi.agent.types import MessageEndEvent
-    from cubepi.providers.base import (
+    from cubeloop.agent.types import MessageEndEvent
+    from cubeloop.providers.base import (
         AssistantMessage,
         TextContent,
     )

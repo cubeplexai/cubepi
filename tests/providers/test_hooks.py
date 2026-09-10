@@ -6,7 +6,7 @@ import inspect
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     Model,
     ProviderResponse,
     StreamOptions,
@@ -141,8 +141,8 @@ class TestInvokeOnResponse:
 class TestAnthropicProviderHooks:
     async def test_on_payload_called_with_kwargs(self):
         """on_payload receives the payload dict and model before the API call."""
-        from cubepi.providers.anthropic import AnthropicProvider
-        from cubepi.providers.base import TextContent, UserMessage
+        from cubeloop.providers.anthropic import AnthropicProvider
+        from cubeloop.providers.base import TextContent, UserMessage
 
         captured_payloads: list[tuple[dict, Model]] = []
 
@@ -194,8 +194,8 @@ class TestAnthropicProviderHooks:
 
     async def test_on_payload_replaces_kwargs(self):
         """When on_payload returns a dict, that dict replaces the payload."""
-        from cubepi.providers.anthropic import AnthropicProvider
-        from cubepi.providers.base import TextContent, UserMessage
+        from cubeloop.providers.anthropic import AnthropicProvider
+        from cubeloop.providers.base import TextContent, UserMessage
 
         def on_payload(payload: dict, model: Model) -> dict:
             payload["model"] = "replaced-model"
@@ -248,8 +248,8 @@ class TestAnthropicProviderHooks:
 class TestOpenAIProviderHooks:
     async def test_on_payload_called_with_kwargs(self):
         """on_payload receives the payload dict and model before the API call."""
-        from cubepi.providers.openai import OpenAIProvider
-        from cubepi.providers.base import TextContent, UserMessage
+        from cubeloop.providers.openai import OpenAIProvider
+        from cubeloop.providers.base import TextContent, UserMessage
 
         captured_payloads: list[tuple[dict, Model]] = []
 
@@ -298,8 +298,8 @@ class TestOpenAIProviderHooks:
 
     async def test_on_payload_replaces_kwargs(self):
         """When on_payload returns a dict, that dict replaces the payload."""
-        from cubepi.providers.openai import OpenAIProvider
-        from cubepi.providers.base import TextContent, UserMessage
+        from cubeloop.providers.openai import OpenAIProvider
+        from cubeloop.providers.base import TextContent, UserMessage
 
         def on_payload(payload: dict, model: Model) -> dict:
             payload["temperature"] = 0.5
@@ -344,8 +344,8 @@ class TestOpenAIProviderHooks:
 class TestOpenAIResponsesProviderHooks:
     async def test_on_payload_called_with_kwargs(self):
         """on_payload receives the payload dict and model before the API call."""
-        from cubepi.providers.openai_responses import OpenAIResponsesProvider
-        from cubepi.providers.base import TextContent, UserMessage
+        from cubeloop.providers.openai_responses import OpenAIResponsesProvider
+        from cubeloop.providers.base import TextContent, UserMessage
 
         captured_payloads: list[tuple[dict, Model]] = []
 
@@ -395,8 +395,8 @@ class TestOpenAIResponsesProviderHooks:
 
     async def test_on_payload_replaces_kwargs(self):
         """When on_payload returns a dict, that dict replaces the payload."""
-        from cubepi.providers.openai_responses import OpenAIResponsesProvider
-        from cubepi.providers.base import TextContent, UserMessage
+        from cubeloop.providers.openai_responses import OpenAIResponsesProvider
+        from cubeloop.providers.base import TextContent, UserMessage
 
         def on_payload(payload: dict, model: Model) -> dict:
             payload["temperature"] = 0.7
@@ -440,8 +440,8 @@ class TestOpenAIResponsesProviderHooks:
 
     async def test_on_response_called_when_http_response_available(self):
         """on_response is invoked with HTTP metadata after the API call."""
-        from cubepi.providers.openai_responses import OpenAIResponsesProvider
-        from cubepi.providers.base import TextContent, UserMessage
+        from cubeloop.providers.openai_responses import OpenAIResponsesProvider
+        from cubeloop.providers.base import TextContent, UserMessage
 
         captured_responses: list[tuple[ProviderResponse, Model]] = []
 
@@ -505,7 +505,7 @@ class TestOpenAIResponsesProviderHooks:
 class TestProtocolConformance:
     def test_provider_protocol_accepts_options(self):
         """The Provider protocol's stream method includes options."""
-        from cubepi.providers.base import Provider
+        from cubeloop.providers.base import Provider
 
         sig = inspect.signature(Provider.stream)
         params = sig.parameters

@@ -12,8 +12,8 @@ import time
 
 import pytest
 
-from cubepi.providers.base import Model, StreamEvent, StreamOptions, UserMessage
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.providers.base import Model, StreamEvent, StreamOptions, UserMessage
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 
 MODEL = Model(id="faux-1", provider_id="faux")
@@ -598,7 +598,7 @@ class TestBaseProvider:
     """Cover BaseProvider sentinels not exercised by Faux."""
 
     async def test_stream_raises_not_implemented(self):
-        from cubepi.providers.base import BaseProvider
+        from cubeloop.providers.base import BaseProvider
 
         class Empty(BaseProvider):
             pass
@@ -621,13 +621,13 @@ class TestFireListenersHelpers:
     end-to-end."""
 
     async def test_fire_listeners_empty_returns(self):
-        from cubepi.providers.base import _fire_listeners
+        from cubeloop.providers.base import _fire_listeners
 
         # Empty list — must return without touching anything.
         await _fire_listeners([])
 
     async def test_fire_listeners_swallows_sync_exception(self):
-        from cubepi.providers.base import _fire_listeners
+        from cubeloop.providers.base import _fire_listeners
 
         seen: list = []
 
@@ -642,12 +642,12 @@ class TestFireListenersHelpers:
         assert seen == ["payload"]
 
     def test_fire_listeners_sync_empty_returns(self):
-        from cubepi.providers.base import _fire_listeners_sync
+        from cubeloop.providers.base import _fire_listeners_sync
 
         _fire_listeners_sync([])  # No listeners — short-circuit.
 
     def test_fire_listeners_sync_swallows_sync_exception(self):
-        from cubepi.providers.base import _fire_listeners_sync
+        from cubeloop.providers.base import _fire_listeners_sync
 
         seen: list = []
 
@@ -664,7 +664,7 @@ class TestFireListenersHelpers:
         """Outside a running event loop, asyncio.create_task raises
         RuntimeError. The sync helper must swallow it (covers the
         no-running-loop branch in the detached-task scheduling)."""
-        from cubepi.providers.base import _fire_listeners_sync
+        from cubeloop.providers.base import _fire_listeners_sync
 
         async def async_cb(x):
             pass  # pragma: no cover — never awaited in this test
@@ -679,8 +679,8 @@ class TestProviderEmit:
     but the Faux end-to-end tests exercise Faux's _emit only."""
 
     async def test_anthropic_emit_fires_chunk_listeners(self):
-        from cubepi.providers.anthropic import AnthropicProvider
-        from cubepi.providers.base import MessageStream
+        from cubeloop.providers.anthropic import AnthropicProvider
+        from cubeloop.providers.base import MessageStream
 
         provider = AnthropicProvider(api_key="test-key")
         seen: list = []
@@ -696,8 +696,8 @@ class TestProviderEmit:
         assert first.type == "text_delta"
 
     async def test_openai_emit_fires_chunk_listeners(self):
-        from cubepi.providers.openai import OpenAIProvider
-        from cubepi.providers.base import MessageStream
+        from cubeloop.providers.openai import OpenAIProvider
+        from cubeloop.providers.base import MessageStream
 
         provider = OpenAIProvider(api_key="test-key")
         seen: list = []
@@ -708,8 +708,8 @@ class TestProviderEmit:
         assert seen == ["text_delta"]
 
     async def test_openai_responses_emit_fires_chunk_listeners(self):
-        from cubepi.providers.openai_responses import OpenAIResponsesProvider
-        from cubepi.providers.base import MessageStream
+        from cubeloop.providers.openai_responses import OpenAIResponsesProvider
+        from cubeloop.providers.base import MessageStream
 
         provider = OpenAIResponsesProvider(api_key="test-key")
         seen: list = []
@@ -725,7 +725,7 @@ class TestAssembleResponse:
     optional-field branches without needing a real LLM stream."""
 
     def test_openai_assemble_with_system_fingerprint_and_service_tier(self):
-        from cubepi.providers.openai import OpenAIProvider
+        from cubeloop.providers.openai import OpenAIProvider
 
         class FakeUsageDetails:
             cached_tokens = 7
@@ -763,7 +763,7 @@ class TestAssembleResponse:
         assert body["usage"]["prompt_tokens_details"] == {"cached_tokens": 7}
 
     def test_openai_assemble_without_optional_fields(self):
-        from cubepi.providers.openai import OpenAIProvider
+        from cubeloop.providers.openai import OpenAIProvider
 
         body = OpenAIProvider._assemble_response(
             response_id=None,

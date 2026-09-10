@@ -4,18 +4,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from cubepi.errors import (
+from cubeloop.errors import (
     ProviderAuthFailed,
     ProviderUnavailable,
     RateLimited,
 )
-from cubepi.providers.base import ImageContent
-from cubepi.providers.images.capability import (
+from cubeloop.providers.base import ImageContent
+from cubeloop.providers.images.capability import (
     ImagesCapabilityDescriptor,
     SizeSpec,
 )
-from cubepi.providers.images.openai_images import OpenAIImagesProvider
-from cubepi.providers.images.types import (
+from cubeloop.providers.images.openai_images import OpenAIImagesProvider
+from cubeloop.providers.images.types import (
     ImagesContext,
     ImagesOptions,
 )
@@ -288,7 +288,7 @@ async def test_subscribe_response_fires_on_abort_with_images_aborted():
          takes the normal awaited path. If it were CancelledError, the
          sync fast-path would schedule async listeners as detached tasks
          that asyncio.run() teardown could cancel before they run."""
-    from cubepi.providers.images import ImagesAborted
+    from cubeloop.providers.images import ImagesAborted
 
     p = _provider(sleep=0.5)
     model = p.model("gpt-image-1")
@@ -326,7 +326,7 @@ async def test_async_response_observer_awaited_on_abort():
     fast-path triggered by exc being a CancelledError); under
     asyncio.run() teardown those detached tasks were getting cancelled
     before they could record the abort."""
-    from cubepi.providers.images import ImagesAborted
+    from cubeloop.providers.images import ImagesAborted
 
     p = _provider(sleep=0.5)
     model = p.model("gpt-image-1")
@@ -633,7 +633,7 @@ async def test_pre_set_signal_does_not_fire_request_listener():
 async def test_pre_set_signal_still_fires_response_listener():
     """Pre-set signal aborts cleanly but the response observer still fires
     (with body=None, exc=ImagesAborted) so tracing records the abort."""
-    from cubepi.providers.images import ImagesAborted
+    from cubeloop.providers.images import ImagesAborted
 
     p = _provider()
     model = p.model("gpt-image-1")

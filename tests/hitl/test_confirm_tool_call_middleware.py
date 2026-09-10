@@ -1,10 +1,10 @@
 import asyncio
 
-from cubepi.agent.types import AgentContext, BeforeToolCallContext
-from cubepi.hitl import ApproveAnswer
-from cubepi.hitl.channel import InMemoryChannel
-from cubepi.hitl.middleware import ConfirmToolCallMiddleware
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
+from cubeloop.agent.types import AgentContext, BeforeToolCallContext
+from cubeloop.hitl import ApproveAnswer
+from cubeloop.hitl.channel import InMemoryChannel
+from cubeloop.hitl.middleware import ConfirmToolCallMiddleware
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall
 
 
 def _ctx(name="bash"):

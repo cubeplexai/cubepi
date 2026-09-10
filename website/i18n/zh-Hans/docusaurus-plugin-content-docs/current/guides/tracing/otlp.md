@@ -1,26 +1,26 @@
 ---
 title: OTLP 与后端
-description: "将 CubePi OpenTelemetry trace 导出到 Jaeger、Tempo、Honeycomb 等兼容 OTLP 的后端。"
+description: "将 CubeLoop OpenTelemetry trace 导出到 Jaeger、Tempo、Honeycomb 等兼容 OTLP 的后端。"
 sidebar_position: 3
 ---
 
 # 导出到 OTLP 后端
 
-`cubepi.tracing.Tracer` 接受任何 `opentelemetry.sdk.trace.export.SpanExporter`，
+`cubeloop.tracing.Tracer` 接受任何 `opentelemetry.sdk.trace.export.SpanExporter`，
 因此 OpenTelemetry 生态中的所有 exporter 均可直接使用。选择传输协议
 （HTTP 或 gRPC），指向你的 collector，将 exporter 传入 Tracer 即可。
 
 ## HTTP（OTLP/HTTP）
 
 ```bash
-pip install "cubepi[tracing]" opentelemetry-exporter-otlp-proto-http
+pip install "cubeloop[tracing]" opentelemetry-exporter-otlp-proto-http
 ```
 
 ```python
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
     OTLPSpanExporter,
 )
-from cubepi.tracing import Tracer
+from cubeloop.tracing import Tracer
 
 tracer = Tracer(
     service_name="my-bot",
@@ -43,7 +43,7 @@ tracer = Tracer(
 ## gRPC（OTLP/gRPC）
 
 ```bash
-pip install "cubepi[tracing]" opentelemetry-exporter-otlp-proto-grpc
+pip install "cubeloop[tracing]" opentelemetry-exporter-otlp-proto-grpc
 ```
 
 ```python
@@ -104,11 +104,11 @@ OTel collector 内置 AWS X-Ray exporter；与其他 OTLP 目标的配置方式�
 暂无公开 API 可传入入站 `traceparent`，使 span 嵌套到调用方 HTTP handler
 的 trace 中。内部钩子（`Tracer._make_parent_context`）为未来的 `run_scope`
 特性预留；在该特性发布之前，agent 运行与周边服务 trace 仅通过 resource
-属性（`service.name`、`gen_ai.agent.name`、`cubepi.run_id`）关联。
+属性（`service.name`、`gen_ai.agent.name`、`cubeloop.run_id`）关联。
 
-如果需要立即将上游 trace 延续到 CubePi，可以在调用 `agent.prompt(...)` 之前
+如果需要立即将上游 trace 延续到 CubeLoop，可以在调用 `agent.prompt(...)` 之前
 手动设置 OTel 当前 span，让 agent 的 span 通过 OTel 的环境上下文继承它——
-CubePi 不会覆盖已有的活跃父节点。
+CubeLoop 不会覆盖已有的活跃父节点。
 
 出站方向，MCP `tools/call` 会自动将 W3C `traceparent` 注入 HTTP 头，
 让下游已埋点的 MCP 服务器能够续接 trace 并写入其自己的后端。
@@ -122,7 +122,7 @@ OTLP 用于生产后端：
 tracer = Tracer(
     service_name="my-bot",
     exporters=[
-        JsonlSpanExporter(directory="./cubepi-traces"),
+        JsonlSpanExporter(directory="./cubeloop-traces"),
         OTLPSpanExporter(endpoint="https://api.honeycomb.io/v1/traces", headers={…}),
     ],
 )
@@ -171,7 +171,7 @@ finally:
 改用独立的 `trace()` 辅助函数并传入 `flush="background"`：
 
 ```python
-from cubepi.tracing import trace
+from cubeloop.tracing import trace
 
 @app.post("/chat")
 async def chat(req: ChatRequest):

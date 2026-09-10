@@ -4,30 +4,30 @@ import asyncio
 
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import (
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import (
     AgentContext,
     BeforeToolCallContext,
 )
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl import (
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl import (
     ApproveAnswer,
     HitlError,
     HitlNoPendingRequest,
     HitlStaleAnswer,
     Question,
 )
-from cubepi.hitl.channel import InMemoryChannel
-from cubepi.hitl.middleware import ApprovalPolicyMiddleware
-from cubepi.hitl.testing import NoopChannel, ScriptedChannel
-from cubepi.hitl.types import ApproveRequest, HitlRequest
-from cubepi.providers.base import (
+from cubeloop.hitl.channel import InMemoryChannel
+from cubeloop.hitl.middleware import ApprovalPolicyMiddleware
+from cubeloop.hitl.testing import NoopChannel, ScriptedChannel
+from cubeloop.hitl.types import ApproveRequest, HitlRequest
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,
     Usage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 
 # ── Agent error guards ──────────────────────────────────────────────────────
@@ -232,7 +232,7 @@ def test_noop_channel_error_on_unknown_kind():
     """NoopChannel handles approve (ApproveAnswer), confirm (True), ask (dict).
     An unknown kind (e.g. a synthetic payload with a made-up kind) triggers
     the HitlError guard."""
-    from cubepi.hitl.types import ConfirmRequest
+    from cubeloop.hitl.types import ConfirmRequest
 
     ch = NoopChannel()
     # ConfirmRequest has kind="confirm", which NoopChannel handles fine.
@@ -246,7 +246,7 @@ def test_noop_channel_error_on_unknown_kind():
 
 
 def test_args_to_dict_fallback():
-    from cubepi.hitl.middleware import _args_to_dict
+    from cubeloop.hitl.middleware import _args_to_dict
 
     class _Custom:
         def __init__(self):
@@ -280,7 +280,7 @@ async def test_policy_type_error():
 
 
 async def test_merge_hitl_details_non_dict_base():
-    from cubepi.agent.tools import _merge_hitl_details
+    from cubeloop.agent.tools import _merge_hitl_details
 
     result = _merge_hitl_details("plain_string", {"a": 1})
     assert result["_non_dict_details"] == "plain_string"
@@ -288,14 +288,14 @@ async def test_merge_hitl_details_non_dict_base():
 
 
 async def test_merge_hitl_details_base_is_none():
-    from cubepi.agent.tools import _merge_hitl_details
+    from cubeloop.agent.tools import _merge_hitl_details
 
     result = _merge_hitl_details(None, {"x": 1})
     assert result == {"hitl": {"x": 1}}
 
 
 async def test_merge_hitl_details_hitl_is_none():
-    from cubepi.agent.tools import _merge_hitl_details
+    from cubeloop.agent.tools import _merge_hitl_details
 
     assert _merge_hitl_details(None, None) is None
     assert _merge_hitl_details({"a": 1}, None) == {"a": 1}
@@ -318,7 +318,7 @@ async def test_answer_with_answered_qid_is_noop():
     # answering again after resolution won't match — pending is None now
     # and a stale answer would raise. We want to verify the current behavior
     # is safe (no error for already-resolved).
-    from cubepi.hitl import HitlStaleAnswer
+    from cubeloop.hitl import HitlStaleAnswer
 
     with pytest.raises(HitlStaleAnswer):
         await ch.answer("any-qid", True)  # stale after resolution
@@ -335,7 +335,7 @@ async def test_cancel_with_stale_qid_raises():
     asyncio.create_task(host())
     await ch.confirm("ok?")
     # cancel with a qid that isn't pending → HitlStaleAnswer
-    from cubepi.hitl import HitlStaleAnswer
+    from cubeloop.hitl import HitlStaleAnswer
 
     with pytest.raises(HitlStaleAnswer):
         await ch.cancel("not-the-qid")

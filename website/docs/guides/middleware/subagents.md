@@ -1,12 +1,12 @@
 ---
 title: Subagents
-description: "Use SubagentMiddleware to delegate self-contained work to child CubePi agents."
+description: "Use SubagentMiddleware to delegate self-contained work to child CubeLoop agents."
 ---
 
 # Subagents
 
 `SubagentMiddleware` adds a `subagent` tool. When the model calls that tool,
-CubePi creates an ephemeral child `Agent`, runs a self-contained prompt, and
+CubeLoop creates an ephemeral child `Agent`, runs a self-contained prompt, and
 returns the child agent's final assistant text as the tool result.
 
 Use it when a parent agent needs to delegate bounded work such as research,
@@ -15,8 +15,8 @@ review, extraction, or a focused implementation pass.
 ## Define subagent specs
 
 ```python
-from cubepi import Agent
-from cubepi.middleware import SubagentMiddleware, SubagentSpec
+from cubeloop import Agent
+from cubeloop.middleware import SubagentMiddleware, SubagentSpec
 
 subagents = {
     "researcher": SubagentSpec(
@@ -45,7 +45,7 @@ agent = Agent(
 )
 ```
 
-If the model requests an unknown `subagent_type`, CubePi falls back to the
+If the model requests an unknown `subagent_type`, CubeLoop falls back to the
 `general-purpose` subagent. If you do not define one, the middleware supplies a
 basic default.
 
@@ -102,7 +102,7 @@ Mapped payloads are also stored in the parent tool result under
 ## Tracing and aborts
 
 Pass a `Tracer` via `tracer=...` to attach tracing to each child run. Nested
-subagent spans share the parent trace, so `cubepi trace view <trace_id>` renders
+subagent spans share the parent trace, so `cubeloop trace view <trace_id>` renders
 the parent tool call and child run together.
 
 The parent run's abort signal is forwarded to the child agent. If the parent is

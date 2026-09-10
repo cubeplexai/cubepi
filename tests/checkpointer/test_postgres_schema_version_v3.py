@@ -7,8 +7,8 @@ from __future__ import annotations
 import asyncpg
 import pytest
 
-from cubepi.checkpointer.postgres import PostgresCheckpointer
-from cubepi.checkpointer.postgres.exceptions import CubepiSchemaMismatch
+from cubeloop.checkpointer.postgres import PostgresCheckpointer
+from cubeloop.checkpointer.postgres.exceptions import CubeloopSchemaMismatch
 
 
 @pytest.mark.asyncio
@@ -22,12 +22,12 @@ async def test_postgres_v2_database_refused_with_actionable_error(clean_db) -> N
     finally:
         await conn.close()
 
-    with pytest.raises(CubepiSchemaMismatch) as ei:
+    with pytest.raises(CubeloopSchemaMismatch) as ei:
         async with PostgresCheckpointer(clean_db):
             pass
 
     msg = str(ei.value)
-    assert "expected 5" in msg or "expected=5" in msg
+    assert "expected 6" in msg or "expected=6" in msg
     assert "actual 2" in msg or "actual=2" in msg
     # Hint mentions the host alembic migration path so operators know what to do.
     assert "alembic" in msg.lower()
@@ -38,10 +38,10 @@ async def test_mysql_v2_database_refused_with_actionable_error(clean_mysql_db) -
     """Same policy for MySQL (parallel to the Postgres test above)."""
     import aiomysql
 
-    from cubepi.checkpointer.mysql import MySQLCheckpointer
-    from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
-    from cubepi.checkpointer.mysql.exceptions import (
-        CubepiSchemaMismatch as MysqlMismatch,
+    from cubeloop.checkpointer.mysql import MySQLCheckpointer
+    from cubeloop.checkpointer.mysql.checkpointer import _parse_dsn
+    from cubeloop.checkpointer.mysql.exceptions import (
+        CubeloopSchemaMismatch as MysqlMismatch,
     )
 
     conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
@@ -59,6 +59,6 @@ async def test_mysql_v2_database_refused_with_actionable_error(clean_mysql_db) -
             pass
 
     msg = str(ei.value)
-    assert "expected 5" in msg or "expected=5" in msg
+    assert "expected 6" in msg or "expected=6" in msg
     assert "actual 2" in msg or "actual=2" in msg
     assert "alembic" in msg.lower()

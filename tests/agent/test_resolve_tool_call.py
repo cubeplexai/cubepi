@@ -2,19 +2,19 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from cubepi.agent.tools import execute_tool_calls
-from cubepi.agent.types import (
+from cubeloop.agent.tools import execute_tool_calls
+from cubeloop.agent.types import (
     AgentContext,
     AgentTool,
     AgentToolResult,
     ToolExecutionStartEvent,
 )
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,
 )
-from cubepi.providers.faux import faux_assistant_message
+from cubeloop.providers.faux import faux_assistant_message
 
 
 class _EchoArgs(BaseModel):

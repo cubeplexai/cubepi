@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 from opentelemetry.sdk.trace.export import SpanExporter
 
-from cubepi.tracing.recorder import Recorder
-from cubepi.tracing.tracer import Tracer
+from cubeloop.tracing.recorder import Recorder
+from cubeloop.tracing.tracer import Tracer
 
 
 class _Span:
@@ -23,7 +23,7 @@ class _Span:
 
 class TestOTLPSpanExporterReExport:
     def test_otlp_exporter_is_importable(self):
-        from cubepi.tracing.exporters import OTLPSpanExporter
+        from cubeloop.tracing.exporters import OTLPSpanExporter
 
         # Returned class must be the actual OTLP exporter.
         assert OTLPSpanExporter.__module__.startswith(
@@ -31,7 +31,7 @@ class TestOTLPSpanExporterReExport:
         )
 
     def test_otlp_exporter_can_be_constructed(self):
-        from cubepi.tracing.exporters import OTLPSpanExporter
+        from cubeloop.tracing.exporters import OTLPSpanExporter
 
         # Construct with default kwargs — should not require a live
         # collector at construction time.
@@ -41,7 +41,7 @@ class TestOTLPSpanExporterReExport:
         exporter.shutdown()
 
     def test_unknown_attr_still_raises(self):
-        from cubepi.tracing import exporters
+        from cubeloop.tracing import exporters
 
         with pytest.raises(AttributeError):
             _ = exporters.NotAnExporter  # type: ignore[attr-defined]
@@ -51,8 +51,8 @@ class TestOpenAIRequestAttrs:
     def test_service_tier_recorded_on_request(self):
         # Direct unit-level: build a fake payload with service_tier
         # and feed _on_provider_request via the Recorder.
-        from cubepi.providers.base import Model
-        from cubepi.tracing import Tracer
+        from cubeloop.providers.base import Model
+        from cubeloop.tracing import Tracer
 
         tracer = Tracer(service_name="t", exporters=[])
         recorder = Recorder(tracer)

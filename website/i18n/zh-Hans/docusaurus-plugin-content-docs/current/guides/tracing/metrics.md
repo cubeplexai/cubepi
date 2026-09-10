@@ -1,13 +1,13 @@
 ---
 title: Metrics
-description: "在 CubePi tracing 中收集 token 用量、延迟和首包时间指标。"
+description: "在 CubeLoop tracing 中收集 token 用量、延迟和首包时间指标。"
 sidebar_position: 5
 ---
 
 # 使用 `Meter` 采集指标
 
 Span 描述单次运行的形态；直方图描述整个集群的形态。
-`cubepi.tracing.Meter` 与 `Tracer` 对称，发出 OTel GenAI 指标集，让 dashboard
+`cubeloop.tracing.Meter` 与 `Tracer` 对称，发出 OTel GenAI 指标集，让 dashboard
 开箱即用。
 
 ## 发出的指标
@@ -35,14 +35,14 @@ RAII 惯用形式——`async with` 全包，无需手动清理：
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
     OTLPMetricExporter,
 )
-from cubepi.tracing import Tracer, Meter
-from cubepi.tracing.exporters import JsonlSpanExporter
+from cubeloop.tracing import Tracer, Meter
+from cubeloop.tracing.exporters import JsonlSpanExporter
 
 async with (
     Tracer(
         service_name="my-bot",
         agent_name="assistant",
-        exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+        exporters=[JsonlSpanExporter(directory="./cubeloop-traces")],
     ) as tracer,
     Meter(
         resource=tracer.resource,    # 共享 Resource，使 service.* 与 span 匹配

@@ -4,14 +4,14 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolResultMessage,
     Usage,
     UserMessage,
 )
-from cubepi.checkpointer import MemoryCheckpointer, SQLiteCheckpointer
+from cubeloop.checkpointer import MemoryCheckpointer, SQLiteCheckpointer
 
 
 def test_user_message_default_metadata_is_empty_dict() -> None:

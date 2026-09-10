@@ -3,17 +3,17 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff check
-        entry: uv run ruff check cubepi/ tests/
+        entry: uv run ruff check cubeloop/ tests/
         language: system
         pass_filenames: false
       - id: ruff-format-check
         name: ruff format --check
-        entry: uv run ruff format --check cubepi/ tests/
+        entry: uv run ruff format --check cubeloop/ tests/
         language: system
         pass_filenames: false
       - id: mypy
-        name: mypy cubepi
-        entry: uv run mypy cubepi
+        name: mypy cubeloop
+        entry: uv run mypy cubeloop
         language: system
         pass_filenames: false
       - id: pytest

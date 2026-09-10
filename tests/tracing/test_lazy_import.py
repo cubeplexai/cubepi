@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-import cubepi.tracing
+import cubeloop.tracing
 
 
 def test_schema_importable_without_opentelemetry():
@@ -21,8 +21,8 @@ def test_schema_importable_without_opentelemetry():
         "        raise ImportError('hidden')\n"
         "    return real_import(name, *a, **k)\n"
         "builtins.__import__ = fake\n"
-        "from cubepi.tracing import schema\n"
-        "assert schema.CUBEPI_RUN_ID == 'cubepi.run_id'\n"
+        "from cubeloop.tracing import schema\n"
+        "assert schema.CUBELOOP_RUN_ID == 'cubeloop.run_id'\n"
         "print('ok')\n"
     )
     result = subprocess.run(
@@ -34,10 +34,10 @@ def test_schema_importable_without_opentelemetry():
 
 def test_unknown_attribute_raises_attribute_error():
     with pytest.raises(AttributeError):
-        cubepi.tracing.does_not_exist
+        cubeloop.tracing.does_not_exist
 
 
 def test_dir_lists_public_names():
-    names = dir(cubepi.tracing)
+    names = dir(cubeloop.tracing)
     assert "Tracer" in names
     assert "JsonlSpanExporter" in names

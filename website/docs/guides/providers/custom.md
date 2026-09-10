@@ -1,6 +1,6 @@
 ---
 title: Writing a Custom Provider
-description: "Write a custom provider for CubePi by implementing the Provider protocol."
+description: "Write a custom provider for CubeLoop by implementing the Provider protocol."
 ---
 
 # Writing a Custom Provider
@@ -42,7 +42,7 @@ pushes events into it, return the stream immediately.
 ```python
 import asyncio
 import time
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     BaseProvider,
     Message,
@@ -136,7 +136,7 @@ If your model emits tool calls, append `ToolCall` blocks to
 `toolcall_delta` / `toolcall_end`:
 
 ```python
-from cubepi.providers.base import ToolCall
+from cubeloop.providers.base import ToolCall
 
 tc = ToolCall(id=block_id, name=tool_name, arguments={})
 partial.content.append(tc)
@@ -148,16 +148,16 @@ ms.push(StreamEvent(type="toolcall_delta", delta=partial_json_chunk, …))
 # replace tc.arguments with the parsed dict, push toolcall_end
 ```
 
-CubePi's agent loop will dispatch the tool calls automatically once
+CubeLoop's agent loop will dispatch the tool calls automatically once
 `done` is emitted.
 
 ## Hooking `on_payload` / `on_response`
 
 If your provider sends an HTTP request, call the helpers in
-`cubepi.providers.base`:
+`cubeloop.providers.base`:
 
 ```python
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     ProviderResponse,
     invoke_on_payload,
     invoke_on_response,
@@ -177,12 +177,12 @@ inspection points for free.
 
 ## Using `FauxProvider` in tests
 
-CubePi ships `FauxProvider` for deterministic tests — no network, no
+CubeLoop ships `FauxProvider` for deterministic tests — no network, no
 flakiness, real streaming events:
 
 ```python
-from cubepi import Agent
-from cubepi.providers import FauxProvider, faux_assistant_message, faux_text, faux_tool_call
+from cubeloop import Agent
+from cubeloop.providers import FauxProvider, faux_assistant_message, faux_text, faux_tool_call
 
 
 def test_my_agent():
@@ -238,9 +238,9 @@ Helpers:
   writing a class from scratch, check whether your backend is just an
   OpenAI/Anthropic-compatible endpoint a `CapabilityDescriptor` or
   bundled preset already covers.
-- [API Reference → providers/base](../../api/cubepi-providers) — the
+- [API Reference → providers/base](../../api/cubeloop-providers) — the
   full type list.
-- [Anthropic Provider source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/anthropic.py)
+- [Anthropic Provider source](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/providers/anthropic.py)
   — a real, complete example.
-- [`FauxProvider` source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/faux.py)
+- [`FauxProvider` source](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/providers/faux.py)
   — the testing primitive, including stream-realism details.

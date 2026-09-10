@@ -1,7 +1,7 @@
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl.channel import CheckpointedChannel, InMemoryChannel
-from cubepi.hitl.middleware import ApprovalPolicyMiddleware, ConfirmToolCallMiddleware
-from cubepi.hitl.policy import Approve
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl.channel import CheckpointedChannel, InMemoryChannel
+from cubeloop.hitl.middleware import ApprovalPolicyMiddleware, ConfirmToolCallMiddleware
+from cubeloop.hitl.policy import Approve
 
 
 def _approve_policy(ctx):

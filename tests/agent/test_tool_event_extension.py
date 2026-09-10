@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from cubepi.agent.tools import execute_tool_calls
-from cubepi.agent.types import (
+from cubeloop.agent.tools import execute_tool_calls
+from cubeloop.agent.types import (
     AgentContext,
     AgentTool,
     AgentToolResult,
     BeforeToolCallResult,
 )
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall
 
 
 class Params(BaseModel):

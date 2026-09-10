@@ -1,4 +1,4 @@
-from cubepi.providers import (
+from cubeloop.providers import (
     get_anthropic_provider,
     get_openai_provider,
     get_openai_responses_provider,

@@ -1,7 +1,7 @@
 import dataclasses
 
 import pytest
-from cubepi.hitl.types import (
+from cubeloop.hitl.types import (
     Option,
     Question,
     ConfirmRequest,
@@ -73,7 +73,7 @@ def test_approve_answer_decisions():
 
 
 def test_before_tool_call_result_new_fields():
-    from cubepi.agent.types import BeforeToolCallResult
+    from cubeloop.agent.types import BeforeToolCallResult
 
     r = BeforeToolCallResult(
         edited_args={"x": 1},
@@ -91,7 +91,7 @@ def test_before_tool_call_result_new_fields():
 
 
 def test_approval_decision_dataclasses_frozen():
-    from cubepi.hitl.policy import Approve, Deny, AskUser
+    from cubeloop.hitl.policy import Approve, Deny, AskUser
 
     a = Approve()
     d = Deny(reason="forbidden")

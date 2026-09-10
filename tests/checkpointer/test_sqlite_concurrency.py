@@ -4,9 +4,9 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
-from cubepi.checkpointer.exceptions import CheckpointerLockTimeoutError
-from cubepi.checkpointer.sqlite import SQLiteCheckpointer
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.checkpointer.exceptions import CheckpointerLockTimeoutError
+from cubeloop.checkpointer.sqlite import SQLiteCheckpointer
+from cubeloop.providers.base import TextContent, UserMessage
 
 
 @pytest.mark.asyncio

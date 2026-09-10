@@ -22,13 +22,13 @@ _anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
 _openai_key = os.environ.get("OPENAI_API_KEY")
 
 if _anthropic_key:
-    from cubepi.providers.anthropic import AnthropicProvider
+    from cubeloop.providers.anthropic import AnthropicProvider
 
     _base_url = os.environ.get("ANTHROPIC_BASE_URL") or None
     provider = AnthropicProvider(api_key=_anthropic_key, base_url=_base_url)
     MODEL_ID = os.environ.get("MODEL", "claude-sonnet-4-6")
 elif _openai_key:
-    from cubepi.providers.openai import OpenAIProvider
+    from cubeloop.providers.openai import OpenAIProvider
 
     _base_url = os.environ.get("OPENAI_BASE_URL") or None
     provider = OpenAIProvider(api_key=_openai_key, base_url=_base_url)

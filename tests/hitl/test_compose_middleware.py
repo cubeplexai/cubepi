@@ -1,10 +1,10 @@
-from cubepi.agent.types import (
+from cubeloop.agent.types import (
     AgentContext,
     BeforeToolCallContext,
     BeforeToolCallResult,
 )
-from cubepi.middleware.base import Middleware, compose_middleware
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
+from cubeloop.middleware.base import Middleware, compose_middleware
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall
 
 
 def _ctx(args: dict | None = None) -> BeforeToolCallContext:

@@ -1,12 +1,12 @@
 ---
 title: 概览
 sidebar_position: 1
-description: "CubePi 人机协同：channel、三种动词（confirm、approve、ask）与超时。"
+description: "CubeLoop 人机协同：channel、三种动词（confirm、approve、ask）与超时。"
 ---
 
 # 人机协同 (HITL)
 
-CubePi 的 HITL channel 让 agent 能够**暂停并等待人类输入**后再继续。
+CubeLoop 的 HITL channel 让 agent 能够**暂停并等待人类输入**后再继续。
 它用一个统一原语覆盖两种典型模式：
 
 1. **沙箱工具确认** —— 危险工具（bash、文件写入、API 变更）在运行前
@@ -51,7 +51,7 @@ ID 来关联。
 - **"其他" 可输入**（选项有 `allow_input=True` —— 用户输入自由文本）
 
 ```python
-from cubepi.hitl.types import Question, Option
+from cubeloop.hitl.types import Question, Option
 
 answers = await channel.ask([
     Question(key="framework", prompt="选择框架？", options=[

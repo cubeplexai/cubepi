@@ -10,15 +10,15 @@ from typing import Any
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl.ask_user import ask_user_tool
-from cubepi.hitl.channel import CheckpointedChannel
-from cubepi.mcp import _tracing as mcp_tracing
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
-from cubepi.providers.faux import FauxProvider
-from cubepi.tracing import Tracer
-from cubepi.tracing import recorder as recorder_module
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl.ask_user import ask_user_tool
+from cubeloop.hitl.channel import CheckpointedChannel
+from cubeloop.mcp import _tracing as mcp_tracing
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall
+from cubeloop.providers.faux import FauxProvider
+from cubeloop.tracing import Tracer
+from cubeloop.tracing import recorder as recorder_module
 
 
 class InMemoryExporter(SpanExporter):
@@ -108,7 +108,7 @@ async def test_suspended_outcome_without_snapshot_emits_no_event() -> None:
 
 
 async def test_recorder_suspension_without_active_run_is_noop() -> None:
-    from cubepi.tracing.recorder import Recorder
+    from cubeloop.tracing.recorder import Recorder
 
     tracer = Tracer(service_name="test", exporters=[])
     recorder = Recorder(tracer)
@@ -133,33 +133,33 @@ async def test_suspended_run_exports_suspended_trace_without_abort_or_leaks() ->
 
     roots = [span for span in exporter.spans if span.name == "invoke_agent"]
     assert len(roots) == 1
-    assert roots[0].attributes.get("cubepi.output.messages.count") == 1
+    assert roots[0].attributes.get("cubeloop.output.messages.count") == 1
     suspended_spans = [
         span
         for span in exporter.spans
-        if span.name in {"invoke_agent", "cubepi.turn"}
+        if span.name in {"invoke_agent", "cubeloop.turn"}
         or span.name.startswith("execute_tool ")
     ]
     assert {span.name for span in suspended_spans} == {
         "invoke_agent",
-        "cubepi.turn",
+        "cubeloop.turn",
         "execute_tool ask_user",
     }
     assert all(
-        span.attributes.get("cubepi.run.outcome") == "suspended"
+        span.attributes.get("cubeloop.run.outcome") == "suspended"
         for span in suspended_spans
     )
     assert not [
         span.name
         for span in exporter.spans
-        if span.attributes.get("cubepi.aborted") is True
+        if span.attributes.get("cubeloop.aborted") is True
     ]
     assert len(mcp_tracing._provider_stack) == provider_stack_baseline
     assert len(mcp_tracing._active_entries) == active_entries_baseline
 
 
 async def test_recorder_suspension_finalizes_all_open_resources() -> None:
-    from cubepi.tracing.recorder import Recorder, _RunState
+    from cubeloop.tracing.recorder import Recorder, _RunState
 
     class _Span:
         def __init__(self) -> None:
@@ -200,7 +200,7 @@ async def test_recorder_suspension_finalizes_all_open_resources() -> None:
     await tracer.shutdown()
 
     for span in (agent_span, turn_span, chat_span, tool_span):
-        assert span.attributes["cubepi.run.outcome"] == "suspended"
+        assert span.attributes["cubeloop.run.outcome"] == "suspended"
         assert span.ended is True
     assert stream.closed is True
     assert run.tool_spans == {}
@@ -211,7 +211,7 @@ async def test_recorder_suspension_finalizes_all_open_resources() -> None:
 
 
 async def test_recorder_suspension_cleanup_continues_after_resource_errors() -> None:
-    from cubepi.tracing.recorder import Recorder, _RunState
+    from cubeloop.tracing.recorder import Recorder, _RunState
 
     class _Span:
         def __init__(self) -> None:
@@ -248,7 +248,7 @@ async def test_recorder_suspension_cleanup_continues_after_resource_errors() -> 
     recorder._on_agent_suspended()
     await tracer.shutdown()
 
-    assert agent_span.attributes["cubepi.run.outcome"] == "suspended"
+    assert agent_span.attributes["cubeloop.run.outcome"] == "suspended"
     assert agent_span.ended is True
     assert run.tool_spans == {}
     assert run.chat_span is None
@@ -312,8 +312,8 @@ async def test_earlier_listener_failure_cannot_hide_suspension_from_tracer() -> 
 
     roots = [span for span in exporter.spans if span.name == "invoke_agent"]
     assert len(roots) == 1
-    assert roots[0].attributes.get("cubepi.run.outcome") == "suspended"
-    assert roots[0].attributes.get("cubepi.aborted") is not True
+    assert roots[0].attributes.get("cubeloop.run.outcome") == "suspended"
+    assert roots[0].attributes.get("cubeloop.aborted") is not True
 
 
 async def test_cancelled_listener_cannot_hide_suspension_from_tracer() -> None:
@@ -340,8 +340,8 @@ async def test_cancelled_listener_cannot_hide_suspension_from_tracer() -> None:
     assert agent.state.active_run_id is None
     roots = [span for span in exporter.spans if span.name == "invoke_agent"]
     assert len(roots) == 1
-    assert roots[0].attributes.get("cubepi.run.outcome") == "suspended"
-    assert roots[0].attributes.get("cubepi.aborted") is not True
+    assert roots[0].attributes.get("cubeloop.run.outcome") == "suspended"
+    assert roots[0].attributes.get("cubeloop.aborted") is not True
 
 
 async def test_listener_cancellation_takes_priority_after_terminal_fanout() -> None:
@@ -377,7 +377,7 @@ async def test_listener_cancellation_takes_priority_after_terminal_fanout() -> N
     assert isinstance(raised, asyncio.CancelledError)
     roots = [span for span in exporter.spans if span.name == "invoke_agent"]
     assert len(roots) == 1
-    assert roots[0].attributes.get("cubepi.run.outcome") == "suspended"
+    assert roots[0].attributes.get("cubeloop.run.outcome") == "suspended"
 
 
 async def test_detach_then_owner_cancel_clears_suspension_snapshot() -> None:
@@ -405,8 +405,8 @@ async def test_detach_then_owner_cancel_clears_suspension_snapshot() -> None:
     assert unhandled == []
     roots = [span for span in exporter.spans if span.name == "invoke_agent"]
     assert len(roots) == 1
-    assert roots[0].attributes.get("cubepi.run.outcome") is None
-    assert roots[0].attributes.get("cubepi.aborted") is True
+    assert roots[0].attributes.get("cubeloop.run.outcome") is None
+    assert roots[0].attributes.get("cubeloop.aborted") is True
 
 
 async def test_reset_before_owner_resumes_does_not_drop_suspension_snapshot() -> None:
@@ -425,8 +425,8 @@ async def test_reset_before_owner_resumes_does_not_drop_suspension_snapshot() ->
     assert persisted_pending is not None
     roots = [span for span in exporter.spans if span.name == "invoke_agent"]
     assert len(roots) == 1
-    assert roots[0].attributes.get("cubepi.run.outcome") == "suspended"
-    assert roots[0].attributes.get("cubepi.aborted") is not True
+    assert roots[0].attributes.get("cubeloop.run.outcome") == "suspended"
+    assert roots[0].attributes.get("cubeloop.aborted") is not True
 
 
 async def test_respond_after_suspension_opens_a_new_activation_trace() -> None:
@@ -444,9 +444,9 @@ async def test_respond_after_suspension_opens_a_new_activation_trace() -> None:
 
     roots = [span for span in exporter.spans if span.name == "invoke_agent"]
     assert len(roots) == 2
-    assert roots[0].attributes.get("cubepi.run.outcome") == "suspended"
-    assert roots[1].attributes.get("cubepi.run.outcome") is None
-    assert roots[1].attributes.get("cubepi.aborted") is not True
+    assert roots[0].attributes.get("cubeloop.run.outcome") == "suspended"
+    assert roots[1].attributes.get("cubeloop.run.outcome") is None
+    assert roots[1].attributes.get("cubeloop.aborted") is not True
     assert roots[0].context.trace_id != roots[1].context.trace_id
 
 

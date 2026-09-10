@@ -1,7 +1,7 @@
 ---
 title: API、事件与参考
 sidebar_position: 4
-description: "CubePi HITL 参考：Agent API、事件、追踪 span、错误参考、测试辅助与架构说明。"
+description: "CubeLoop HITL 参考：Agent API、事件、追踪 span、错误参考、测试辅助与架构说明。"
 ---
 
 # API、事件与参考
@@ -30,7 +30,7 @@ description: "CubePi HITL 参考：Agent API、事件、追踪 span、错误参�
 
 ## 追踪 span
 
-安装 `cubepi[tracing]` extra 后，每次 HITL await 都会包装在一个
+安装 `cubeloop[tracing]` extra 后，每次 HITL await 都会包装在一个
 OpenTelemetry span 中：
 
 | Span 名称 | 属性 |
@@ -59,7 +59,7 @@ OpenTelemetry span 中：
 | `HitlDurabilityNotGuaranteed` | `Exception` | 自定义工具调了 `CheckpointedChannel.ask()` 但没有 `allow_inside_custom_tool=True` |
 
 `HitlControlException`（四个 `BaseException` 子类的父类）**故意**不被
-`cubepi.agent.tools._prepare_tool_call` 和 `_execute_prepared` 中现有
+`cubeloop.agent.tools._prepare_tool_call` 和 `_execute_prepared` 中现有
 的广泛 `except Exception:` 处理器捕获 —— 这模仿了 `asyncio.CancelledError`
 的模式。
 
@@ -67,7 +67,7 @@ OpenTelemetry span 中：
 ## 测试辅助
 
 ```python
-from cubepi.hitl.testing import ScriptedChannel, NoopChannel
+from cubeloop.hitl.testing import ScriptedChannel, NoopChannel
 
 # ScriptedChannel：预编程答案，按顺序消费
 ch = ScriptedChannel(answers=[

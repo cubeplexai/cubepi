@@ -74,13 +74,13 @@ const sidebars: SidebarsConfig = {
       label: 'API Reference',
       link: { type: 'doc', id: 'api/index' },
       items: [
-        'api/cubepi-agent',
-        'api/cubepi-providers',
-        'api/cubepi-checkpointer',
-        'api/cubepi-middleware',
-        'api/cubepi-mcp',
-        'api/cubepi-tracing',
-        'api/cubepi-utils',
+        'api/cubeloop-agent',
+        'api/cubeloop-providers',
+        'api/cubeloop-checkpointer',
+        'api/cubeloop-middleware',
+        'api/cubeloop-mcp',
+        'api/cubeloop-tracing',
+        'api/cubeloop-utils',
       ],
     },
     {
@@ -99,7 +99,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Migration',
-      items: ['migration/from-langgraph'],
+      items: ['migration/from-cubepi', 'migration/from-langgraph'],
     },
   ],
 };

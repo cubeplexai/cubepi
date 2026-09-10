@@ -1,11 +1,11 @@
 ---
 title: 图片生成
-description: "用 CubePi 的 image provider 生成图片 —— OpenAI、豆包 Seedream、SiliconFlow、Together AI 等 OpenAI 兼容后端。"
+description: "用 CubeLoop 的 image provider 生成图片 —— OpenAI、豆包 Seedream、SiliconFlow、Together AI 等 OpenAI 兼容后端。"
 ---
 
 # 图片生成
 
-CubePi 的图片生成路径与 chat provider 范式同构：Provider 装连接信息
+CubeLoop 的图片生成路径与 chat provider 范式同构：Provider 装连接信息
 （`provider_id`、`api_key`、`base_url`、`capability`），model spec 装模型级
 默认值，per-call 走类型化的 `ImagesContext` 加可选的 `ImagesOptions`
 跨切面选项。调用失败抛出类型化的 `ProviderError` 子类——UI 端跟 chat
@@ -24,7 +24,7 @@ OpenAI 形态的后端（OpenAI 官方、豆包 Seedream、SiliconFlow、Togethe
 
 ```python
 import os
-from cubepi.providers.images import OpenAIImagesProvider, ImagesContext
+from cubeloop.providers.images import OpenAIImagesProvider, ImagesContext
 
 provider = OpenAIImagesProvider(
     provider_id="openai",
@@ -88,7 +88,7 @@ ctx = ImagesContext(
 ## `ImagesOptions` — per-call 跨切面选项
 
 ```python
-from cubepi.providers.images import ImagesOptions
+from cubeloop.providers.images import ImagesOptions
 
 opts = ImagesOptions(
     signal=cancel_event,         # asyncio.Event；set 后中止当前调用
@@ -107,7 +107,7 @@ Response 观察者通过 `ImagesAborted` 异常（普通 `Exception` 子类，**
 在 generate 返回前完成）来看到 abort：
 
 ```python
-from cubepi.providers.images import ImagesAborted
+from cubeloop.providers.images import ImagesAborted
 
 def on_response(body, model, exc):
     if isinstance(exc, ImagesAborted):
@@ -148,7 +148,7 @@ OpenAIImagesProvider(
 URL 长得像 OpenAI，但字段名要换：
 
 ```python
-from cubepi.providers.images.capability import ImagesCapabilityDescriptor, SizeSpec
+from cubeloop.providers.images.capability import ImagesCapabilityDescriptor, SizeSpec
 
 OpenAIImagesProvider(
     provider_id="siliconflow",
@@ -203,11 +203,11 @@ provider = OpenAIImagesProvider(
 
 ## 错误处理
 
-所有内置 image provider 在失败时抛出类型化的 `cubepi.errors.ProviderError`
+所有内置 image provider 在失败时抛出类型化的 `cubeloop.errors.ProviderError`
 子类——不再用 in-band 错误字符串：
 
 ```python
-from cubepi.errors import RateLimited, ProviderAuthFailed, ProviderUnavailable
+from cubeloop.errors import RateLimited, ProviderAuthFailed, ProviderUnavailable
 
 try:
     result = await provider.generate_images(model, ctx)
@@ -246,7 +246,7 @@ provider.subscribe_response(lambda body, model, exc: log_response(body, exc))
 
 ```python
 import base64
-from cubepi.providers.base import ImageContent
+from cubeloop.providers.base import ImageContent
 
 with open("source.png", "rb") as fh:
     source_b64 = base64.b64encode(fh.read()).decode("ascii")
@@ -264,8 +264,8 @@ result = await provider.generate_images(model, ctx)
 ## 测试 stub `FauxImagesProvider`
 
 ```python
-from cubepi.providers.images import FauxImagesProvider
-from cubepi.errors import RateLimited
+from cubeloop.providers.images import FauxImagesProvider
+from cubeloop.errors import RateLimited
 
 # 正常路径：
 provider = FauxImagesProvider(png_b64="iVBORw0KGgo...")
@@ -288,7 +288,7 @@ provider = FauxImagesProvider(
   今天可以继承 `BaseImagesProvider` 自己实现；未来版本会加 `AsyncTaskImagesProvider`
   这种共享 polling 脚手架。
 - **Tracing 接入**：本版加了 image provider 的 listener 注册表，但
-  `cubepi.tracing` 还没自动订阅 image 调用。需要 image 调用 span 的
+  `cubeloop.tracing` 还没自动订阅 image 调用。需要 image 调用 span 的
   Host 暂时手动 `subscribe_*`。
 
 ## 另见
@@ -296,4 +296,4 @@ provider = FauxImagesProvider(
 - [Providers Overview](./overview) —— chat-provider 的配置方式；image
   provider 跟它共享 `provider_id` / `.model()` / capability 范式。
 - [OpenAI Provider](./openai) —— chat 那边 OpenAI 形态的共通配置。
-- [API Reference → `cubepi.providers.images`](../../api/cubepi-providers)。
+- [API Reference → `cubeloop.providers.images`](../../api/cubeloop-providers)。

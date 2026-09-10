@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">cubeloop logo</title>
+  <desc id="desc">An isometric cube shell with two vertical operator eyes on the open front face.</desc>
+  <defs>
+    <style>
+      .ink { fill: #050608; }
+      .accent { fill: #3042d5; }
+    </style>
+  </defs>
+
+  <rect width="512" height="512" fill="#ffffff"/>
+
+  <path class="ink" d="M261 117 L396 183 L244 252 L120 183 Z"/>
+  <path class="ink" d="M115 198 L232 263 L232 432 L115 365 Z"/>
+  <path class="ink" d="M355 346 L397 365 L397 376 L252 446 L247 442 L247 395 Z"/>
+
+  <rect class="accent" x="287" y="268" width="26" height="74" rx="12"/>
+  <rect class="accent" x="351" y="247" width="26" height="76" rx="12"/>
+</svg>

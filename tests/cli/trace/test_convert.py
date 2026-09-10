@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cubepi.cli.__main__ import main
+from cubeloop.cli.__main__ import main
 
 
 # ---------------------------------------------------------------------------
@@ -415,14 +415,14 @@ class TestConvertErrors:
 
 class TestMessagesToOpenAI:
     def test_user_message(self):
-        from cubepi.cli.trace.convert import messages_to_openai
+        from cubeloop.cli.trace.convert import messages_to_openai
 
         msgs = [{"role": "user", "parts": [{"type": "text", "content": "hi"}]}]
         out = messages_to_openai(msgs)
         assert out == [{"role": "user", "content": "hi"}]
 
     def test_assistant_text(self):
-        from cubepi.cli.trace.convert import messages_to_openai
+        from cubeloop.cli.trace.convert import messages_to_openai
 
         msgs = [{"role": "assistant", "parts": [{"type": "text", "content": "hello"}]}]
         out = messages_to_openai(msgs)
@@ -431,7 +431,7 @@ class TestMessagesToOpenAI:
         assert out[0]["content"] == "hello"
 
     def test_assistant_tool_call(self):
-        from cubepi.cli.trace.convert import messages_to_openai
+        from cubeloop.cli.trace.convert import messages_to_openai
 
         msgs = [
             {
@@ -454,7 +454,7 @@ class TestMessagesToOpenAI:
         assert parsed == {"x": 1}
 
     def test_tool_result(self):
-        from cubepi.cli.trace.convert import messages_to_openai
+        from cubeloop.cli.trace.convert import messages_to_openai
 
         msgs = [
             {
@@ -466,7 +466,7 @@ class TestMessagesToOpenAI:
         assert out == [{"role": "tool", "tool_call_id": "c1", "content": "ok"}]
 
     def test_unknown_role_skipped(self):
-        from cubepi.cli.trace.convert import messages_to_openai
+        from cubeloop.cli.trace.convert import messages_to_openai
 
         msgs = [{"role": "system", "parts": [{"type": "text", "content": "x"}]}]
         out = messages_to_openai(msgs)
@@ -475,7 +475,7 @@ class TestMessagesToOpenAI:
 
 class TestMessagesToAnthropic:
     def test_user_message(self):
-        from cubepi.cli.trace.convert import messages_to_anthropic
+        from cubeloop.cli.trace.convert import messages_to_anthropic
 
         msgs = [{"role": "user", "parts": [{"type": "text", "content": "hi"}]}]
         out = messages_to_anthropic(msgs)
@@ -483,7 +483,7 @@ class TestMessagesToAnthropic:
         assert out[0]["content"][0]["text"] == "hi"
 
     def test_tool_result_batched_into_user_message(self):
-        from cubepi.cli.trace.convert import messages_to_anthropic
+        from cubeloop.cli.trace.convert import messages_to_anthropic
 
         msgs = [
             {
@@ -504,7 +504,7 @@ class TestMessagesToAnthropic:
         assert tool_results
 
     def test_assistant_tool_use_block(self):
-        from cubepi.cli.trace.convert import messages_to_anthropic
+        from cubeloop.cli.trace.convert import messages_to_anthropic
 
         msgs = [
             {
@@ -526,7 +526,7 @@ class TestMessagesToAnthropic:
         assert blocks[0]["input"] == {"a": 1}
 
     def test_trailing_tool_results_flushed(self):
-        from cubepi.cli.trace.convert import messages_to_anthropic
+        from cubeloop.cli.trace.convert import messages_to_anthropic
 
         msgs = [
             {

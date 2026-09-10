@@ -1,11 +1,11 @@
 ---
 title: Streaming Events
-description: "Stream events and tokens from CubePi agents in real time using subscribers and MessageStream."
+description: "Stream events and tokens from CubeLoop agents in real time using subscribers and MessageStream."
 ---
 
 # Streaming Events
 
-CubePi exposes two streams, layered:
+CubeLoop exposes two streams, layered:
 
 1. **Provider stream** — `MessageStream` you get from
    `provider.stream(...)`. Yields `StreamEvent`s describing the raw
@@ -102,7 +102,7 @@ def on_event(event, signal=None):
         print(event.stream_event.delta, end="", flush=True)
 ```
 
-The shape that CubePi guarantees is the one in the table above
+The shape that CubeLoop guarantees is the one in the table above
 (`MessageUpdateEvent.stream_event.delta`). Always match the outer
 event's `type == "message_update"` (or check `stream_event` exists)
 before reaching into `stream_event.type`.
@@ -167,5 +167,5 @@ canonical way to get the final message.
 
 - [Tool Use](./tool-use) — the `tool_execution_*` triplet in detail.
 - [Multi-turn](./multi-turn) — event order around steering and resume.
-- [API Reference → StreamEvent](../../api/cubepi-providers#streamevent)
+- [API Reference → StreamEvent](../../api/cubeloop-providers#streamevent)
   for the field-level schema.

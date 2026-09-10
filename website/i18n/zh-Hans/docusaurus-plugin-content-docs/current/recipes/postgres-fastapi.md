@@ -1,21 +1,21 @@
 ---
 title: Postgres + FastAPI 服务
-description: "使用 PostgresCheckpointer 将 FastAPI 后端的 CubePi agent 部署到生产环境。"
+description: "使用 PostgresCheckpointer 将 FastAPI 后端的 CubeLoop agent 部署到生产环境。"
 ---
 
 # Recipe：Postgres + FastAPI 服务
 
-一个生产形态的 HTTP 服务，用于封装 CubePi agent：以 FastAPI 做路由，
+一个生产形态的 HTTP 服务，用于封装 CubeLoop agent：以 FastAPI 做路由，
 Server-Sent Events 做流式传输，共享的 `PostgresCheckpointer` 做持久化，
 `thread_id` 从已认证用户派生。
 
 **预计耗时：** 30 分钟。
-**依赖：** `cubepi[postgres]`、`fastapi`、`uvicorn[standard]`、
-`sse-starlette`、已运行并应用 CubePi schema 的 Postgres 实例。
+**依赖：** `cubeloop[postgres]`、`fastapi`、`uvicorn[standard]`、
+`sse-starlette`、已运行并应用 CubeLoop schema 的 Postgres 实例。
 
 ## 先建 Schema
 
-在服务启动之前，运行 CubePi schema 迁移。本 recipe 最快捷的方式：
+在服务启动之前，运行 CubeLoop schema 迁移。本 recipe 最快捷的方式：
 
 ```bash
 psql "$DATABASE_URL" <<'SQL'
@@ -72,9 +72,9 @@ from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from cubepi import Agent
-from cubepi.checkpointer import PostgresCheckpointer
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.checkpointer import PostgresCheckpointer
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 # --- 应用生命周期 ----------------------------------------------------------
@@ -173,8 +173,8 @@ async def get_history(
 运行：
 
 ```bash
-pip install "cubepi[postgres]" fastapi "uvicorn[standard]" sse-starlette
-export DATABASE_URL=postgresql://user:pass@localhost/cubepi
+pip install "cubeloop[postgres]" fastapi "uvicorn[standard]" sse-starlette
+export DATABASE_URL=postgresql://user:pass@localhost/cubeloop
 export ANTHROPIC_API_KEY=sk-…
 uvicorn service:app --reload --port 8000
 ```
@@ -233,7 +233,7 @@ curl -N -X POST http://localhost:8000/chat/conv1/messages \
 
 ## 常见陷阱
 
-- **启动时 CubepiSchemaUninitialized** —— 迁移未运行。请先应用 schema。
+- **启动时 CubeloopSchemaUninitialized** —— 迁移未运行。请先应用 schema。
 - **连接池耗尽** —— 默认 `max_pool_size=10`。如果服务的并发 agent
   数量超过此值，请调大。
 - **SSE 在负载均衡器后面** —— 某些负载均衡器会缓冲 SSE。禁用缓冲
@@ -250,13 +250,13 @@ curl -N -X POST http://localhost:8000/chat/conv1/messages \
 ## 运行示例
 
 仓库中有一份完整可运行的代码，位于
-[`examples/postgres_fastapi.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/postgres_fastapi.py)。
+[`examples/postgres_fastapi.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/postgres_fastapi.py)。
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync --extra postgres
 
-export DATABASE_URL=postgresql://user:pass@localhost/cubepi
+export DATABASE_URL=postgresql://user:pass@localhost/cubeloop
 export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]
 
 uv run --with fastapi --with "uvicorn[standard]" --with sse-starlette \

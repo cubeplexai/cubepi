@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from cubepi import Agent
-from cubepi.agent.types import AgentContext
-from cubepi.middleware.base import Middleware, compose_middleware
-from cubepi.providers.base import TextContent, UserMessage
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop import Agent
+from cubeloop.agent.types import AgentContext
+from cubeloop.middleware.base import Middleware, compose_middleware
+from cubeloop.providers.base import TextContent, UserMessage
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 
 def _mk_ctx() -> AgentContext:
@@ -168,7 +168,7 @@ async def test_on_run_end_none_does_not_add_turn() -> None:
 @pytest.mark.asyncio
 async def test_on_run_end_injected_messages_in_history() -> None:
     """Messages injected by on_run_end appear in agent.state.messages."""
-    from cubepi.providers.base import AssistantMessage
+    from cubeloop.providers.base import AssistantMessage
 
     provider = FauxProvider(provider_id="faux")
     provider.set_responses(
@@ -202,7 +202,7 @@ async def test_on_run_end_injected_messages_in_history() -> None:
 @pytest.mark.asyncio
 async def test_on_run_end_fires_via_should_stop_after_turn() -> None:
     """on_run_end fires when should_stop_after_turn exits the inner loop."""
-    from cubepi.agent.types import ShouldStopAfterTurnContext
+    from cubeloop.agent.types import ShouldStopAfterTurnContext
 
     provider = FauxProvider(provider_id="faux")
     provider.set_responses(

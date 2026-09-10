@@ -1,9 +1,9 @@
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.providers.base import AssistantMessage, TextContent
-from cubepi.providers.faux import FauxProvider
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.providers.base import AssistantMessage, TextContent
+from cubeloop.providers.faux import FauxProvider
 
 
 def _ok_faux() -> FauxProvider:
@@ -32,11 +32,11 @@ async def test_fork_once_emits_named_span(in_memory_exporter):
     await a2.fork_once("src", "follow up?", after_run_id="R1")
     spans = in_memory_exporter.get_finished_spans()
     names = [s.name for s in spans]
-    assert "cubepi.agent.fork_once" in names
-    span = next(s for s in spans if s.name == "cubepi.agent.fork_once")
+    assert "cubeloop.agent.fork_once" in names
+    span = next(s for s in spans if s.name == "cubeloop.agent.fork_once")
     attrs = dict(span.attributes)
-    assert attrs["cubepi.fork.src_thread_id"] == "src"
-    assert attrs["cubepi.fork.after_run_id"] == "R1"
+    assert attrs["cubeloop.fork.src_thread_id"] == "src"
+    assert attrs["cubeloop.fork.after_run_id"] == "R1"
 
 
 @pytest.mark.asyncio

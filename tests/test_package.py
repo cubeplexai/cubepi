@@ -21,12 +21,12 @@ def test_version_attribute_present_and_matches_metadata() -> None:
     ``cubepi.__version__`` and the installed distribution would
     make trace metadata lie about what produced the spans.
     """
-    import cubepi
+    import cubeloop
 
-    assert hasattr(cubepi, "__version__"), "cubepi must expose __version__"
-    assert cubepi.__version__ == _pkg_version("cubepi"), (
-        f"cubepi.__version__ ({cubepi.__version__!r}) drifted from the "
-        f"installed distribution version ({_pkg_version('cubepi')!r}) — "
+    assert hasattr(cubeloop, "__version__"), "cubepi must expose __version__"
+    assert cubeloop.__version__ == _pkg_version("cubeloop"), (
+        f"cubeloop.__version__ ({cubeloop.__version__!r}) drifted from the "
+        f"installed distribution version ({_pkg_version('cubeloop')!r}) — "
         "check pyproject.toml's [project].version field."
     )
 
@@ -35,17 +35,17 @@ def test_version_string_shape() -> None:
     """Version should look like a PEP 440 release (e.g. ``0.4.0``,
     ``0.4.1.dev0``). Catches accidental ``unknown`` fallbacks landing
     in a published package."""
-    import cubepi
+    import cubeloop
 
-    assert re.match(r"^\d+\.\d+", cubepi.__version__), (
-        f"cubepi.__version__ {cubepi.__version__!r} doesn't look like a "
+    assert re.match(r"^\d+\.\d+", cubeloop.__version__), (
+        f"cubepi.__version__ {cubeloop.__version__!r} doesn't look like a "
         f"PEP 440 version — fallback path may have been hit."
     )
 
 
 def test_version_listed_in_dunder_all() -> None:
-    """``__version__`` must be in ``__all__`` so ``from cubepi import *``
+    """``__version__`` must be in ``__all__`` so ``from cubeloop import *``
     surfaces it and editors auto-complete it."""
-    import cubepi
+    import cubeloop
 
-    assert "__version__" in cubepi.__all__
+    assert "__version__" in cubeloop.__all__

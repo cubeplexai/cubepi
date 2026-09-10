@@ -1,12 +1,12 @@
 import pytest
 
-from cubepi.checkpointer.exceptions import (
+from cubeloop.checkpointer.exceptions import (
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
     RunNotClaimedError,
 )
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.providers.base import TextContent, UserMessage
 
 
 @pytest.mark.asyncio
@@ -76,7 +76,7 @@ async def test_append_in_flight_run_id_ok():
 
 @pytest.mark.asyncio
 async def test_load_pending_returns_tuple_with_run_id():
-    from cubepi.hitl.types import ConfirmRequest, HitlRequest
+    from cubeloop.hitl.types import ConfirmRequest, HitlRequest
 
     cp = MemoryCheckpointer()
     req = HitlRequest(

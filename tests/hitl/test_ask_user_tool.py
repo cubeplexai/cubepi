@@ -1,7 +1,7 @@
 import asyncio
 
-from cubepi.hitl.ask_user import ask_user_tool
-from cubepi.hitl.channel import InMemoryChannel
+from cubeloop.hitl.ask_user import ask_user_tool
+from cubeloop.hitl.channel import InMemoryChannel
 
 
 async def test_ask_user_tool_is_sequential():

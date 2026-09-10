@@ -13,8 +13,8 @@ Set ANTHROPIC_API_KEY or OPENAI_API_KEY before running (see _provider.py).
 
 import asyncio
 
-from cubepi import Agent
-from cubepi.hitl import InMemoryChannel, ask_user_tool
+from cubeloop import Agent
+from cubeloop.hitl import InMemoryChannel, ask_user_tool
 
 from _provider import MODEL_ID, provider
 

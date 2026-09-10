@@ -1,6 +1,6 @@
 ---
 title: 上下文压缩
-description: "使用 CompactionMiddleware 总结较早轮次，同时保留完整 CubePi 历史。"
+description: "使用 CompactionMiddleware 总结较早轮次，同时保留完整 CubeLoop 历史。"
 ---
 
 # 上下文压缩
@@ -14,8 +14,8 @@ description: "使用 CompactionMiddleware 总结较早轮次，同时保留完�
 用便宜模型做摘要，用正常模型运行 agent：
 
 ```python
-from cubepi import Agent
-from cubepi.middleware import CompactionMiddleware
+from cubeloop import Agent
+from cubeloop.middleware import CompactionMiddleware
 
 agent = Agent(
     model=provider.model("claude-sonnet-4-6"),
@@ -44,7 +44,7 @@ middleware 会向 `AgentContext.extra` 写入两个键：
 - `compaction` —— 摘要状态，以及它覆盖的消息引用。
 - `compaction_until_msg_index` —— 已总结到的历史边界。
 
-绑定 checkpointer 时，CubePi 会在 `agent_end` 通过 `save_extra` 保存
+绑定 checkpointer 时，CubeLoop 会在 `agent_end` 通过 `save_extra` 保存
 `ctx.extra`，所以下一个进程可以带着已有摘要继续。如果消息引用与当前历史不再
 匹配，middleware 会清除旧状态并重新开始，而不是发送无效摘要。
 
@@ -54,7 +54,7 @@ middleware 会向 `AgentContext.extra` 写入两个键：
 之间的那些调用——并沿两个维度触发：
 
 - **真实 token 阈值。** 触发判据用*真实*上下文占用与 `max_tokens_before_compact`
-  比较。CubePi 把估算锚定到上一轮的真实 provider usage ——
+  比较。CubeLoop 把估算锚定到上一轮的真实 provider usage ——
   `input_tokens + cache_read_tokens + cache_write_tokens` ——所以在 prompt
   caching 下依然准确（此时大部分 prompt 由缓存提供，纯字符估算根本看不到）。
   首次模型响应前（还没有 usage）回退到字符估算。零值的 error/abort 消息会被
@@ -89,22 +89,22 @@ CompactionMiddleware(
 
 ## Tracing
 
-挂上 `cubepi.tracing` 时，摘要调用是 trace 树里的一等公民。`summarize()`
-在 LLM 调用外包一个 `cubepi.compaction.summarize` 父 span（标签
-`cubepi.compaction.message_count`），同时 recorder 自动订阅 summary
+挂上 `cubeloop.tracing` 时，摘要调用是 trace 树里的一等公民。`summarize()`
+在 LLM 调用外包一个 `cubeloop.compaction.summarize` 父 span（标签
+`cubeloop.compaction.message_count`），同时 recorder 自动订阅 summary
 provider，所以它的 `chat` span 也落在里面：
 
 ```
 invoke_agent
-└── cubepi.turn
-    ├── cubepi.compaction.summarize
+└── cubeloop.turn
+    ├── cubeloop.compaction.summarize
     │   └── chat <summary-model>
     └── chat <main-model>
 ```
 
 没装 OpenTelemetry 时，wrapper span 退化为 no-op context manager，中间件
 行为不变。根 `invoke_agent` span 的 `gen_ai.provider.name` /
-`cubepi.agent.system_prompt_sha256` / `cubepi.agent.tools` 始终归属
+`cubeloop.agent.system_prompt_sha256` / `cubeloop.agent.tools` 始终归属
 agent 的主 provider/model，不会被先跑的 summarizer 覆盖。
 
 ## 摘要结构
@@ -175,7 +175,7 @@ CompactionMiddleware(
 
 ## 失败行为
 
-如果摘要 provider 失败，CubePi 会用基于消息结构的**确定性 fallback**
+如果摘要 provider 失败，CubeLoop 会用基于消息结构的**确定性 fallback**
 （用户请求首行 + 出现过的工具名）来生成摘要，让上下文继续收缩。连续 3 次
 LLM 失败后**熔断器**打开，跳过 LLM 调用——但 fallback 仍然运行，
 agent 不会因为 summariser 模型故障而卡在超限状态。下一次 LLM 成功调用
@@ -191,16 +191,16 @@ agent 不会因为 summariser 模型故障而卡在超限状态。下一次 LLM 
 
 压缩总结的是*旧*历史，但它无法缩小一个模型在**当前**轮必须读取的单个工具
 结果——如果某个工具返回的内容超过上下文窗口能容纳的量，再多摘要也无济于事。
-限制它是*上层应用*的职责，因为 CubePi 是环境无关的：它没有文件系统、会话目录
+限制它是*上层应用*的职责，因为 CubeLoop 是环境无关的：它没有文件系统、会话目录
 或对象存储可以把溢出内容写进去，而内容落到哪里由你决定。
 
 接入点是 `after_tool_call` middleware hook。检查结果、把完整内容持久化到你的
 环境里,再返回一个包含预览 + 模型可追溯引用的替换内容：
 
 ```python
-from cubepi.middleware import Middleware
-from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult
-from cubepi.providers.base import TextContent
+from cubeloop.middleware import Middleware
+from cubeloop.agent.types import AfterToolCallContext, AfterToolCallResult
+from cubeloop.providers.base import TextContent
 
 class BoundToolResults(Middleware):
     def __init__(self, *, max_chars: int = 20_000) -> None:
@@ -222,7 +222,7 @@ class BoundToolResults(Middleware):
         )
 ```
 
-CubePi 从不解析 `ref` ——磁盘路径、对象存储 key、数据库 id,或一个纯截断标记
+CubeLoop 从不解析 `ref` ——磁盘路径、对象存储 key、数据库 id,或一个纯截断标记
 都同样有效。这样工具输出策略就留在真正掌握环境的那一层。
 
 ## 什么时候不用

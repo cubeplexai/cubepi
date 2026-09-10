@@ -6,7 +6,7 @@ import sys
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "cubepi.cli", *args],
+        [sys.executable, "-m", "cubeloop.cli", *args],
         capture_output=True,
         text=True,
     )

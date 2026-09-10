@@ -8,24 +8,24 @@ pytest.importorskip("opentelemetry.sdk.trace")
 
 from opentelemetry.sdk.trace import TracerProvider  # noqa: E402
 
-from cubepi.tracing.exporters import JsonlSpanExporter  # noqa: E402
-from cubepi.tracing.schema import CUBEPI_RUN_ID  # noqa: E402
+from cubeloop.tracing.exporters import JsonlSpanExporter  # noqa: E402
+from cubeloop.tracing.schema import CUBELOOP_RUN_ID  # noqa: E402
 
 
 def test_jsonl_shards_by_trace_id_not_run_id(tmp_path):
     # A parent span and a nested (subagent) span share one trace_id but carry
-    # DIFFERENT cubepi.run_id values — the subagent run gets its own run_id.
+    # DIFFERENT cubeloop.run_id values — the subagent run gets its own run_id.
     exporter = JsonlSpanExporter(directory=tmp_path)
     provider = TracerProvider()
-    tracer = provider.get_tracer("cubepi.tracing")
+    tracer = provider.get_tracer("cubeloop.tracing")
     with tracer.start_as_current_span("invoke_agent") as parent:
-        parent.set_attribute(CUBEPI_RUN_ID, "parent-run")
+        parent.set_attribute(CUBELOOP_RUN_ID, "parent-run")
         with tracer.start_as_current_span("invoke_agent") as child:
             # Same trace, different run id (nested subagent run).
-            child.set_attribute(CUBEPI_RUN_ID, "subagent-run")
+            child.set_attribute(CUBELOOP_RUN_ID, "subagent-run")
 
     assert parent.context.trace_id == child.context.trace_id
-    assert parent.attributes[CUBEPI_RUN_ID] != child.attributes[CUBEPI_RUN_ID]
+    assert parent.attributes[CUBELOOP_RUN_ID] != child.attributes[CUBELOOP_RUN_ID]
 
     exporter.export([parent, child])
 

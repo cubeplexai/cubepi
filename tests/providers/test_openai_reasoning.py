@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cubepi.providers.openai import OpenAIProvider
-from cubepi.providers.base import (
+from cubeloop.providers.openai import OpenAIProvider
+from cubeloop.providers.base import (
     Model,
     TextContent,
     ThinkingContent,

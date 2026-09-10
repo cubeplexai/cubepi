@@ -1,6 +1,6 @@
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl.ask_user import ask_user_tool
-from cubepi.hitl.channel import CheckpointedChannel, InMemoryChannel
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl.ask_user import ask_user_tool
+from cubeloop.hitl.channel import CheckpointedChannel, InMemoryChannel
 
 
 def test_ask_user_tool_with_checkpointed_channel_sets_binding():

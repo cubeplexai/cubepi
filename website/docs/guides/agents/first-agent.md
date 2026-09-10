@@ -1,6 +1,6 @@
 ---
 title: Building Your First Agent
-description: "Create and run your first CubePi agent — choose a provider, define a system prompt, and send a message."
+description: "Create and run your first CubeLoop agent — choose a provider, define a system prompt, and send a message."
 ---
 
 # Building Your First Agent
@@ -17,7 +17,7 @@ expects.
 
 ```python
 import os
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
 model = provider.model(
@@ -39,7 +39,7 @@ in 0.7.
 A tool is an async function decorated with `@tool`:
 
 ```python
-from cubepi import tool
+from cubeloop import tool
 
 
 @tool
@@ -58,7 +58,7 @@ A few details:
   or a full `AgentToolResult` when you need `details`/`is_error`.
 - Need cancellation or progress streaming? Declare `signal` (an
   `asyncio.Event` set when the user cancels) and/or `on_update(partial)`
-  in the signature and CubePi injects them — see
+  in the signature and CubeLoop injects them — see
   [Tool Use](./tool-use#streaming-tool-progress).
 - For a shared params model or dynamic construction, the longhand
   `AgentTool(...)` is equivalent — see [Tool Use](./tool-use).
@@ -66,7 +66,7 @@ A few details:
 ## Step 3 — assemble the agent
 
 ```python
-from cubepi import Agent
+from cubeloop import Agent
 
 agent = Agent(
     model=model,
@@ -160,11 +160,11 @@ async def main():
 - **No `text_delta` events** — Did you subscribe *before* calling
   `prompt()`? Listeners only see events emitted after registration.
 - **Tool not found** — The model invoked a tool whose `name` doesn't
-  match any tool in `tools=[...]`. CubePi reports this as a tool result
+  match any tool in `tools=[...]`. CubeLoop reports this as a tool result
   with `is_error=True` rather than crashing — check the
   `tool_execution_end` event's `result`.
 - **Pydantic ValidationError swallowed** — If the model produces
-  malformed JSON, CubePi captures the validation error and feeds it
+  malformed JSON, CubeLoop captures the validation error and feeds it
   back as a tool error result. The model usually corrects itself on
   the next turn.
 

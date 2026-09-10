@@ -1,6 +1,6 @@
 ---
 title: 持久化聊天
-description: "使用 CubePi 和 SQLiteCheckpointer 构建持久化聊天应用。"
+description: "使用 CubeLoop 和 SQLiteCheckpointer 构建持久化聊天应用。"
 ---
 
 # Recipe：持久化聊天（SQLite）
@@ -9,7 +9,7 @@ description: "使用 CubePi 和 SQLiteCheckpointer 构建持久化聊天应用�
 每位用户拥有独立的 `thread_id`。
 
 **预计耗时：** 5 分钟。
-**依赖：** `cubepi[sqlite]`、`ANTHROPIC_API_KEY`。
+**依赖：** `cubeloop[sqlite]`、`ANTHROPIC_API_KEY`。
 
 ## 脚本
 
@@ -18,9 +18,9 @@ import asyncio
 import os
 import sys
 
-from cubepi import Agent
-from cubepi.checkpointer import SQLiteCheckpointer
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.checkpointer import SQLiteCheckpointer
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 async def main(thread_id: str):
@@ -63,7 +63,7 @@ if __name__ == "__main__":
 运行：
 
 ```bash
-pip install "cubepi[sqlite]"
+pip install "cubeloop[sqlite]"
 export ANTHROPIC_API_KEY=sk-…
 python chat.py alice
 # 聊一会儿，然后按 Ctrl-D。
@@ -78,7 +78,7 @@ python chat.py bob
 
 ## 运行原理
 
-- **每个进程的第一次 `prompt()` 会加载历史记录。** CubePi 在第一次
+- **每个进程的第一次 `prompt()` 会加载历史记录。** CubeLoop 在第一次
   prompt 开始时检查一次 checkpointer，恢复 `agent.state.messages`，
   然后继续。
 - **每个 `message_end` 追加写入数据库。** 没有批处理，没有有损缓冲。
@@ -119,7 +119,7 @@ sqlite3 chat.db "DELETE FROM messages WHERE thread_id='alice'; DELETE FROM threa
 middleware：
 
 ```python
-from cubepi import Middleware
+from cubeloop import Middleware
 
 class SlidingWindow(Middleware):
     def __init__(self, n: int) -> None:
@@ -145,7 +145,7 @@ agent = Agent(
 代码相同，仅替换 checkpointer：
 
 ```python
-from cubepi.checkpointer import PostgresCheckpointer
+from cubeloop.checkpointer import PostgresCheckpointer
 
 async with PostgresCheckpointer("postgresql://…") as cp:
     agent = Agent(model=…, checkpointer=cp, thread_id=…)
@@ -172,10 +172,10 @@ Postgres 适合多实例服务或大量并发用户 ——
 ## 运行示例
 
 仓库中有一份完整可运行的代码，位于
-[`examples/persistent_chat.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/persistent_chat.py)。
+[`examples/persistent_chat.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/persistent_chat.py)。
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync --extra sqlite
 
 export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]

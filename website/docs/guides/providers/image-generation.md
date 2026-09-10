@@ -1,11 +1,11 @@
 ---
 title: Image Generation
-description: "Generate images with CubePi image providers — OpenAI, Doubao Seedream, SiliconFlow, Together AI, and other OpenAI-compatible backends."
+description: "Generate images with CubeLoop image providers — OpenAI, Doubao Seedream, SiliconFlow, Together AI, and other OpenAI-compatible backends."
 ---
 
 # Image Generation
 
-CubePi's image-generation path mirrors the chat-provider conventions: a
+CubeLoop's image-generation path mirrors the chat-provider conventions: a
 provider holds the connection (`provider_id`, `api_key`, `base_url`,
 `capability`), a model spec holds model-level defaults, and per-call work
 goes through a typed `ImagesContext` plus an optional `ImagesOptions`
@@ -27,7 +27,7 @@ name, supports_seed/steps/guidance gates, …).
 
 ```python
 import os
-from cubepi.providers.images import OpenAIImagesProvider, ImagesContext
+from cubeloop.providers.images import OpenAIImagesProvider, ImagesContext
 
 provider = OpenAIImagesProvider(
     provider_id="openai",
@@ -93,7 +93,7 @@ the wire **key**.
 ## `ImagesOptions` — per-call cross-cutting
 
 ```python
-from cubepi.providers.images import ImagesOptions
+from cubeloop.providers.images import ImagesOptions
 
 opts = ImagesOptions(
     signal=cancel_event,         # asyncio.Event; set to abort
@@ -114,7 +114,7 @@ plain `Exception` subclass, intentionally distinct from
 fast-path before the call returns):
 
 ```python
-from cubepi.providers.images import ImagesAborted
+from cubeloop.providers.images import ImagesAborted
 
 def on_response(body, model, exc):
     if isinstance(exc, ImagesAborted):
@@ -155,7 +155,7 @@ OpenAIImagesProvider(
 OpenAI-shape URL but field names differ:
 
 ```python
-from cubepi.providers.images.capability import ImagesCapabilityDescriptor, SizeSpec
+from cubeloop.providers.images.capability import ImagesCapabilityDescriptor, SizeSpec
 
 OpenAIImagesProvider(
     provider_id="siliconflow",
@@ -212,11 +212,11 @@ the base `capability`.
 
 ## Error handling
 
-All built-in image providers raise typed `cubepi.errors.ProviderError`
+All built-in image providers raise typed `cubeloop.errors.ProviderError`
 subclasses on failure — never in-band error strings:
 
 ```python
-from cubepi.errors import RateLimited, ProviderAuthFailed, ProviderUnavailable
+from cubeloop.errors import RateLimited, ProviderAuthFailed, ProviderUnavailable
 
 try:
     result = await provider.generate_images(model, ctx)
@@ -258,7 +258,7 @@ supports it:
 
 ```python
 import base64
-from cubepi.providers.base import ImageContent
+from cubeloop.providers.base import ImageContent
 
 with open("source.png", "rb") as fh:
     source_b64 = base64.b64encode(fh.read()).decode("ascii")
@@ -277,8 +277,8 @@ useful when targeting a backend whose model can't edit.
 ## Faux provider for tests
 
 ```python
-from cubepi.providers.images import FauxImagesProvider
-from cubepi.errors import RateLimited
+from cubeloop.providers.images import FauxImagesProvider
+from cubeloop.errors import RateLimited
 
 # Happy path:
 provider = FauxImagesProvider(png_b64="iVBORw0KGgo...")
@@ -304,7 +304,7 @@ with `OpenAIImagesProvider`.
   will likely add an `AsyncTaskImagesProvider` base with shared polling
   scaffolding.
 - **Tracing wiring.** This release adds the listener registry on image
-  providers, but `cubepi.tracing` does not yet auto-subscribe to image
+  providers, but `cubeloop.tracing` does not yet auto-subscribe to image
   calls. Hosts that want image-call spans should subscribe manually for
   now.
 
@@ -315,4 +315,4 @@ with `OpenAIImagesProvider`.
   conventions.
 - [OpenAI Provider](./openai) — shared OpenAI-shape patterns on the chat
   side.
-- [API Reference → `cubepi.providers.images`](../../api/cubepi-providers).
+- [API Reference → `cubeloop.providers.images`](../../api/cubeloop-providers).

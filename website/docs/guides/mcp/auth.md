@@ -1,6 +1,6 @@
 ---
 title: MCP Server Authentication
-description: "Configure authentication — API keys, OAuth, and custom headers — for MCP servers in CubePi."
+description: "Configure authentication — API keys, OAuth, and custom headers — for MCP servers in CubeLoop."
 ---
 
 # MCP Server Authentication
@@ -22,7 +22,7 @@ internal). Pass an `Authorization` header to `load_mcp_tools_http`:
 
 ```python
 import os
-from cubepi.mcp import load_mcp_tools_http
+from cubeloop.mcp import load_mcp_tools_http
 
 tools = await load_mcp_tools_http(
     server_url="https://mcp.example.com/sse",
@@ -59,7 +59,7 @@ headers = {
 
 ## HTTP: short-lived tokens / refresh
 
-CubePi's loaders take a static `headers` dict at load time. For tokens
+CubeLoop's loaders take a static `headers` dict at load time. For tokens
 that expire (OAuth, JWT with short TTL), you have two options:
 
 ### Option A — Re-load on expiry
@@ -85,8 +85,8 @@ Build the `AgentTool` yourself with a closure that knows how to
 refresh:
 
 ```python
-from cubepi.mcp._adapter import make_mcp_agent_tool
-from cubepi.mcp import load_mcp_tools_http
+from cubeloop.mcp._adapter import make_mcp_agent_tool
+from cubeloop.mcp import load_mcp_tools_http
 
 async def call_remote_with_refresh(tool_name, args):
     headers = {"Authorization": f"Bearer {await fetch_token()}"}
@@ -118,7 +118,7 @@ Pass an `env` dict:
 
 ```python
 import os
-from cubepi.mcp import load_mcp_tools_stdio
+from cubeloop.mcp import load_mcp_tools_stdio
 
 tools = await load_mcp_tools_stdio(
     command="npx",

@@ -1,5 +1,5 @@
-from cubepi.middleware.base import Middleware, compose_middleware
-from cubepi.agent.types import (
+from cubeloop.middleware.base import Middleware, compose_middleware
+from cubeloop.agent.types import (
     AfterToolCallResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
@@ -8,7 +8,7 @@ from cubepi.agent.types import (
     AgentContext,
     AgentToolResult,
 )
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,
@@ -202,8 +202,8 @@ class TestAgentMiddlewareWiring:
 
     async def test_agent_uses_middleware_convert_to_llm(self):
         """Middleware-declared convert_to_llm must be wired up by Agent."""
-        from cubepi import Agent
-        from cubepi.providers.faux import FauxProvider, faux_assistant_message
+        from cubeloop import Agent
+        from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
         captured: dict = {}
 

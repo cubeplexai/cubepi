@@ -1,6 +1,6 @@
 ---
 title: Sandbox Confirm with ApprovalPolicyMiddleware
-description: "Implement sandbox tool confirmation with CubePi's ApprovalPolicyMiddleware — auto-allow, deny, or human-confirm."
+description: "Implement sandbox tool confirmation with CubeLoop's ApprovalPolicyMiddleware — auto-allow, deny, or human-confirm."
 ---
 
 # Recipe: Sandbox Confirm with `ApprovalPolicyMiddleware`
@@ -14,7 +14,7 @@ The policy receives a `BeforeToolCallContext` and returns an
 `ApprovalDecision` — `Approve()`, `Deny(reason)`, or `AskUser(...)`.
 
 ```python
-from cubepi.hitl import Approve, AskUser, Deny
+from cubeloop.hitl import Approve, AskUser, Deny
 
 # Mock rule engine — replace with your actual policy catalog.
 def classify_command(cmd: str) -> tuple[str, str | None]:
@@ -48,9 +48,9 @@ policy receives the typed model.
 ## Step 2: Wire into the agent
 
 ```python
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.postgres import PostgresCheckpointer
-from cubepi.hitl import ApprovalPolicyMiddleware, CheckpointedChannel
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.postgres import PostgresCheckpointer
+from cubeloop.hitl import ApprovalPolicyMiddleware, CheckpointedChannel
 
 async def main():
     async with PostgresCheckpointer("postgresql://...") as cp:
@@ -94,7 +94,7 @@ async def host_loop(channel: CheckpointedChannel):
                 timeout=timeout,
             )
             # Build an ApproveAnswer from the human's decision.
-            from cubepi.hitl import ApproveAnswer
+            from cubeloop.hitl import ApproveAnswer
             human_answer = ApproveAnswer(
                 decision=ui_response["decision"],          # "approve" | "deny" | "edit"
                 reason=ui_response.get("reason"),           # only for deny
@@ -142,12 +142,12 @@ appended for any unresolved tool calls, a terminal
 ## Run the example
 
 A self-contained, runnable version of this recipe is in the repository at
-[`examples/sandbox_confirm.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/sandbox_confirm.py).
+[`examples/sandbox_confirm.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/sandbox_confirm.py).
 It wires up a simulated bash tool and a policy that auto-allows reads, denies
 destructive writes, and auto-approves everything else via the host loop.
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync
 
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]

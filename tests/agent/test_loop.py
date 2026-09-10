@@ -4,14 +4,14 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from cubepi.agent.loop import run_agent_loop, run_agent_loop_continue
-from cubepi.agent.types import (
+from cubeloop.agent.loop import run_agent_loop, run_agent_loop_continue
+from cubeloop.agent.types import (
     AgentContext,
     AgentEvent,
     AgentTool,
     AgentToolResult,
 )
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     BoundModel,
     Message,
@@ -24,7 +24,7 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 
 def make_user_message(text: str) -> UserMessage:
@@ -204,8 +204,8 @@ class TestAgentLoop:
         between the assistant tool_use and its tool_result — strict
         Anthropic-style endpoints 400 on tool_use without an immediately
         following tool_result."""
-        from cubepi.middleware.base import TurnAction
-        from cubepi.providers.base import ToolCall
+        from cubeloop.middleware.base import TurnAction
+        from cubeloop.providers.base import ToolCall
 
         tool = make_echo_tool()
         provider = FauxProvider(provider_id="faux")
@@ -760,7 +760,7 @@ class TestLoopHitlPartialResults:
         siblings' tool_results from the messages the stateless loop returns —
         callers persisting the return value would otherwise resume with
         dangling tool_calls and re-run side-effecting work."""
-        from cubepi.hitl.exceptions import HitlDetached
+        from cubeloop.hitl.exceptions import HitlDetached
 
         async def detaching_execute(
             tool_call_id, params, *, signal=None, on_update=None

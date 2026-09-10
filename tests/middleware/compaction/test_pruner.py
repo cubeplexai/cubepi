@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from cubepi.middleware.compaction.pruner import prune_tool_results
-from cubepi.providers.base import (
+from cubeloop.middleware.compaction.pruner import prune_tool_results
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,

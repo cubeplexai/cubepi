@@ -16,9 +16,9 @@ work, stop when a second model says the condition is satisfied.
 ## Basic setup
 
 ```python
-from cubepi import Agent
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.middleware.goal import GoalMiddleware
+from cubeloop import Agent
+from cubeloop.providers.anthropic import AnthropicProvider
+from cubeloop.middleware.goal import GoalMiddleware
 
 provider = AnthropicProvider(api_key="...")
 

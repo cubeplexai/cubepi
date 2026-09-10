@@ -1,6 +1,6 @@
 ---
 title: 自定义后端
-description: "使用 Checkpointer protocol 为 CubePi 实现自定义 checkpointer 后端。"
+description: "使用 Checkpointer protocol 为 CubeLoop 实现自定义 checkpointer 后端。"
 ---
 
 # 自定义 Checkpointing 后端
@@ -32,8 +32,8 @@ class Checkpointer(Protocol):
 import json
 from typing import Any
 import redis.asyncio as aredis
-from cubepi.checkpointer.base import CheckpointData
-from cubepi.providers.base import AssistantMessage, Message, ToolResultMessage, UserMessage
+from cubeloop.checkpointer.base import CheckpointData
+from cubeloop.providers.base import AssistantMessage, Message, ToolResultMessage, UserMessage
 
 
 _ROLE_TO_CLS: dict[str, type[Message]] = {
@@ -44,7 +44,7 @@ _ROLE_TO_CLS: dict[str, type[Message]] = {
 
 
 class RedisCheckpointer:
-    def __init__(self, redis_url: str, prefix: str = "cubepi:") -> None:
+    def __init__(self, redis_url: str, prefix: str = "cubeloop:") -> None:
         self._url = redis_url
         self._prefix = prefix
         self._r: aredis.Redis | None = None
@@ -109,7 +109,7 @@ async with RedisCheckpointer("redis://localhost:6379") as cp:
 
 1. **仅追加。** 不要修改过去的消息。agent 假定它追加的历史就是你在 `load` 中返回的内容。
 2. **保持顺序。** `load` 按追加顺序返回消息。使用列表、排序键或序列列。
-3. **`load` 幂等。** 对同一 thread 两次调用 `load` 应返回相同结果。（CubePi 只调用一次，但工具往往也需要调用。）
+3. **`load` 幂等。** 对同一 thread 两次调用 `load` 应返回相同结果。（CubeLoop 只调用一次，但工具往往也需要调用。）
 4. **`extra` 是合并语义。** 先调用 `save_extra({"a": 1})` 后调用 `save_extra({"b": 2})` 应得到 `{"a": 1, "b": 2}`，而非仅 `{"b": 2}`。agent 携带完整字典调用，但 middleware 会分多次写入。
 5. **用 `model_validate` 重建消息。** 使用 role 判别符（`UserMessage` / `AssistantMessage` / `ToolResultMessage`）选择正确的类。
 
@@ -139,8 +139,8 @@ agent = Agent(model=…, checkpointer=FileCheckpointer("/tmp/cp"), thread_id="x"
 使用 `FauxProvider` 的即插即用测试模式：
 
 ```python
-from cubepi import Agent
-from cubepi.providers import FauxProvider, faux_assistant_message
+from cubeloop import Agent
+from cubeloop.providers import FauxProvider, faux_assistant_message
 
 async def test_roundtrip():
     cp = MyCheckpointer(…)
@@ -165,13 +165,13 @@ async def test_roundtrip():
 
 ## 常见陷阱
 
-- **修改返回的 `CheckpointData`** —— 要么在传入时深拷贝，要么在文档中说明 agent 拥有该列表的所有权。CubePi 内置实现会进行拷贝。
+- **修改返回的 `CheckpointData`** —— 要么在传入时深拷贝，要么在文档中说明 agent 拥有该列表的所有权。CubeLoop 内置实现会进行拷贝。
 - **丢失 `metadata`** —— `model_dump(mode="json")` 会保留 `metadata`。若通过 `__dict__` 序列化则会丢失。
 - **`save_extra` 合并的竞态问题** —— 读-改-写模式在并发写入时可能丢失数据。若有针对同一 thread 的并发写入者，请使用 SQL `JSONB ||` 或 Redis Lua 脚本。
 - **忘记注册 tool result 的 role** —— 容易只映射 `"user"` 和 `"assistant"` 而忘记 `"tool_result"`。三者都需要。
 
 ## 另请参阅
 
-- [`Checkpointer` Protocol API](../../api/cubepi-checkpointer) —— 完整签名。
-- [SQLiteCheckpointer 源码](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py) —— 完整参考实现。
-- [PostgresCheckpointer 源码](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py) —— 生产级参考实现。
+- [`Checkpointer` Protocol API](../../api/cubeloop-checkpointer) —— 完整签名。
+- [SQLiteCheckpointer 源码](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/checkpointer/sqlite.py) —— 完整参考实现。
+- [PostgresCheckpointer 源码](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/checkpointer/postgres/checkpointer.py) —— 生产级参考实现。

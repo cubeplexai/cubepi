@@ -1,6 +1,6 @@
-from cubepi.agent.types import AgentTool
-from cubepi.hitl.binding import HitlBinding
-from cubepi.middleware.base import Middleware
+from cubeloop.agent.types import AgentTool
+from cubeloop.hitl.binding import HitlBinding
+from cubeloop.middleware.base import Middleware
 from pydantic import BaseModel
 
 

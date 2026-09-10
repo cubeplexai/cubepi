@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cubepi.cli.__main__ import main
+from cubeloop.cli.__main__ import main
 
 
 def _write_run(directory: Path):

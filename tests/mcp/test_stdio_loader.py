@@ -6,7 +6,7 @@ import pytest
 
 
 def test_import_stdio_loader() -> None:
-    from cubepi.mcp import load_mcp_tools_stdio
+    from cubeloop.mcp import load_mcp_tools_stdio
 
     assert callable(load_mcp_tools_stdio)
 
@@ -14,7 +14,7 @@ def test_import_stdio_loader() -> None:
 @pytest.mark.asyncio
 async def test_stdio_loader_against_fake_server() -> None:
     """Spawn the fake stdio server, list tools, invoke 'echo'."""
-    from cubepi.mcp import MCPDiscoveryResult, load_mcp_tools_stdio
+    from cubeloop.mcp import MCPDiscoveryResult, load_mcp_tools_stdio
 
     discovery = await load_mcp_tools_stdio(
         command=sys.executable,
@@ -33,7 +33,7 @@ async def test_stdio_loader_against_fake_server() -> None:
     args = echo.parameters(text="hello")
     result = await echo.execute("tc-stdio-1", args, signal=None, on_update=None)
     assert len(result.content) == 1
-    from cubepi.providers.base import TextContent
+    from cubeloop.providers.base import TextContent
 
     assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == "hello"

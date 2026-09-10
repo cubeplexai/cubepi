@@ -20,8 +20,8 @@ import os
 import sys
 from pathlib import Path
 
-from cubepi import Agent, AgentToolResult, TextContent, tool
-from cubepi.checkpointer import SQLiteCheckpointer
+from cubeloop import Agent, AgentToolResult, TextContent, tool
+from cubeloop.checkpointer import SQLiteCheckpointer
 
 from _provider import MODEL_ID, provider
 
@@ -89,7 +89,7 @@ async def main(thread_id: str, start: bool) -> None:
             last_type = type(last).__name__ if last else "none"
             print(f"Resuming thread {thread_id!r} ({len(agent.state.messages)} messages, last={last_type})")
             if last_type == "AssistantMessage":
-                from cubepi.providers.base import ToolCall
+                from cubeloop.providers.base import ToolCall
                 has_pending_tools = any(isinstance(c, ToolCall) for c in last.content)
                 if not has_pending_tools:
                     # Run completed normally — no pending tool calls to execute.

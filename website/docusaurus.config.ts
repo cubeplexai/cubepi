@@ -27,7 +27,7 @@ const PACKAGE_VERSION = VERSION_MATCH ? VERSION_MATCH[1] : 'dev';
 const classicOptions: ClassicOptions = {
   docs: {
     sidebarPath: './sidebars.ts',
-    editUrl: 'https://github.com/cubeplexai/cubepi/edit/main/website/',
+    editUrl: 'https://github.com/cubeplexai/cubeloop/edit/main/website/',
     lastVersion: '0.13',
     versions: {
       current: { label: 'Next 🚧', path: 'next', banner: 'unreleased', noIndex: true },
@@ -69,15 +69,15 @@ const classicOptions: ClassicOptions = {
 };
 
 const config: Config = {
-  title: 'CubePi',
+  title: 'CubeLoop',
   tagline: 'A Pythonic, async-native agent framework — an alternative to langgraph and pi-agent-core',
-  favicon: 'img/brand/cubepi-logo.svg',
+  favicon: 'img/brand/cubeloop-logo.svg',
 
-  url: 'https://cubepi.ai',
+  url: 'https://cubeloop.dev',
   baseUrl: '/',
   trailingSlash: false,
   organizationName: 'cubeplexai',
-  projectName: 'cubepi',
+  projectName: 'cubeloop',
 
   onBrokenLinks: 'throw',
   onBrokenAnchors: 'throw',
@@ -107,13 +107,13 @@ const config: Config = {
       innerHTML: JSON.stringify({
         '@context': 'https://schema.org',
         '@type': 'Organization',
-        name: 'CubePi',
-        url: 'https://cubepi.ai',
-        logo: 'https://cubepi.ai/img/brand/cubepi-logo.png',
+        name: 'CubeLoop',
+        url: 'https://cubeloop.dev',
+        logo: 'https://cubeloop.dev/img/brand/cubeloop-logo.png',
         sameAs: [
-          'https://github.com/cubeplexai/cubepi',
+          'https://github.com/cubeplexai/cubeloop',
           'https://x.com/cubeplexai',
-          'https://pypi.org/project/cubepi/',
+          'https://pypi.org/project/cubeloop/',
         ],
       }),
     },
@@ -147,14 +147,14 @@ const config: Config = {
 
   themeConfig: {
     metadata: [
-      { name: 'keywords', content: 'CubePi, langgraph alternative, pi-agent-core alternative, Python agent framework, async agent, LLM agent, AI agent framework, tool-use agent, Python Agent 框架, 异步 Agent, langgraph 替代品, AI Agent 开发' },
+      { name: 'keywords', content: 'CubeLoop, langgraph alternative, pi-agent-core alternative, Python agent framework, async agent, LLM agent, AI agent framework, tool-use agent, Python Agent 框架, 异步 Agent, langgraph 替代品, AI Agent 开发' },
       { name: 'twitter:site', content: '@cubeplexai' },
       { name: 'twitter:creator', content: '@cubeplexai' },
     ],
-    image: 'img/brand/cubepi-social-preview.png',
+    image: 'img/brand/cubeloop-social-preview.png',
     navbar: {
-      title: 'CubePi',
-      logo: { alt: 'CubePi logo', src: 'img/brand/cubepi-logo.svg' },
+      title: 'CubeLoop',
+      logo: { alt: 'CubeLoop logo', src: 'img/brand/cubeloop-logo.svg' },
       items: [
         // Version-aware section links (see src/components/VersionAwareDocLink):
         // active state is path-driven so only one lights up per page, and the
@@ -178,7 +178,7 @@ const config: Config = {
         { type: 'docsVersionDropdown', position: 'right' },
         { type: 'localeDropdown', position: 'right' },
         {
-          href: 'https://github.com/cubeplexai/cubepi',
+          href: 'https://github.com/cubeplexai/cubeloop',
           position: 'right',
           className: 'header-github-link',
           'aria-label': 'GitHub repository',

@@ -16,16 +16,16 @@ import asyncio
 
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl.ask_user import ask_user_tool
-from cubepi.hitl.channel import CheckpointedChannel
-from cubepi.providers.base import (
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl.ask_user import ask_user_tool
+from cubeloop.hitl.channel import CheckpointedChannel
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,
 )
-from cubepi.providers.faux import FauxProvider
+from cubeloop.providers.faux import FauxProvider
 
 
 def _pause_then_finish_provider() -> FauxProvider:

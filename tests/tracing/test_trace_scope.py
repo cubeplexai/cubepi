@@ -14,10 +14,10 @@ import asyncio
 import pytest
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from cubepi.agent.agent import Agent
-from cubepi.providers.base import Model
-from cubepi.providers.faux import FauxProvider
-from cubepi.tracing import Tracer, trace
+from cubeloop.agent.agent import Agent
+from cubeloop.providers.base import Model
+from cubeloop.providers.faux import FauxProvider
+from cubeloop.tracing import Tracer, trace
 
 MODEL = Model(id="faux-1", provider_id="faux")
 
@@ -176,7 +176,7 @@ async def test_trace_swallows_mcp_unregister_failure(monkeypatch):
     # Real attach registers the MCP provider; make unregister blow up on detach.
     # The body must still run and the failure must not propagate.
     agent, _provider, tracer = _build()
-    import cubepi.mcp._tracing as mcp_tracing
+    import cubeloop.mcp._tracing as mcp_tracing
 
     baseline = len(mcp_tracing._provider_stack)
     try:

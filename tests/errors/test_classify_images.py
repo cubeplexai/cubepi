@@ -1,6 +1,6 @@
 import pytest
 
-from cubepi.errors import (
+from cubeloop.errors import (
     ContextLengthExceeded,
     ProviderAuthFailed,
     ProviderBadRequest,
@@ -8,7 +8,7 @@ from cubepi.errors import (
     RateLimited,
     classify_and_raise,
 )
-from cubepi.providers.images.types import ImagesModel
+from cubeloop.providers.images.types import ImagesModel
 
 
 def _img_model() -> ImagesModel:
@@ -73,7 +73,7 @@ def test_unknown_exception_falls_through_reraise():
 
 def test_chat_model_still_works():
     """Widening must not break the existing chat-side call path."""
-    from cubepi.providers.base import Model
+    from cubeloop.providers.base import Model
 
     chat_model = Model(
         id="claude-sonnet-4-6", provider_id="anthropic", context_window=200_000

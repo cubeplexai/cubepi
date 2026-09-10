@@ -3,7 +3,7 @@
 This is a runnable, end-to-end example of `PostgresCheckpointer`. It uses
 `FauxProvider`, so it needs no API key — only a reachable Postgres.
 
-    CUBEPI_PG_DSN=postgresql://user:pass@host:5432/dbname \
+    CUBELOOP_PG_DSN=postgresql://user:pass@host:5432/dbname \
         uv run python examples/checkpointing_postgres.py
 
 Defaults to `postgresql://postgres:postgres@localhost:5432/postgres`.
@@ -28,69 +28,90 @@ import secrets
 
 import asyncpg
 
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.postgres import PostgresCheckpointer
-from cubepi.checkpointer.postgres.alembic_helpers import (
-    add_pending_request_column_op,
-    add_run_id_column_op,
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.postgres import PostgresCheckpointer
+from cubeloop.checkpointer.postgres.alembic_helpers import (
     create_message_partitions_op,
-    upgrade_v3_to_v4_op,
+    create_runs_partitions_op,
     write_schema_version_op,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 ADMIN_DSN = os.environ.get(
-    "CUBEPI_PG_DSN",
-    "postgresql://postgres:postgres@localhost:5432/postgres",
+    "CUBELOOP_PG_DSN",
+    os.environ.get(
+        "CUBEPI_PG_DSN",
+        "postgresql://postgres:postgres@localhost:5432/postgres",
+    ),
 )
 THREAD_ID = "user-42"
 
 
 async def bootstrap_schema(dsn: str) -> None:
-    """Create the cubepi v2 schema.
+    """Create the cubeloop v6 schema.
 
-    In a real deployment this is your Alembic migration. The columns come
-    straight from `cubepi_metadata`; only the partitioning and the
-    schema-version row are added by hand (autogenerate can't model them).
-    See cubepi/checkpointer/postgres/README.md for the migration recipe.
+    In a real deployment this is your Alembic migration. Existing v5
+    databases should call upgrade_v5_to_v6_op() instead of this CREATE.
     """
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute("""
-            CREATE TABLE cubepi_threads (
+            CREATE TABLE cubeloop_threads (
                 thread_id TEXT PRIMARY KEY,
-                parent_thread_id TEXT REFERENCES cubepi_threads(thread_id),
+                parent_thread_id TEXT REFERENCES cubeloop_threads(thread_id),
                 forked_at_seq BIGINT,
                 extra JSONB NOT NULL DEFAULT '{}'::jsonb,
+                pending_request JSONB,
+                run_id TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
         """)
-        await conn.execute(add_pending_request_column_op())  # v1 -> v2 column
-        await conn.execute(add_run_id_column_op())  # v2 -> v3 column
         await conn.execute("""
-            CREATE TABLE cubepi_messages (
+            CREATE TABLE cubeloop_messages (
                 thread_id TEXT NOT NULL
-                    REFERENCES cubepi_threads(thread_id) ON DELETE CASCADE,
+                    REFERENCES cubeloop_threads(thread_id) ON DELETE CASCADE,
                 seq BIGINT NOT NULL,
                 role TEXT NOT NULL,
                 metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
                 payload BYTEA NOT NULL,
+                run_id TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 PRIMARY KEY (thread_id, seq)
             ) PARTITION BY HASH (thread_id);
         """)
-        await conn.execute(create_message_partitions_op())  # 64 child partitions
+        await conn.execute(create_message_partitions_op())
         await conn.execute("""
-            CREATE INDEX ix_cubepi_messages_metadata_gin
-            ON cubepi_messages USING GIN (metadata jsonb_path_ops);
+            CREATE INDEX ix_cubeloop_messages_metadata_gin
+            ON cubeloop_messages USING GIN (metadata jsonb_path_ops);
         """)
-        await conn.execute(
-            "CREATE TABLE cubepi_schema_version (version INTEGER PRIMARY KEY);"
-        )
-        # v3 -> v4: run_id on cubepi_messages + cubepi_runs partitioned table.
-        await conn.execute(upgrade_v3_to_v4_op())
-        await conn.execute(write_schema_version_op())  # record EXPECTED_SCHEMA_VERSION
+        await conn.execute("""
+            CREATE TABLE cubeloop_schema_version (version INTEGER PRIMARY KEY);
+        """)
+        await conn.execute("""
+            CREATE TABLE cubeloop_runs (
+                thread_id TEXT NOT NULL REFERENCES cubeloop_threads(thread_id)
+                    ON DELETE CASCADE,
+                run_id TEXT NOT NULL,
+                claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                completed_at TIMESTAMPTZ,
+                completion_seq BIGINT,
+                PRIMARY KEY (thread_id, run_id)
+            ) PARTITION BY HASH (thread_id);
+        """)
+        await conn.execute(create_runs_partitions_op())
+        await conn.execute("""
+            CREATE TABLE cubeloop_hitl_answers (
+                thread_id TEXT NOT NULL REFERENCES cubeloop_threads(thread_id)
+                    ON DELETE CASCADE,
+                run_id TEXT NOT NULL,
+                question_id TEXT NOT NULL,
+                answer JSONB NOT NULL,
+                answered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (thread_id, run_id, question_id)
+            );
+        """)
+        await conn.execute(write_schema_version_op())
     finally:
         await conn.close()
 
@@ -116,7 +137,7 @@ def transcript(messages) -> list[str]:
 
 async def main() -> None:
     # Throwaway DB so the example is safe to re-run.
-    db_name = f"cubepi_example_{secrets.token_hex(5)}"
+    db_name = f"cubeloop_example_{secrets.token_hex(5)}"
     admin = await asyncpg.connect(ADMIN_DSN)
     try:
         await admin.execute(f'CREATE DATABASE "{db_name}"')

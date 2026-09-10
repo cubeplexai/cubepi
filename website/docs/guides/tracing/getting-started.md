@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: "Get started with OpenTelemetry tracing in CubePi — install, configure, and export spans."
+description: "Get started with OpenTelemetry tracing in CubeLoop — install, configure, and export spans."
 sidebar_position: 2
 ---
 
@@ -8,14 +8,14 @@ sidebar_position: 2
 
 ## Install the extra
 
-CubePi keeps OpenTelemetry an optional dependency:
+CubeLoop keeps OpenTelemetry an optional dependency:
 
 ```bash
-pip install "cubepi[tracing]"
+pip install "cubeloop[tracing]"
 ```
 
 This pulls in `opentelemetry-sdk` and friends. Without the extra, the
-`cubepi.tracing` import raises a clear error so you find out at import time
+`cubeloop.tracing` import raises a clear error so you find out at import time
 rather than mid-run.
 
 ## Attach a Tracer
@@ -24,10 +24,10 @@ The minimal end-to-end setup — local JSONL export, idiomatic RAII:
 
 ```python
 import asyncio
-from cubepi import Agent
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.tracing import Tracer
-from cubepi.tracing.exporters import JsonlSpanExporter
+from cubeloop import Agent
+from cubeloop.providers.anthropic import AnthropicProvider
+from cubeloop.tracing import Tracer
+from cubeloop.tracing.exporters import JsonlSpanExporter
 
 
 async def main() -> None:
@@ -40,7 +40,7 @@ async def main() -> None:
         Tracer(
             service_name="my-bot",
             agent_name="assistant",
-            exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+            exporters=[JsonlSpanExporter(directory="./cubeloop-traces")],
         ) as tracer,
         tracer.attached(agent),
     ):
@@ -80,14 +80,14 @@ safety net while you're still building. (Doesn't run on `SIGKILL` or
 The run produces one JSONL file per trace (sharded by `trace_id`):
 
 ```text
-./cubepi-traces/
+./cubeloop-traces/
   2026-05-19/
     8e1c9a3f4b2d…d976a.jsonl   ← one trace, one file, one span per line
 ```
 
 A trace is the whole OTel tree, including any nested subagent runs (they
 inherit the parent's `trace_id`, so they land in the same file). Each span
-also carries `cubepi.run_id` — the **same** id as `agent.prompt(run_id=…)` /
+also carries `cubeloop.run_id` — the **same** id as `agent.prompt(run_id=…)` /
 `Message.run_id` (hosts that pass a run id will see it here; otherwise the
 agent-minted id). Use it to filter by individual business run inside a
 trace that may hold several nested activations.
@@ -96,9 +96,9 @@ Open it with any tool that reads OTLP/JSON or with `jq` directly:
 
 ```bash
 jq -r '"\(.name)  \(.attributes."gen_ai.operation.name" // "")"' \
-   cubepi-traces/2026-05-19/*.jsonl
+   cubeloop-traces/2026-05-19/*.jsonl
 # invoke_agent  invoke_agent
-# cubepi.turn
+# cubeloop.turn
 # chat claude-sonnet-4-6  chat
 ```
 
@@ -108,7 +108,7 @@ For a single prompt with one LLM round-trip, the recorder produces three spans:
 
 ```text
 invoke_agent assistant              [INTERNAL]   gen_ai.operation.name=invoke_agent
-└── cubepi.turn                     [INTERNAL]   cubepi.turn.index=0
+└── cubeloop.turn                     [INTERNAL]   cubeloop.turn.index=0
     └── chat <model>                [CLIENT]     gen_ai.operation.name=chat
 ```
 
@@ -116,17 +116,17 @@ When the model calls a tool, you get an extra layer per tool:
 
 ```text
 invoke_agent assistant
-└── cubepi.turn                     ← turn index 0
+└── cubeloop.turn                     ← turn index 0
     ├── chat <model>                ← first round trip
     └── execute_tool <tool_name>    ← gen_ai.tool.name, gen_ai.tool.call.id
-└── cubepi.turn                     ← turn index 1 (response after tool result)
+└── cubeloop.turn                     ← turn index 1 (response after tool result)
     └── chat <model>
 ```
 
 For MCP tools the `execute_tool` span gets a CLIENT child:
 
 ```text
-execute_tool <tool_name>            [INTERNAL]   cubepi-side wrapper
+execute_tool <tool_name>            [INTERNAL]   cubeloop-side wrapper
 └── tools/call <tool_name>          [CLIENT]     gen_ai.operation.name=execute_tool
                                                   mcp.method.name=tools/call
                                                   mcp.session.id=…
@@ -141,10 +141,10 @@ instrumented MCP server can continue the trace.
 The recorder treats cancellation as a control signal, not a failure:
 
 - `agent.abort()` or a cancelled one-shot call → affected spans close with
-  `cubepi.aborted=true` and `error.type=cubepi.aborted`, **status UNSET**, and no
+  `cubeloop.aborted=true` and `error.type=cubeloop.aborted`, **status UNSET**, and no
   exception event (per OTel guidance — cancellation isn't an error).
 - `agent.detach()` at a durable HITL prompt → open spans close with
-  `cubepi.run.outcome=suspended` and no aborted/error classification. A later
+  `cubeloop.run.outcome=suspended` and no aborted/error classification. A later
   `respond()` is a new activation trace; correlate the two with metadata such as
   a host run or conversation ID.
 - A provider or one-shot call raising → affected spans close with **status
@@ -167,13 +167,13 @@ than silently disappearing.
 Defaults (no opt-in needed):
 
 - `invoke_agent` (root) — `gen_ai.operation.name`, `gen_ai.provider.name`,
-  `gen_ai.agent.name`, `cubepi.run_id` (business run id from
+  `gen_ai.agent.name`, `cubeloop.run_id` (business run id from
   `prompt`/`resume`/`respond`, not a separate tracer uuid),
-  `cubepi.agent.system_prompt.sha256`, `cubepi.agent.tools` (names list),
-  `cubepi.input_messages.count`, `cubepi.output_messages.count`
-- `cubepi.turn` — `cubepi.turn.index`, `cubepi.turn.stop_reason`,
-  `cubepi.turn.tool_calls.count`, `cubepi.turn.terminated_by_tool`,
-  `cubepi.run_id`
+  `cubeloop.agent.system_prompt.sha256`, `cubeloop.agent.tools` (names list),
+  `cubeloop.input_messages.count`, `cubeloop.output_messages.count`
+- `cubeloop.turn` — `cubeloop.turn.index`, `cubeloop.turn.stop_reason`,
+  `cubeloop.turn.tool_calls.count`, `cubeloop.turn.terminated_by_tool`,
+  `cubeloop.run_id`
 - `chat <model>` — `gen_ai.operation.name`, `gen_ai.provider.name`,
   `gen_ai.request.model`, `gen_ai.request.max_tokens` / `temperature` /
   `top_p`, `gen_ai.request.stream`, `gen_ai.usage.input_tokens` /
@@ -183,15 +183,15 @@ Defaults (no opt-in needed):
   OpenAI-specific extras (`openai.api.type`, service tier, system fingerprint)
 - `execute_tool <tool_name>` — `gen_ai.operation.name=execute_tool`,
   `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.description`,
-  `gen_ai.tool.type`, `cubepi.tool.is_error`, `cubepi.tool.execution_mode`
+  `gen_ai.tool.type`, `cubeloop.tool.is_error`, `cubeloop.tool.execution_mode`
 - `tools/call <tool_name>` (MCP only) — `mcp.method.name`, `mcp.session.id`,
   `mcp.protocol.version`, `server.address`, `server.port`, `gen_ai.tool.name`
 
 Optional, opt-in via `Tracer(record_content=True)`:
 `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`,
 `gen_ai.tool.definitions`, `gen_ai.tool.call.arguments`,
-`gen_ai.tool.call.result`, `cubepi.llm.raw_request`,
-`cubepi.llm.raw_response`, provider/MCP/one-shot exception messages and stack
+`gen_ai.tool.call.result`, `cubeloop.llm.raw_request`,
+`cubeloop.llm.raw_response`, provider/MCP/one-shot exception messages and stack
 traces, and stream-log tool-argument/error previews. See
 [Content & Redaction](./content-recording).
 
@@ -216,12 +216,12 @@ async with (
 
 ## Tagging individual runs
 
-`cubepi.tracing.tracing_context` scopes per-run tags / metadata onto
+`cubeloop.tracing.tracing_context` scopes per-run tags / metadata onto
 the `invoke_agent` span — perfect for `user_id`, `session_id`,
 A/B-test arm, anything you'd want to filter by in the backend later:
 
 ```python
-from cubepi.tracing import tracing_context
+from cubeloop.tracing import tracing_context
 
 async with tracer.attached(agent):
     with tracing_context(tags=["beta-arm"], metadata={"user_id": "u-42"}):
@@ -230,21 +230,21 @@ async with tracer.attached(agent):
 
 Attributes on the span:
 
-- `cubepi.tags = ("beta-arm",)`
-- `cubepi.metadata.user_id = "u-42"`
+- `cubeloop.tags = ("beta-arm",)`
+- `cubeloop.metadata.user_id = "u-42"`
 
-The `cubepi.metadata.*` prefix keeps user keys from clobbering
-recorder-owned schema (e.g. `cubepi.run_id`). Tags and metadata
+The `cubeloop.metadata.*` prefix keeps user keys from clobbering
+recorder-owned schema (e.g. `cubeloop.run_id`). Tags and metadata
 contextvars are per-asyncio-task, so concurrent agents see
 independent values, and nested `tracing_context` blocks merge
 (tags concatenate, metadata keys union with inner winning).
 
 ## Tracing background LLM calls (`oneshot`)
 
-`attach()` instruments a cubepi `Agent`. For background tasks that call an LLM
+`attach()` instruments a cubeloop `Agent`. For background tasks that call an LLM
 directly — without a full agent loop (no tool use, no multi-turn) — use
 `Tracer.oneshot()` instead. It produces the same `invoke_agent` root span and
-`chat` child span so the `cubepi trace` CLI indexes it alongside normal agent
+`chat` child span so the `cubeloop trace` CLI indexes it alongside normal agent
 runs.
 
 ```python
@@ -260,7 +260,7 @@ async with tracer.oneshot(
     )
 ```
 
-The span tree is flat (no `cubepi.turn` wrapper — there is no loop):
+The span tree is flat (no `cubeloop.turn` wrapper — there is no loop):
 
 ```
 invoke_agent  820ms
@@ -270,13 +270,13 @@ invoke_agent  820ms
 Filter these traces by operation name in the CLI:
 
 ```bash
-cubepi trace ls --meta oneshot_operation=consolidate_memory
-cubepi trace ls --meta conversation_id=conv-123   # alongside the conversation's agent runs
+cubeloop trace ls --meta oneshot_operation=consolidate_memory
+cubeloop trace ls --meta conversation_id=conv-123   # alongside the conversation's agent runs
 ```
 
-The `operation` string is recorded as both `cubepi.oneshot.operation` (for
-dashboards) and `cubepi.metadata.oneshot_operation` (so `--meta` can reach it,
-since the CLI filter only reads `cubepi.metadata.*` attributes).
+The `operation` string is recorded as both `cubeloop.oneshot.operation` (for
+dashboards) and `cubeloop.metadata.oneshot_operation` (so `--meta` can reach it,
+since the CLI filter only reads `cubeloop.metadata.*` attributes).
 
 ## Next
 

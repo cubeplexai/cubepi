@@ -1,4 +1,4 @@
-from cubepi.agent.agent import AgentState
+from cubeloop.agent.agent import AgentState
 
 
 def test_agent_state_default_active_run_id_none():

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from cubepi.deferred._expand_tool import (
+from cubeloop.deferred._expand_tool import (
     TOOL_NAME,
     LoadToolsInput,
     LoadToolsOutput,
     _make_load_tools,
 )
-from cubepi.agent.types import AgentTool
+from cubeloop.agent.types import AgentTool
 
 
 class TestLoadToolsInput:

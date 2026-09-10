@@ -1,63 +1,32 @@
 ---
 title: Postgres + FastAPI Service
-description: "Deploy a FastAPI-backed CubePi agent with PostgresCheckpointer for production."
+description: "Deploy a FastAPI-backed CubeLoop agent with PostgresCheckpointer for production."
 ---
 
 # Recipe: Postgres + FastAPI Service
 
-A production-shaped HTTP service that fronts a CubePi agent: FastAPI
+A production-shaped HTTP service that fronts a CubeLoop agent: FastAPI
 for routing, server-sent events for streaming, a shared
 `PostgresCheckpointer` for persistence, and `thread_id` derived from
 the authenticated user.
 
 **Time to run:** 30 minutes.
-**Deps:** `cubepi[postgres]`, `fastapi`, `uvicorn[standard]`,
-`sse-starlette`, a running Postgres with the CubePi schema applied.
+**Deps:** `cubeloop[postgres]`, `fastapi`, `uvicorn[standard]`,
+`sse-starlette`, a running Postgres with the CubeLoop schema applied.
 
 ## Schema first
 
-Before the service starts, run the CubePi schema migration. The
+Before the service starts, run the CubeLoop schema migration. The
 quickest way for this recipe:
 
 ```bash
-psql "$DATABASE_URL" <<'SQL'
-CREATE TABLE cubepi_threads (
-    thread_id TEXT PRIMARY KEY,
-    parent_thread_id TEXT REFERENCES cubepi_threads(thread_id),
-    forked_at_seq BIGINT,
-    extra JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE cubepi_messages (
-    thread_id TEXT NOT NULL REFERENCES cubepi_threads(thread_id) ON DELETE CASCADE,
-    seq BIGINT NOT NULL,
-    role TEXT NOT NULL,
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    payload BYTEA NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (thread_id, seq)
-) PARTITION BY HASH (thread_id);
-
--- 64 hash partitions
-DO $$
-BEGIN
-  FOR i IN 0..63 LOOP
-    EXECUTE format(
-      'CREATE TABLE cubepi_messages_p%s PARTITION OF cubepi_messages FOR VALUES WITH (MODULUS 64, REMAINDER %s)',
-      i, i
-    );
-  END LOOP;
-END$$;
-
-CREATE INDEX ix_cubepi_messages_metadata_gin
-ON cubepi_messages USING gin (metadata jsonb_path_ops);
-
-CREATE TABLE cubepi_schema_version (version INT PRIMARY KEY);
-INSERT INTO cubepi_schema_version VALUES (1);
-SQL
+# Throwaway / recipe: copy the v6 bootstrap from
+# examples/checkpointing_postgres.py (cubeloop_threads, cubeloop_messages +
+# 64 partitions, cubeloop_runs + 64 partitions, cubeloop_hitl_answers,
+# cubeloop_schema_version = 6).
 ```
+
+Existing v5 databases must run `upgrade_v5_to_v6_op()` instead of CREATE.
 
 For a real deployment, generate this via Alembic — see
 [Postgres Checkpointing → Bootstrapping via Alembic](../guides/checkpointing/postgres#bootstrapping-via-alembic).
@@ -74,9 +43,9 @@ from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from cubepi import Agent
-from cubepi.checkpointer import PostgresCheckpointer
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.checkpointer import PostgresCheckpointer
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 # --- App lifecycle ------------------------------------------------------
@@ -175,8 +144,8 @@ async def get_history(
 Run:
 
 ```bash
-pip install "cubepi[postgres]" fastapi "uvicorn[standard]" sse-starlette
-export DATABASE_URL=postgresql://user:pass@localhost/cubepi
+pip install "cubeloop[postgres]" fastapi "uvicorn[standard]" sse-starlette
+export DATABASE_URL=postgresql://user:pass@localhost/cubeloop
 export ANTHROPIC_API_KEY=sk-…
 uvicorn service:app --reload --port 8000
 ```
@@ -237,7 +206,7 @@ If you need strict ordering, add an application-layer mutex
 
 ## Common pitfalls
 
-- **CubepiSchemaUninitialized at startup** — Your migrations didn't
+- **CubeloopSchemaUninitialized at startup** — Your migrations didn't
   run. Apply the schema first.
 - **Connection pool exhaustion** — Default `max_pool_size=10`. Bump
   it if your service has more concurrent agents than that.
@@ -249,13 +218,13 @@ If you need strict ordering, add an application-layer mutex
 ## Run the example
 
 A self-contained service template for this recipe is in the repository at
-[`examples/postgres_fastapi.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/postgres_fastapi.py).
+[`examples/postgres_fastapi.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/postgres_fastapi.py).
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync --extra postgres
 
-export DATABASE_URL=postgresql://user:pass@localhost/cubepi
+export DATABASE_URL=postgresql://user:pass@localhost/cubeloop
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]
 
 uv run --with fastapi --with "uvicorn[standard]" --with sse-starlette \

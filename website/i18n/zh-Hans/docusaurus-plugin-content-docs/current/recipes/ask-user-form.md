@@ -1,6 +1,6 @@
 ---
 title: 通过 ask_user 实现多问题表单
-description: "使用 CubePi 的 ask_user HITL 工具构建多问题表单以收集结构化用户输入。"
+description: "使用 CubeLoop 的 ask_user HITL 工具构建多问题表单以收集结构化用户输入。"
 ---
 
 # 配方：通过 `ask_user` 实现多问题表单
@@ -11,8 +11,8 @@ description: "使用 CubePi 的 ask_user HITL 工具构建多问题表单以收�
 ## 步骤 1：注册工具
 
 ```python
-from cubepi.agent.agent import Agent
-from cubepi.hitl import InMemoryChannel, ask_user_tool
+from cubeloop.agent.agent import Agent
+from cubeloop.hitl import InMemoryChannel, ask_user_tool
 
 channel = InMemoryChannel()
 
@@ -151,8 +151,8 @@ tool_result.details["hitl"]["seconds"] = 30.0
 
 ```python
 import asyncio
-from cubepi.agent.agent import Agent
-from cubepi.hitl import InMemoryChannel, ask_user_tool
+from cubeloop.agent.agent import Agent
+from cubeloop.hitl import InMemoryChannel, ask_user_tool
 
 channel = InMemoryChannel()
 
@@ -184,11 +184,11 @@ asyncio.run(main())
 ## 运行示例
 
 仓库中有一份完整可运行的代码，位于
-[`examples/ask_user_form.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/ask_user_form.py)。
+[`examples/ask_user_form.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/ask_user_form.py)。
 Host 循环以编程方式回答所有问题，无需接入真实 UI 即可观察完整的交互过程。
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync
 
 export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]

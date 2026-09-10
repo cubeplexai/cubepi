@@ -5,12 +5,12 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     StructuredOutputError,
     TextContent,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 
 class MovieReview(BaseModel):
@@ -172,7 +172,7 @@ async def test_generate_structured_retry_includes_tool_result_message() -> None:
     assert result.rating == 8
     # The retry call should have: original UserMessage, failed AssistantMessage,
     # ToolResultMessage (error), UserMessage (retry prompt)
-    from cubepi.providers.base import ToolResultMessage
+    from cubeloop.providers.base import ToolResultMessage
 
     tool_results = [m for m in captured_messages if isinstance(m, ToolResultMessage)]
     assert len(tool_results) == 1

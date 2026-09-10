@@ -17,8 +17,10 @@ jobs:
         with:
           version: "latest"
 
-      - name: Build package
-        run: uv build
+      - name: Build packages
+        run: |
+          uv build
+          uv build --package cubepi
 
       - uses: actions/upload-artifact@v7
         with:
@@ -41,6 +43,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   publish-pypi:
     needs: publish-testpypi
@@ -56,3 +59,5 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

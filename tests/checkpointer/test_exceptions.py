@@ -1,10 +1,10 @@
 import pytest
 
-from cubepi.checkpointer.exceptions import (
+from cubeloop.checkpointer.exceptions import (
     CheckpointerError,
     CheckpointerLockTimeoutError,
     CompletionMarkerFailedError,
-    CubepiSchemaError,
+    CubeloopSchemaError,
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
     RunNotClaimedError,
@@ -32,8 +32,8 @@ def test_runtime_errors_inherit_checkpointer_error(exc_cls):
 
 
 def test_checkpointer_error_separate_from_schema_error():
-    assert not issubclass(CheckpointerError, CubepiSchemaError)
-    assert not issubclass(CubepiSchemaError, CheckpointerError)
+    assert not issubclass(CheckpointerError, CubeloopSchemaError)
+    assert not issubclass(CubeloopSchemaError, CheckpointerError)
 
 
 def test_completion_marker_failed_error_carries_run_id():

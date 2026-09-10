@@ -70,8 +70,8 @@ to get their full schemas, then invoke them via
 向 `Agent` 传入 `deferred_tool_groups`，中间件自动创建，无需手动接线：
 
 ```python
-from cubepi import Agent
-from cubepi.deferred import DeferredToolGroup
+from cubeloop import Agent
+from cubeloop.deferred import DeferredToolGroup
 
 # load_github_tools / load_linear_tools 是零参 async 可调用对象，
 # 返回 list[AgentTool]。具体怎么写见下面的「编写 loader」一节，
@@ -113,7 +113,7 @@ agent = Agent(
 
 ### 编写 loader
 
-`loader` 是一个零参 async 可调用对象，返回 `list[AgentTool]`。CubePi
+`loader` 是一个零参 async 可调用对象，返回 `list[AgentTool]`。CubeLoop
 只看返回类型——里面的 `AgentTool` 怎么来由你决定。两种典型写法：
 
 **从 MCP server 加载。** `load_mcp_tools_stdio` / `load_mcp_tools_http`
@@ -121,8 +121,8 @@ agent = Agent(
 `list[AgentTool]`。包一层：
 
 ```python
-from cubepi.deferred import DeferredToolGroup
-from cubepi.mcp import load_mcp_tools_stdio
+from cubeloop.deferred import DeferredToolGroup
+from cubeloop.mcp import load_mcp_tools_stdio
 
 async def load_github_tools():
     result = await load_mcp_tools_stdio(
@@ -150,8 +150,8 @@ server 发布的是 `github_create_issue`，选择性展开就匹配不到。
 loader 就是一个返回列表的 async 函数：
 
 ```python
-from cubepi import tool
-from cubepi.deferred import DeferredToolGroup
+from cubeloop import tool
+from cubeloop.deferred import DeferredToolGroup
 
 @tool
 async def create_issue(*, repo: str, title: str, body: str) -> str:
@@ -239,7 +239,7 @@ ctx.extra["expanded_groups"] = {
 中间件的 strategy 一致：
 
 ```python
-from cubepi.deferred import DeferredToolsMiddleware
+from cubeloop.deferred import DeferredToolsMiddleware
 
 # saved_extra 是上一个 run 持久化的 ctx.extra
 resumed = await DeferredToolsMiddleware.prepare_resumed_state(
@@ -273,7 +273,7 @@ dispatch 模式下没有其他要恢复的东西：模型见过的 schema 留在
 `DeferredToolsMiddleware`：
 
 ```python
-from cubepi.deferred import DeferredToolsMiddleware
+from cubeloop.deferred import DeferredToolsMiddleware
 
 mw = DeferredToolsMiddleware(
     groups=[github_group, linear_group],
@@ -305,7 +305,7 @@ agent = Agent(
 
 ## 从 0.10 迁移
 
-延迟工具组在 CubePi 0.10 发布时的行为即现在的 `inject` 策略。升级后
+延迟工具组在 CubeLoop 0.10 发布时的行为即现在的 `inject` 策略。升级后
 行为变化：
 
 - **默认策略现在是 `dispatch`。** 目录措辞改变，出现 `deferred_tool_call`

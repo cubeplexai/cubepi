@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from cubepi.middleware.compaction.tokens import (
+from cubeloop.middleware.compaction.tokens import (
     approx_tokens,
     real_context_estimate,
 )
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ThinkingContent,

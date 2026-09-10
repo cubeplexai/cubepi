@@ -1,11 +1,11 @@
 import pytest
 
-from cubepi.providers.images.base import BaseImagesProvider, ImagesProvider
-from cubepi.providers.images.capability import (
+from cubeloop.providers.images.base import BaseImagesProvider, ImagesProvider
+from cubeloop.providers.images.capability import (
     ImagesCapabilityDescriptor,
     SizeSpec,
 )
-from cubepi.providers.images.types import (
+from cubeloop.providers.images.types import (
     AssistantImages,
     ImagesContext,
     ImagesCost,

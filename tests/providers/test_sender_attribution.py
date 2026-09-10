@@ -1,6 +1,6 @@
 """Tests for sender_attribution helpers used by group chat."""
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     ImageContent,
     TextContent,
     UserMessage,

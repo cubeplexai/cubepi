@@ -1,4 +1,4 @@
-# cubepi
+# cubeloop
 
 Pythonic async-native agent framework (an alternative to langgraph). Async-first,
 strongly typed, deliberately few dependencies. 
@@ -9,9 +9,9 @@ strongly typed, deliberately few dependencies.
 uv sync --all-extras --dev               # install everything
 uv run pytest tests/                      # run tests (asyncio_mode=auto)
 uv run pytest tests/path/test.py::test -v # single test
-uv run ruff check cubepi/ tests/
-uv run ruff format --check cubepi/ tests/ # CI checks formatting, doesn't fix
-uv run mypy cubepi
+uv run ruff check cubeloop/ tests/
+uv run ruff format --check cubeloop/ tests/ # CI checks formatting, doesn't fix
+uv run mypy cubeloop
 ```
 
 CI runs pytest + ruff + mypy. Tests run on Python 3.11–3.14 (3.14 is
@@ -19,11 +19,11 @@ CI runs pytest + ruff + mypy. Tests run on Python 3.11–3.14 (3.14 is
 
 ## Architecture
 
-`cubepi/` modules: `providers/` (LLM abstraction — `Provider` protocol returning
+`cubeloop/` modules: `providers/` (LLM abstraction — `Provider` protocol returning
 `MessageStream`; anthropic / openai / openai_responses / faux), `agent/`
 (`agent.py` stateful class, `loop.py` stateless core algorithm, `tools.py`
 execution engine), `middleware/`, `checkpointer/` (memory / sqlite / postgres),
-`mcp/`, `tracing/` (OTel, optional), `cli/` (`cubepi trace`). See the README
+`mcp/`, `tracing/` (OTel, optional), `cli/` (`cubeloop trace`). See the README
 "Architecture" section for the full annotated tree.
 
 ## Conventions & gotchas
@@ -31,14 +31,14 @@ execution engine), `middleware/`, `checkpointer/` (memory / sqlite / postgres),
 - **Lean deps**: core deps are anthropic, openai, pydantic only.
   Everything else (sqlite, postgres, mcp, tracing, trace-cli) is an optional
   extra in `pyproject.toml`. Don't add a hard dependency without strong reason.
-- **`cubepi.tracing` is lazily importable** (PEP 562 `__getattr__`): schema
+- **`cubeloop.tracing` is lazily importable** (PEP 562 `__getattr__`): schema
   constants import without the opentelemetry SDK, so the trace CLI works on a
-  `cubepi[trace-cli]`-only install. Don't add eager OTel imports to its
+  `cubeloop[trace-cli]`-only install. Don't add eager OTel imports to its
   `__init__.py`.
 - **Tests use `FauxProvider`** for deterministic, no-API-call runs with realistic
   streaming. Prefer it over mocking providers.
-- **`cubepi/cli/**` is excluded from codecov** (`codecov.yml` ignore).
-- Packaged data: `cubepi/providers/catalog/data/*.yaml` ships in the wheel.
+- **`cubeloop/cli/**` is excluded from codecov** (`codecov.yml` ignore).
+- Packaged data: `cubeloop/providers/catalog/data/*.yaml` ships in the wheel.
 
 ## Development workflow
 
@@ -55,7 +55,7 @@ directly on `main`. Subagents that write code must also use `isolation:
 talk through and confirm requirements with the user before writing the spec.
 While forming it, research prior art — **pi-agent-core, langgraph, claude code** —
 to find best practices, but let our own requirements and design philosophy drive
-the result. Call out notable divergences ("library does X, cubepi does Y because
+the result. Call out notable divergences ("library does X, cubeloop does Y because
 Z") so they can be reviewed. Specs go in `dev/specs/` (dated
 `YYYY-MM-DD-<topic>.md`), plans in `dev/plans/`.
 

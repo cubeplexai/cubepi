@@ -1,6 +1,6 @@
 ---
 title: Examples
-description: "Working middleware examples for CubePi: rate limiting, retries with backoff, structured logging, context truncation, and HITL."
+description: "Working middleware examples for CubeLoop: rate limiting, retries with backoff, structured logging, context truncation, and HITL."
 ---
 
 # Middleware Examples
@@ -16,8 +16,8 @@ Redis INCR, …).
 
 ```python
 import time
-from cubepi import Middleware
-from cubepi.agent.types import BeforeToolCallResult
+from cubeloop import Middleware
+from cubeloop.agent.types import BeforeToolCallResult
 
 
 class RateLimitMiddleware(Middleware):
@@ -54,8 +54,8 @@ exponential backoff, only for transient errors.
 
 ```python
 import asyncio
-from cubepi import Middleware
-from cubepi.agent.types import AfterToolCallResult
+from cubeloop import Middleware
+from cubeloop.agent.types import AfterToolCallResult
 
 
 class RetryMiddleware(Middleware):
@@ -107,9 +107,9 @@ Pairs `before_tool_call` (to record start time) with `after_tool_call`
 
 ```python
 import time, logging
-from cubepi import Middleware
+from cubeloop import Middleware
 
-log = logging.getLogger("cubepi.tools")
+log = logging.getLogger("cubeloop.tools")
 
 
 class ToolLoggingMiddleware(Middleware):
@@ -145,7 +145,7 @@ Keep the model's context bounded by retaining only the most recent N
 messages, plus the system prompt:
 
 ```python
-from cubepi import Middleware
+from cubeloop import Middleware
 
 
 class SlidingWindow(Middleware):
@@ -178,7 +178,7 @@ passes the model a compressed view: one summary message plus recent
 messages. The full conversation history remains in `agent.state`.
 
 ```python
-from cubepi.middleware import CompactionMiddleware
+from cubeloop.middleware import CompactionMiddleware
 
 main_model = main_provider.model("claude-sonnet-4-6")
 summary_model = cheap_provider.model("claude-haiku-4-5")
@@ -202,12 +202,12 @@ The summary call uses `Provider.generate(...)` with
 ## Built-in subagents
 
 `SubagentMiddleware` adds one `subagent` tool that runs a temporary
-child `Agent` with a self-contained prompt. CubePi captures child
+child `Agent` with a self-contained prompt. CubeLoop captures child
 events and returns the child agent's final assistant text as the tool
 result.
 
 ```python
-from cubepi.middleware import SubagentMiddleware, SubagentSpec
+from cubeloop.middleware import SubagentMiddleware, SubagentSpec
 
 subagents = {
     "researcher": SubagentSpec(
@@ -252,7 +252,7 @@ class MaxTurns(Middleware):
 class BudgetCap(Middleware):
     def __init__(self, usd: float, model_cost) -> None:
         self.cap = usd
-        self.cost = model_cost   # cubepi.providers.ModelCost or similar
+        self.cost = model_cost   # cubeloop.providers.ModelCost or similar
         self.spent = 0.0
 
     async def should_stop_after_turn(self, ctx):
@@ -271,9 +271,9 @@ Validate JSON output and re-prompt if it doesn't parse:
 
 ```python
 import json
-from cubepi import Middleware
-from cubepi.middleware.base import TurnAction
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop import Middleware
+from cubeloop.middleware.base import TurnAction
+from cubeloop.providers.base import TextContent, UserMessage
 
 
 class JSONOutputValidator(Middleware):
@@ -302,12 +302,12 @@ model with the feedback message in context.
 
 ## Human-in-the-loop tool confirmation
 
-CubePi ships two built-in HITL middlewares in `cubepi.hitl`:
+CubeLoop ships two built-in HITL middlewares in `cubeloop.hitl`:
 
 **`ConfirmToolCallMiddleware`** — "always ask the human for this tool":
 
 ```python
-from cubepi.hitl import ConfirmToolCallMiddleware, InMemoryChannel
+from cubeloop.hitl import ConfirmToolCallMiddleware, InMemoryChannel
 
 channel = InMemoryChannel()
 agent = Agent(
@@ -330,7 +330,7 @@ result drives the tool: `approve` runs it, `deny` blocks with a reason,
 a policy engine:
 
 ```python
-from cubepi.hitl import Approve, ApprovalPolicyMiddleware, AskUser, Deny
+from cubeloop.hitl import Approve, ApprovalPolicyMiddleware, AskUser, Deny
 
 def my_policy(ctx):
     if ctx.tool_call.name in ("read_file", "grep"):

@@ -1,12 +1,12 @@
 ---
 title: Content & Redaction
-description: "Configure prompt content recording and redaction in CubePi's OpenTelemetry tracing."
+description: "Configure prompt content recording and redaction in CubeLoop's OpenTelemetry tracing."
 sidebar_position: 4
 ---
 
 # Recording Prompts, Responses, and Tool Payloads
 
-By default CubePi's tracing emits structural attributes only — operation
+By default CubeLoop's tracing emits structural attributes only — operation
 names, models, token counts, finish reasons, durations, and typed error classes.
 **No prompt content, model output, tool arguments/results, raw exception text,
 or exception stack traces leave the process.** This is deliberate: many agent
@@ -25,7 +25,7 @@ tracer = Tracer(
     service_name="my-bot",
     agent_name="assistant",
     record_content=True,            # ← opt-in
-    exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+    exporters=[JsonlSpanExporter(directory="./cubeloop-traces")],
 )
 ```
 
@@ -35,8 +35,8 @@ attributes per the OTel GenAI semconv:
 | Span | Content attributes added |
 |---|---|
 | `invoke_agent` | `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.output.messages` |
-| `cubepi.turn` | `gen_ai.input.messages` (per-turn slice), `gen_ai.output.messages` (per-turn slice) |
-| `chat <model>` | `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.tool.definitions`, `cubepi.llm.raw_request`, `cubepi.llm.raw_response` |
+| `cubeloop.turn` | `gen_ai.input.messages` (per-turn slice), `gen_ai.output.messages` (per-turn slice) |
+| `chat <model>` | `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.tool.definitions`, `cubeloop.llm.raw_request`, `cubeloop.llm.raw_response` |
 | `execute_tool <tool_name>` | `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` |
 
 Developer-authored agent and tool descriptions are treated as operational
@@ -64,7 +64,7 @@ def redact(key: str, value):
     if key in ("gen_ai.input.messages", "gen_ai.output.messages"):
         return _scrub_messages(value)
     # Don't ship raw bodies at all in prod — keep only the normalised shape.
-    if key in ("cubepi.llm.raw_request", "cubepi.llm.raw_response"):
+    if key in ("cubeloop.llm.raw_request", "cubeloop.llm.raw_response"):
         return None
     return value
 
@@ -129,8 +129,8 @@ main trace:
 tracer = Tracer(
     record_content=True,            # needed for trace convert
     record_stream=True,             # ← per-chunk event log
-    stream_dir="./cubepi-traces",   # where to write <run_id>.stream.jsonl
-    exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+    stream_dir="./cubeloop-traces",   # where to write <run_id>.stream.jsonl
+    exporters=[JsonlSpanExporter(directory="./cubeloop-traces")],
 )
 ```
 
@@ -144,7 +144,7 @@ events include the raw provider error message:
 ```json
 {"t": 5.873, "type": "toolcall_start", "ci": 1, "id": "toolu_...", "name": "show_widget"}
 {"t": 5.875, "type": "toolcall_delta", "ci": 1, "chars": 11, "accumulated": 11, "preview": "{\"title\": \""}
-{"t": 33.177, "type": "toolcall_end",  "ci": 1, "id": "toolu_...", "args_chars": 7465, "args_preview": "{\"title\": \"CubePi..."}
+{"t": 33.177, "type": "toolcall_end",  "ci": 1, "id": "toolu_...", "args_chars": 7465, "args_preview": "{\"title\": \"CubeLoop..."}
 ```
 
 This makes it straightforward to confirm whether argument chunks ever arrived, or
@@ -160,7 +160,7 @@ tool-heavy agents.
 ## Auditing what's recorded
 
 The recorder always sets `service.name`, `gen_ai.agent.name`, and
-`cubepi.run_id` on every span — regardless of `record_content`. Use these
+`cubeloop.run_id` on every span — regardless of `record_content`. Use these
 to filter the trace backend to a single run and visually confirm what
 landed.
 
@@ -170,5 +170,5 @@ backend:
 
 ```bash
 jq -r 'select(.attributes["gen_ai.input.messages"]) | .attributes["gen_ai.input.messages"]' \
-   cubepi-traces/2026-05-19/*.jsonl
+   cubeloop-traces/2026-05-19/*.jsonl
 ```

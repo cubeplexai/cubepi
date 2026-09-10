@@ -1,12 +1,12 @@
 import pytest
 
-from cubepi.checkpointer.exceptions import (
+from cubeloop.checkpointer.exceptions import (
     RunNotCompletedError,
     ThreadAlreadyExistsError,
     ThreadNotFoundError,
 )
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.providers.base import TextContent, UserMessage
 
 
 def _msg(run_id: str | None, text: str) -> UserMessage:

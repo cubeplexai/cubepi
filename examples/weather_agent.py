@@ -15,7 +15,7 @@ from typing import Annotated
 import httpx
 from pydantic import Field
 
-from cubepi import Agent, AgentToolResult, TextContent, tool
+from cubeloop import Agent, AgentToolResult, TextContent, tool
 
 from _provider import MODEL_ID, provider
 

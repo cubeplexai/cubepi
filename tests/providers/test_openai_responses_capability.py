@@ -10,19 +10,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     Model,
     ReasoningControl,
     StreamOptions,
     TextContent,
     UserMessage,
 )
-from cubepi.providers.capability import (
+from cubeloop.providers.capability import (
     CapabilityDescriptor,
     ReasoningCapability,
     TemperatureSpec,
 )
-from cubepi.providers.openai_responses import OpenAIResponsesProvider
+from cubeloop.providers.openai_responses import OpenAIResponsesProvider
 
 
 def _model(id: str = "gpt-5-test", *, reasoning: bool = False, **kw) -> Model:

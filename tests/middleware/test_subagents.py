@@ -5,10 +5,10 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from cubepi import Agent, AgentTool, AgentToolResult, TextContent, UserMessage
-from cubepi.middleware.subagents import SubagentMiddleware, SubagentSpec
-from cubepi.providers.base import AssistantMessage, MessageStream, StreamEvent
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
+from cubeloop import Agent, AgentTool, AgentToolResult, TextContent, UserMessage
+from cubeloop.middleware.subagents import SubagentMiddleware, SubagentSpec
+from cubeloop.providers.base import AssistantMessage, MessageStream, StreamEvent
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 
 def _make_middleware(
@@ -505,7 +505,7 @@ async def test_subagent_strips_checkpointed_hitl_bound_tools() -> None:
     entry would reject the run with ``"Agent has checkpointed HITL elements
     bound to run_ids ..."`` because the child runs under its own run_id.
     """
-    from cubepi.hitl.binding import HitlBinding
+    from cubeloop.hitl.binding import HitlBinding
 
     class _NoOpParams(BaseModel):
         pass
@@ -576,8 +576,8 @@ async def test_subagent_strips_middleware_exposing_checkpointed_hitl_tools() -> 
     ``checkpointed HITL elements bound to run_ids`` error this fix is meant
     to avoid (codex P2 on PR #159).
     """
-    from cubepi.hitl.binding import HitlBinding
-    from cubepi.middleware.base import Middleware
+    from cubeloop.hitl.binding import HitlBinding
+    from cubeloop.middleware.base import Middleware
 
     class _NoOpParams(BaseModel):
         pass

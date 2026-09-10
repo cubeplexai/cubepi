@@ -6,13 +6,13 @@ import asyncio
 
 import pytest
 
-from cubepi.checkpointer.exceptions import (
+from cubeloop.checkpointer.exceptions import (
     RunNotCompletedError,
     ThreadAlreadyExistsError,
     ThreadNotFoundError,
 )
-from cubepi.checkpointer.postgres import PostgresCheckpointer
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.checkpointer.postgres import PostgresCheckpointer
+from cubeloop.providers.base import TextContent, UserMessage
 
 
 def _msg(run_id: str | None, text: str) -> UserMessage:

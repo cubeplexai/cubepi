@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from cubepi.checkpointer.mysql.checkpointer import MySQLCheckpointer
-from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
+from cubeloop.checkpointer.mysql.checkpointer import MySQLCheckpointer
+from cubeloop.checkpointer.postgres.checkpointer import PostgresCheckpointer
 
 
 class _AsyncCtx:
@@ -102,9 +102,9 @@ async def test_postgres_hitl_answer_ledger_crud() -> None:
     await cp.clear_hitl_answers("t-1", run_id="r-1")
 
     sqls = [sql for sql, _args in conn.exec_calls]
-    assert any("cubepi_hitl_answers" in sql for sql in sqls)
+    assert any("cubeloop_hitl_answers" in sql for sql in sqls)
     assert any("ON CONFLICT (thread_id, run_id, question_id)" in sql for sql in sqls)
-    assert any("DELETE FROM cubepi_hitl_answers" in sql for sql in sqls)
+    assert any("DELETE FROM cubeloop_hitl_answers" in sql for sql in sqls)
 
 
 @pytest.mark.asyncio
@@ -142,9 +142,9 @@ async def test_mysql_hitl_answer_ledger_crud() -> None:
     await cp.clear_hitl_answers("t-1", run_id="r-1")
 
     sqls = [sql for sql, _params in conn.exec_calls]
-    assert any("cubepi_hitl_answers" in sql for sql in sqls)
+    assert any("cubeloop_hitl_answers" in sql for sql in sqls)
     assert any("ON DUPLICATE KEY UPDATE" in sql for sql in sqls)
-    assert any("DELETE FROM cubepi_hitl_answers" in sql for sql in sqls)
+    assert any("DELETE FROM cubeloop_hitl_answers" in sql for sql in sqls)
 
 
 @pytest.mark.asyncio

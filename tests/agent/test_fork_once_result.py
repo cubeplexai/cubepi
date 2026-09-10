@@ -1,6 +1,6 @@
 import pytest
 
-from cubepi.agent.types import ForkOnceResult
+from cubeloop.agent.types import ForkOnceResult
 
 
 def test_fork_once_result_constructs_and_is_frozen():

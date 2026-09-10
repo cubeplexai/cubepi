@@ -1,7 +1,7 @@
 """Phase 5: pin MCP CLIENT span emissions + W3C traceparent propagation.
 
 The MCP adapter wraps every ``call_remote`` invocation in
-:func:`cubepi.mcp._tracing.mcp_client_span`, which opens a CLIENT span
+:func:`cubeloop.mcp._tracing.mcp_client_span`, which opens a CLIENT span
 with the GenAI MCP semconv attributes. When the OTel API is absent the
 context manager is a no-op (verified separately).
 """
@@ -22,7 +22,7 @@ from opentelemetry.sdk.trace.export import (
 )
 from opentelemetry.trace import SpanKind, StatusCode
 
-from cubepi.mcp._adapter import make_mcp_agent_tool
+from cubeloop.mcp._adapter import make_mcp_agent_tool
 
 
 class _CaptureExporter(SpanExporter):
@@ -45,7 +45,7 @@ def _make_provider() -> tuple[TracerProvider, _CaptureExporter]:
 
     Each test gets its own provider; we don't use trace.set_tracer_provider
     globally, instead we monkeypatch the module-level ``_otel_trace`` in
-    ``cubepi.mcp._tracing`` so MCP fetches the test's tracer.
+    ``cubeloop.mcp._tracing`` so MCP fetches the test's tracer.
     """
     resource = Resource.create({"service.name": "mcp-span-tests"})
     provider = TracerProvider(resource=resource)
@@ -55,8 +55,8 @@ def _make_provider() -> tuple[TracerProvider, _CaptureExporter]:
 
 
 def _patch_mcp_trace(monkeypatch, provider: TracerProvider) -> None:
-    """Swap the cubepi.mcp._tracing module's ``get_tracer`` to use ours."""
-    import cubepi.mcp._tracing as mcp_tracing
+    """Swap the cubeloop.mcp._tracing module's ``get_tracer`` to use ours."""
+    import cubeloop.mcp._tracing as mcp_tracing
 
     class _ShimTraceMod:
         @staticmethod
@@ -194,7 +194,7 @@ class TestMCPClientSpan:
     async def test_span_records_cancellation(self, monkeypatch):
         """Cancellation is a control signal, not a failure — match the
         chat / turn / invoke_agent convention: leave Status UNSET,
-        record cubepi.aborted=true + error.type, do NOT add an
+        record cubeloop.aborted=true + error.type, do NOT add an
         ``exception`` event."""
         provider, exporter = _make_provider()
         _patch_mcp_trace(monkeypatch, provider)
@@ -212,11 +212,11 @@ class TestMCPClientSpan:
         assert len(mcp_spans) == 1
         span = mcp_spans[0]
         attrs = _attrs(span)
-        assert attrs["error.type"] == "cubepi.aborted"
-        assert attrs["cubepi.aborted"] is True
+        assert attrs["error.type"] == "cubeloop.aborted"
+        assert attrs["cubeloop.aborted"] is True
         # Status stays UNSET; cancel is not a failure.
         assert span.status.status_code == StatusCode.UNSET
-        # No exception event — cancel is signaled via cubepi.aborted only.
+        # No exception event — cancel is signaled via cubeloop.aborted only.
         assert not any(e.name == "exception" for e in span.events)
 
 
@@ -247,7 +247,7 @@ class TestMCPIsErrorResponse:
         assert attrs["error.type"] == "mcp.is_error"
 
     async def test_protocol_error_message_is_private_by_default(self, monkeypatch):
-        from cubepi.mcp._tracing import mark_span_mcp_error, mcp_client_span
+        from cubeloop.mcp._tracing import mark_span_mcp_error, mcp_client_span
 
         provider, exporter = _make_provider()
         _patch_mcp_trace(monkeypatch, provider)
@@ -288,7 +288,7 @@ class TestMCPIsErrorResponse:
 
 class TestNoOpWhenOTelMissing:
     async def test_context_manager_yields_none_when_no_otel(self, monkeypatch):
-        import cubepi.mcp._tracing as mcp_tracing
+        import cubeloop.mcp._tracing as mcp_tracing
 
         monkeypatch.setattr(mcp_tracing, "_OTEL_AVAILABLE", False)
 
@@ -306,7 +306,7 @@ class TestTraceparentHelper:
     ):
         provider, _ = _make_provider()
         _patch_mcp_trace(monkeypatch, provider)
-        from cubepi.mcp._tracing import current_traceparent
+        from cubeloop.mcp._tracing import current_traceparent
 
         tracer = provider.get_tracer("test")
         with tracer.start_as_current_span("test-span"):
@@ -321,7 +321,7 @@ class TestTraceparentHelper:
         assert len(parts[3]) == 2
 
     async def test_current_traceparent_none_without_span(self, monkeypatch):
-        from cubepi.mcp._tracing import current_traceparent
+        from cubeloop.mcp._tracing import current_traceparent
 
         # No active span (and no recording context set up).
         assert current_traceparent() is None
@@ -333,8 +333,8 @@ class TestTraceparentInjection:
     instrumented MCP servers can continue the trace (codex round 2)."""
 
     async def test_traceparent_header_set_inside_mcp_span(self, monkeypatch):
-        from cubepi.mcp import _tracing as mcp_tracing
-        from cubepi.mcp._tracing import mcp_client_span
+        from cubeloop.mcp import _tracing as mcp_tracing
+        from cubeloop.mcp._tracing import mcp_client_span
 
         # Force OTel on with a deterministic tracer.
         provider, _exporter = _make_provider()
@@ -364,7 +364,7 @@ class TestTraceparentInjection:
         assert tp.startswith("00-") and len(tp.split("-")) == 4
 
     async def test_no_header_added_when_no_active_span(self, monkeypatch):
-        from cubepi.mcp._tracing import current_traceparent
+        from cubeloop.mcp._tracing import current_traceparent
 
         # Outside any span: helper returns None and loader must not add
         # a traceparent header.
@@ -372,20 +372,20 @@ class TestTraceparentInjection:
 
 
 class TestTracerProviderRouting:
-    """When a user constructs a cubepi.tracing.Tracer with its own
+    """When a user constructs a cubeloop.tracing.Tracer with its own
     private provider and calls attach(agent), MCP CLIENT spans must
     flow through that same provider's exporters — without this, MCP
     spans would silently land in the OTel global no-op provider
     (codex round 5)."""
 
     async def test_mcp_span_lands_in_tracer_exporter(self):
-        from cubepi.agent.agent import Agent
-        from cubepi.providers.base import ToolCall
-        from cubepi.providers.faux import (
+        from cubeloop.agent.agent import Agent
+        from cubeloop.providers.base import ToolCall
+        from cubeloop.providers.faux import (
             FauxProvider,
             faux_assistant_message,
         )
-        from cubepi.tracing import Tracer
+        from cubeloop.tracing import Tracer
 
         from pydantic import BaseModel
 
@@ -399,7 +399,7 @@ class TestTracerProviderRouting:
         async def call_remote(name, args):
             return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
-        from cubepi.mcp._adapter import make_mcp_agent_tool
+        from cubeloop.mcp._adapter import make_mcp_agent_tool
 
         mcp_tool = make_mcp_agent_tool(
             name="search",
@@ -459,10 +459,10 @@ class TestTracerProviderRouting:
         assert client_span.parent.span_id == tool_ctx.span_id
 
     async def test_mcp_exception_is_private_without_content_opt_in(self):
-        from cubepi.agent.agent import Agent
-        from cubepi.providers.base import ToolCall
-        from cubepi.providers.faux import FauxProvider, faux_assistant_message
-        from cubepi.tracing import Tracer
+        from cubeloop.agent.agent import Agent
+        from cubeloop.providers.base import ToolCall
+        from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+        from cubeloop.tracing import Tracer
 
         secret = "Authorization: Bearer MCPSECRET"
         exporter = _CaptureExporter()
@@ -520,10 +520,10 @@ class TestTracerProviderRouting:
             assert secret not in repr(dict(event.attributes or {}))
 
     async def test_mcp_exception_details_remain_available_with_content_opt_in(self):
-        from cubepi.agent.agent import Agent
-        from cubepi.providers.base import ToolCall
-        from cubepi.providers.faux import FauxProvider, faux_assistant_message
-        from cubepi.tracing import Tracer
+        from cubeloop.agent.agent import Agent
+        from cubeloop.providers.base import ToolCall
+        from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+        from cubeloop.tracing import Tracer
 
         secret = "diagnostic mcp failure"
         exporter = _CaptureExporter()
@@ -578,10 +578,10 @@ class TestTracerProviderRouting:
     async def test_unparented_mcp_exception_fails_closed_with_opted_in_tracer(self):
         """Without a tool-span owner, the global provider stack cannot prove
         which concurrent Tracer owns the call, so content must stay disabled."""
-        from cubepi.agent.agent import Agent
-        from cubepi.mcp._tracing import mcp_client_span
-        from cubepi.providers.faux import FauxProvider
-        from cubepi.tracing import Tracer
+        from cubeloop.agent.agent import Agent
+        from cubeloop.mcp._tracing import mcp_client_span
+        from cubeloop.providers.faux import FauxProvider
+        from cubeloop.tracing import Tracer
 
         secret = "Authorization: Bearer UNPARENTEDMCPSECRET"
         exporter = _CaptureExporter()
@@ -617,17 +617,17 @@ class TestTracerProviderRouting:
         the remaining agent's MCP spans must still land in the Tracer's
         exporter. Refcounted register/unregister is the contract
         (codex round-6 review on PR #86)."""
-        from cubepi.agent.agent import Agent
-        from cubepi.providers.base import ToolCall
-        from cubepi.providers.faux import FauxProvider, faux_assistant_message
-        from cubepi.tracing import Tracer
+        from cubeloop.agent.agent import Agent
+        from cubeloop.providers.base import ToolCall
+        from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+        from cubeloop.tracing import Tracer
 
         exporter = _CaptureExporter()
 
         async def call_remote(name, args):
             return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
-        from cubepi.mcp._adapter import make_mcp_agent_tool
+        from cubeloop.mcp._adapter import make_mcp_agent_tool
 
         def _make_agent():
             mcp_tool = make_mcp_agent_tool(
@@ -680,7 +680,7 @@ class TestTracerProviderRouting:
         )
 
     def test_register_and_unregister_provider(self, monkeypatch):
-        from cubepi.mcp import _tracing as mcp_tracing
+        from cubeloop.mcp import _tracing as mcp_tracing
 
         # Start from a clean stack so the assertion below is well-defined
         # regardless of other tests' attach()/detach() side-effects.
@@ -700,7 +700,7 @@ class TestTracerProviderRouting:
         continue flowing through it. Without this, a Tracer attached to
         agent A and B then detached from A would drop MCP routing for B
         (codex round-6 review on PR #86)."""
-        from cubepi.mcp import _tracing as mcp_tracing
+        from cubeloop.mcp import _tracing as mcp_tracing
 
         monkeypatch.setattr(mcp_tracing, "_provider_stack", [])
 
@@ -733,7 +733,7 @@ class TestMCPSpanParentage:
         # Open a synthetic "execute_tool" span and register it as the
         # parent for tool_call_id "tc1" — the same hook the cubepi
         # recorder uses.
-        from cubepi.mcp import _tracing as mcp_tracing
+        from cubeloop.mcp import _tracing as mcp_tracing
 
         tracer = provider.get_tracer("test")
         tool_span = tracer.start_span("execute_tool search")
@@ -760,7 +760,7 @@ class TestMCPSpanParentage:
         assert client_span.parent.span_id == tool_ctx.span_id
 
     async def test_two_tracers_route_mcp_by_parent_owner(self):
-        """Two different cubepi.Tracer instances attached to two agents
+        """Two different cubeloop.Tracer instances attached to two agents
         in the same process. An MCP CLIENT span emitted under agent A's
         execute_tool span must export through Tracer A's exporter — not
         Tracer B's, even if B was attached more recently (LIFO order on
@@ -769,12 +769,12 @@ class TestMCPSpanParentage:
         Without this routing, agent A's trace would be missing its MCP
         leg and Tracer B's exporter would receive a stray span with
         agent A's trace_id (codex round-7 review on PR #86)."""
-        from cubepi.agent.agent import Agent
-        from cubepi.providers.base import ToolCall
-        from cubepi.providers.faux import FauxProvider, faux_assistant_message
-        from cubepi.tracing import Tracer
+        from cubeloop.agent.agent import Agent
+        from cubeloop.providers.base import ToolCall
+        from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+        from cubeloop.tracing import Tracer
 
-        from cubepi.mcp._adapter import make_mcp_agent_tool
+        from cubeloop.mcp._adapter import make_mcp_agent_tool
 
         async def call_remote(name, args):
             return {"content": [{"type": "text", "text": "ok"}], "isError": False}
@@ -863,11 +863,11 @@ class TestMCPSpanParentage:
         only its own parent (codex round-8 review on PR #86)."""
         import asyncio as _asyncio
 
-        from cubepi.agent.agent import Agent
-        from cubepi.mcp._adapter import make_mcp_agent_tool
-        from cubepi.providers.base import ToolCall
-        from cubepi.providers.faux import FauxProvider, faux_assistant_message
-        from cubepi.tracing import Tracer
+        from cubeloop.agent.agent import Agent
+        from cubeloop.mcp._adapter import make_mcp_agent_tool
+        from cubeloop.providers.base import ToolCall
+        from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+        from cubeloop.tracing import Tracer
 
         # Gate that holds both agents' MCP calls inside the
         # ``execute_tool`` span at the same time, so any global-dict
@@ -962,12 +962,12 @@ class TestMCPSpanParentage:
         registry valid until the child task's cleanup runs — pin that
         an MCP CLIENT span is still correctly parented under
         ``execute_tool`` in this mode (codex round-9 review)."""
-        from cubepi.agent.agent import Agent
-        from cubepi.agent.types import AgentTool
-        from cubepi.mcp._adapter import make_mcp_agent_tool
-        from cubepi.providers.base import ToolCall
-        from cubepi.providers.faux import FauxProvider, faux_assistant_message
-        from cubepi.tracing import Tracer
+        from cubeloop.agent.agent import Agent
+        from cubeloop.agent.types import AgentTool
+        from cubeloop.mcp._adapter import make_mcp_agent_tool
+        from cubeloop.providers.base import ToolCall
+        from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+        from cubeloop.tracing import Tracer
 
         async def call_remote(name, args):
             return {"content": [{"type": "text", "text": "ok"}], "isError": False}
@@ -1032,19 +1032,19 @@ class TestMCPSpanParentage:
         bypasses the cubepi agent loop's ``except Exception`` handler,
         so a cancelled run never emits ``ToolExecutionEndEvent`` and
         never reaches the per-event unregister. Without an explicit
-        cleanup path, ``_active_entries`` in ``cubepi.mcp._tracing``
+        cleanup path, ``_active_entries`` in ``cubeloop.mcp._tracing``
         would grow unbounded across aborted runs (codex round-10).
 
         Pin: after a cancelled run + detach, ``_active_entries`` is
         back to its pre-run size."""
         import asyncio as _asyncio
 
-        from cubepi.agent.agent import Agent
-        from cubepi.mcp import _tracing as mcp_tracing
-        from cubepi.mcp._adapter import make_mcp_agent_tool
-        from cubepi.providers.base import ToolCall
-        from cubepi.providers.faux import FauxProvider, faux_assistant_message
-        from cubepi.tracing import Tracer
+        from cubeloop.agent.agent import Agent
+        from cubeloop.mcp import _tracing as mcp_tracing
+        from cubeloop.mcp._adapter import make_mcp_agent_tool
+        from cubeloop.providers.base import ToolCall
+        from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+        from cubeloop.tracing import Tracer
 
         baseline = len(mcp_tracing._active_entries)
 
@@ -1131,7 +1131,7 @@ class TestMCPSpanParentage:
         (codex round-9 review)."""
         import asyncio as _asyncio
 
-        from cubepi.mcp import _tracing as mcp_tracing
+        from cubeloop.mcp import _tracing as mcp_tracing
 
         # Build a parent task that registers, then a child task that
         # unregisters. We assert the dict is empty after cleanup.
@@ -1169,7 +1169,7 @@ class TestMCPSpanParentage:
         execute_tool span (codex P2, PR #122)."""
         import asyncio as _asyncio
 
-        from cubepi.mcp import _tracing as mcp_tracing
+        from cubeloop.mcp import _tracing as mcp_tracing
 
         tok_outer = mcp_tracing.register_tool_span(
             "outer", "span-outer", provider="prov-outer"
@@ -1223,7 +1223,7 @@ class TestMCPSpanParentage:
 
 class TestLoaderHelpers:
     def test_split_address_parses_url(self):
-        from cubepi.mcp.http_loader import _split_address
+        from cubeloop.mcp.http_loader import _split_address
 
         assert _split_address("https://api.example.com:8443/mcp") == (
             "api.example.com",
@@ -1234,7 +1234,7 @@ class TestLoaderHelpers:
         assert port is None
 
     def test_split_address_on_empty(self):
-        from cubepi.mcp.http_loader import _split_address
+        from cubeloop.mcp.http_loader import _split_address
 
         # urlparse("") returns hostname=None, port=None — both nones is
         # the documented signal that the helper couldn't extract values.
@@ -1243,7 +1243,7 @@ class TestLoaderHelpers:
         assert port is None
 
     def test_extract_protocol_version(self):
-        from cubepi.mcp.http_loader import _extract_protocol_version
+        from cubeloop.mcp.http_loader import _extract_protocol_version
 
         class FakeInit:
             protocolVersion = "2025-11-25"

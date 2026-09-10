@@ -5,14 +5,14 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl import ApproveAnswer, AskUser
-from cubepi.hitl.channel import CheckpointedChannel
-from cubepi.hitl.middleware import ApprovalPolicyMiddleware
-from cubepi.providers.base import TextContent, ToolResultMessage
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl import ApproveAnswer, AskUser
+from cubeloop.hitl.channel import CheckpointedChannel
+from cubeloop.hitl.middleware import ApprovalPolicyMiddleware
+from cubeloop.providers.base import TextContent, ToolResultMessage
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 
 class _NoParams(BaseModel):

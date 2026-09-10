@@ -5,8 +5,8 @@ import { useIsZhHans } from '@site/src/hooks/useIsZhHans';
 import styles from './HelloAgent.module.css';
 
 const SAMPLE = `import asyncio
-from cubepi import Agent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(api_key="sk-...")
 

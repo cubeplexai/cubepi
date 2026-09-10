@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from cubepi.middleware.compaction.boundary import (
+from cubeloop.middleware.compaction.boundary import (
     safe_boundary,
     tail_start_by_tokens,
 )
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     Message,
     TextContent,

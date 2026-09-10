@@ -28,7 +28,7 @@ export interface CompareCode {
 export interface CompareContent {
   /** The competitor's display name, e.g. "LangGraph". */
   them: string;
-  /** <title> — must NOT lead with "CubePi" (the brand is appended). */
+  /** <title> — must NOT lead with "CubeLoop" (the brand is appended). */
   title: string;
   description: string;
   keywords: string;
@@ -53,8 +53,8 @@ export default function ComparePage({ content }: { content: CompareContent }): R
             '@type': 'TechArticle',
             headline: content.h1,
             description: content.description,
-            author: { '@type': 'Organization', name: 'CubePi', url: 'https://cubepi.ai' },
-            publisher: { '@type': 'Organization', name: 'CubePi', url: 'https://cubepi.ai' },
+            author: { '@type': 'Organization', name: 'CubeLoop', url: 'https://cubeloop.dev' },
+            publisher: { '@type': 'Organization', name: 'CubeLoop', url: 'https://cubeloop.dev' },
           })}
         </script>
       </Head>
@@ -71,7 +71,7 @@ export default function ComparePage({ content }: { content: CompareContent }): R
               <tr>
                 <th></th>
                 <th>{content.them}</th>
-                <th>CubePi</th>
+                <th>CubeLoop</th>
               </tr>
             </thead>
             <tbody>

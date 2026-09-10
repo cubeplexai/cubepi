@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from cubepi.errors import (
+from cubeloop.errors import (
     ContextLengthExceeded,
     ProviderAuthFailed,
     ProviderBadRequest,
@@ -12,7 +12,7 @@ from cubepi.errors import (
     ProviderUnavailable,
     RateLimited,
 )
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     BaseProvider,
     BoundModel,
@@ -26,8 +26,8 @@ from cubepi.providers.base import (
     ToolDefinition,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
-from cubepi.providers.fallback import DEFAULT_TRIGGER_ERRORS, FallbackBoundModel
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.providers.fallback import DEFAULT_TRIGGER_ERRORS, FallbackBoundModel
 
 
 class _RaisingProvider(BaseProvider):
@@ -93,7 +93,7 @@ def test_default_trigger_errors_composition() -> None:
     assert ContextLengthExceeded in DEFAULT_TRIGGER_ERRORS
     assert ProviderBadRequest in DEFAULT_TRIGGER_ERRORS
     assert ProviderAuthFailed not in DEFAULT_TRIGGER_ERRORS
-    from cubepi.errors import ContentFiltered
+    from cubeloop.errors import ContentFiltered
 
     assert ContentFiltered not in DEFAULT_TRIGGER_ERRORS
 
@@ -393,7 +393,7 @@ async def test_generate_error_assistant_message_triggers_failover() -> None:
 
 def test_chain_providers_for_fallback_returns_unique_providers_in_order() -> None:
     """FallbackBoundModel chain → list of unique providers, primary first."""
-    from cubepi.providers.fallback import chain_providers
+    from cubeloop.providers.fallback import chain_providers
 
     p1 = FauxProvider(provider_id="p1")
     p2 = FauxProvider(provider_id="p2")
@@ -406,7 +406,7 @@ def test_chain_providers_for_fallback_returns_unique_providers_in_order() -> Non
 
 def test_chain_providers_dedupes_shared_provider_across_legs() -> None:
     """Two chain entries on the same provider instance → single entry in output."""
-    from cubepi.providers.fallback import chain_providers
+    from cubeloop.providers.fallback import chain_providers
 
     shared = FauxProvider(provider_id="shared")
     other = FauxProvider(provider_id="other")
@@ -421,7 +421,7 @@ def test_chain_providers_dedupes_shared_provider_across_legs() -> None:
 
 def test_chain_providers_for_plain_bound_model_returns_single_entry() -> None:
     """A plain BoundModel → single-entry list with its provider."""
-    from cubepi.providers.fallback import chain_providers
+    from cubeloop.providers.fallback import chain_providers
 
     p = FauxProvider(provider_id="plain")
     out = chain_providers(p.model("x"))
@@ -430,7 +430,7 @@ def test_chain_providers_for_plain_bound_model_returns_single_entry() -> None:
 
 def test_chain_providers_for_none_returns_empty() -> None:
     """None model → empty list (used by attach()'s legacy fallback path)."""
-    from cubepi.providers.fallback import chain_providers
+    from cubeloop.providers.fallback import chain_providers
 
     assert chain_providers(None) == []
 
@@ -442,7 +442,7 @@ def test_chain_providers_warns_when_chain_leg_is_not_base_provider(caplog) -> No
     """
     import logging
 
-    from cubepi.providers.fallback import chain_providers
+    from cubeloop.providers.fallback import chain_providers
 
     real = FauxProvider(provider_id="real")
 
@@ -473,7 +473,7 @@ def test_chain_providers_warns_when_chain_leg_is_not_base_provider(caplog) -> No
 def test_chain_providers_returns_empty_for_object_without_provider_or_chain() -> None:
     """Walk: model is not None, has no .chain, .provider isn't a
     BaseProvider → final `return []` path."""
-    from cubepi.providers.base import chain_providers
+    from cubeloop.providers.base import chain_providers
 
     class _Bare:
         """Object that satisfies `model is not None` but exposes neither
@@ -487,7 +487,7 @@ def test_collect_agent_providers_falls_back_to_legacy_provider_attribute() -> No
     """When ``agent._model`` is absent / yields no providers and the
     agent itself exposes a ``provider`` attribute that IS a BaseProvider,
     use it. Covers the legacy fallback path."""
-    from cubepi.providers.base import collect_agent_providers
+    from cubeloop.providers.base import collect_agent_providers
 
     real = FauxProvider(provider_id="legacy")
 
@@ -502,7 +502,7 @@ def test_collect_agent_providers_empty_when_no_model_or_legacy_provider() -> Non
     """No `_model`, no `provider` → empty list. Defensive for fully
     detached agents (unlikely in practice but the contract guarantees []
     rather than a crash)."""
-    from cubepi.providers.base import collect_agent_providers
+    from cubeloop.providers.base import collect_agent_providers
 
     class _BlankAgent:
         pass
@@ -778,7 +778,7 @@ async def test_first_event_typed_rate_limited_retries_then_failovers() -> None:
 
 @pytest.mark.asyncio
 async def test_sticky_after_successful_failover() -> None:
-    from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+    from cubeloop.providers.fallback import begin_fallback_run, end_fallback_run
 
     err = ProviderUnavailable("down", provider="primary", model="m")
     primary = _raising(err)
@@ -802,7 +802,7 @@ async def test_sticky_after_successful_failover() -> None:
 
 @pytest.mark.asyncio
 async def test_sticky_second_call_skips_primary() -> None:
-    from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+    from cubeloop.providers.fallback import begin_fallback_run, end_fallback_run
 
     err = ProviderUnavailable("down", provider="primary", model="m")
     primary_p = _CountingRaiseProvider(err, fail_times=99, provider_id="primary")
@@ -825,7 +825,7 @@ async def test_sticky_second_call_skips_primary() -> None:
 
 @pytest.mark.asyncio
 async def test_new_run_resets_sticky_to_primary() -> None:
-    from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+    from cubeloop.providers.fallback import begin_fallback_run, end_fallback_run
 
     prim = FauxProvider(provider_id="primary")
     prim.set_responses(
@@ -851,7 +851,7 @@ async def test_new_run_resets_sticky_to_primary() -> None:
 
 @pytest.mark.asyncio
 async def test_new_run_after_failover_probes_primary_again() -> None:
-    from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+    from cubeloop.providers.fallback import begin_fallback_run, end_fallback_run
 
     err = ProviderUnavailable("down", provider="primary", model="m")
     primary_p = _CountingRaiseProvider(err, fail_times=99, provider_id="primary")
@@ -937,7 +937,7 @@ async def test_generate_skips_too_small_middle_leg() -> None:
 
 @pytest.mark.asyncio
 async def test_content_filtered_does_not_hop_unless_listed() -> None:
-    from cubepi.errors import ContentFiltered
+    from cubeloop.errors import ContentFiltered
 
     err = ContentFiltered("blocked", provider="primary", model="m")
     primary = _raising(err)
@@ -950,7 +950,7 @@ async def test_content_filtered_does_not_hop_unless_listed() -> None:
 
 @pytest.mark.asyncio
 async def test_content_filtered_hops_when_opted_in() -> None:
-    from cubepi.errors import ContentFiltered
+    from cubeloop.errors import ContentFiltered
 
     err = ContentFiltered("blocked", provider="primary", model="m")
     primary = _raising(err)
@@ -966,7 +966,7 @@ async def test_content_filtered_hops_when_opted_in() -> None:
 
 @pytest.mark.asyncio
 async def test_reset_active_and_index_helpers() -> None:
-    from cubepi.providers.fallback import (
+    from cubeloop.providers.fallback import (
         begin_fallback_run,
         end_fallback_run,
         get_active_index,
@@ -1055,7 +1055,7 @@ async def test_async_on_retry_is_awaited() -> None:
 
 
 def test_context_too_small_without_need_or_window() -> None:
-    from cubepi.providers.fallback import _context_too_small
+    from cubeloop.providers.fallback import _context_too_small
 
     bound = BoundModel(
         provider=_RaisingProvider(ProviderUnavailable("x")),
@@ -1075,7 +1075,7 @@ def test_context_too_small_without_need_or_window() -> None:
 
 
 def test_start_index_clamps_out_of_range() -> None:
-    from cubepi.providers.fallback import (
+    from cubeloop.providers.fallback import (
         begin_fallback_run,
         end_fallback_run,
         set_active_index,
@@ -1091,7 +1091,7 @@ def test_start_index_clamps_out_of_range() -> None:
 
 
 def test_stick_noop_when_disabled() -> None:
-    from cubepi.providers.fallback import begin_fallback_run, end_fallback_run
+    from cubeloop.providers.fallback import begin_fallback_run, end_fallback_run
 
     fbm = FallbackBoundModel(chain=(_faux("p", "hi"),), sticky_within_run=False)
     token = begin_fallback_run()

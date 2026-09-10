@@ -1,0 +1,43 @@
+[project]
+name = "cubepi"
+version = "0.14.0"
+description = "DEPRECATED: Cubepi has been renamed to cubeloop. This package is a transitional wrapper."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 7 - Inactive",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "cubeloop==0.14.0",
+]
+
+[project.optional-dependencies]
+sqlite = ["cubeloop[sqlite]==0.14.0"]
+postgres = ["cubeloop[postgres]==0.14.0"]
+mysql = ["cubeloop[mysql]==0.14.0"]
+mcp = ["cubeloop[mcp]==0.14.0"]
+tracing = ["cubeloop[tracing]==0.14.0"]
+tracing-otlp = ["cubeloop[tracing-otlp]==0.14.0"]
+trace-cli = ["cubeloop[trace-cli]==0.14.0"]
+
+[project.scripts]
+cubepi = "cubepi.__main__:main"
+
+[project.urls]
+Homepage = "https://cubeloop.dev"
+Documentation = "https://cubeloop.dev/docs/migration/from-cubepi"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cubepi"]
+
+[tool.uv.sources]
+cubeloop = { workspace = true }

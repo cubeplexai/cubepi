@@ -1,8 +1,8 @@
 import pytest
-from cubepi.agent.agent import Agent
-from cubepi.hitl import HitlError
-from cubepi.hitl.channel import InMemoryChannel
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.agent.agent import Agent
+from cubeloop.hitl import HitlError
+from cubeloop.hitl.channel import InMemoryChannel
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 
 def _agent(channel=None):

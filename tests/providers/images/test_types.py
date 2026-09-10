@@ -4,8 +4,8 @@ from typing import get_args
 import pytest
 from pydantic import ValidationError
 
-from cubepi.providers.base import ImageContent
-from cubepi.providers.images.types import (
+from cubeloop.providers.base import ImageContent
+from cubeloop.providers.images.types import (
     AssistantImages,
     ImagesContext,
     ImagesCost,
@@ -133,12 +133,12 @@ def test_assistant_images_provider_id_renamed():
 
 
 def test_top_level_re_exports():
-    """The image types are reachable via `from cubepi import ...`."""
-    import cubepi
+    """The image types are reachable via `from cubeloop import ...`."""
+    import cubeloop
 
     assert (
-        cubepi.ImagesModel
-        is __import__("cubepi.providers.images", fromlist=["ImagesModel"]).ImagesModel
+        cubeloop.ImagesModel
+        is __import__("cubeloop.providers.images", fromlist=["ImagesModel"]).ImagesModel
     )
     for name in (
         "AssistantImages",
@@ -152,4 +152,4 @@ def test_top_level_re_exports():
         "ImagesProvider",
         "SizeSpec",
     ):
-        assert hasattr(cubepi, name), f"cubepi.{name} not exported"
+        assert hasattr(cubeloop, name), f"cubepi.{name} not exported"

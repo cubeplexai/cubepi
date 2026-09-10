@@ -2,16 +2,16 @@
 
 import pytest
 
-from cubepi import Agent
-from cubepi.agent.types import AgentContext
-from cubepi.middleware.base import Middleware, TurnAction, compose_middleware
-from cubepi.providers.base import (
+from cubeloop import Agent
+from cubeloop.agent.types import AgentContext
+from cubeloop.middleware.base import Middleware, TurnAction, compose_middleware
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     Usage,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 
 def _mk_response(text: str = "hi") -> AssistantMessage:
@@ -238,7 +238,7 @@ async def test_agent_no_middleware_natural_flow() -> None:
 async def test_ctx_extra_flows_into_loop_context(tmp_path) -> None:
     """Middleware reading ctx.extra inside the loop sees the hydrated value
     AND mutations persist to checkpointer after the turn (Bug A)."""
-    from cubepi.checkpointer import MemoryCheckpointer
+    from cubeloop.checkpointer import MemoryCheckpointer
 
     seen_extra: list[dict] = []
 
@@ -277,7 +277,7 @@ async def test_ctx_extra_flows_into_loop_context(tmp_path) -> None:
 async def test_turn_action_response_persists_in_agent_state(tmp_path) -> None:
     """When after_model_response mutates the response, agent state and
     checkpointer reflect the mutation (Bug B)."""
-    from cubepi.checkpointer import MemoryCheckpointer
+    from cubeloop.checkpointer import MemoryCheckpointer
 
     def _mk(text: str) -> AssistantMessage:
         return AssistantMessage(content=[TextContent(text=text)], usage=Usage())
@@ -317,8 +317,8 @@ async def test_turn_action_response_persists_in_agent_state(tmp_path) -> None:
 async def test_turn_action_inject_messages_persist(tmp_path) -> None:
     """Messages injected via TurnAction.inject_messages persist to agent
     state and checkpointer (Bug C)."""
-    from cubepi.checkpointer import MemoryCheckpointer
-    from cubepi.providers.base import UserMessage
+    from cubeloop.checkpointer import MemoryCheckpointer
+    from cubeloop.providers.base import UserMessage
 
     injected_once = False
 

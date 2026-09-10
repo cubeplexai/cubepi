@@ -1,7 +1,7 @@
 import asyncio
 import pytest
 
-from cubepi.hitl import (
+from cubeloop.hitl import (
     ApproveAnswer,
     HitlCancelled,
     HitlConcurrencyError,
@@ -10,7 +10,7 @@ from cubepi.hitl import (
     HitlTimedOut,
     Question,
 )
-from cubepi.hitl.channel import InMemoryChannel, _BaseChannel
+from cubeloop.hitl.channel import InMemoryChannel, _BaseChannel
 
 
 class _BareChannel(_BaseChannel):
@@ -163,7 +163,7 @@ async def test_concurrent_request_raises_hitl_concurrency_error():
 
 
 async def test_signal_abort_raises_hitl_aborted():
-    from cubepi.hitl.exceptions import HitlAborted
+    from cubeloop.hitl.exceptions import HitlAborted
 
     ch = InMemoryChannel()
     signal = asyncio.Event()
@@ -252,7 +252,7 @@ async def test_answer_ledger_replays_raw_dict_as_approve_answer():
 
 
 async def test_answer_ledger_replay_emits_hitl_answer_event():
-    from cubepi.agent.types import HitlAnswerEvent
+    from cubeloop.agent.types import HitlAnswerEvent
 
     emitted: list[object] = []
     ch = InMemoryChannel()
@@ -291,7 +291,7 @@ async def test_cancel_with_stale_qid_raises():
 async def test_resume_short_circuit_emits_hitl_answer_event():
     """Resume short-circuit must emit HitlAnswerEvent so subscribers
     (e.g. IM outbound tailers) learn the question was answered."""
-    from cubepi.agent.types import HitlAnswerEvent
+    from cubeloop.agent.types import HitlAnswerEvent
 
     emitted: list[object] = []
     ch = InMemoryChannel()

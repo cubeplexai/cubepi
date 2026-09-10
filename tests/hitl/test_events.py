@@ -1,10 +1,10 @@
-from cubepi.agent.types import (
+from cubeloop.agent.types import (
     AgentAbortedEvent,
     AgentSuspendedEvent,
     HitlAnswerEvent,
     HitlRequestEvent,
 )
-from cubepi.hitl.types import ConfirmRequest, HitlRequest
+from cubeloop.hitl.types import ConfirmRequest, HitlRequest
 
 
 def _req() -> HitlRequest:

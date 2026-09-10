@@ -2,7 +2,7 @@ import React from 'react';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 
 /**
- * Inline component that renders the current cubepi package version,
+ * Inline component that renders the current cubeloop package version,
  * sourced from `siteConfig.customFields.PACKAGE_VERSION` which
  * `docusaurus.config.ts` parses out of `pyproject.toml` at
  * config-load time.

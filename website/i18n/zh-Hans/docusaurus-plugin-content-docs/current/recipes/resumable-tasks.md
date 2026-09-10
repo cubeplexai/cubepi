@@ -1,17 +1,17 @@
 ---
 title: 可恢复长任务
-description: "使用 CubePi checkpointing 和恢复机制构建崩溃容错的长时间运行任务。"
+description: "使用 CubeLoop checkpointing 和恢复机制构建崩溃容错的长时间运行任务。"
 ---
 
 # Recipe：可恢复长任务
 
 当 agent 正在执行一个长时间运行的操作（一系列工具调用、多轮推理会话）
 时，如果进程崩溃，你希望能从中断处继续，而不是从头开始。
-CubePi 的追加写入 checkpointing 加上 `agent.resume()` 让**轮次之间**
+CubeLoop 的追加写入 checkpointing 加上 `agent.resume()` 让**轮次之间**
 的恢复变得轻而易举；而**工具执行中途**的恢复则需要多一些准备。
 
 **预计耗时：** 15 分钟。
-**依赖：** `cubepi[sqlite]`、`ANTHROPIC_API_KEY`。
+**依赖：** `cubeloop[sqlite]`、`ANTHROPIC_API_KEY`。
 
 ## 模式概述
 
@@ -23,7 +23,7 @@ CubePi 的追加写入 checkpointing 加上 `agent.resume()` 让**轮次之间**
    看到最后一条消息是 `ToolResultMessage`，重新调用模型。
    *使用 checkpointer 即免费获得。*
 3. **工具执行中途** —— 工具已启动但未完成。尚未持久化任何内容
-   （CubePi 只持久化消息）。需要工具内部的幂等性。*需要额外处理。*
+   （CubeLoop 只持久化消息）。需要工具内部的幂等性。*需要额外处理。*
 
 本 recipe 重点关注第 3 种情况。
 
@@ -37,11 +37,11 @@ import os
 import json
 from pathlib import Path
 
-from cubepi import AgentToolResult, TextContent, tool
+from cubeloop import AgentToolResult, TextContent, tool
 
 
 # 简单的文件支撑 job store；生产中替换为 Redis / Postgres。
-JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/cubepi-jobs"))
+JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/cubeloop-jobs"))
 JOB_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -86,9 +86,9 @@ import asyncio
 import os
 import sys
 
-from cubepi import Agent
-from cubepi.checkpointer import SQLiteCheckpointer
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.checkpointer import SQLiteCheckpointer
+from cubeloop.providers.anthropic import AnthropicProvider
 
 from tools import transcode_video   # 上面用 @tool 装饰的 AgentTool
 
@@ -123,7 +123,7 @@ async def main(thread_id: str, initial_prompt: str | None):
             #   没有排队 steer/follow_up 的 AssistantMessage → 抛出异常
             last = agent.state.messages[-1]
             if type(last).__name__ == "AssistantMessage":
-                from cubepi.providers.base import ToolCall
+                from cubeloop.providers.base import ToolCall
                 has_pending_tools = any(isinstance(c, ToolCall) for c in last.content)
                 if not has_pending_tools:
                     # 任务已正常完成，无待执行的工具调用。
@@ -187,7 +187,7 @@ async def smart_resume(agent, cp, thread_id):
 
 ## 关于持久化部分工具状态
 
-CubePi 不提供"持久化部分工具结果"的 API。预期的模式是：将部分状态
+CubeLoop 不提供"持久化部分工具结果"的 API。预期的模式是：将部分状态
 保存在工具自己的外部存储中（文件系统、Redis、S3），以工具参数为键
 进行确定性寻址。上面的 `transcode_video` 用 `JOB_DIR` 实现的就是这种模式。
 
@@ -217,10 +217,10 @@ CubePi 不提供"持久化部分工具结果"的 API。预期的模式是：将�
 ## 运行示例
 
 仓库中有一份完整可运行的代码，位于
-[`examples/resumable_tasks.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/resumable_tasks.py)。
+[`examples/resumable_tasks.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/resumable_tasks.py)。
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync --extra sqlite
 
 export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]

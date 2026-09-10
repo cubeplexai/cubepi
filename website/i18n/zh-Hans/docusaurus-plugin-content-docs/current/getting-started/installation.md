@@ -1,29 +1,29 @@
 ---
 title: 安装
-description: "通过 pip 安装 CubePi。需要 Python 3.11+，支持 Linux、macOS 和 Windows。"
+description: "通过 pip 安装 CubeLoop。需要 Python 3.11+，支持 Linux、macOS 和 Windows。"
 ---
 
 # 安装
 
-CubePi 需要 **Python 3.11 或以上**。核心运行时只有三个依赖：`pydantic`、
+CubeLoop 需要 **Python 3.11 或以上**。核心运行时只有三个依赖：`pydantic`、
 `anthropic`、`openai`。可选功能（SQLite、Postgres、MCP、OpenTelemetry
 追踪）通过 extras 按需安装,不用的话不会被拉进来。
 
 ## 使用 pip
 
 ```bash
-pip install cubepi
+pip install cubeloop
 ```
 
 可选 extras:
 
 ```bash
-pip install "cubepi[sqlite]"        # 安装 aiosqlite,启用 SQLiteCheckpointer
-pip install "cubepi[postgres]"      # 安装 asyncpg + sqlalchemy + msgpack
-pip install "cubepi[mcp]"           # 安装 MCP SDK,启用 MCP 工具加载器
-pip install "cubepi[tracing]"       # 安装 opentelemetry-sdk,启用 Tracer / Meter
-pip install "cubepi[tracing-otlp]"  # 加上 OTLP/HTTP 导出器
-pip install "cubepi[sqlite,mcp,tracing]"  # 组合
+pip install "cubeloop[sqlite]"        # 安装 aiosqlite,启用 SQLiteCheckpointer
+pip install "cubeloop[postgres]"      # 安装 asyncpg + sqlalchemy + msgpack
+pip install "cubeloop[mcp]"           # 安装 MCP SDK,启用 MCP 工具加载器
+pip install "cubeloop[tracing]"       # 安装 opentelemetry-sdk,启用 Tracer / Meter
+pip install "cubeloop[tracing-otlp]"  # 加上 OTLP/HTTP 导出器
+pip install "cubeloop[sqlite,mcp,tracing]"  # 组合
 ```
 
 ## 使用 uv
@@ -31,8 +31,8 @@ pip install "cubepi[sqlite,mcp,tracing]"  # 组合
 [`uv`](https://github.com/astral-sh/uv) 比 pip 快很多,是推荐的工作流：
 
 ```bash
-uv add cubepi
-uv add "cubepi[sqlite,postgres,mcp,tracing,tracing-otlp]"
+uv add cubeloop
+uv add "cubeloop[sqlite,postgres,mcp,tracing,tracing-otlp]"
 ```
 
 在已有 uv 项目里,改完 `pyproject.toml` 后 `uv sync` 会重新锁定环境。
@@ -40,15 +40,15 @@ uv add "cubepi[sqlite,postgres,mcp,tracing,tracing-otlp]"
 ## 使用 Poetry
 
 ```bash
-poetry add cubepi
-poetry add "cubepi[sqlite,postgres,mcp,tracing,tracing-otlp]"
+poetry add cubeloop
+poetry add "cubeloop[sqlite,postgres,mcp,tracing,tracing-otlp]"
 ```
 
 ## 验证安装
 
 ```bash
-python -c "import cubepi; print(cubepi.__doc__)"
-# cubepi — Pythonic async-native agent framework.
+python -c "import cubeloop; print(cubeloop.__doc__)"
+# cubeloop — Pythonic async-native agent framework.
 ```
 
 如果报 `ImportError`,大概率是解释器版本低于 3.11——用 `python --version`
@@ -56,13 +56,13 @@ python -c "import cubepi; print(cubepi.__doc__)"
 
 ## 配置 provider 凭据
 
-CubePi 的 provider 从构造函数参数读取凭据。大多数部署会从环境变量
+CubeLoop 的 provider 从构造函数参数读取凭据。大多数部署会从环境变量
 取出来：
 
 ```python
 import os
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop.providers.anthropic import AnthropicProvider
+from cubeloop.providers.openai import OpenAIProvider
 
 anthropic = AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
 openai = OpenAIProvider(provider_id="openai", api_key=os.environ["OPENAI_API_KEY"])

@@ -3,7 +3,7 @@
 This is a runnable, end-to-end example of `MySQLCheckpointer`. It uses
 `FauxProvider`, so it needs no API key — only a reachable MySQL 8.0.13+.
 
-    CUBEPI_MYSQL_DSN=mysql://user:pass@host:3306/dbname \
+    CUBELOOP_MYSQL_DSN=mysql://user:pass@host:3306/dbname \
         uv run python examples/checkpointing_mysql.py
 
 Defaults to `mysql://root:root@localhost:3306/mysql`.
@@ -28,76 +28,80 @@ import secrets
 
 import aiomysql
 
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.mysql import MySQLCheckpointer
-from cubepi.checkpointer.mysql.alembic_helpers import (
-    add_pending_request_column_op,
-    add_run_id_column_op,
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.mysql import MySQLCheckpointer
+from cubeloop.checkpointer.mysql.alembic_helpers import (
+    create_runs_table_op,
     messages_partition_clause,
-    upgrade_v3_to_v4_op,
     write_schema_version_op,
 )
-from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.checkpointer.mysql.checkpointer import _parse_dsn
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 ADMIN_DSN = os.environ.get(
-    "CUBEPI_MYSQL_DSN",
-    "mysql://root:root@localhost:3306/mysql",
+    "CUBELOOP_MYSQL_DSN",
+    os.environ.get(
+        "CUBEPI_MYSQL_DSN",
+        "mysql://root:root@localhost:3306/mysql",
+    ),
 )
 THREAD_ID = "user-42"
 
 
 async def bootstrap_schema(dsn: str) -> None:
-    """Create the cubepi v2 schema.
+    """Create the cubeloop v6 schema.
 
-    In a real deployment this is your Alembic migration. The columns come
-    straight from `cubepi_metadata`; only the KEY partitioning and the
-    schema-version row are added by hand (autogenerate can't model them).
-    See cubepi/checkpointer/mysql/README.md for the migration recipe.
+    In a real deployment this is your Alembic migration. Existing v5
+    databases should call upgrade_v5_to_v6_op() instead of this CREATE.
     """
     conn = await aiomysql.connect(autocommit=True, **_parse_dsn(dsn))
     try:
         async with conn.cursor() as cur:
             await cur.execute("""
-                CREATE TABLE cubepi_threads (
+                CREATE TABLE cubeloop_threads (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin PRIMARY KEY,
                     parent_thread_id VARCHAR(255) COLLATE utf8mb4_bin NULL,
                     forked_at_seq BIGINT NULL,
                     extra JSON NOT NULL DEFAULT (JSON_OBJECT()),
+                    pending_request JSON NULL,
+                    run_id VARCHAR(64) NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                         ON UPDATE CURRENT_TIMESTAMP,
                     CONSTRAINT fk_parent FOREIGN KEY (parent_thread_id)
-                        REFERENCES cubepi_threads (thread_id)
+                        REFERENCES cubeloop_threads (thread_id)
                 ) ENGINE=InnoDB
             """)
-            await cur.execute(add_pending_request_column_op())  # v1 -> v2 column
-            await cur.execute(add_run_id_column_op())  # v2 -> v3 column
             await cur.execute(
                 """
-                CREATE TABLE cubepi_messages (
+                CREATE TABLE cubeloop_messages (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
                     seq BIGINT NOT NULL,
                     role VARCHAR(32) NOT NULL,
                     metadata JSON NOT NULL DEFAULT (JSON_OBJECT()),
                     payload LONGBLOB NOT NULL,
+                    run_id VARCHAR(255) NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (thread_id, seq)
+                    PRIMARY KEY (thread_id, seq),
+                    KEY ix_cubeloop_messages_thread_run (thread_id, run_id)
                 ) ENGINE=InnoDB """
-                + messages_partition_clause()  # PARTITION BY KEY (thread_id)
+                + messages_partition_clause()
             )
             await cur.execute(
-                "CREATE TABLE cubepi_schema_version (version INT PRIMARY KEY) "
+                "CREATE TABLE cubeloop_schema_version (version INT PRIMARY KEY) "
                 "ENGINE=InnoDB"
             )
-            # v3 -> v4: run_id on cubepi_messages + cubepi_runs partitioned table.
-            # upgrade_v3_to_v4_op() returns multiple ';'-separated statements;
-            # MySQL runs one per call, so split before executing.
-            for stmt in upgrade_v3_to_v4_op().split(";"):
-                if stmt.strip():
-                    await cur.execute(stmt)
-            # write_schema_version_op() returns two ';'-separated statements;
-            # MySQL runs one per call, so split before executing.
+            await cur.execute(create_runs_table_op())
+            await cur.execute("""
+                CREATE TABLE cubeloop_hitl_answers (
+                    thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
+                    run_id VARCHAR(255) NOT NULL,
+                    question_id VARCHAR(255) NOT NULL,
+                    answer JSON NOT NULL,
+                    answered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (thread_id, run_id, question_id)
+                ) ENGINE=InnoDB
+            """)
             for stmt in write_schema_version_op().split(";"):
                 if stmt.strip():
                     await cur.execute(stmt)
@@ -126,7 +130,7 @@ def transcript(messages) -> list[str]:
 
 async def main() -> None:
     # Throwaway DB so the example is safe to re-run.
-    db_name = f"cubepi_example_{secrets.token_hex(5)}"
+    db_name = f"cubeloop_example_{secrets.token_hex(5)}"
     admin_cfg = _parse_dsn(ADMIN_DSN)
     admin = await aiomysql.connect(autocommit=True, **admin_cfg)
     try:

@@ -1,4 +1,4 @@
-"""Generate Docusaurus-compatible MDX from cubepi public API via griffe.
+"""Generate Docusaurus-compatible MDX from cubeloop public API via griffe.
 
 Pipeline:
 
@@ -40,13 +40,13 @@ import griffe
 from griffe import AliasResolutionError
 
 MODULES = [
-    ("cubepi.agent",        "Agents",        1),
-    ("cubepi.providers",    "Providers",     2),
-    ("cubepi.checkpointer", "Checkpointing", 3),
-    ("cubepi.middleware",   "Middleware",    4),
-    ("cubepi.mcp",          "MCP",           5),
-    ("cubepi.tracing",      "Tracing",       6),
-    ("cubepi.utils",        "Utils",         7),
+    ("cubeloop.agent",        "Agents",        1),
+    ("cubeloop.providers",    "Providers",     2),
+    ("cubeloop.checkpointer", "Checkpointing", 3),
+    ("cubeloop.middleware",   "Middleware",    4),
+    ("cubeloop.mcp",          "MCP",           5),
+    ("cubeloop.tracing",      "Tracing",       6),
+    ("cubeloop.utils",        "Utils",         7),
 ]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -166,7 +166,7 @@ def _source_relpath(filepath: str | Path) -> str:
     except ValueError:
         parts = path.as_posix().split("/")
         for index in range(len(parts) - 1, -1, -1):
-            if parts[index] == "cubepi":
+            if parts[index] == "cubeloop":
                 return "/".join(parts[index:])
         return path.as_posix()
 
@@ -712,7 +712,7 @@ def emit_module(
         "---\n\n"
     )
     body = [f"# `{module_name}`", ""]
-    github_blob_root = f"https://github.com/cubeplexai/cubepi/blob/{source_ref}"
+    github_blob_root = f"https://github.com/cubeplexai/cubeloop/blob/{source_ref}"
     for sym in symbols:
         body.append(render_symbol(sym, ref_index, github_blob_root))
         body.append("")
@@ -724,7 +724,9 @@ def emit_module(
 def resolve_source_ref(cli_ref: str | None) -> str:
     if cli_ref:
         return cli_ref
-    env = os.environ.get("CUBEPI_DOCS_SOURCE_REF")
+    env = os.environ.get("CUBELOOP_DOCS_SOURCE_REF") or os.environ.get(
+        "CUBEPI_DOCS_SOURCE_REF"
+    )
     if env:
         return env
     return "main"
@@ -750,7 +752,7 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
 
     source_ref = resolve_source_ref(args.ref)
-    top: griffe.Module = griffe.load("cubepi")  # type: ignore[assignment]
+    top: griffe.Module = griffe.load("cubeloop")  # type: ignore[assignment]
 
     # Two-pass: collect symbols first, build the cross-ref index, then
     # render. This lets RST refs in any module link to symbols defined

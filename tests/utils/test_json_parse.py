@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from cubepi.utils.json_parse import (
+from cubeloop.utils.json_parse import (
     _close_partial_json,
     parse_streaming_json,
     repair_json,

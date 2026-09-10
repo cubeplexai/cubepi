@@ -1,15 +1,15 @@
 ---
 title: 9 个 Hook
-description: "CubePi 的 9 个中间件 hook 参考——transform_context、resolve_tool_call、before_tool_call、after_tool_call、on_run_end 等。"
+description: "CubeLoop 的 9 个中间件 hook 参考——transform_context、resolve_tool_call、before_tool_call、after_tool_call、on_run_end 等。"
 ---
 
 # 9 个 Hook
 
 `Middleware` 是一个最多包含九个可选异步方法的类。每个 hook 在 agent
-循环中的精确位置触发。只实现你需要的——CubePi 只会连接你重写了的方法。
+循环中的精确位置触发。只实现你需要的——CubeLoop 只会连接你重写了的方法。
 
 ```python
-from cubepi import Middleware
+from cubeloop import Middleware
 
 class MyMiddleware(Middleware):
     async def transform_context(self, messages, *, ctx, signal=None):
@@ -120,7 +120,7 @@ context 提供：
 - `ctx.context` —— 完整的 `AgentContext`。
 
 返回 `BeforeToolCallResult(block=True, reason="…")` 以短路——
-CubePi 会将该原因作为工具结果返回，并标记 `is_error=True`。
+CubeLoop 会将该原因作为工具结果返回，并标记 `is_error=True`。
 返回 `None`（或无返回）则继续执行。
 
 用于：权限控制、速率限制、dry-run 模式、沙箱、
@@ -179,8 +179,8 @@ async def after_model_response(
 在任何工具调用分发**之前**。该 hook 返回一个 `TurnAction`：
 
 ```python
-from cubepi.middleware.base import TurnAction
-from cubepi.providers.base import synthetic_user_message
+from cubeloop.middleware.base import TurnAction
+from cubeloop.providers.base import synthetic_user_message
 
 TurnAction(
     response=modified_message,            # 替换消息；None 则保留原消息
@@ -248,7 +248,7 @@ synthetic 标记。
 的 hook 会抛出 `NotImplementedError`，但 `compose_middleware` 会自动跳过它们。
 
 ```python
-from cubepi import Middleware
+from cubeloop import Middleware
 
 class MaxTurnsMiddleware(Middleware):
     def __init__(self, max_turns: int) -> None:

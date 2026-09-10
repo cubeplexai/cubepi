@@ -1,6 +1,6 @@
 ---
 title: Compaction
-description: "Use CompactionMiddleware to summarize older turns while preserving full CubePi history."
+description: "Use CompactionMiddleware to summarize older turns while preserving full CubeLoop history."
 ---
 
 # Compaction
@@ -15,8 +15,8 @@ messages. `agent.state.messages` and checkpointer history stay complete.
 Use a cheaper model for the summary pass and your normal model for the agent:
 
 ```python
-from cubepi import Agent
-from cubepi.middleware import CompactionMiddleware
+from cubeloop import Agent
+from cubeloop.middleware import CompactionMiddleware
 
 model = main_provider.model("claude-sonnet-4-6")
 summary_model = cheap_provider.model("claude-haiku-4-5")
@@ -48,7 +48,7 @@ The middleware writes two keys into `AgentContext.extra`:
 - `compaction` — the summary state and the message refs it covers.
 - `compaction_until_msg_index` — the history boundary summarized so far.
 
-When a checkpointer is attached, CubePi saves `ctx.extra` at `agent_end`, so the
+When a checkpointer is attached, CubeLoop saves `ctx.extra` at `agent_end`, so the
 next process can resume with the existing summary. If the message refs no longer
 match the current history, the middleware clears the stale state and starts over
 rather than sending an invalid summary.
@@ -59,7 +59,7 @@ Compaction is evaluated **before every model call** — including the calls *ins
 a single agent turn, between tool-call iterations — along two dimensions:
 
 - **Real-token threshold.** The trigger compares the *true* context fill against
-  `max_tokens_before_compact`. CubePi anchors the estimate to the last turn's
+  `max_tokens_before_compact`. CubeLoop anchors the estimate to the last turn's
   actual provider usage — `input_tokens + cache_read_tokens + cache_write_tokens`
   — so it stays accurate under prompt caching, where most of the prompt is served
   from cache and would be invisible to a character-only estimate. Before the first
@@ -76,11 +76,11 @@ a single agent turn, between tool-call iterations — along two dimensions:
 ### Trailing synthetic controls
 
 Transform middleware earlier in the chain may append synthetic `UserMessage`
-controls for the next model call. CubePi keeps a maximal trailing suffix of those
+controls for the next model call. CubeLoop keeps a maximal trailing suffix of those
 controls outside the historical tail/boundary calculation: they cannot make tool
 evidence immediately before them look old and become eligible for pruning.
 
-The controls still count toward the real-token threshold, and CubePi reattaches them
+The controls still count toward the real-token threshold, and CubeLoop reattaches them
 unchanged after the original or compressed history in exact order. Only trailing
 synthetic **user** messages receive this treatment. Internal synthetic messages remain
 ordinary history, and synthetic `ToolResultMessage`s are never detached from their
@@ -114,17 +114,17 @@ Override with an explicit int to pin the budget.
 
 ## Tracing
 
-When `cubepi.tracing` is attached to the agent, the summarizer call is
+When `cubeloop.tracing` is attached to the agent, the summarizer call is
 first-class in the trace tree. `summarize()` opens a
-`cubepi.compaction.summarize` parent span (tagged with
-`cubepi.compaction.message_count`) around the LLM call, and the recorder
+`cubeloop.compaction.summarize` parent span (tagged with
+`cubeloop.compaction.message_count`) around the LLM call, and the recorder
 automatically subscribes the summarizer provider so its `chat` span lands
 inside:
 
 ```
 invoke_agent
-└── cubepi.turn
-    ├── cubepi.compaction.summarize
+└── cubeloop.turn
+    ├── cubeloop.compaction.summarize
     │   └── chat <summary-model>
     └── chat <main-model>
 ```
@@ -132,7 +132,7 @@ invoke_agent
 The wrapper span is a no-op context manager when OpenTelemetry isn't
 installed, so the middleware works the same on minimal installs. The
 root `invoke_agent` span's `gen_ai.provider.name` /
-`cubepi.agent.system_prompt_sha256` / `cubepi.agent.tools` continue to
+`cubeloop.agent.system_prompt_sha256` / `cubeloop.agent.tools` continue to
 reflect the agent's main provider/model, not the summarizer's — even
 when summarization runs first.
 
@@ -217,7 +217,7 @@ which can blow up context in long conversations. For finer control, pass a
 each `ToolResultMessage`:
 
 ```python
-from cubepi.providers.base import ToolResultMessage
+from cubeloop.providers.base import ToolResultMessage
 
 def my_compressor(msg: ToolResultMessage) -> str | None:
     if msg.tool_name == "chip_metrics":
@@ -283,7 +283,7 @@ conversation still has access to the preserved data from earlier turns.
 
 ## Failure behavior
 
-If the summary provider fails, CubePi falls back to a deterministic, no-LLM
+If the summary provider fails, CubeLoop falls back to a deterministic, no-LLM
 summary built from message structure (user-request first lines, distinct
 tool names) so context still shrinks. After three consecutive LLM failures
 a circuit breaker opens and skips the LLM entirely; the fallback keeps
@@ -303,7 +303,7 @@ later compaction does save ≥ 10%.
 Compaction summarizes *old* history, but it can't shrink a single tool result
 that the model must read on the **current** turn — if one tool returns more than
 the context window holds, no summary helps. Bounding that is the *application's*
-job, because CubePi is environment-agnostic: it has no filesystem, session
+job, because CubeLoop is environment-agnostic: it has no filesystem, session
 directory, or blob store to spill overflow into, and where overflow goes is your
 call.
 
@@ -312,9 +312,9 @@ the full content wherever your environment keeps it, and return a replacement
 that previews the content plus a reference the model can follow:
 
 ```python
-from cubepi.middleware import Middleware
-from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult
-from cubepi.providers.base import TextContent
+from cubeloop.middleware import Middleware
+from cubeloop.agent.types import AfterToolCallContext, AfterToolCallResult
+from cubeloop.providers.base import TextContent
 
 class BoundToolResults(Middleware):
     def __init__(self, *, max_chars: int = 20_000) -> None:
@@ -336,7 +336,7 @@ class BoundToolResults(Middleware):
         )
 ```
 
-CubePi never inspects `ref` — a disk path, object-store key, database id, or a
+CubeLoop never inspects `ref` — a disk path, object-store key, database id, or a
 plain truncation marker are all equally valid. This keeps tool-output policy in
 the layer that actually owns the environment.
 

@@ -8,33 +8,33 @@ import pytest
 
 
 def test_models_import() -> None:
-    from cubepi.checkpointer.postgres.models import (
+    from cubeloop.checkpointer.postgres.models import (
         EXPECTED_SCHEMA_VERSION,
         PARTITION_COUNT,
-        CubepiHitlAnswer,
-        CubepiMessage,
-        CubepiSchemaVersion,
-        CubepiThread,
-        cubepi_metadata,
+        CubeloopHitlAnswer,
+        CubeloopMessage,
+        CubeloopSchemaVersion,
+        CubeloopThread,
+        cubeloop_metadata,
     )
 
-    assert EXPECTED_SCHEMA_VERSION == 5
+    assert EXPECTED_SCHEMA_VERSION == 6
     assert PARTITION_COUNT == 64
-    assert CubepiThread.__tablename__ == "cubepi_threads"
-    assert CubepiMessage.__tablename__ == "cubepi_messages"
-    assert CubepiHitlAnswer.__tablename__ == "cubepi_hitl_answers"
-    assert CubepiSchemaVersion.__tablename__ == "cubepi_schema_version"
-    assert "cubepi_threads" in cubepi_metadata.tables
-    assert "cubepi_messages" in cubepi_metadata.tables
-    assert "cubepi_hitl_answers" in cubepi_metadata.tables
-    assert "cubepi_schema_version" in cubepi_metadata.tables
+    assert CubeloopThread.__tablename__ == "cubeloop_threads"
+    assert CubeloopMessage.__tablename__ == "cubeloop_messages"
+    assert CubeloopHitlAnswer.__tablename__ == "cubeloop_hitl_answers"
+    assert CubeloopSchemaVersion.__tablename__ == "cubeloop_schema_version"
+    assert "cubeloop_threads" in cubeloop_metadata.tables
+    assert "cubeloop_messages" in cubeloop_metadata.tables
+    assert "cubeloop_hitl_answers" in cubeloop_metadata.tables
+    assert "cubeloop_schema_version" in cubeloop_metadata.tables
 
 
 def test_cubepi_message_has_partition_by() -> None:
     """The CubepiMessage table declares HASH partitioning."""
-    from cubepi.checkpointer.postgres.models import cubepi_metadata
+    from cubeloop.checkpointer.postgres.models import cubeloop_metadata
 
-    msgs = cubepi_metadata.tables["cubepi_messages"]
+    msgs = cubeloop_metadata.tables["cubeloop_messages"]
     # SQLAlchemy stores PG partition clause in info or dialect-specific args
     # Verify via dialect kwargs
     assert msgs.kwargs.get("postgresql_partition_by") == "HASH (thread_id)"
@@ -42,72 +42,72 @@ def test_cubepi_message_has_partition_by() -> None:
 
 def test_cubepi_message_has_gin_index() -> None:
     """The GIN index on metadata is registered."""
-    from cubepi.checkpointer.postgres.models import cubepi_metadata
+    from cubeloop.checkpointer.postgres.models import cubeloop_metadata
 
-    msgs = cubepi_metadata.tables["cubepi_messages"]
+    msgs = cubeloop_metadata.tables["cubeloop_messages"]
     idx_names = [i.name for i in msgs.indexes]
-    assert "ix_cubepi_messages_metadata_gin" in idx_names
+    assert "ix_cubeloop_messages_metadata_gin" in idx_names
 
 
 def test_create_message_partitions_op_yields_64_statements() -> None:
-    from cubepi.checkpointer.postgres.alembic_helpers import (
+    from cubeloop.checkpointer.postgres.alembic_helpers import (
         create_message_partitions_op,
     )
 
     sql = create_message_partitions_op()
-    assert sql.count("CREATE TABLE cubepi_messages_p") == 64
+    assert sql.count("CREATE TABLE cubeloop_messages_p") == 64
     assert "modulus 64, remainder 0" in sql
     assert "modulus 64, remainder 63" in sql
 
 
 def test_create_message_partitions_op_partitions_are_zero_padded() -> None:
-    from cubepi.checkpointer.postgres.alembic_helpers import (
+    from cubeloop.checkpointer.postgres.alembic_helpers import (
         create_message_partitions_op,
     )
 
     sql = create_message_partitions_op()
     # Partition names use 2-digit padding so they sort lexicographically
-    assert "cubepi_messages_p00 " in sql
-    assert "cubepi_messages_p63 " in sql
+    assert "cubeloop_messages_p00 " in sql
+    assert "cubeloop_messages_p63 " in sql
 
 
 def test_write_schema_version_op_includes_expected_version() -> None:
-    from cubepi.checkpointer.postgres.alembic_helpers import write_schema_version_op
-    from cubepi.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
+    from cubeloop.checkpointer.postgres.alembic_helpers import write_schema_version_op
+    from cubeloop.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
 
     sql = write_schema_version_op()
-    assert "INSERT INTO cubepi_schema_version" in sql
+    assert "cubeloop_schema_version" in sql
+    assert "cubepi_schema_version" in sql
     assert f"VALUES ({EXPECTED_SCHEMA_VERSION})" in sql
     assert "ON CONFLICT" in sql
 
 
 def test_write_schema_version_op_clears_stale_rows() -> None:
     """A prior version's row must be removed so _verify_schema sees the new one."""
-    from cubepi.checkpointer.postgres.alembic_helpers import write_schema_version_op
-    from cubepi.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
+    from cubeloop.checkpointer.postgres.alembic_helpers import write_schema_version_op
+    from cubeloop.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
 
     sql = write_schema_version_op()
-    # Must DELETE rows whose version is not the expected one before INSERT.
+    assert "DELETE FROM cubeloop_schema_version" in sql
     assert "DELETE FROM cubepi_schema_version" in sql
     assert f"WHERE version <> {EXPECTED_SCHEMA_VERSION}" in sql
-    # And the DELETE must come before the INSERT in the statement order.
     assert sql.index("DELETE") < sql.index("INSERT")
 
 
 def test_schema_uninitialized_is_schema_error() -> None:
-    from cubepi.checkpointer.postgres.exceptions import (
-        CubepiSchemaError,
-        CubepiSchemaUninitialized,
+    from cubeloop.checkpointer.postgres.exceptions import (
+        CubeloopSchemaError,
+        CubeloopSchemaUninitialized,
     )
 
-    err = CubepiSchemaUninitialized("tables missing")
-    assert isinstance(err, CubepiSchemaError)
+    err = CubeloopSchemaUninitialized("tables missing")
+    assert isinstance(err, CubeloopSchemaError)
 
 
 def test_schema_mismatch_carries_expected_actual() -> None:
-    from cubepi.checkpointer.postgres.exceptions import CubepiSchemaMismatch
+    from cubeloop.checkpointer.postgres.exceptions import CubeloopSchemaMismatch
 
-    err = CubepiSchemaMismatch(expected=2, actual=1, hint="run alembic")
+    err = CubeloopSchemaMismatch(expected=2, actual=1, hint="run alembic")
     assert err.expected == 2
     assert err.actual == 1
     assert "expected=2" in str(err)
@@ -116,9 +116,9 @@ def test_schema_mismatch_carries_expected_actual() -> None:
 
 
 def test_schema_mismatch_without_hint() -> None:
-    from cubepi.checkpointer.postgres.exceptions import CubepiSchemaMismatch
+    from cubeloop.checkpointer.postgres.exceptions import CubeloopSchemaMismatch
 
-    err = CubepiSchemaMismatch(expected=2, actual=1)
+    err = CubeloopSchemaMismatch(expected=2, actual=1)
     # No hint suffix
     assert "expected=2" in str(err)
     assert "actual=1" in str(err)
@@ -126,8 +126,8 @@ def test_schema_mismatch_without_hint() -> None:
 
 def test_role_of_known_message_types() -> None:
     """_role_of maps each concrete Message subclass to its role string."""
-    from cubepi.checkpointer.postgres.checkpointer import _role_of
-    from cubepi.providers.base import (
+    from cubeloop.checkpointer.postgres.checkpointer import _role_of
+    from cubeloop.providers.base import (
         AssistantMessage,
         TextContent,
         ToolResultMessage,
@@ -150,7 +150,7 @@ def test_role_of_known_message_types() -> None:
 
 def test_role_of_rejects_unknown_message_type() -> None:
     """_role_of raises for anything that isn't User/Assistant/ToolResult."""
-    from cubepi.checkpointer.postgres.checkpointer import _role_of
+    from cubeloop.checkpointer.postgres.checkpointer import _role_of
 
     class FakeMessage:
         pass
@@ -162,7 +162,7 @@ def test_role_of_rejects_unknown_message_type() -> None:
 @pytest.mark.asyncio
 async def test_append_empty_messages_is_noop() -> None:
     """append([]) returns early without touching the pool — no DB needed."""
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
 
     cp = PostgresCheckpointer("postgresql://unreachable-host/none")
     # Pool intentionally never created — early return must precede the assert.
@@ -176,7 +176,93 @@ async def test_append_empty_messages_is_noop() -> None:
 
 
 async def _setup_schema(dsn: str) -> None:
-    """Build the cubepi schema (matching what host alembic would generate)."""
+    """Fresh v6 schema — canonical current DDL, no historical helpers."""
+    from cubeloop.checkpointer.postgres.alembic_helpers import (
+        create_message_partitions_op,
+        create_runs_partitions_op,
+        write_schema_version_op,
+    )
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute("""
+            CREATE TABLE cubeloop_threads (
+                thread_id TEXT PRIMARY KEY,
+                parent_thread_id TEXT REFERENCES cubeloop_threads(thread_id),
+                forked_at_seq BIGINT,
+                extra JSONB NOT NULL DEFAULT '{}'::jsonb,
+                pending_request JSONB,
+                run_id TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+        """)
+        await conn.execute("""
+            CREATE TABLE cubeloop_messages (
+                thread_id TEXT NOT NULL REFERENCES cubeloop_threads(thread_id) ON DELETE CASCADE,
+                seq BIGINT NOT NULL,
+                role TEXT NOT NULL,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                payload BYTEA NOT NULL,
+                run_id TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (thread_id, seq)
+            ) PARTITION BY HASH (thread_id);
+        """)
+        await conn.execute(create_message_partitions_op())
+        await conn.execute("""
+            CREATE INDEX ix_cubeloop_messages_metadata_gin
+            ON cubeloop_messages USING GIN (metadata jsonb_path_ops);
+        """)
+        await conn.execute("""
+            CREATE INDEX ix_cubeloop_messages_thread_run
+            ON cubeloop_messages (thread_id, run_id);
+        """)
+        await conn.execute("""
+            CREATE TABLE cubeloop_schema_version (
+                version INTEGER PRIMARY KEY
+            );
+        """)
+        await conn.execute("""
+            CREATE TABLE cubeloop_runs (
+                thread_id TEXT NOT NULL REFERENCES cubeloop_threads(thread_id) ON DELETE CASCADE,
+                run_id TEXT NOT NULL,
+                claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                completed_at TIMESTAMPTZ,
+                completion_seq BIGINT,
+                PRIMARY KEY (thread_id, run_id)
+            ) PARTITION BY HASH (thread_id);
+        """)
+        await conn.execute(create_runs_partitions_op())
+        await conn.execute("""
+            CREATE INDEX ix_cubeloop_runs_thread_seq
+            ON cubeloop_runs (thread_id, completion_seq);
+        """)
+        await conn.execute("""
+            CREATE TABLE cubeloop_hitl_answers (
+                thread_id TEXT NOT NULL REFERENCES cubeloop_threads(thread_id) ON DELETE CASCADE,
+                run_id TEXT NOT NULL,
+                question_id TEXT NOT NULL,
+                answer JSONB NOT NULL,
+                answered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (thread_id, run_id, question_id)
+            );
+        """)
+        await conn.execute(write_schema_version_op())
+    finally:
+        await conn.close()
+
+
+async def _setup_schema_v5(dsn: str) -> None:
+    """Historical v5 (cubepi_* names) via frozen v1–v5 helpers."""
+    from cubeloop.checkpointer.postgres.alembic_helpers import (
+        add_pending_request_column_op,
+        add_run_id_column_op,
+        upgrade_v3_to_v4_op,
+        upgrade_v4_to_v5_op,
+    )
+    from cubeloop.checkpointer.postgres.models import PARTITION_COUNT
+
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute("""
@@ -200,19 +286,14 @@ async def _setup_schema(dsn: str) -> None:
                 PRIMARY KEY (thread_id, seq)
             ) PARTITION BY HASH (thread_id);
         """)
-        from cubepi.checkpointer.postgres.alembic_helpers import (
-            add_pending_request_column_op,
-            add_run_id_column_op,
-            create_message_partitions_op,
-            upgrade_v3_to_v4_op,
-            upgrade_v4_to_v5_op,
-            write_schema_version_op,
-        )
-
-        # Bring cubepi_threads up to the v3 shape (pending_request + run_id).
         await conn.execute(add_pending_request_column_op())
         await conn.execute(add_run_id_column_op())
-        await conn.execute(create_message_partitions_op())
+        for i in range(PARTITION_COUNT):
+            await conn.execute(
+                f"CREATE TABLE cubepi_messages_p{i:02d} "
+                f"PARTITION OF cubepi_messages "
+                f"FOR VALUES WITH (modulus {PARTITION_COUNT}, remainder {i})"
+            )
         await conn.execute("""
             CREATE INDEX ix_cubepi_messages_metadata_gin
             ON cubepi_messages USING GIN (metadata jsonb_path_ops);
@@ -222,10 +303,9 @@ async def _setup_schema(dsn: str) -> None:
                 version INTEGER PRIMARY KEY
             );
         """)
-        # Apply v3→v4 (run_id on messages + cubepi_runs partitioned table).
         await conn.execute(upgrade_v3_to_v4_op())
         await conn.execute(upgrade_v4_to_v5_op())
-        await conn.execute(write_schema_version_op())
+        await conn.execute("INSERT INTO cubepi_schema_version (version) VALUES (5)")
     finally:
         await conn.close()
 
@@ -233,8 +313,8 @@ async def _setup_schema(dsn: str) -> None:
 @pytest.mark.asyncio
 async def test_postgres_checkpointer_round_trip(clean_db) -> None:
     """Append + load round-trips messages with metadata."""
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
-    from cubepi.providers.base import (
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.providers.base import (
         AssistantMessage,
         TextContent,
         Usage,
@@ -268,8 +348,8 @@ async def test_postgres_checkpointer_round_trip(clean_db) -> None:
 
 @pytest.mark.asyncio
 async def test_postgres_checkpointer_save_extra_merges(clean_db) -> None:
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
-    from cubepi.providers.base import TextContent, UserMessage
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.providers.base import TextContent, UserMessage
 
     await _setup_schema(clean_db)
     async with PostgresCheckpointer(clean_db) as cp:
@@ -285,8 +365,8 @@ async def test_postgres_checkpointer_save_extra_merges(clean_db) -> None:
 @pytest.mark.asyncio
 async def test_postgres_checkpointer_seq_monotonic(clean_db) -> None:
     """Multiple append batches produce strictly monotonic seqs."""
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
-    from cubepi.providers.base import TextContent, UserMessage
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.providers.base import TextContent, UserMessage
 
     await _setup_schema(clean_db)
     async with PostgresCheckpointer(clean_db) as cp:
@@ -305,12 +385,12 @@ async def test_postgres_checkpointer_seq_monotonic(clean_db) -> None:
 @pytest.mark.asyncio
 async def test_uninitialized_schema_raises(clean_db) -> None:
     """Empty DB (no cubepi tables) → CubepiSchemaUninitialized."""
-    from cubepi.checkpointer.postgres import (
-        CubepiSchemaUninitialized,
+    from cubeloop.checkpointer.postgres import (
+        CubeloopSchemaUninitialized,
         PostgresCheckpointer,
     )
 
-    with pytest.raises(CubepiSchemaUninitialized):
+    with pytest.raises(CubeloopSchemaUninitialized):
         async with PostgresCheckpointer(clean_db):
             pass
 
@@ -318,22 +398,22 @@ async def test_uninitialized_schema_raises(clean_db) -> None:
 @pytest.mark.asyncio
 async def test_version_mismatch_raises(clean_db) -> None:
     """Schema present but version != EXPECTED → CubepiSchemaMismatch."""
-    from cubepi.checkpointer.postgres import (
-        CubepiSchemaMismatch,
+    from cubeloop.checkpointer.postgres import (
+        CubeloopSchemaMismatch,
         PostgresCheckpointer,
     )
 
     await _setup_schema(clean_db)
     conn = await asyncpg.connect(clean_db)
     try:
-        await conn.execute("UPDATE cubepi_schema_version SET version = 999")
+        await conn.execute("UPDATE cubeloop_schema_version SET version = 999")
     finally:
         await conn.close()
 
-    with pytest.raises(CubepiSchemaMismatch) as exc_info:
+    with pytest.raises(CubeloopSchemaMismatch) as exc_info:
         async with PostgresCheckpointer(clean_db):
             pass
-    from cubepi.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
+    from cubeloop.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION
 
     assert exc_info.value.expected == EXPECTED_SCHEMA_VERSION
     assert exc_info.value.actual == 999
@@ -342,7 +422,7 @@ async def test_version_mismatch_raises(clean_db) -> None:
 @pytest.mark.asyncio
 async def test_empty_thread_load_returns_none(clean_db) -> None:
     """Loading an unknown thread returns None."""
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
 
     await _setup_schema(clean_db)
     async with PostgresCheckpointer(clean_db) as cp:
@@ -354,9 +434,9 @@ async def test_empty_thread_load_returns_none(clean_db) -> None:
 async def test_postgres_load_corrupt_row_raises_typed(clean_db) -> None:
     """One bad payload row surfaces as CheckpointCorruptionError naming the
     row — not a raw msgpack error that hides which row is bad."""
-    from cubepi.checkpointer.exceptions import CheckpointCorruptionError
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
-    from cubepi.providers.base import TextContent, UserMessage
+    from cubeloop.checkpointer.exceptions import CheckpointCorruptionError
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.providers.base import TextContent, UserMessage
 
     await _setup_schema(clean_db)
     async with PostgresCheckpointer(clean_db) as cp:
@@ -370,9 +450,9 @@ async def test_postgres_load_corrupt_row_raises_typed(clean_db) -> None:
         conn = await asyncpg.connect(clean_db)
         try:
             await conn.execute(
-                "UPDATE cubepi_messages SET payload = $1 "
+                "UPDATE cubeloop_messages SET payload = $1 "
                 "WHERE thread_id = 't-corrupt' AND seq = ("
-                "  SELECT max(seq) FROM cubepi_messages "
+                "  SELECT max(seq) FROM cubeloop_messages "
                 "  WHERE thread_id = 't-corrupt')",
                 b"\xc1 not msgpack",
             )
@@ -385,15 +465,15 @@ async def test_postgres_load_corrupt_row_raises_typed(clean_db) -> None:
     err = excinfo.value
     assert err.thread_id == "t-corrupt"
     assert err.backend == "postgres"
-    assert err.row_ref.startswith("cubepi_messages.seq=")
+    assert err.row_ref.startswith("cubeloop_messages.seq=")
     assert err.__cause__ is not None
 
 
 @pytest.mark.asyncio
 async def test_postgres_load_unknown_role_raises_typed(clean_db) -> None:
-    from cubepi.checkpointer.exceptions import CheckpointCorruptionError
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
-    from cubepi.providers.base import TextContent, UserMessage
+    from cubeloop.checkpointer.exceptions import CheckpointCorruptionError
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.providers.base import TextContent, UserMessage
 
     await _setup_schema(clean_db)
     async with PostgresCheckpointer(clean_db) as cp:
@@ -401,7 +481,7 @@ async def test_postgres_load_unknown_role_raises_typed(clean_db) -> None:
         conn = await asyncpg.connect(clean_db)
         try:
             await conn.execute(
-                "UPDATE cubepi_messages SET role = 'alien' WHERE thread_id = 't-role'"
+                "UPDATE cubeloop_messages SET role = 'alien' WHERE thread_id = 't-role'"
             )
         finally:
             await conn.close()
@@ -411,3 +491,85 @@ async def test_postgres_load_unknown_role_raises_typed(clean_db) -> None:
 
     assert isinstance(excinfo.value.__cause__, ValueError)
     assert "alien" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_unmigrated_v5_raises_mismatch_not_uninitialized(clean_db) -> None:
+    from cubeloop.checkpointer.postgres import (
+        CubeloopSchemaMismatch,
+        PostgresCheckpointer,
+    )
+
+    await _setup_schema_v5(clean_db)
+    with pytest.raises(CubeloopSchemaMismatch) as ei:
+        async with PostgresCheckpointer(clean_db):
+            pass
+    assert ei.value.expected == 6
+    assert ei.value.actual == 5
+    assert "upgrade_v5_to_v6_op" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_v5_to_v6_rename_then_round_trip(clean_db) -> None:
+    from cubeloop.checkpointer.postgres.alembic_helpers import (
+        upgrade_v5_to_v6_op,
+        write_schema_version_op,
+    )
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.providers.base import TextContent, UserMessage
+
+    await _setup_schema_v5(clean_db)
+    conn = await asyncpg.connect(clean_db)
+    try:
+        await conn.execute(upgrade_v5_to_v6_op())
+        await conn.execute(write_schema_version_op())
+        # Idempotent on complete v6.
+        await conn.execute(upgrade_v5_to_v6_op())
+        names = {
+            r["table_name"]
+            for r in await conn.fetch(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public'"
+            )
+        }
+        assert "cubeloop_threads" in names
+        assert "cubeloop_messages" in names
+        assert "cubeloop_runs" in names
+        assert "cubeloop_hitl_answers" in names
+        assert "cubeloop_schema_version" in names
+        assert "cubepi_threads" not in names
+    finally:
+        await conn.close()
+
+    async with PostgresCheckpointer(clean_db) as cp:
+        await cp.append("t-mig", [UserMessage(content=[TextContent(text="hi")])])
+        data = await cp.load("t-mig")
+    assert data is not None
+    assert len(data.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_data_tables_without_version_table_are_not_uninitialized(
+    clean_db,
+) -> None:
+    from cubeloop.checkpointer.postgres import (
+        CubeloopSchemaMismatch,
+        CubeloopSchemaUninitialized,
+        PostgresCheckpointer,
+    )
+
+    conn = await asyncpg.connect(clean_db)
+    try:
+        await conn.execute("CREATE TABLE cubepi_threads (thread_id TEXT PRIMARY KEY)")
+    finally:
+        await conn.close()
+
+    with pytest.raises(CubeloopSchemaMismatch) as ei:
+        async with PostgresCheckpointer(clean_db):
+            pass
+    assert ei.value.actual == 0
+    with pytest.raises(CubeloopSchemaMismatch):
+        async with PostgresCheckpointer(clean_db):
+            pass
+    assert "Uninitialized" not in type(ei.value).__name__
+    assert not isinstance(ei.value, CubeloopSchemaUninitialized)

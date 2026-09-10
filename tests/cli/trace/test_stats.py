@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from cubepi.cli.trace.model import Span
-from cubepi.cli.trace.stats import aggregate
+from cubeloop.cli.trace.model import Span
+from cubeloop.cli.trace.stats import aggregate
 
 
 def _chat(model, in_tok, out_tok, dur_ms, error=False):

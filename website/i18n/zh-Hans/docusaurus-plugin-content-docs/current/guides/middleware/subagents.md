@@ -1,11 +1,11 @@
 ---
 title: 子 Agent
-description: "使用 SubagentMiddleware 把自包含任务委派给 CubePi 子 Agent。"
+description: "使用 SubagentMiddleware 把自包含任务委派给 CubeLoop 子 Agent。"
 ---
 
 # 子 Agent
 
-`SubagentMiddleware` 会添加一个 `subagent` 工具。模型调用该工具时，CubePi
+`SubagentMiddleware` 会添加一个 `subagent` 工具。模型调用该工具时，CubeLoop
 创建一个临时子 `Agent`，运行一段自包含 prompt，并把子 agent 最终 assistant
 文本作为工具结果返回。
 
@@ -14,8 +14,8 @@ description: "使用 SubagentMiddleware 把自包含任务委派给 CubePi 子 A
 ## 定义子 agent
 
 ```python
-from cubepi import Agent
-from cubepi.middleware import SubagentMiddleware, SubagentSpec
+from cubeloop import Agent
+from cubeloop.middleware import SubagentMiddleware, SubagentSpec
 
 subagents = {
     "researcher": SubagentSpec(
@@ -44,7 +44,7 @@ agent = Agent(
 )
 ```
 
-如果模型请求未知 `subagent_type`，CubePi 回退到 `general-purpose` 子 agent。
+如果模型请求未知 `subagent_type`，CubeLoop 回退到 `general-purpose` 子 agent。
 如果你没有定义它，middleware 会提供一个基础默认版本。
 
 ## 工具访问和 middleware 继承
@@ -85,7 +85,7 @@ SubagentMiddleware(
 ## Tracing 和 abort
 
 通过 `tracer=...` 传入 `Tracer`，即可给每个子运行附加 tracing。嵌套子
-agent span 共享父 trace，所以 `cubepi trace view <trace_id>` 会把父工具调用
+agent span 共享父 trace，所以 `cubeloop trace view <trace_id>` 会把父工具调用
 和子运行一起渲染出来。
 
 父运行的 abort signal 会转发给子 agent。如果父运行在子 agent 执行中被

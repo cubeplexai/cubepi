@@ -3,15 +3,15 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from cubepi.agent.tools import execute_tool_calls
-from cubepi.agent.types import (
+from cubeloop.agent.tools import execute_tool_calls
+from cubeloop.agent.types import (
     AfterToolCallResult,
     AgentContext,
     AgentTool,
     AgentToolResult,
     BeforeToolCallResult,
 )
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall
 
 
 class EchoParams(BaseModel):
@@ -803,7 +803,7 @@ class TestParallelFaultIsolation:
         )
 
     async def test_hitl_raise_preserves_and_persists_sibling_results(self):
-        from cubepi.hitl.exceptions import HitlDetached
+        from cubeloop.hitl.exceptions import HitlDetached
 
         side_effects = []
 
@@ -1012,7 +1012,7 @@ class TestFaultIsolationEdgeCases:
     async def test_after_tool_call_hitl_propagates_with_siblings_persisted(self):
         """_finalize must re-raise HITL control exceptions from the hook —
         they are a suspend, not a tool failure — after siblings persist."""
-        from cubepi.hitl.exceptions import HitlDetached
+        from cubeloop.hitl.exceptions import HitlDetached
 
         async def after(after_ctx, *, signal=None):
             if after_ctx.tool_call.id == "t2":
@@ -1036,7 +1036,7 @@ class TestFaultIsolationEdgeCases:
         """Suspending after a sibling result failed to persist would durably
         record a batch missing completed work — the persistence failure must
         win over the suspend."""
-        from cubepi.hitl.exceptions import HitlDetached
+        from cubeloop.hitl.exceptions import HitlDetached
 
         async def hitl_raiser(tool_call_id, params, *, signal=None, on_update=None):
             raise HitlDetached()
@@ -1092,7 +1092,7 @@ class TestFaultIsolationEdgeCases:
     async def test_sequential_hitl_carries_partial_results(self):
         """The sequential executor attaches already-emitted results to an
         escaping HITL control exception too."""
-        from cubepi.hitl.exceptions import HitlDetached
+        from cubeloop.hitl.exceptions import HitlDetached
 
         async def hitl_raiser(tool_call_id, params, *, signal=None, on_update=None):
             raise HitlDetached()

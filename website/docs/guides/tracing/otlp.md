@@ -1,26 +1,26 @@
 ---
 title: OTLP & Backends
-description: "Export CubePi OpenTelemetry traces to OTLP-compatible backends like Jaeger, Tempo, or Honeycomb."
+description: "Export CubeLoop OpenTelemetry traces to OTLP-compatible backends like Jaeger, Tempo, or Honeycomb."
 sidebar_position: 3
 ---
 
 # Exporting to OTLP Backends
 
-`cubepi.tracing.Tracer` accepts any `opentelemetry.sdk.trace.export.SpanExporter`,
+`cubeloop.tracing.Tracer` accepts any `opentelemetry.sdk.trace.export.SpanExporter`,
 so anything in the OpenTelemetry ecosystem works. Pick the wire format
 (HTTP or gRPC), point it at your collector, hand the exporter to the Tracer.
 
 ## HTTP (OTLP/HTTP)
 
 ```bash
-pip install "cubepi[tracing]" opentelemetry-exporter-otlp-proto-http
+pip install "cubeloop[tracing]" opentelemetry-exporter-otlp-proto-http
 ```
 
 ```python
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
     OTLPSpanExporter,
 )
-from cubepi.tracing import Tracer
+from cubeloop.tracing import Tracer
 
 tracer = Tracer(
     service_name="my-bot",
@@ -44,7 +44,7 @@ config.
 ## gRPC (OTLP/gRPC)
 
 ```bash
-pip install "cubepi[tracing]" opentelemetry-exporter-otlp-proto-grpc
+pip install "cubeloop[tracing]" opentelemetry-exporter-otlp-proto-grpc
 ```
 
 ```python
@@ -109,12 +109,12 @@ spans nest under a caller's HTTP handler trace. The internal hook
 (`Tracer._make_parent_context`) exists for a future `run_scope` feature;
 until that ships, agent runs and the surrounding service trace are linked
 only by their resource attributes (`service.name`, `gen_ai.agent.name`,
-`cubepi.run_id`).
+`cubeloop.run_id`).
 
-If you need the upstream trace to continue into CubePi today, the
+If you need the upstream trace to continue into CubeLoop today, the
 workaround is to set the OTel current span yourself before calling
 `agent.prompt(...)` and let the agent's spans inherit it via OTel's
-ambient context — CubePi never overrides an active parent.
+ambient context — CubeLoop never overrides an active parent.
 
 On the way out, MCP `tools/call` does inject W3C `traceparent` as an HTTP
 header automatically, so an instrumented MCP server downstream of the
@@ -129,7 +129,7 @@ pattern — JSONL for local debugging plus OTLP for the production backend:
 tracer = Tracer(
     service_name="my-bot",
     exporters=[
-        JsonlSpanExporter(directory="./cubepi-traces"),
+        JsonlSpanExporter(directory="./cubeloop-traces"),
         OTLPSpanExporter(endpoint="https://api.honeycomb.io/v1/traces", headers={…}),
     ],
 )
@@ -182,7 +182,7 @@ returning ties your p99 to the slowest exporter. Use the standalone `trace()`
 helper with `flush="background"` instead:
 
 ```python
-from cubepi.tracing import trace
+from cubeloop.tracing import trace
 
 @app.post("/chat")
 async def chat(req: ChatRequest):

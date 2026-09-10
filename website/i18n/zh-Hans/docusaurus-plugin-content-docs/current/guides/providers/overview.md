@@ -1,6 +1,6 @@
 ---
 title: Providers Overview
-description: "CubePi 的 provider 配置、能力和预设总览。"
+description: "CubeLoop 的 provider 配置、能力和预设总览。"
 ---
 
 # Providers Overview
@@ -32,8 +32,8 @@ _从这里开始看 provider 配置。_
 后端在 wire 上的差异。
 
 ```python
-from cubepi import CapabilityDescriptor
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop import CapabilityDescriptor
+from cubeloop.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="...",
@@ -49,8 +49,8 @@ provider = OpenAIProvider(
 如果只有部分模型例外，使用 `model_capability_overrides`：
 
 ```python
-from cubepi import CapabilityDescriptor
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop import CapabilityDescriptor
+from cubeloop.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="...",
@@ -78,7 +78,7 @@ provider = OpenAIProvider(
 - `supports_tools` / `supports_images` / `supports_streaming` — 供宿主应用或前端消费的能力元数据。
 
 :::note 预设目录由宿主应用维护
-CubePi 提供的是**机制**（`CapabilityDescriptor` 及其 wire 运行时），而非厂商目录。包含 base URL、认证、区域/代码规划端点、模型列表的现成 provider 列表属于产品数据，应由嵌入 CubePi 的应用自行维护（例如，cubebox 维护自己的 provider 目录）。如需接入特定厂商，请按下文所示，使用正确的 `base_url` + `CapabilityDescriptor` 构建 provider。
+CubeLoop 提供的是**机制**（`CapabilityDescriptor` 及其 wire 运行时），而非厂商目录。包含 base URL、认证、区域/代码规划端点、模型列表的现成 provider 列表属于产品数据，应由嵌入 CubeLoop 的应用自行维护（例如，cubebox 维护自己的 provider 目录）。如需接入特定厂商，请按下文所示，使用正确的 `base_url` + `CapabilityDescriptor` 构建 provider。
 :::
 
 ## 1. 简单场景——完全零配置
@@ -86,25 +86,25 @@ CubePi 提供的是**机制**（`CapabilityDescriptor` 及其 wire 运行时）�
 大多数用户无需关心能力描述符。内置 provider 已有合理的默认值：
 
 ```python
-import cubepi
-from cubepi import Agent
-from cubepi.providers.anthropic import AnthropicProvider
+import cubeloop
+from cubeloop import Agent
+from cubeloop.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(provider_id="anthropic")  # reads ANTHROPIC_API_KEY
 agent = Agent(model=provider.model("claude-sonnet-4-6"))
 await agent.prompt("Hello!")
 ```
 
-这就是全部配置。不带 `capability=` 构建的 provider，其输出与 CubePi `0.4` 完全一致——下文的机制仅在显式使用时才会生效。
+这就是全部配置。不带 `capability=` 构建的 provider，其输出与 CubeLoop `0.4` 完全一致——下文的机制仅在显式使用时才会生效。
 
 ## 2. 非默认端点——CapabilityDescriptor
 
-当你需要使用 OpenAI 或 Anthropic 之外的模型——DeepSeek、Qwen、豆包、OpenRouter 路由、本地服务器——麻烦在于每家的 wire 方言不同（是用 `max_tokens` 还是 `max_completion_tokens`？如何开关推理？）。你不需要子类化 provider；只需将差异描述为一个 [`CapabilityDescriptor`](pathname:///pydoc/cubepi/providers/capability.html)，连同正确的 `base_url` 和对应端点 wire 形状的 provider 类一起传入：
+当你需要使用 OpenAI 或 Anthropic 之外的模型——DeepSeek、Qwen、豆包、OpenRouter 路由、本地服务器——麻烦在于每家的 wire 方言不同（是用 `max_tokens` 还是 `max_completion_tokens`？如何开关推理？）。你不需要子类化 provider；只需将差异描述为一个 [`CapabilityDescriptor`](pathname:///pydoc/cubeloop/providers/capability.html)，连同正确的 `base_url` 和对应端点 wire 形状的 provider 类一起传入：
 
 ```python
 import os
-from cubepi import CapabilityDescriptor
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop import CapabilityDescriptor
+from cubeloop.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key=os.environ["DEEPSEEK_API_KEY"],
@@ -135,7 +135,7 @@ provider = OpenAIProvider(
 `TemperatureSpec` 控制调用方传入的 temperature 如何处理：
 
 ```python
-from cubepi import TemperatureSpec
+from cubeloop import TemperatureSpec
 
 TemperatureSpec(mode="free", min=0.0, max=2.0, default=1.0)  # clamp into [min, max]
 TemperatureSpec(mode="fixed", fixed_value=1.0)               # always overwrite
@@ -161,7 +161,7 @@ CapabilityDescriptor(
 
 ### 推理级别：`reasoning_level`（三种形状）
 
-在开/关之外，CubePi 将 `ThinkingLevel`（`off`/`low`/`medium`/`high`/`xhigh`）映射到通过点路径 `path` 写入的具体 wire 值。`kind` 决定形状：
+在开/关之外，CubeLoop 将 `ThinkingLevel`（`off`/`low`/`medium`/`high`/`xhigh`）映射到通过点路径 `path` 写入的具体 wire 值。`kind` 决定形状：
 
 `ReasoningLevelSpec` 只负责「`thinking`/`low`/... 具体映射成后端字段」；要真正生效，还要配两个参数：
 
@@ -169,8 +169,8 @@ CapabilityDescriptor(
 - 在 `Agent(...)` 初始化时把 `thinking` 设成 `off|low|medium|high|xhigh`（默认 `off`）
 
 ```python
-from cubepi import Agent, CapabilityDescriptor, ReasoningLevelSpec
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop import Agent, CapabilityDescriptor, ReasoningLevelSpec
+from cubeloop.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="...",
@@ -194,7 +194,7 @@ agent = Agent(model=provider.model("deepseek-r1", reasoning=True), thinking="hig
 ```
 
 ```python
-from cubepi import ReasoningLevelSpec
+from cubeloop import ReasoningLevelSpec
 
 # int_budget — a token budget (Anthropic).
 ReasoningLevelSpec(
@@ -242,7 +242,7 @@ provider = OpenAIProvider(
 
 ## 图片生成 provider
 
-图片生成有独立的 provider 表面（`cubepi.providers.images`），范式与上文
+图片生成有独立的 provider 表面（`cubeloop.providers.images`），范式与上文
 描述完全一致：provider 上的 `provider_id`、`provider.model("id", ...)`
 工厂、类型化的 `ProviderError` 错误，以及处理后端字段差异的 capability
 descriptor。完整指南见 [图片生成](./image-generation)。
@@ -252,4 +252,4 @@ descriptor。完整指南见 [图片生成](./image-generation)。
 - [OpenAI Provider](./openai) —— OpenAI / OpenAI 兼容端点的具体配置。
 - [Anthropic Provider](./anthropic) —— `int_budget` 推理形状的实际用法。
 - [自定义 Provider](./custom) —— 当端点甚至不是 OpenAI/Anthropic 形状时。
-- [API 参考 → `cubepi.providers`](../../api/cubepi-providers)。
+- [API 参考 → `cubeloop.providers`](../../api/cubeloop-providers)。

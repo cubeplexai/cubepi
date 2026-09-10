@@ -5,20 +5,20 @@ description: "注册工具、并行或顺序执行、并通过 Pydantic 校验�
 
 # 工具使用与并行执行
 
-工具是 Agent 影响世界的方式。CubePi 把每个 `AgentTool` 转成模型可用
+工具是 Agent 影响世界的方式。CubeLoop 把每个 `AgentTool` 转成模型可用
 的 JSON Schema、用 Pydantic 校验参数、执行你的代码、把结果作为
 `ToolResultMessage` 喂回。默认情况下,只要模型在一轮里发出多个工具
 调用,它们就会并行执行。
 
 ## `@tool` 装饰器
 
-定义工具最快的方式是给一个 async 函数加装饰器。CubePi 会从参数生成输入
+定义工具最快的方式是给一个 async 函数加装饰器。CubeLoop 会从参数生成输入
 schema,不需要单独写参数模型,也不用写样板的 `execute` 签名:
 
 ```python
 from typing import Annotated
 from pydantic import Field
-from cubepi import tool
+from cubeloop import tool
 
 
 @tool
@@ -42,7 +42,7 @@ async def search(
 在你需要 `details`、`is_error`、`terminate` 时返回完整的 `AgentToolResult`:
 
 ```python
-from cubepi import tool, AgentToolResult, TextContent
+from cubeloop import tool, AgentToolResult, TextContent
 
 
 @tool
@@ -73,7 +73,7 @@ async def long_job(prompt: str, *, signal=None, on_update=None) -> str:
 
 ```python
 from pydantic import BaseModel, Field
-from cubepi import AgentTool, AgentToolResult, TextContent
+from cubeloop import AgentTool, AgentToolResult, TextContent
 
 
 class SearchParams(BaseModel):
@@ -102,7 +102,7 @@ search_tool = AgentTool(
 
 ## 默认并行
 
-模型在一条 assistant 消息里发多个工具调用时,CubePi 会用
+模型在一条 assistant 消息里发多个工具调用时,CubeLoop 会用
 `asyncio.create_task()` 调度它们并 gather。这通常就是你想要的。
 
 ```python
@@ -181,7 +181,7 @@ async def long_running(tool_call_id, params, *, signal=None, on_update=None):
 
 两种姿势：
 
-1. **抛异常。** CubePi 捕获后转成 `is_error=True` 的 `AgentToolResult`,
+1. **抛异常。** CubeLoop 捕获后转成 `is_error=True` 的 `AgentToolResult`,
    异常字符串作为 `TextContent`。
 2. **显式返回 `is_error=True`。** 适合你想给结构化错误体的场景：
 
@@ -209,7 +209,7 @@ async def submit_final_answer(tool_call_id, params, *, signal=None, on_update=No
     )
 ```
 
-CubePi 仅在当前批次中 *每个* 工具结果都是 `terminate=True` 时才终止。
+CubeLoop 仅在当前批次中 *每个* 工具结果都是 `terminate=True` 时才终止。
 然后循环发 `turn_end`、`agent_end`,退出。
 
 ## 工具很多？把 schema 延迟加载
@@ -227,9 +227,9 @@ cache。（v1 行为——把加载的工具注入模型可见的 tools 数组�
 仍可通过 `deferred_tool_strategy="inject"` 选用。）
 
 ```python
-from cubepi import Agent
-from cubepi.deferred import DeferredToolGroup
-from cubepi.mcp import load_mcp_tools_stdio
+from cubeloop import Agent
+from cubeloop.deferred import DeferredToolGroup
+from cubeloop.mcp import load_mcp_tools_stdio
 
 async def load_github_tools():
     result = await load_mcp_tools_stdio(
@@ -274,7 +274,7 @@ loader 是一个零参 async 可调用对象，返回 `list[AgentTool]` —— �
   给模型看。除非你下游有消费者,否则别堆大 blob。
 - **Pydantic 严格度的意外** —— `Field(..., min_length=1)` 让模型通过
   JSON Schema 看到约束 —— 约束有帮助,但模型仍然偶尔发坏 JSON。
-  CubePi 把 `ValidationError` 转成工具的 error result,你不用自己包。
+  CubeLoop 把 `ValidationError` 转成工具的 error result,你不用自己包。
 - **`tools=[]` 但模型还是想用工具** —— 一般是 system prompt 里提到了
   工具。要么删掉提示,要么真的把工具给它。
 

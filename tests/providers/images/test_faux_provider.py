@@ -2,9 +2,9 @@ import base64
 
 import pytest
 
-from cubepi.errors import ProviderError, RateLimited
-from cubepi.providers.images.faux import FauxImagesProvider
-from cubepi.providers.images.types import ImagesContext
+from cubeloop.errors import ProviderError, RateLimited
+from cubeloop.providers.images.faux import FauxImagesProvider
+from cubeloop.providers.images.types import ImagesContext
 
 
 def _png_b64() -> str:
@@ -50,7 +50,7 @@ async def test_raise_on_call_can_be_base_provider_error():
 
 
 def test_inherits_from_base_images_provider():
-    from cubepi.providers.images.base import BaseImagesProvider
+    from cubeloop.providers.images.base import BaseImagesProvider
 
     p = FauxImagesProvider(png_b64=_png_b64())
     assert isinstance(p, BaseImagesProvider)
@@ -68,7 +68,7 @@ async def test_pre_set_signal_returns_aborted_matching_real_provider():
     path actually aborts."""
     import asyncio
 
-    from cubepi.providers.images.types import ImagesOptions
+    from cubeloop.providers.images.types import ImagesOptions
 
     p = FauxImagesProvider(png_b64=_png_b64())
     model = p.model("faux-1")
@@ -90,7 +90,7 @@ async def test_unset_signal_still_returns_happy_path_image():
     Faux returns the deterministic image as usual."""
     import asyncio
 
-    from cubepi.providers.images.types import ImagesOptions
+    from cubeloop.providers.images.types import ImagesOptions
 
     p = FauxImagesProvider(png_b64=_png_b64())
     model = p.model("faux-1")
@@ -158,8 +158,8 @@ async def test_subscribe_response_fires_on_pre_set_abort_with_images_aborted():
     the same way OpenAIImagesProvider does."""
     import asyncio
 
-    from cubepi.providers.images import ImagesAborted
-    from cubepi.providers.images.types import ImagesOptions
+    from cubeloop.providers.images import ImagesAborted
+    from cubeloop.providers.images.types import ImagesOptions
 
     p = FauxImagesProvider(png_b64=_png_b64())
     model = p.model("faux-1")
@@ -186,7 +186,7 @@ async def test_pre_set_abort_skips_request_listener_in_faux():
     contract as OpenAIImagesProvider."""
     import asyncio
 
-    from cubepi.providers.images.types import ImagesOptions
+    from cubeloop.providers.images.types import ImagesOptions
 
     p = FauxImagesProvider(png_b64=_png_b64())
     model = p.model("faux-1")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cubepi.cli.trace.model import Span, build_forest
+from cubeloop.cli.trace.model import Span, build_forest
 
 
 def _raw(span_id, parent_id, name, start, end=None, status="UNSET", attrs=None):

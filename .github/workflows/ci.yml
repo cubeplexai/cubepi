@@ -45,8 +45,8 @@ jobs:
           --health-retries 20
 
     env:
-      CUBEPI_TEST_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
-      CUBEPI_TEST_MYSQL_DSN: mysql://root:root@localhost:3306/mysql
+      CUBELOOP_TEST_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+      CUBELOOP_TEST_MYSQL_DSN: mysql://root:root@localhost:3306/mysql
 
     steps:
       - uses: actions/checkout@v7
@@ -62,7 +62,7 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Run tests
-        run: uv run pytest tests/ -v --cov=cubepi --cov-report=term-missing --cov-report=xml
+        run: uv run pytest tests/ -v --cov=cubeloop --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.13'
@@ -73,7 +73,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Check import
-        run: uv run python -c "import cubepi; print(cubepi.__all__)"
+        run: uv run python -c "import cubeloop; print(cubeloop.__all__)"
 
   lint:
     runs-on: ubuntu-latest
@@ -88,10 +88,10 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Ruff check
-        run: uv run ruff check cubepi/ tests/
+        run: uv run ruff check cubeloop/ tests/
 
       - name: Ruff format check
-        run: uv run ruff format --check cubepi/ tests/
+        run: uv run ruff format --check cubeloop/ tests/
 
       - name: Mypy
-        run: uv run mypy cubepi
+        run: uv run mypy cubeloop
