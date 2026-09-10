@@ -30,13 +30,13 @@ BEGIN
   END IF;
   SELECT count(*) INTO new_index_count
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE relkind = 'i' AND relname IN (
+  WHERE relkind IN ('i', 'I') AND relname IN (
     'ix_cubeloop_messages_metadata_gin',
     'ix_cubeloop_messages_thread_run', 'ix_cubeloop_runs_thread_seq'
   ) AND n.nspname = schema_name;
   SELECT count(*) INTO old_index_count
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE relkind = 'i' AND relname IN (
+  WHERE relkind IN ('i', 'I') AND relname IN (
     'ix_cubepi_messages_metadata_gin',
     'ix_cubepi_messages_thread_run', 'ix_cubepi_runs_thread_seq'
   ) AND n.nspname = schema_name;
