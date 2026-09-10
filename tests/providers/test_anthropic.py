@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cubepi.providers.anthropic import AnthropicProvider, CacheRetention
-from cubepi.providers.base import (
+from cubeloop.providers.anthropic import AnthropicProvider, CacheRetention
+from cubeloop.providers.base import (
     ImageContent,
     Model,
     ReasoningControl,
@@ -1472,7 +1472,7 @@ class TestAnthropicTypedErrorWrapping:
 
     @pytest.mark.asyncio
     async def test_rate_limit_429_delivers_rate_limited_to_listener(self) -> None:
-        from cubepi.errors import RateLimited
+        from cubeloop.errors import RateLimited
 
         exc = _FakeAnthropicExc("Rate limit exceeded", status_code=429)
         provider = _make_provider("none")
@@ -1503,7 +1503,7 @@ class TestAnthropicTypedErrorWrapping:
     async def test_context_length_message_delivers_context_length_exceeded(
         self,
     ) -> None:
-        from cubepi.errors import ContextLengthExceeded
+        from cubeloop.errors import ContextLengthExceeded
 
         exc = _FakeAnthropicExc(
             "This model's maximum context length is 200000 tokens.", status_code=400

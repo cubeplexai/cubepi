@@ -1,4 +1,4 @@
-from cubepi.checkpointer.base import CheckpointData
+from cubeloop.checkpointer.base import CheckpointData
 
 
 def test_checkpoint_data_default_parent_is_none():

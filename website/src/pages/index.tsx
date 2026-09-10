@@ -23,32 +23,32 @@ export default function Home(): React.ReactElement {
   const softwareJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
-    name: 'CubePi',
+    name: 'CubeLoop',
     description:
       'A Pythonic, async-native agent framework — a leaner alternative to langgraph and pi-agent-core. Plain async functions, append-only checkpointing, minimal dependencies.',
-    url: 'https://cubepi.ai',
+    url: 'https://cubeloop.dev',
     applicationCategory: 'DeveloperApplication',
     operatingSystem: 'Linux, macOS, Windows',
     programmingLanguage: 'Python',
     softwareVersion: version,
-    downloadUrl: 'https://pypi.org/project/cubepi/',
-    softwareHelp: 'https://cubepi.ai/docs/',
-    license: 'https://github.com/cubeplexai/cubepi/blob/main/LICENSE',
+    downloadUrl: 'https://pypi.org/project/cubeloop/',
+    softwareHelp: 'https://cubeloop.dev/docs/',
+    license: 'https://github.com/cubeplexai/cubeloop/blob/main/LICENSE',
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-    author: { '@type': 'Organization', name: 'CubePi', url: 'https://cubepi.ai' },
+    author: { '@type': 'Organization', name: 'CubeLoop', url: 'https://cubeloop.dev' },
   };
 
   return (
     <Layout
-      // The site title ("CubePi") is appended via the title delimiter, so the
+      // The site title ("CubeLoop") is appended via the title delimiter, so the
       // page title here must NOT lead with the brand or it double-brands the
-      // <title>/og:title (e.g. "CubePi — … | CubePi").
+      // <title>/og:title (e.g. "CubeLoop — … | CubeLoop").
       title={zh
         ? 'Pythonic 异步原生 Agent 框架'
         : 'A Pythonic, async-native agent framework'}
       description={zh
-        ? 'CubePi 是 langgraph 和 pi-agent-core 的 Pythonic 异步原生替代方案。普通 async 函数、追加式持久化、3 个核心依赖。'
-        : 'CubePi is a Pythonic async-native agent framework — a leaner alternative to langgraph and pi-agent-core. Plain async functions, append-only checkpointing, 3 core dependencies.'}
+        ? 'CubeLoop 是 langgraph 和 pi-agent-core 的 Pythonic 异步原生替代方案。普通 async 函数、追加式持久化、3 个核心依赖。'
+        : 'CubeLoop is a Pythonic async-native agent framework — a leaner alternative to langgraph and pi-agent-core. Plain async functions, append-only checkpointing, 3 core dependencies.'}
     >
       <Head>
         <script type="application/ld+json">{JSON.stringify(softwareJsonLd)}</script>

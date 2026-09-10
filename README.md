@@ -1,26 +1,26 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/cubeplexai/cubepi/main/website/static/img/brand/cubepi-social-preview.png" alt="CubePi" width="800">
+  <img src="https://raw.githubusercontent.com/cubeplexai/cubeloop/main/website/static/img/brand/cubeloop-social-preview.png" alt="CubeLoop" width="800">
 </p>
 
-[![CI](https://github.com/cubeplexai/cubepi/actions/workflows/ci.yml/badge.svg)](https://github.com/cubeplexai/cubepi/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/cubeplexai/cubepi/graph/badge.svg)](https://codecov.io/gh/cubeplexai/cubepi)
-[![PyPI](https://img.shields.io/pypi/v/cubepi)](https://pypi.org/project/cubepi/)
-[![Python](https://img.shields.io/pypi/pyversions/cubepi)](https://pypi.org/project/cubepi/)
+[![CI](https://github.com/cubeplexai/cubeloop/actions/workflows/ci.yml/badge.svg)](https://github.com/cubeplexai/cubeloop/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/cubeplexai/cubeloop/graph/badge.svg)](https://codecov.io/gh/cubeplexai/cubeloop)
+[![PyPI](https://img.shields.io/pypi/v/cubeloop)](https://pypi.org/project/cubeloop/)
+[![Python](https://img.shields.io/pypi/pyversions/cubeloop)](https://pypi.org/project/cubeloop/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Docs](https://img.shields.io/badge/Docs-cubepi.ai-blue?logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjEwNSAxMTAgMzAwIDM0NSI+CiAgPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0yNjEgMTE3IEwzOTYgMTgzIEwyNDQgMjUyIEwxMjAgMTgzIFoiLz4KICA8cGF0aCBmaWxsPSJ3aGl0ZSIgZD0iTTExNSAxOTggTDIzMiAyNjMgTDIzMiA0MzIgTDExNSAzNjUgWiIvPgogIDxwYXRoIGZpbGw9IndoaXRlIiBkPSJNMzU1IDM0NiBMMzk3IDM2NSBMMzk3IDM3NiBMMjUyIDQ0NiBMMjQ3IDQ0MiBMMjQ3IDM5NSBaIi8%2BCiAgPHJlY3QgZmlsbD0id2hpdGUiIHg9IjI4NyIgeT0iMjY4IiB3aWR0aD0iMjYiIGhlaWdodD0iNzQiIHJ4PSIxMiIvPgogIDxyZWN0IGZpbGw9IndoaXRlIiB4PSIzNTEiIHk9IjI0NyIgd2lkdGg9IjI2IiBoZWlnaHQ9Ijc2IiByeD0iMTIiLz4KPC9zdmc+)](https://cubepi.ai)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/cubeplexai/cubepi)
-[![skills.sh](https://skills.sh/b/cubeplexai/cubepi)](https://skills.sh/cubeplexai/cubepi)
+[![Docs](https://img.shields.io/badge/Docs-cubeloop.dev-blue?logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjEwNSAxMTAgMzAwIDM0NSI+CiAgPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0yNjEgMTE3IEwzOTYgMTgzIEwyNDQgMjUyIEwxMjAgMTgzIFoiLz4KICA8cGF0aCBmaWxsPSJ3aGl0ZSIgZD0iTTExNSAxOTggTDIzMiAyNjMgTDIzMiA0MzIgTDExNSAzNjUgWiIvPgogIDxwYXRoIGZpbGw9IndoaXRlIiBkPSJNMzU1IDM0NiBMMzk3IDM2NSBMMzk3IDM3NiBMMjUyIDQ0NiBMMjQ3IDQ0MiBMMjQ3IDM5NSBaIi8%2BCiAgPHJlY3QgZmlsbD0id2hpdGUiIHg9IjI4NyIgeT0iMjY4IiB3aWR0aD0iMjYiIGhlaWdodD0iNzQiIHJ4PSIxMiIvPgogIDxyZWN0IGZpbGw9IndoaXRlIiB4PSIzNTEiIHk9IjI0NyIgd2lkdGg9IjI2IiBoZWlnaHQ9Ijc2IiByeD0iMTIiLz4KPC9zdmc+)](https://cubeloop.dev)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/cubeplexai/cubeloop)
+[![skills.sh](https://skills.sh/b/cubeplexai/cubeloop)](https://skills.sh/cubeplexai/cubeloop)
 
-CubePi is a Pythonic, async-native agent framework designed for high performance, readability, and production-grade persistence. It provides a leaner alternative to graph-based agent runtimes by modeling agent logic as a linear while loop that developers can easily trace and debug.
+CubeLoop is a Pythonic, async-native agent framework designed for high performance, readability, and production-grade persistence. It provides a leaner alternative to graph-based agent runtimes by modeling agent logic as a linear while loop that developers can easily trace and debug.
 
-CubePi powers [CubePlex](https://github.com/cubeplexai/cubeplex), a cloud-native
+CubeLoop powers [CubePlex](https://github.com/cubeplexai/cubeplex), a cloud-native
 platform for managed agents in team workspaces — skills, shared memory, MCP
 tools, persistent sandboxes, governed access, and self-hosted deploy on Docker
 Compose or Kubernetes.
 
-## Why CubePi
+## Why CubeLoop
 
-| | langgraph | CubePi |
+| | langgraph | CubeLoop |
 |---|---|---|
 | **Abstraction** | Graph nodes + edges + channels — you model your agent as a state machine | Plain async functions — `run_agent_loop` is a while loop you can read in 5 minutes |
 | **Streaming** | Callback-based, multiple handler types | `async for event in stream` — one pattern everywhere |
@@ -34,23 +34,23 @@ Compose or Kubernetes.
 ## Install
 
 ```bash
-pip install cubepi
+pip install cubeloop
 
 # Optional extras
-pip install cubepi[sqlite]     # SQLite checkpointer
-pip install cubepi[postgres]   # Postgres checkpointer
-pip install cubepi[mysql]      # MySQL checkpointer
-pip install cubepi[mcp]        # MCP tool loaders
-pip install cubepi[tracing]    # OpenTelemetry tracing + metrics
-pip install cubepi[tracing-otlp]  # Adds the OTLP/HTTP span exporter
-pip install cubepi[trace-cli]  # `cubepi trace` terminal viewer
+pip install cubeloop[sqlite]     # SQLite checkpointer
+pip install cubeloop[postgres]   # Postgres checkpointer
+pip install cubeloop[mysql]      # MySQL checkpointer
+pip install cubeloop[mcp]        # MCP tool loaders
+pip install cubeloop[tracing]    # OpenTelemetry tracing + metrics
+pip install cubeloop[tracing-otlp]  # Adds the OTLP/HTTP span exporter
+pip install cubeloop[trace-cli]  # `cubeloop trace` terminal viewer
 ```
 
 Or with [uv](https://github.com/astral-sh/uv):
 
 ```bash
-uv add cubepi
-uv add cubepi[sqlite,postgres,mysql,mcp,tracing]
+uv add cubeloop
+uv add cubeloop[sqlite,postgres,mysql,mcp,tracing]
 ```
 
 For local Git hooks that mirror CI, install `pre-commit` and enable the repo
@@ -64,8 +64,8 @@ uvx pre-commit install
 
 ```python
 import asyncio
-from cubepi import Agent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(provider_id="anthropic", api_key="sk-...")
 
@@ -89,8 +89,8 @@ asyncio.run(agent.prompt("What's the weather in Tokyo?"))
 ```
 
 For a guided tour of the architecture, browse the
-[DeepWiki for this repo](https://deepwiki.com/cubeplexai/cubepi) or the
-[Core Concepts guide](https://cubepi.ai/docs/getting-started/core-concepts).
+[DeepWiki for this repo](https://deepwiki.com/cubeplexai/cubeloop) or the
+[Core Concepts guide](https://cubeloop.dev/docs/getting-started/core-concepts).
 
 ## Core Concepts
 
@@ -99,9 +99,9 @@ For a guided tour of the architecture, browse the
 Abstract LLM interaction behind a `Provider` protocol. All providers return `MessageStream` — an async iterator of `StreamEvent`s.
 
 ```python
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.providers.openai import OpenAIProvider
-from cubepi.providers import FauxProvider
+from cubeloop.providers.anthropic import AnthropicProvider
+from cubeloop.providers.openai import OpenAIProvider
+from cubeloop.providers import FauxProvider
 
 # Real providers
 anthropic = AnthropicProvider(provider_id="anthropic", api_key="...")
@@ -116,7 +116,7 @@ Use `FallbackBoundModel` to chain providers — on a rate limit, outage, or
 context-length error the next model in the chain is tried automatically:
 
 ```python
-from cubepi import FallbackBoundModel
+from cubeloop import FallbackBoundModel
 
 model = FallbackBoundModel(
     chain=(
@@ -134,7 +134,7 @@ typed parameters, the docstring becomes the description, and the framework
 handles argument parsing, parallel execution, and error wrapping.
 
 ```python
-from cubepi import tool
+from cubeloop import tool
 
 @tool
 async def search(query: str) -> str:
@@ -147,9 +147,9 @@ longhand `AgentTool(...)` is equivalent and fully supported:
 
 ```python
 from pydantic import BaseModel
-from cubepi import AgentTool
-from cubepi.agent.types import AgentToolResult
-from cubepi.providers.base import TextContent
+from cubeloop import AgentTool
+from cubeloop.agent.types import AgentToolResult
+from cubeloop.providers.base import TextContent
 
 class SearchParams(BaseModel):
     query: str
@@ -171,8 +171,8 @@ search = AgentTool(
 Composable hooks that modify behavior without touching the core loop:
 
 ```python
-from cubepi import Middleware, compose_middleware
-from cubepi.agent.types import BeforeToolCallResult
+from cubeloop import Middleware, compose_middleware
+from cubeloop.agent.types import BeforeToolCallResult
 
 class LoggingMiddleware(Middleware):
     async def transform_context(self, messages, *, ctx, signal=None):
@@ -209,8 +209,8 @@ consume significant context. Deferred tool groups hide schemas by default and
 let the model expand them on demand:
 
 ```python
-from cubepi import Agent
-from cubepi.deferred import DeferredToolGroup
+from cubeloop import Agent
+from cubeloop.deferred import DeferredToolGroup
 
 # load_github_tools is a zero-arg async callable returning list[AgentTool]
 # (e.g. wrap load_mcp_tools_stdio(...).tools — see the website guide).
@@ -257,7 +257,7 @@ For advanced use (custom catalog header, cross-run replay), construct
 `DeferredToolsMiddleware` directly:
 
 ```python
-from cubepi.deferred import DeferredToolsMiddleware
+from cubeloop.deferred import DeferredToolsMiddleware
 
 # Replay expansion state from a previous run (strategy is required and
 # must match the middleware's strategy)
@@ -278,7 +278,7 @@ agent = Agent(
 Persist conversation state with append-only semantics:
 
 ```python
-from cubepi.checkpointer import (
+from cubeloop.checkpointer import (
     MemoryCheckpointer,
     SQLiteCheckpointer,
     PostgresCheckpointer,
@@ -303,8 +303,8 @@ async with MySQLCheckpointer("mysql://...") as cp:
 
 Postgres and MySQL never issue DDL at runtime — your app owns the schema via
 Alembic. See the host-integration runbooks
-([Postgres](cubepi/checkpointer/postgres/README.md) ·
-[MySQL](cubepi/checkpointer/mysql/README.md)) and the runnable
+([Postgres](cubeloop/checkpointer/postgres/README.md) ·
+[MySQL](cubeloop/checkpointer/mysql/README.md)) and the runnable
 [`examples/`](examples/).
 
 ### FauxProvider for Testing
@@ -312,7 +312,7 @@ Alembic. See the host-integration runbooks
 Ship your agent tests without API keys:
 
 ```python
-from cubepi.providers import FauxProvider, faux_text, faux_tool_call, faux_assistant_message
+from cubeloop.providers import FauxProvider, faux_text, faux_tool_call, faux_assistant_message
 
 provider = FauxProvider(provider_id="faux")
 provider.set_responses([
@@ -336,14 +336,14 @@ ingestible by Jaeger, Tempo, Honeycomb, Datadog, AWS X-Ray, or any
 OTLP-compatible backend without custom instrumentation:
 
 ```python
-from cubepi.tracing import Tracer, tracing_context
-from cubepi.tracing.exporters import JsonlSpanExporter
+from cubeloop.tracing import Tracer, tracing_context
+from cubeloop.tracing.exporters import JsonlSpanExporter
 
 async with (
     Tracer(
         service_name="my-bot",
         agent_name="assistant",
-        exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+        exporters=[JsonlSpanExporter(directory="./cubeloop-traces")],
     ) as tracer,
     tracer.attached(agent),
 ):
@@ -357,14 +357,14 @@ Span tree per run:
 ```
 trace
 └── invoke_agent  14425.8ms  [0x1cd97cdb]         ← one per agent.prompt()
-    ├── cubepi.turn  1283.1ms  [0x5cfda93e]        ← one per LLM round-trip
+    ├── cubeloop.turn  1283.1ms  [0x5cfda93e]        ← one per LLM round-trip
     │   ├── chat deepseek-v4-flash  1208.7ms  tok 6845/68  [0x0d130229]
     │   └── execute_tool subagent  9610.2ms  subagent  [0x38bdd10a]
     │       └── invoke_agent  9601.0ms  [0x8094f99b]   ← subagent run, nested
-    │           └── cubepi.turn  9598.4ms  [0x57c5cfc7]
+    │           └── cubeloop.turn  9598.4ms  [0x57c5cfc7]
     │               ├── chat deepseek-v4-flash  1190.3ms  [0x8205ca6b]
     │               └── execute_tool web_search  6500.2ms  web_search  [0xca4e59fc]
-    └── cubepi.turn  491.9ms  ERROR  [0xce25f242]
+    └── cubeloop.turn  491.9ms  ERROR  [0xce25f242]
         └── chat deepseek-v4-flash  427.2ms  ERROR  [0x0bff68ec]
             └── error: Error code: 400 - ... `tool_use` ids were found without
                 `tool_result` blocks immediately after: call_01_...
@@ -373,25 +373,25 @@ trace
 No prompts / model outputs are recorded by default. Opt in with
 `Tracer(record_content=True)` plus a `redact` callback for PII. Pair
 with `Meter(...)` for `gen_ai.client.operation.duration` / TTFC /
-token-usage histograms. Full guide: https://cubepi.ai/docs/guides/tracing/overview
+token-usage histograms. Full guide: https://cubeloop.dev/docs/guides/tracing/overview
 
 #### Inspecting traces from the terminal
 
-With `JsonlSpanExporter` writing to `./cubepi-traces`, inspect runs with the
-`cubepi trace` CLI (install the extra: `pip install cubepi[trace-cli]`). All
-subcommands take `--dir` (default `./cubepi-traces`):
+With `JsonlSpanExporter` writing to `./cubeloop-traces`, inspect runs with the
+`cubeloop trace` CLI (install the extra: `pip install cubeloop[trace-cli]`). All
+subcommands take `--dir` (default `./cubeloop-traces`):
 
 ```bash
-cubepi trace ls                 # recent runs, newest first; the `input`
+cubeloop trace ls                 # recent runs, newest first; the `input`
                                 #   column shows the user message + `status`
-cubepi trace view <run_id>      # render a run as a tree; errors print inline
+cubeloop trace view <run_id>      # render a run as a tree; errors print inline
                                 #   under the failing span (no flag needed).
                                 #   A unique run-id PREFIX is enough.
-cubepi trace view <run> --content   # also expand prompts / tool args / results
-cubepi trace view <run> -v          # expand ALL span attributes (verbose)
-cubepi trace follow <run_id>    # stream spans live as they complete
-cubepi trace stats --by model   # token / latency / error aggregates
-cubepi trace stats --by tool --since 2026-01-01
+cubeloop trace view <run> --content   # also expand prompts / tool args / results
+cubeloop trace view <run> -v          # expand ALL span attributes (verbose)
+cubeloop trace follow <run_id>    # stream spans live as they complete
+cubeloop trace stats --by model   # token / latency / error aggregates
+cubeloop trace stats --by tool --since 2026-01-01
 ```
 
 Typical debugging flow: `ls` (find the run by its `input`), then
@@ -405,11 +405,11 @@ is a subset of it. From trace fields, cache hit rate is
 `cache_read / input_tokens` (≤ 100%) — do **not** add `cache_read` to the
 denominator.
 
-Coding agents debugging cubepi/consumer apps can install the
-[`cubepi-trace` skill](skills/cubepi-trace/SKILL.md):
+Coding agents debugging cubeloop/consumer apps can install the
+[`cubeloop-trace` skill](skills/cubeloop-trace/SKILL.md):
 
 ```bash
-npx skills add cubeplexai/cubepi@cubepi-trace -a claude-code
+npx skills add cubeplexai/cubeloop@cubeloop-trace -a claude-code
 ```
 
 ## AI Agents
@@ -419,8 +419,8 @@ with this repo:
 
 | Skill | Install | Purpose |
 |-------|---------|---------|
-| `cubepi` | `npx skills add cubeplexai/cubepi@cubepi -a claude-code` | Build agents — API reference, tools, middleware, checkpointing, MCP, HITL |
-| `cubepi-trace` | `npx skills add cubeplexai/cubepi@cubepi-trace -a claude-code` | Debug runs — inspect OTel spans, token counts, tool results, streaming failures |
+| `cubeloop` | `npx skills add cubeplexai/cubeloop@cubeloop -a claude-code` | Build agents — API reference, tools, middleware, checkpointing, MCP, HITL |
+| `cubeloop-trace` | `npx skills add cubeplexai/cubeloop@cubeloop-trace -a claude-code` | Debug runs — inspect OTel spans, token counts, tool results, streaming failures |
 
 ## Requirements
 
@@ -430,7 +430,7 @@ with this repo:
 
 ## Credits
 
-Architecture inspired by pi-agent-core (TypeScript); CubePi is an independent Python reimplementation with Pydantic v2, asyncio-native primitives, and built-in checkpointing.
+Architecture inspired by pi-agent-core (TypeScript); CubeLoop is an independent Python reimplementation with Pydantic v2, asyncio-native primitives, and built-in checkpointing.
 
 ## License
 

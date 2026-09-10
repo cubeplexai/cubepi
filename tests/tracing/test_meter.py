@@ -15,11 +15,11 @@ from opentelemetry.sdk.metrics.export import (
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.resources import Resource
 
-from cubepi.agent.agent import Agent
-from cubepi.providers.base import Model
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
-from cubepi.tracing import Meter
-from cubepi.tracing.schema import SCHEMA_URL, SCOPE_NAME
+from cubeloop.agent.agent import Agent
+from cubeloop.providers.base import Model
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.tracing import Meter
+from cubeloop.tracing.schema import SCHEMA_URL, SCOPE_NAME
 
 
 MODEL = Model(id="faux-1", provider_id="faux")
@@ -163,8 +163,8 @@ class TestProviderOnToolMetrics:
         then has no tool entries to update). Codex P2 finding on PR #85."""
         from pydantic import BaseModel
 
-        from cubepi.agent.types import AgentTool, AgentToolResult
-        from cubepi.providers.base import TextContent, ToolCall
+        from cubeloop.agent.types import AgentTool, AgentToolResult
+        from cubeloop.providers.base import TextContent, ToolCall
 
         class P(BaseModel):
             pass
@@ -354,7 +354,7 @@ class TestFallbackChainCoverage:
     """Issue #167 — Meter.attach() should subscribe to every chain provider."""
 
     async def test_attach_subscribes_to_every_chain_provider(self):
-        from cubepi.providers.fallback import FallbackBoundModel
+        from cubeloop.providers.fallback import FallbackBoundModel
 
         primary = FauxProvider(provider_id="primary")
         secondary = FauxProvider(provider_id="secondary")
@@ -376,7 +376,7 @@ class TestFallbackChainCoverage:
         assert len(getattr(secondary, "_request_listeners", [])) == 0
 
     async def test_attach_dedupes_shared_provider_across_chain(self):
-        from cubepi.providers.fallback import FallbackBoundModel
+        from cubeloop.providers.fallback import FallbackBoundModel
 
         shared = FauxProvider(provider_id="shared")
         chain_model = FallbackBoundModel(

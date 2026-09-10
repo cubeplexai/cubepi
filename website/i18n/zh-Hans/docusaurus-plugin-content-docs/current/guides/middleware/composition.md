@@ -1,11 +1,11 @@
 ---
 title: 组合规则
-description: "了解 CubePi 如何通过 per-hook 规则组合多个中间件。"
+description: "了解 CubeLoop 如何通过 per-hook 规则组合多个中间件。"
 ---
 
 # 组合规则
 
-当你传入多个中间件——`Agent(middleware=[m1, m2, m3])`——CubePi 按照
+当你传入多个中间件——`Agent(middleware=[m1, m2, m3])`——CubeLoop 按照
 **每个 hook 各自的规则**进行组合。正确的理解方式是：每个 hook 采用
 最适合其工作的组合规则，你不需要记忆 "before" 或 "after" 优先级猜测。
 
@@ -42,7 +42,7 @@ agent = Agent(
 ## `convert_to_llm`
 
 有意采用最后胜出：这是发送前的最终转换。多个所有者会打架；只选一个。
-CubePi 强制**列表中的最后一个**实现了 `convert_to_llm` 的中间件运行。
+CubeLoop 强制**列表中的最后一个**实现了 `convert_to_llm` 的中间件运行。
 
 如果你发现自己需要两个 `convert_to_llm` 中间件，将它们合并为一个
 （调用点组合：写一个调用两者的中间件）。
@@ -84,7 +84,7 @@ agent = Agent(
 ## `after_tool_call`
 
 每个中间件可以返回一个设置了部分字段的 `AfterToolCallResult`；
-CubePi 合并它们，后面的结果在非 `None` 字段上覆盖前面的。完整结果：
+CubeLoop 合并它们，后面的结果在非 `None` 字段上覆盖前面的。完整结果：
 
 ```python
 class AfterToolCallResult(BaseModel):
@@ -166,7 +166,7 @@ agent = Agent(
 class JustTransform(Middleware):
     async def transform_context(self, messages, *, ctx, signal=None):
         return messages[-10:]
-    # 没有其他 hook。CubePi 不会调用它们。
+    # 没有其他 hook。CubeLoop 不会调用它们。
 ```
 
 ## `on_run_end`

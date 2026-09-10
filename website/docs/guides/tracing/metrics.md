@@ -1,13 +1,13 @@
 ---
 title: Metrics
-description: "Collect token usage, latency, and time-to-first-content metrics in CubePi tracing."
+description: "Collect token usage, latency, and time-to-first-content metrics in CubeLoop tracing."
 sidebar_position: 5
 ---
 
 # Metrics with `Meter`
 
 Spans tell you the shape of one run; histograms tell you the shape of the
-fleet. `cubepi.tracing.Meter` mirrors `Tracer` and emits the OTel GenAI
+fleet. `cubeloop.tracing.Meter` mirrors `Tracer` and emits the OTel GenAI
 metric set so dashboards work out of the box.
 
 ## What it emits
@@ -36,14 +36,14 @@ The idiomatic RAII form — `async with` everything, no manual cleanup:
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
     OTLPMetricExporter,
 )
-from cubepi.tracing import Tracer, Meter
-from cubepi.tracing.exporters import JsonlSpanExporter
+from cubeloop.tracing import Tracer, Meter
+from cubeloop.tracing.exporters import JsonlSpanExporter
 
 async with (
     Tracer(
         service_name="my-bot",
         agent_name="assistant",
-        exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+        exporters=[JsonlSpanExporter(directory="./cubeloop-traces")],
     ) as tracer,
     Meter(
         resource=tracer.resource,    # share Resource so service.* matches spans

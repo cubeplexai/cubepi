@@ -16,7 +16,7 @@ import pytest
 
 def test_import_http_loader() -> None:
     """Loader function is importable from the public module path."""
-    from cubepi.mcp import load_mcp_tools_http
+    from cubeloop.mcp import load_mcp_tools_http
 
     assert callable(load_mcp_tools_http)
 
@@ -116,8 +116,8 @@ def _install_fake_transport(monkeypatch, *, tools, call_response, init_result=No
 @pytest.mark.asyncio
 async def test_load_mcp_tools_http_lists_and_calls_tool(monkeypatch) -> None:
     """Mocked transport: lists tools, then invokes one and serializes response."""
-    from cubepi.mcp import load_mcp_tools_http
-    from cubepi.providers.base import TextContent
+    from cubeloop.mcp import load_mcp_tools_http
+    from cubeloop.providers.base import TextContent
 
     tools_resp = [
         SimpleNamespace(
@@ -172,7 +172,7 @@ async def test_load_mcp_tools_http_lists_and_calls_tool(monkeypatch) -> None:
     assert sessions[1].calls == [("search", {"query": "cats"})]
 
     # text + image preserved; unsupported "resource" dropped
-    from cubepi.providers.base import ImageContent
+    from cubeloop.providers.base import ImageContent
 
     assert len(result.content) == 2
     assert isinstance(result.content[0], TextContent)
@@ -185,7 +185,7 @@ async def test_load_mcp_tools_http_lists_and_calls_tool(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_load_mcp_tools_http_propagates_is_error(monkeypatch) -> None:
-    from cubepi.mcp import load_mcp_tools_http
+    from cubeloop.mcp import load_mcp_tools_http
 
     tools_resp = [
         SimpleNamespace(
@@ -216,7 +216,7 @@ async def test_load_mcp_tools_http_propagates_is_error(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_load_mcp_tools_http_preserves_structured_content(monkeypatch) -> None:
     """structuredContent flows through to AgentToolResult.details."""
-    from cubepi.mcp import load_mcp_tools_http
+    from cubeloop.mcp import load_mcp_tools_http
 
     tools_resp = [
         SimpleNamespace(
@@ -244,7 +244,7 @@ async def test_load_mcp_tools_http_preserves_structured_content(monkeypatch) -> 
 @pytest.mark.asyncio
 async def test_load_mcp_tools_http_handles_empty_content(monkeypatch) -> None:
     """resp.content == None should not break the serializer."""
-    from cubepi.mcp import load_mcp_tools_http
+    from cubeloop.mcp import load_mcp_tools_http
 
     tools_resp = [
         SimpleNamespace(
@@ -274,7 +274,7 @@ async def test_load_mcp_tools_http_streamable_transport(monkeypatch) -> None:
     discovery and per-tool ``call_tool`` must go through the matching
     streamable_http client.
     """
-    from cubepi.mcp import load_mcp_tools_http
+    from cubeloop.mcp import load_mcp_tools_http
 
     tools_resp = [
         SimpleNamespace(
@@ -326,7 +326,7 @@ async def test_load_mcp_tools_http_streamable_transport(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_load_mcp_tools_http_rejects_unknown_transport() -> None:
     """Unknown transport raises ValueError; we do not silently fall back."""
-    from cubepi.mcp import load_mcp_tools_http
+    from cubeloop.mcp import load_mcp_tools_http
 
     with pytest.raises(ValueError, match="unsupported MCP transport"):
         await load_mcp_tools_http(
@@ -338,7 +338,7 @@ async def test_load_mcp_tools_http_rejects_unknown_transport() -> None:
 @pytest.mark.asyncio
 async def test_load_mcp_tools_http_initialize_timeout(monkeypatch) -> None:
     """A session that hangs on initialize must raise TimeoutError, not block."""
-    from cubepi.mcp import load_mcp_tools_http
+    from cubeloop.mcp import load_mcp_tools_http
 
     class _HangingSession:
         def __init__(self, *streams):
@@ -378,11 +378,13 @@ async def test_load_mcp_tools_http_initialize_timeout(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_load_mcp_tools_http_against_test_server() -> None:
     """End-to-end: connect to a real MCP test server, list + call a tool."""
-    server_url = os.environ.get("CUBEPI_TEST_MCP_HTTP_URL")
+    server_url = os.environ.get("CUBELOOP_TEST_MCP_HTTP_URL") or os.environ.get(
+        "CUBEPI_TEST_MCP_HTTP_URL"
+    )
     if not server_url:
-        pytest.skip("Set CUBEPI_TEST_MCP_HTTP_URL to run this test")
+        pytest.skip("Set CUBELOOP_TEST_MCP_HTTP_URL to run this test")
 
-    from cubepi.mcp import load_mcp_tools_http
+    from cubeloop.mcp import load_mcp_tools_http
 
     discovery = await load_mcp_tools_http(server_url)
     assert len(discovery.tools) > 0
@@ -401,7 +403,7 @@ async def test_load_mcp_tools_http_captures_server_info_from_initialize(
     monkeypatch,
 ) -> None:
     """Implementation.icons + websiteUrl + name flow into MCPServerInfo."""
-    from cubepi.mcp import MCPDiscoveryResult, MCPIcon, load_mcp_tools_http
+    from cubeloop.mcp import MCPDiscoveryResult, MCPIcon, load_mcp_tools_http
 
     init_result = SimpleNamespace(
         serverInfo=SimpleNamespace(
@@ -450,7 +452,7 @@ async def test_load_mcp_tools_http_captures_server_info_from_initialize(
 @pytest.mark.asyncio
 async def test_load_mcp_tools_http_captures_per_tool_icons(monkeypatch) -> None:
     """Per-tool ``Tool.icons`` flow into ``tool_infos`` keyed by tool name."""
-    from cubepi.mcp import MCPIcon, load_mcp_tools_http
+    from cubeloop.mcp import MCPIcon, load_mcp_tools_http
 
     tools_resp = [
         SimpleNamespace(
@@ -482,7 +484,7 @@ async def test_load_mcp_tools_http_captures_per_tool_icons(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_load_mcp_tools_http_handles_missing_server_icons(monkeypatch) -> None:
     """Server without icons / websiteUrl yields MCPServerInfo with empty defaults."""
-    from cubepi.mcp import load_mcp_tools_http
+    from cubeloop.mcp import load_mcp_tools_http
 
     init_result = SimpleNamespace(
         serverInfo=SimpleNamespace(
@@ -514,7 +516,7 @@ def test_stamp_session_id_handles_otel_missing(monkeypatch) -> None:
     tracing extra is installed (defensive-branch coverage)."""
     import builtins
 
-    from cubepi.mcp import http_loader
+    from cubeloop.mcp import http_loader
 
     real_import = builtins.__import__
 
@@ -532,7 +534,7 @@ def test_stamp_session_id_noop_without_active_span() -> None:
     """When no recording span is active (``ctx.is_valid == False``)
     ``_stamp_session_id`` must return without touching the span
     (defensive-branch coverage)."""
-    from cubepi.mcp import http_loader
+    from cubeloop.mcp import http_loader
 
     # No tracer provider set up — get_current_span returns the OTel
     # NonRecordingSpan whose ctx.is_valid is False.
@@ -555,7 +557,7 @@ def test_stamp_session_id_swallows_set_attribute_errors(monkeypatch) -> None:
         def set_attribute(self, *_a, **_kw):
             raise RuntimeError("boom")
 
-    from cubepi.mcp import http_loader
+    from cubeloop.mcp import http_loader
 
     monkeypatch.setattr(_otel_trace, "get_current_span", lambda: _BoomSpan())
     # Must not raise.
@@ -599,7 +601,7 @@ async def test_stamp_session_id_attaches_attr_to_current_span() -> None:
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     tracer = provider.get_tracer("test")
 
-    from cubepi.mcp.http_loader import _stamp_session_id
+    from cubeloop.mcp.http_loader import _stamp_session_id
 
     with tracer.start_as_current_span("test-span"):
         _stamp_session_id("session-abc-123")

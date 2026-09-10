@@ -1,6 +1,6 @@
-from cubepi.providers.base import AssistantMessage, BaseProvider, BoundModel, Model
-from cubepi.providers.base import TextContent
-from cubepi.providers.faux import FauxProvider
+from cubeloop.providers.base import AssistantMessage, BaseProvider, BoundModel, Model
+from cubeloop.providers.base import TextContent
+from cubeloop.providers.faux import FauxProvider
 
 
 def test_base_provider_model_binds_runtime_provider_and_model_spec() -> None:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cubepi.cli.trace.loader import (
+from cubeloop.cli.trace.loader import (
     RunResolutionError,
     list_runs,
     load_run,
@@ -267,8 +267,8 @@ def test_run_prompt_prefers_root_over_subagent_invoke_agent():
     # the ROOT (parent-less) invoke_agent, not a subagent's. The subagent span
     # is placed FIRST in the list so this distinguishes the parent-less filter
     # from plain iteration order (which would otherwise pick the subagent).
-    from cubepi.cli.trace.loader import _run_prompt
-    from cubepi.cli.trace.model import Span
+    from cubeloop.cli.trace.loader import _run_prompt
+    from cubeloop.cli.trace.model import Span
 
     sub = Span(
         _span(
@@ -362,8 +362,8 @@ def test_list_runs_filters_by_meta(tmp_path):
 
 
 def test_filter_spans_by_meta():
-    from cubepi.cli.trace.loader import filter_spans_by_meta
-    from cubepi.cli.trace.model import Span
+    from cubeloop.cli.trace.loader import filter_spans_by_meta
+    from cubeloop.cli.trace.model import Span
 
     def sp(trace_id, span_id, parent, name, **attrs):
         return Span(

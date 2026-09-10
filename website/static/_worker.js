@@ -1,10 +1,11 @@
 // Cloudflare Pages "advanced mode" Worker.
 //
-// The site moved from the default *.pages.dev hostname to the custom domain
-// cubepi.ai, but only the root path was redirecting — deep pages still served
-// 200 on cubepi.pages.dev (duplicate content on two domains). This 301-redirects
-// the production pages.dev hostname to the matching cubepi.ai path so the domain
-// migration sends search engines one clean 1:1 signal.
+// The site moved from cubepi.pages.dev → cubepi.ai → cubeloop.dev. The Pages
+// project is still named `cubepi`, so the production pages.dev hostname remains
+// cubepi.pages.dev (preview URLs are <hash>.cubepi.pages.dev). This 301s that
+// hostname — and cubeloop.pages.dev if the project is later renamed — to the
+// matching cubeloop.dev path. Search Console Change of Address requires a
+// single hop; chaining through cubepi.ai fails Google's 301 check.
 //
 // Why _worker.js (advanced mode) and not functions/_middleware.js:
 //   The site is deployed via Direct Upload (cloudflare/pages-action uploads
@@ -22,8 +23,11 @@
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.hostname === "cubepi.pages.dev") {
-      url.hostname = "cubepi.ai";
+    if (
+      url.hostname === "cubepi.pages.dev" ||
+      url.hostname === "cubeloop.pages.dev"
+    ) {
+      url.hostname = "cubeloop.dev";
       url.protocol = "https:";
       url.port = "";
       return Response.redirect(url.toString(), 301);

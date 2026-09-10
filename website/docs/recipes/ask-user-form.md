@@ -1,6 +1,6 @@
 ---
 title: Multi-question Form via ask_user
-description: "Build a multi-question form with CubePi's ask_user HITL tool for structured user input."
+description: "Build a multi-question form with CubeLoop's ask_user HITL tool for structured user input."
 ---
 
 # Recipe: Multi-question Form via `ask_user`
@@ -11,8 +11,8 @@ proceed — a configuration wizard, a preference selector, a feature toggle.
 ## Step 1: Register the tool
 
 ```python
-from cubepi.agent.agent import Agent
-from cubepi.hitl import InMemoryChannel, ask_user_tool
+from cubeloop.agent.agent import Agent
+from cubeloop.hitl import InMemoryChannel, ask_user_tool
 
 channel = InMemoryChannel()
 
@@ -153,8 +153,8 @@ accordingly — ask again, fall back to a default, or report to the user.
 
 ```python
 import asyncio
-from cubepi.agent.agent import Agent
-from cubepi.hitl import InMemoryChannel, ask_user_tool
+from cubeloop.agent.agent import Agent
+from cubeloop.hitl import InMemoryChannel, ask_user_tool
 
 channel = InMemoryChannel()
 
@@ -186,12 +186,12 @@ asyncio.run(main())
 ## Run the example
 
 A self-contained, runnable version of this recipe is in the repository at
-[`examples/ask_user_form.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/ask_user_form.py).
+[`examples/ask_user_form.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/ask_user_form.py).
 The host loop answers all questions programmatically so you can observe the
 full round-trip without wiring up a real UI.
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync
 
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]

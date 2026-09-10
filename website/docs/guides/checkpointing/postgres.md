@@ -13,7 +13,7 @@ the same `thread_id` without trampling each other.
 Install the extra:
 
 ```bash
-pip install "cubepi[postgres]"
+pip install "cubeloop[postgres]"
 ```
 
 This pulls in `asyncpg`, `sqlalchemy`, and `msgpack`.
@@ -22,9 +22,9 @@ This pulls in `asyncpg`, `sqlalchemy`, and `msgpack`.
 
 ```python
 import asyncio
-from cubepi import Agent
-from cubepi.checkpointer import PostgresCheckpointer
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.checkpointer import PostgresCheckpointer
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 async def main():
@@ -54,15 +54,15 @@ async with PostgresCheckpointer(
 
 ## Schema
 
-The checkpointer expects `cubepi_threads`, `cubepi_messages`,
-`cubepi_runs`, `cubepi_hitl_answers`, and `cubepi_schema_version`.
-Unlike SQLite, CubePi
+The checkpointer expects `cubeloop_threads`, `cubeloop_messages`,
+`cubeloop_runs`, `cubeloop_hitl_answers`, and `cubeloop_schema_version`.
+Unlike SQLite, CubeLoop
 **does not create these for you** — it verifies on `__aenter__` that
 they exist with the expected `schema_version`.
 
-If they're missing, you get `CubepiSchemaUninitialized`. If the
-version doesn't match this CubePi release, you get
-`CubepiSchemaMismatch`.
+If they're missing, you get `CubeloopSchemaUninitialized`. If the
+version doesn't match this CubeLoop release, you get
+`CubeloopSchemaMismatch`.
 
 The reason: a production database belongs to the host application's
 migration system (Alembic, Atlas, …), not to a third-party library
@@ -70,78 +70,81 @@ that might fight your existing migrations.
 
 ### Bootstrapping via Alembic
 
-CubePi exposes the SQLAlchemy `MetaData` so your migrations can adopt
+CubeLoop exposes the SQLAlchemy `MetaData` so your migrations can adopt
 the schema:
 
 ```python
 # alembic/env.py
-from cubepi.checkpointer.postgres import cubepi_metadata, EXPECTED_SCHEMA_VERSION
+from cubeloop.checkpointer.postgres import cubeloop_metadata, EXPECTED_SCHEMA_VERSION
 
-target_metadata = [my_app_metadata, cubepi_metadata]
+target_metadata = [my_app_metadata, cubeloop_metadata]
 ```
 
 Then autogenerate a revision:
 
 ```bash
-alembic revision --autogenerate -m "add cubepi checkpointer"
+alembic revision --autogenerate -m "add cubeloop checkpointer"
 ```
 
-Autogenerate emits the `CREATE TABLE`s from `cubepi_metadata`, but
-SQLAlchemy `MetaData` **cannot model two things CubePi needs**, so add
+Autogenerate emits the `CREATE TABLE`s from `cubeloop_metadata`, but
+SQLAlchemy `MetaData` **cannot model two things CubeLoop needs**, so add
 them to the generated migration by hand: the 64 hash partitions of
-`cubepi_messages` (via `create_message_partitions_op()`) and the
-`cubepi_schema_version` row (via `write_schema_version_op()`). Use the
-helpers:
+`cubeloop_messages` (via `create_message_partitions_op()`), the 64
+partitions of `cubeloop_runs` (via `create_runs_partitions_op()`), and
+the `cubeloop_schema_version` row (via `write_schema_version_op()`). Use
+the helpers:
 
 ```python
 # In a migration's upgrade():
-from cubepi.checkpointer.postgres.alembic_helpers import (
+from cubeloop.checkpointer.postgres.alembic_helpers import (
     create_message_partitions_op,
+    create_runs_partitions_op,
     write_schema_version_op,
 )
 
 def upgrade():
-    op.create_table(...)                            # auto-generated from cubepi_metadata
-    op.execute(create_message_partitions_op())      # creates the 64 hash partitions
+    op.create_table(...)                            # auto-generated from cubeloop_metadata
+    op.execute(create_message_partitions_op())      # 64 hash partitions of cubeloop_messages
+    op.execute(create_runs_partitions_op())         # 64 hash partitions of cubeloop_runs
     op.execute(write_schema_version_op())           # records EXPECTED_SCHEMA_VERSION
 ```
 
 Both helpers return a SQL string — you pass them to `op.execute(...)`.
 `write_schema_version_op()` is idempotent: it deletes any rows from a
-prior CubePi version and inserts the current one.
+prior CubeLoop version and inserts the current one.
 
-When CubePi later upgrades and bumps `EXPECTED_SCHEMA_VERSION`, you
+When CubeLoop later upgrades and bumps `EXPECTED_SCHEMA_VERSION`, you
 generate a new revision and call `op.execute(write_schema_version_op())`
 again.
 
 ## Data model
 
 ```
-cubepi_threads
+cubeloop_threads
     thread_id (PK)
     parent_thread_id   -- for forks
     forked_at_seq      -- seq number at fork point
     extra              -- JSONB
     created_at / updated_at
 
-cubepi_messages
+cubeloop_messages
     thread_id, seq     -- composite PK; partitioned by HASH(thread_id) into 64
     role               -- "user" | "assistant" | "tool"
     metadata           -- JSONB (indexed via GIN)
     payload            -- bytea (msgpack)
     created_at
 
-cubepi_runs
+cubeloop_runs
     thread_id, run_id  -- composite PK
     claimed_at / completed_at
     completion_seq
 
-cubepi_hitl_answers
+cubeloop_hitl_answers
     thread_id, run_id, question_id -- composite PK
     answer                         -- JSONB
     answered_at
 
-cubepi_schema_version
+cubeloop_schema_version
     version (PK)
 ```
 
@@ -151,7 +154,7 @@ Important properties:
   per thread, allocated under a `pg_advisory_xact_lock(hashtext(thread_id))`.
   Two concurrent writers on the same thread serialize cleanly.
 - **`payload` is msgpack-encoded `model.model_dump(mode="json")`.**
-  CubePi reconstructs the Pydantic model on read.
+  CubeLoop reconstructs the Pydantic model on read.
 - **`metadata` is JSONB, queryable.** The full message also has
   `metadata` inside the payload, but the column is the canonical view
   for SQL queries.
@@ -179,7 +182,7 @@ The pool default of `min=1, max=10` is fine for most apps; bump
 `save_extra` does a JSONB merge, not a replace:
 
 ```sql
-extra = cubepi_threads.extra || EXCLUDED.extra
+extra = cubeloop_threads.extra || EXCLUDED.extra
 ```
 
 So writing `{"foo": 1}` then `{"bar": 2}` leaves `{"foo": 1, "bar":
@@ -191,8 +194,8 @@ keys.
 `PostgresCheckpointer` implements the v4 `snapshot` / `fork` /
 `claim_run` / `mark_run_complete` / `load_pending` Protocol methods,
 so it supports both `Agent.fork(...)` and `Agent.fork_once(...)`. The
-`parent_thread_id` and `forked_at_seq` columns on `cubepi_threads`
-record fork lineage; `cubepi_runs` (the v4 partitioned table) tracks
+`parent_thread_id` and `forked_at_seq` columns on `cubeloop_threads`
+record fork lineage; `cubeloop_runs` (the v4 partitioned table) tracks
 per-run claim/completion state.
 
 See the [Conversation Forking](../agents/forking) guide for the user-facing
@@ -207,7 +210,7 @@ partitions. Use the provided alembic helper:
 
 ```python
 # In a migration's upgrade():
-from cubepi.checkpointer.postgres.alembic_helpers import (
+from cubeloop.checkpointer.postgres.alembic_helpers import (
     upgrade_v3_to_v4_op,
     write_schema_version_op,
 )
@@ -233,7 +236,7 @@ cycle completes.
 
 ```python
 # In a migration's upgrade():
-from cubepi.checkpointer.postgres.alembic_helpers import (
+from cubeloop.checkpointer.postgres.alembic_helpers import (
     upgrade_v4_to_v5_op,
     write_schema_version_op,
 )
@@ -243,20 +246,41 @@ def upgrade():
     op.execute(write_schema_version_op())  # bumps cubepi_schema_version to 5
 ```
 
+## Schema v5 → v6 migration
+
+0.14 renames the Postgres tables from `cubepi_*` to `cubeloop_*`.
+`EXPECTED_SCHEMA_VERSION` is 6. Apply this **before** opening a 0.14
+checkpointer on an existing database:
+
+```python
+from cubeloop.checkpointer.postgres.alembic_helpers import (
+    upgrade_v5_to_v6_op,
+    write_schema_version_op,
+)
+
+def upgrade():
+    op.execute(upgrade_v5_to_v6_op())
+    op.execute(write_schema_version_op())  # writes 6 into cubeloop_schema_version
+```
+
+Do not run the v6 `CREATE TABLE` helpers against a v5 database — they
+would try to create tables that already exist under the old names.
+See the [migration guide](../../migration/from-cubepi).
+
 ## Common pitfalls
 
-- **`CubepiSchemaUninitialized`** — Your DB is empty or your
+- **`CubeloopSchemaUninitialized`** — Your DB is empty or your
   migrations didn't run. Apply the host alembic upgrade first.
-- **`CubepiSchemaMismatch`** — You upgraded CubePi but didn't generate
-  a new migration. Generate one, apply it, and CubePi will start.
+- **`CubeloopSchemaMismatch`** — You upgraded CubeLoop but didn't generate
+  a new migration. Generate one, apply it, and CubeLoop will start.
   
   :::info Schema v2 (HITL)
 
-  CubePi ≥ the HITL feature bumps `EXPECTED_SCHEMA_VERSION` from 1 to 2
+  CubeLoop ≥ the HITL feature bumps `EXPECTED_SCHEMA_VERSION` from 1 to 2
   and adds a `pending_request JSONB NULL` column to `cubepi_threads`.
   Your host alembic upgrade must call
   `add_pending_request_column_op()` (from
-  `cubepi.checkpointer.postgres.alembic_helpers`) before bumping the
+  `cubeloop.checkpointer.postgres.alembic_helpers`) before bumping the
   schema_version row. See the [HITL guide](../hitl/overview) for the full
   cross-process flow.
   :::
@@ -265,15 +289,15 @@ def upgrade():
 - **`asyncpg.exceptions.UndefinedTableError` outside `__aenter__`** —
   Means you're using the checkpointer outside of `async with`. The
   pool isn't connected yet. Wrap in the context manager.
-- **Mixing host SQLAlchemy `MetaData`** — CubePi ships its own
+- **Mixing host SQLAlchemy `MetaData`** — CubeLoop ships its own
   `MetaData` instance precisely so it can coexist with your app's
   models without colliding. Don't merge them into your global metadata
   — pass both to Alembic separately.
 - **`CheckpointCorruptionError` on `load()`** — A persisted message row
   failed to deserialize (bad msgpack payload, schema-invalid data, or an
-  unknown role). The error's `row_ref` (e.g. `cubepi_messages.seq=42`)
+  unknown role). The error's `row_ref` (e.g. `cubeloop_messages.seq=42`)
   locates the bad row for inspection or surgical repair; `thread_id` and
-  `__cause__` carry the rest. CubePi never skips corrupt rows silently —
+  `__cause__` carry the rest. CubeLoop never skips corrupt rows silently —
   dropping a message that carries `tool_calls` would leave the
   transcript in a state every provider rejects.
 
@@ -283,5 +307,5 @@ def upgrade():
 - [Custom Backends](./custom) — Protocol details.
 - [Recipes → Postgres + FastAPI Service](../../recipes/postgres-fastapi)
   — a deployable HTTP-fronted agent.
-- [Package README](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/README.md)
+- [Package README](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/checkpointer/postgres/README.md)
   — the full host-integration runbook next to the code.

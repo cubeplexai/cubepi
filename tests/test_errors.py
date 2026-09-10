@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cubepi.errors import (
+from cubeloop.errors import (
     ContentFiltered,
     ContextLengthExceeded,
     ModelNotFound,
@@ -20,7 +20,7 @@ from cubepi.errors import (
     _status_of,
     classify_and_raise,
 )
-from cubepi.providers.base import Model, TextContent, UserMessage
+from cubeloop.providers.base import Model, TextContent, UserMessage
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +370,7 @@ class TestSDKConnectionErrors:
 
 class TestErrorCodeExtraction:
     def test_openai_error_code(self) -> None:
-        from cubepi.errors import extract_error_code
+        from cubeloop.errors import extract_error_code
 
         exc = _FakeExc("nope", status_code=400)
         exc.body = {
@@ -396,7 +396,7 @@ class TestErrorCodeExtraction:
         assert not isinstance(ei.value, ModelNotFound)
 
     def test_nested_error_object_and_attr_error(self) -> None:
-        from cubepi.errors import extract_error_code
+        from cubeloop.errors import extract_error_code
 
         nested = _FakeExc("x", status_code=400)
         nested.error = {"error": {"code": "model_not_available"}}
@@ -412,7 +412,7 @@ class TestErrorCodeExtraction:
         assert extract_error_code(attr) == "content_filter"
 
     def test_type_fallback_and_param_model(self) -> None:
-        from cubepi.errors import extract_error_code
+        from cubeloop.errors import extract_error_code
 
         typ = _FakeExc("x", status_code=400)
         typ.error = {"type": "invalid_model"}
@@ -427,7 +427,7 @@ class TestErrorCodeExtraction:
         assert extract_error_code(other) == "overloaded_error"
 
     def test_looks_like_model_not_found_gates(self) -> None:
-        from cubepi.errors import _looks_like_model_not_found
+        from cubeloop.errors import _looks_like_model_not_found
 
         assert _looks_like_model_not_found(status=500, code="model_not_found", msg="x")
         assert _looks_like_model_not_found(
@@ -441,12 +441,12 @@ class TestErrorCodeExtraction:
         )
 
     def test_content_filtered_by_code(self) -> None:
-        from cubepi.errors import _looks_like_content_filtered
+        from cubeloop.errors import _looks_like_content_filtered
 
         assert _looks_like_content_filtered(code="content_filter", msg="nope")
 
     def test_classify_string_error_branches(self) -> None:
-        from cubepi.errors import classify_string_error
+        from cubeloop.errors import classify_string_error
 
         assert isinstance(
             classify_string_error("maximum context length exceeded"),
@@ -469,7 +469,7 @@ class TestErrorCodeExtraction:
         )
 
     def test_error_from_stream_fields_context_length(self) -> None:
-        from cubepi.errors import error_from_stream_fields
+        from cubeloop.errors import error_from_stream_fields
 
         err = error_from_stream_fields(
             error_message="too long",
@@ -481,7 +481,7 @@ class TestErrorCodeExtraction:
         assert err.tokens_in == 99
 
     def test_annotate_error_event_typed_and_raw(self) -> None:
-        from cubepi.errors import annotate_error_event
+        from cubeloop.errors import annotate_error_event
 
         rl = RateLimited("wait", retry_after=1.5, provider="p", model="m")
         fields = annotate_error_event(rl)

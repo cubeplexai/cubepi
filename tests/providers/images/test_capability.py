@@ -1,4 +1,4 @@
-from cubepi.providers.images.capability import (
+from cubeloop.providers.images.capability import (
     ImagesCapabilityDescriptor,
     SizeSpec,
 )

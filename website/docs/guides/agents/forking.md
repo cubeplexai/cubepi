@@ -5,7 +5,7 @@ description: "Branch a conversation at a completed-run boundary — persistent f
 
 # Conversation Forking
 
-A **fork** branches a conversation at a completed-run boundary. CubePi
+A **fork** branches a conversation at a completed-run boundary. CubeLoop
 gives you two variants:
 
 - **`Agent.fork(...)`** — a *persistent* fork. Copies messages from the
@@ -159,8 +159,8 @@ When you use `ask_user_tool` or `ApprovalPolicyMiddleware` with a
 
 ```python
 import uuid
-from cubepi import Agent
-from cubepi.hitl import CheckpointedChannel, ask_user_tool
+from cubeloop import Agent
+from cubeloop.hitl import CheckpointedChannel, ask_user_tool
 
 run_id = uuid.uuid4().hex
 channel = CheckpointedChannel(checkpointer=cp, thread_id="conv_123", run_id=run_id)
@@ -204,7 +204,7 @@ upgrade path:
 
 ## Legacy data behaviour
 
-CubePi treats messages from before this feature (no `run_id`
+CubeLoop treats messages from before this feature (no `run_id`
 column populated, i.e. `run_id IS NULL`) gracefully:
 
 - **Mixed threads** — a thread that already has legacy messages and

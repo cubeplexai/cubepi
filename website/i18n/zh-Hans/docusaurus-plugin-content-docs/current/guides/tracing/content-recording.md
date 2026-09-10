@@ -1,12 +1,12 @@
 ---
 title: 内容记录与脱敏
-description: "在 CubePi 的 OpenTelemetry tracing 中配置 prompt 内容记录与脱敏。"
+description: "在 CubeLoop 的 OpenTelemetry tracing 中配置 prompt 内容记录与脱敏。"
 sidebar_position: 4
 ---
 
 # 记录 Prompt、响应与工具 Payload
 
-CubePi 的 tracing 默认只发出结构性属性——操作名称、模型、token 数量、
+CubeLoop 的 tracing 默认只发出结构性属性——操作名称、模型、token 数量、
 结束原因、耗时。**不会有 prompt 内容、模型输出、工具参数或结果离开进程。**
 这是有意为之：很多 agent 场景处理 PII、客户数据或商业机密 prompt，
 这些内容不应发送到第三方可观测性后端。
@@ -22,7 +22,7 @@ tracer = Tracer(
     service_name="my-bot",
     agent_name="assistant",
     record_content=True,            # ← 显式开启
-    exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+    exporters=[JsonlSpanExporter(directory="./cubeloop-traces")],
 )
 ```
 
@@ -32,8 +32,8 @@ tracer = Tracer(
 | Span | 新增内容属性 |
 |---|---|
 | `invoke_agent` | `gen_ai.system_instructions`、`gen_ai.input.messages`、`gen_ai.output.messages` |
-| `cubepi.turn` | `gen_ai.input.messages`（per-turn 切片）、`gen_ai.output.messages`（per-turn 切片） |
-| `chat <model>` | `gen_ai.system_instructions`、`gen_ai.input.messages`、`gen_ai.tool.definitions`、`cubepi.llm.raw_request`、`cubepi.llm.raw_response` |
+| `cubeloop.turn` | `gen_ai.input.messages`（per-turn 切片）、`gen_ai.output.messages`（per-turn 切片） |
+| `chat <model>` | `gen_ai.system_instructions`、`gen_ai.input.messages`、`gen_ai.tool.definitions`、`cubeloop.llm.raw_request`、`cubeloop.llm.raw_response` |
 | `execute_tool <tool_name>` | `gen_ai.tool.call.arguments`、`gen_ai.tool.call.result` |
 
 `chat` span 的 `gen_ai.input.messages` 包含 provider 请求实际携带的
@@ -56,7 +56,7 @@ def redact(key: str, value):
     if key in ("gen_ai.input.messages", "gen_ai.output.messages"):
         return _scrub_messages(value)
     # 在生产环境中不发送原始请求/响应体——只保留规范化后的结构。
-    if key in ("cubepi.llm.raw_request", "cubepi.llm.raw_response"):
+    if key in ("cubeloop.llm.raw_request", "cubeloop.llm.raw_response"):
         return None
     return value
 
@@ -116,8 +116,8 @@ OTel 属性值在 recorder 内部以 JSON 序列化。大多数后端会截断�
 tracer = Tracer(
     record_content=True,            # trace convert 所需
     record_stream=True,             # ← 逐块事件日志
-    stream_dir="./cubepi-traces",   # <run_id>.stream.jsonl 的写入目录
-    exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+    stream_dir="./cubeloop-traces",   # <run_id>.stream.jsonl 的写入目录
+    exporters=[JsonlSpanExporter(directory="./cubeloop-traces")],
 )
 ```
 
@@ -129,7 +129,7 @@ tracer = Tracer(
 ```json
 {"t": 5.873, "type": "toolcall_start", "ci": 1, "id": "toolu_...", "name": "show_widget"}
 {"t": 5.875, "type": "toolcall_delta", "ci": 1, "chars": 11, "accumulated": 11, "preview": "{\"title\": \""}
-{"t": 33.177, "type": "toolcall_end",  "ci": 1, "id": "toolu_...", "args_chars": 7465, "args_preview": "{\"title\": \"CubePi..."}
+{"t": 33.177, "type": "toolcall_end",  "ci": 1, "id": "toolu_...", "args_chars": 7465, "args_preview": "{\"title\": \"CubeLoop..."}
 ```
 
 通过这些数据，可以方便地确认参数 chunk 是否按预期到达，或者同一事件是否
@@ -142,7 +142,7 @@ tracer = Tracer(
 ## 审计已记录的内容
 
 recorder 始终在每个 span 上设置 `service.name`、`gen_ai.agent.name` 和
-`cubepi.run_id`——无论 `record_content` 是否开启。使用这些属性在 trace
+`cubeloop.run_id`——无论 `record_content` 是否开启。使用这些属性在 trace
 后端过滤到单次运行，并直观确认哪些数据已落地。
 
 如需深度审计，`JsonlSpanExporter` 每行写入一个 span，因此可以在将同一
@@ -150,5 +150,5 @@ exporter 指向远程后端之前，先对本地文件进行 grep / `jq` 检查�
 
 ```bash
 jq -r 'select(.attributes["gen_ai.input.messages"]) | .attributes["gen_ai.input.messages"]' \
-   cubepi-traces/2026-05-19/*.jsonl
+   cubeloop-traces/2026-05-19/*.jsonl
 ```

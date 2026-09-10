@@ -19,14 +19,14 @@ import asyncio
 
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.exceptions import (
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.exceptions import (
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
 )
-from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
-from cubepi.providers.base import AssistantMessage, TextContent
-from cubepi.providers.faux import FauxProvider
+from cubeloop.checkpointer.postgres.checkpointer import PostgresCheckpointer
+from cubeloop.providers.base import AssistantMessage, TextContent
+from cubeloop.providers.faux import FauxProvider
 
 
 def _ok_faux() -> FauxProvider:

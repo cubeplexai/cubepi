@@ -1,12 +1,12 @@
 ---
 title: Overview
 sidebar_position: 1
-description: "CubePi human-in-the-loop: the channel, the three verbs (confirm, approve, ask), and timeouts."
+description: "CubeLoop human-in-the-loop: the channel, the three verbs (confirm, approve, ask), and timeouts."
 ---
 
 # Human-in-the-Loop (HITL)
 
-CubePi's HITL channel lets an agent **pause and ask a human** before proceeding.
+CubeLoop's HITL channel lets an agent **pause and ask a human** before proceeding.
 It handles two recurring patterns with a single primitive:
 
 1. **Sandbox tool confirmation** — a dangerous tool (bash, file writes, API
@@ -55,7 +55,7 @@ cover the full spectrum:
      └──────────────────────────────────────┘
                        │
          ┌─────────────▼──────────────┐
-         │   cubepi Agent loop        │
+         │   cubeloop Agent loop      │
          │   (BeforeToolCallResult    │
          │    carries hitl_trace)     │
          └────────────────────────────┘
@@ -69,7 +69,7 @@ For single-process use. Holds an `asyncio.Future` internally — the host
 calls `channel.answer()` from the same event loop.
 
 ```python
-from cubepi.hitl import InMemoryChannel
+from cubeloop.hitl import InMemoryChannel
 
 channel = InMemoryChannel(
     default_timeout=180.0,  # per-call timeout; None = no timeout (default)
@@ -84,8 +84,8 @@ is persisted via `Checkpointer.save_pending_request(thread_id, ...)`. On
 suspend), the pending stays so a later `Agent.respond()` can resume.
 
 ```python
-from cubepi.hitl import CheckpointedChannel
-from cubepi.checkpointer.sqlite import SQLiteCheckpointer  # or postgres / mysql
+from cubeloop.hitl import CheckpointedChannel
+from cubeloop.checkpointer.sqlite import SQLiteCheckpointer  # or postgres / mysql
 
 async with SQLiteCheckpointer("path/to.db") as cp:
     channel = CheckpointedChannel(
@@ -135,7 +135,7 @@ A structured form with one or more `Question` objects. Each question can be:
 - **"Other" with input** (option has `allow_input=True` — user types free text)
 
 ```python
-from cubepi.hitl.types import Question, Option
+from cubeloop.hitl.types import Question, Option
 
 answers = await channel.ask([
     Question(key="framework", prompt="Which framework?", options=[

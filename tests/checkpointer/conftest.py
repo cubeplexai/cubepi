@@ -13,8 +13,11 @@ import pytest_asyncio
 def pg_dsn() -> str:
     """Postgres DSN for tests. Override via CUBEPI_TEST_PG_DSN env."""
     return os.environ.get(
-        "CUBEPI_TEST_PG_DSN",
-        "postgresql://postgres:postgres@localhost:5432/postgres",
+        "CUBELOOP_TEST_PG_DSN",
+        os.environ.get(
+            "CUBEPI_TEST_PG_DSN",
+            "postgresql://postgres:postgres@localhost:5432/postgres",
+        ),
     )
 
 
@@ -79,13 +82,16 @@ async def pg_v4_dsn(clean_db: str):
 def mysql_dsn() -> str:
     """MySQL DSN for tests. Override via CUBEPI_TEST_MYSQL_DSN env."""
     return os.environ.get(
-        "CUBEPI_TEST_MYSQL_DSN",
-        "mysql://root:root@localhost:3306/mysql",
+        "CUBELOOP_TEST_MYSQL_DSN",
+        os.environ.get(
+            "CUBEPI_TEST_MYSQL_DSN",
+            "mysql://root:root@localhost:3306/mysql",
+        ),
     )
 
 
 def _mysql_cfg(dsn: str) -> dict:
-    from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
+    from cubeloop.checkpointer.mysql.checkpointer import _parse_dsn
 
     return _parse_dsn(dsn)
 

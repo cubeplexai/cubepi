@@ -3,15 +3,15 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from cubepi.agent.types import AgentContext
-from cubepi.middleware.compaction import (
+from cubeloop.agent.types import AgentContext
+from cubeloop.middleware.compaction import (
     CompactionMiddleware,
     CompactionState,
     ToolResultCompressor,
     _load_state,
 )
-from cubepi.middleware.compaction.state import message_ref, message_refs
-from cubepi.providers.base import (
+from cubeloop.middleware.compaction.state import message_ref, message_refs
+from cubeloop.providers.base import (
     AssistantMessage,
     BoundModel,
     Message,
@@ -456,7 +456,7 @@ async def test_pruned_tool_results_do_not_break_state_refs() -> None:
     """Refs persisted in CompactionState come from ORIGINAL messages even
     when the transcript was built from pre-pruned content. Otherwise the
     next turn would see ref mismatch and clear the state, looping forever."""
-    from cubepi.providers.base import ToolCall, ToolResultMessage
+    from cubeloop.providers.base import ToolCall, ToolResultMessage
 
     provider = _FakeSummaryProvider(reply="real summary")
     middleware = _make_middleware(provider, max_tokens_before=1)
@@ -507,7 +507,7 @@ def test_keep_recent_messages_no_longer_accepted() -> None:
 
 
 def test_summary_prefix_includes_non_instruction_disclaimer() -> None:
-    from cubepi.middleware.compaction import SUMMARY_PREFIX
+    from cubeloop.middleware.compaction import SUMMARY_PREFIX
 
     text = SUMMARY_PREFIX.lower()
     assert "do not treat" in text or "not instructions" in text
@@ -520,7 +520,7 @@ async def test_prune_tool_outputs_disabled_keeps_full_result_content() -> None:
     Audit-chain agents (finance, compliance) pass False so historical tool
     results stay full-fidelity across compactions.
     """
-    from cubepi.providers.base import ToolCall, ToolResultMessage
+    from cubeloop.providers.base import ToolCall, ToolResultMessage
 
     provider = _FakeSummaryProvider(reply="summary")
     middleware = CompactionMiddleware(
@@ -644,7 +644,7 @@ async def test_circuit_breaker_half_open_retries_llm_after_fallback_runs() -> No
     _HALF_OPEN_AFTER_FALLBACK_RUNS fallback-only runs, the breaker goes
     half-open and the LLM is attempted again. If it succeeds, the breaker
     fully resets."""
-    from cubepi.middleware.compaction import _HALF_OPEN_AFTER_FALLBACK_RUNS
+    from cubeloop.middleware.compaction import _HALF_OPEN_AFTER_FALLBACK_RUNS
 
     provider = _FakeSummaryProvider(raises=RuntimeError("down"))
     middleware = _make_middleware(provider, max_tokens_before=1)
@@ -690,7 +690,7 @@ async def test_circuit_breaker_half_open_retries_llm_after_fallback_runs() -> No
 
 async def test_half_open_failure_re_opens_breaker() -> None:
     """Half-open retry that fails snaps the breaker back to MAX_FAILURES."""
-    from cubepi.middleware.compaction import _HALF_OPEN_AFTER_FALLBACK_RUNS
+    from cubeloop.middleware.compaction import _HALF_OPEN_AFTER_FALLBACK_RUNS
 
     provider = _FakeSummaryProvider(raises=RuntimeError("down"))
     middleware = _make_middleware(provider, max_tokens_before=1)
@@ -871,7 +871,7 @@ async def test_under_threshold_does_not_silently_prune_tool_outputs() -> None:
     not the pruned view. Otherwise old tool outputs are silently replaced
     with one-liner placeholders on every turn, with no state recording the
     loss."""
-    from cubepi.providers.base import ToolCall, ToolResultMessage
+    from cubeloop.providers.base import ToolCall, ToolResultMessage
 
     provider = _FakeSummaryProvider()
     # Big threshold so the un-pruned history stays under it.
@@ -907,7 +907,7 @@ async def test_no_safe_boundary_does_not_silently_prune_tool_outputs() -> None:
     """Codex round 6 P2: when over threshold but safe_boundary returns None
     (no valid split point), the middleware must return original messages
     rather than the pruned view."""
-    from cubepi.providers.base import ToolCall, ToolResultMessage
+    from cubeloop.providers.base import ToolCall, ToolResultMessage
 
     provider = _FakeSummaryProvider()
     # Threshold low enough that the conversation exceeds it.
@@ -940,7 +940,7 @@ async def test_anti_thrash_guard_skip_does_not_silently_prune() -> None:
     """Codex round 6 P2: when the anti-thrash guard fires, the returned view
     must come from the un-pruned messages so the main model still sees the
     full tool outputs."""
-    from cubepi.providers.base import ToolCall, ToolResultMessage
+    from cubeloop.providers.base import ToolCall, ToolResultMessage
 
     provider = _FakeSummaryProvider()
     big_text = "x" * 5000  # 2500 tokens via approx_tokens
@@ -1003,7 +1003,7 @@ def _make_middleware_with_compressor(
 
 async def test_compressor_preserved_text_appended_to_summary() -> None:
     """Preserved tool results appear in the summary message text."""
-    from cubepi.providers.base import ToolCall, ToolResultMessage
+    from cubeloop.providers.base import ToolCall, ToolResultMessage
 
     provider = _FakeSummaryProvider(reply="conversation summary")
 
@@ -1041,7 +1041,7 @@ async def test_compressor_preserved_text_appended_to_summary() -> None:
 
 async def test_compressor_preserved_excluded_from_summarizer_input() -> None:
     """Preserved messages are not fed to the summarizer LLM."""
-    from cubepi.providers.base import ToolCall, ToolResultMessage
+    from cubeloop.providers.base import ToolCall, ToolResultMessage
 
     provider = _FakeSummaryProvider(reply="summary")
 
@@ -1079,7 +1079,7 @@ async def test_compressor_preserved_excluded_from_summarizer_input() -> None:
 async def test_compressor_none_return_uses_default_pruning() -> None:
     """When compressor returns None for all messages, behavior is identical
     to not having a compressor."""
-    from cubepi.providers.base import ToolCall, ToolResultMessage
+    from cubeloop.providers.base import ToolCall, ToolResultMessage
 
     provider = _FakeSummaryProvider(reply="summary")
 
@@ -1112,7 +1112,7 @@ async def test_compressor_none_return_uses_default_pruning() -> None:
 
 async def test_compressor_preserved_persists_across_compaction_rounds() -> None:
     """Preserved results from earlier rounds survive in subsequent compressed views."""
-    from cubepi.providers.base import ToolCall, ToolResultMessage
+    from cubeloop.providers.base import ToolCall, ToolResultMessage
 
     provider = _FakeSummaryProvider(reply="round 1 summary")
 
@@ -1167,7 +1167,7 @@ async def test_trailing_synthetic_control_does_not_age_current_tool_results() ->
     user control. The ordinary four-message history has no legal boundary at
     ``min_compact_messages=4``; the control must not manufacture one.
     """
-    from cubepi.providers.base import (
+    from cubeloop.providers.base import (
         ToolCall,
         ToolResultMessage,
         synthetic_user_message,
@@ -1224,8 +1224,8 @@ async def test_trailing_synthetic_control_does_not_age_current_tool_results() ->
 
 async def test_trailing_controls_count_toward_compaction_threshold() -> None:
     """Controls stay in the size calculation even though they do not set the tail."""
-    from cubepi.middleware.compaction.tokens import real_context_estimate
-    from cubepi.providers.base import synthetic_user_message
+    from cubeloop.middleware.compaction.tokens import real_context_estimate
+    from cubeloop.providers.base import synthetic_user_message
 
     provider = _FakeSummaryProvider(reply="combined view crossed threshold")
     middleware = CompactionMiddleware(
@@ -1263,7 +1263,7 @@ async def test_old_prefix_compacts_without_pruning_current_multi_tool_evidence()
     None
 ):
     """Older turns may compact while a current multi-tool turn stays raw."""
-    from cubepi.providers.base import (
+    from cubeloop.providers.base import (
         ToolCall,
         ToolResultMessage,
         synthetic_user_message,
@@ -1333,10 +1333,10 @@ async def test_old_prefix_compacts_without_pruning_current_multi_tool_evidence()
 
 def test_split_only_detaches_trailing_synthetic_user_messages() -> None:
     """Plain user tails and synthetic tool results remain ordinary history."""
-    from cubepi.middleware.compaction import (
+    from cubeloop.middleware.compaction import (
         _split_trailing_synthetic_user_controls,
     )
-    from cubepi.providers.base import (
+    from cubeloop.providers.base import (
         ToolCall,
         ToolResultMessage,
         synthetic_user_message,
@@ -1376,7 +1376,7 @@ async def test_compaction_state_refs_survive_trailing_control_becoming_internal(
     None
 ):
     """Suffix splitting does not change persisted prefix indices or refs."""
-    from cubepi.providers.base import synthetic_user_message
+    from cubeloop.providers.base import synthetic_user_message
 
     provider = _FakeSummaryProvider(reply="stable summary")
     compacting = CompactionMiddleware(

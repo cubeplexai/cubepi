@@ -1,7 +1,7 @@
 ---
 title: Cross-process & durability
 sidebar_position: 3
-description: "Suspend a CubePi agent on a HITL request and resume it in another process with a CheckpointedChannel; durable-scope rules."
+description: "Suspend a CubeLoop agent on a HITL request and resume it in another process with a CheckpointedChannel; durable-scope rules."
 ---
 
 # Cross-process flow & durability
@@ -12,9 +12,9 @@ Full lifecycle of a suspend/resume cycle:
 
 ```python
 import asyncio
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.postgres import PostgresCheckpointer
-from cubepi.hitl import (
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.postgres import PostgresCheckpointer
+from cubeloop.hitl import (
     ApproveAnswer, CheckpointedChannel, ConfirmToolCallMiddleware,
 )
 
@@ -113,7 +113,7 @@ well-defined safe suspension points:
 
 **Custom tools that mix HITL with other work inside `execute()` are NOT
 durable cross-process by default.** If such a tool's process dies mid-execute,
-anything that ran before the channel call would be lost. CubePi will raise
+anything that ran before the channel call would be lost. CubeLoop will raise
 `HitlDurabilityNotGuaranteed` unless the `CheckpointedChannel` is constructed
 with `allow_inside_custom_tool=True` — the caller must acknowledge the
 idempotency contract (the tool body must be a pure HITL wait with no

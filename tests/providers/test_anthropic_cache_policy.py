@@ -2,11 +2,11 @@
 
 import pytest
 
-from cubepi.providers.anthropic import (
+from cubeloop.providers.anthropic import (
     AnthropicProvider,
     DefaultCacheMarkerPolicy,
 )
-from cubepi.providers.base import Message, TextContent, UserMessage
+from cubeloop.providers.base import Message, TextContent, UserMessage
 
 
 def test_default_policy_marks_system() -> None:

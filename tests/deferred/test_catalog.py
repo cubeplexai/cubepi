@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from cubepi.deferred._catalog import render_catalog, render_static_catalog
-from cubepi.deferred.types import DeferredToolGroup
+from cubeloop.deferred._catalog import render_catalog, render_static_catalog
+from cubeloop.deferred.types import DeferredToolGroup
 
 
 class TestDeferredToolGroup:

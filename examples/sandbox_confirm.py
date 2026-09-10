@@ -12,8 +12,8 @@ Set ANTHROPIC_API_KEY or OPENAI_API_KEY before running (see _provider.py).
 import asyncio
 from pydantic import BaseModel
 
-from cubepi import Agent, AgentToolResult, TextContent, tool
-from cubepi.hitl import (
+from cubeloop import Agent, AgentToolResult, TextContent, tool
+from cubeloop.hitl import (
     Approve,
     AskUser,
     Deny,

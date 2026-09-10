@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cubepi.agent.types import AgentContext
+from cubeloop.agent.types import AgentContext
 
 
 def test_agent_context_default_extra_is_empty_dict() -> None:
@@ -38,7 +38,7 @@ def test_extra_independent_between_instances() -> None:
 @pytest.mark.asyncio
 async def test_save_extra_round_trip_via_checkpointer() -> None:
     """save_extra + load round-trip works (sanity check for the checkpointer)."""
-    from cubepi.checkpointer import SQLiteCheckpointer
+    from cubeloop.checkpointer import SQLiteCheckpointer
 
     with tempfile.TemporaryDirectory() as d:
         path = Path(d) / "extra.db"
@@ -53,9 +53,9 @@ async def test_save_extra_round_trip_via_checkpointer() -> None:
 async def test_agent_hydrates_ctx_extra_from_checkpointer() -> None:
     """When agent loads a thread with pre-existing extra, the extra is preserved
     through the turn and written back via save_extra."""
-    from cubepi.agent.agent import Agent
-    from cubepi.checkpointer import SQLiteCheckpointer
-    from cubepi.providers.faux import FauxProvider, faux_assistant_message
+    from cubeloop.agent.agent import Agent
+    from cubeloop.checkpointer import SQLiteCheckpointer
+    from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
     with tempfile.TemporaryDirectory() as d:
         path = Path(d) / "hydrate.db"
@@ -82,9 +82,9 @@ async def test_agent_hydrates_ctx_extra_from_checkpointer() -> None:
 async def test_agent_persists_ctx_extra_mutation_after_turn() -> None:
     """Pre-seeded extra is round-tripped: hydrated on load, persisted via
     save_extra after the turn completes."""
-    from cubepi.agent.agent import Agent
-    from cubepi.checkpointer import SQLiteCheckpointer
-    from cubepi.providers.faux import FauxProvider, faux_assistant_message
+    from cubeloop.agent.agent import Agent
+    from cubeloop.checkpointer import SQLiteCheckpointer
+    from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
     with tempfile.TemporaryDirectory() as d:
         path = Path(d) / "persist.db"

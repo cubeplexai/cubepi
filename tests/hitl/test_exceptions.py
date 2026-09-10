@@ -1,5 +1,5 @@
 import pytest
-from cubepi.hitl.exceptions import (
+from cubeloop.hitl.exceptions import (
     HitlControlException,
     HitlCancelled,
     HitlTimedOut,

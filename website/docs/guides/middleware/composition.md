@@ -1,12 +1,12 @@
 ---
 title: Composition Rules
-description: "Learn how CubePi composes multiple middlewares with per-hook rules: chain, last-wins, first-block-stops, and more."
+description: "Learn how CubeLoop composes multiple middlewares with per-hook rules: chain, last-wins, first-block-stops, and more."
 ---
 
 # Composition Rules
 
 When you pass multiple middlewares — `Agent(middleware=[m1, m2,
-m3])` — CubePi composes them according to **per-hook rules** that
+m3])` — CubeLoop composes them according to **per-hook rules** that
 differ on purpose. The right way to think about it is: each hook has
 the composition rule that makes sense for its job, and you don't have
 to remember "before" or "after" precedence guesses.
@@ -46,7 +46,7 @@ the model receives.
 ## `convert_to_llm`
 
 Last-wins on purpose: this is the final transform before wire
-serialisation. Multiple owners would fight; pick one. CubePi enforces
+serialisation. Multiple owners would fight; pick one. CubeLoop enforces
 that the **last** middleware in the list that implements
 `convert_to_llm` is the one that runs.
 
@@ -95,7 +95,7 @@ hook.
 ## `after_tool_call`
 
 Each middleware can return an `AfterToolCallResult` with some fields
-set; CubePi merges them, with later results overriding earlier ones
+set; CubeLoop merges them, with later results overriding earlier ones
 for any field that's not `None`. The full result:
 
 ```python
@@ -188,7 +188,7 @@ overrides. You don't need to `pass`-implement every method.
 class JustTransform(Middleware):
     async def transform_context(self, messages, *, ctx, signal=None):
         return messages[-10:]
-    # No other hooks. CubePi won't call them.
+    # No other hooks. CubeLoop won't call them.
 ```
 
 ## `on_run_end`

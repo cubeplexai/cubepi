@@ -1,11 +1,11 @@
 ---
 title: OpenAI
-description: "Use OpenAI GPT models with CubePi's OpenAIProvider — Chat Completions API integration."
+description: "Use OpenAI GPT models with CubeLoop's OpenAIProvider — Chat Completions API integration."
 ---
 
 # OpenAI Provider
 
-CubePi ships two OpenAI providers covering the two API surfaces:
+CubeLoop ships two OpenAI providers covering the two API surfaces:
 
 - **`OpenAIProvider`** — Chat Completions API
   (`/v1/chat/completions`). Use this for the GPT-4/5 family and most
@@ -20,7 +20,7 @@ Both implement the same `Provider` protocol; pick one per agent.
 ## Chat Completions: `OpenAIProvider`
 
 ```python
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     provider_id="openai",
@@ -41,12 +41,12 @@ model = provider.model(
 ### Reasoning on Chat Completions
 
 OpenAI exposes reasoning content through `delta.reasoning_content` on
-o-series and gpt-5 models. CubePi captures it as `ThinkingContent` and
+o-series and gpt-5 models. CubeLoop captures it as `ThinkingContent` and
 emits `thinking_*` events identically to Anthropic. Control it with
 `ReasoningControl`:
 
 ```python
-from cubepi import ReasoningControl
+from cubeloop import ReasoningControl
 
 agent = Agent(
     model=model,
@@ -60,7 +60,7 @@ written to `reasoning_effort` on the wire (`"max"` maps to OpenAI's
 `reasoning_effort` field, regardless of the requested mode.
 
 Many OpenAI-compatible OSS backends emit reasoning under different
-fields. CubePi understands three in priority order:
+fields. CubeLoop understands three in priority order:
 
 1. `delta.reasoning_content` (DeepSeek, Qwen, DouBao)
 2. `delta.reasoning` (vLLM)
@@ -89,10 +89,10 @@ If you need per-request mutation, use `on_payload` (see below).
 Wire-shape differences between OpenAI and OpenAI-compatible backends
 (e.g. `max_tokens` vs `max_completion_tokens`, reasoning field names,
 temperature handling) are configured through a
-[`CapabilityDescriptor`](pathname:///pydoc/cubepi/providers/capability.html)
+[`CapabilityDescriptor`](pathname:///pydoc/cubeloop/providers/capability.html)
 passed at construction. For example, `max_tokens_field="max_completion_tokens"`
 renames the key on the way out. See [Providers Overview](./overview)
-for the full set of knobs (CubePi `0.5+`).
+for the full set of knobs (CubeLoop `0.5+`).
 
 ### Pointing at vLLM / LiteLLM / DeepSeek
 
@@ -119,14 +119,14 @@ renames, …), see [Providers Overview](./overview).
 ## Responses API: `OpenAIResponsesProvider`
 
 ```python
-from cubepi.providers.openai_responses import OpenAIResponsesProvider
+from cubeloop.providers.openai_responses import OpenAIResponsesProvider
 
 provider = OpenAIResponsesProvider(provider_id="openai_responses", api_key="sk-…")
 model = provider.model("gpt-5", reasoning=True)
 ```
 
 The Responses API keeps state server-side (referenced by
-`previous_response_id`). CubePi tracks `AssistantMessage.response_id`
+`previous_response_id`). CubeLoop tracks `AssistantMessage.response_id`
 and feeds it back automatically — your code looks identical to the
 Chat Completions path.
 
@@ -158,9 +158,9 @@ agent = Agent(model=model, on_payload=add_user_metadata)
 
 Tool definitions are auto-converted to OpenAI's
 `{"type": "function", "function": {...}}` shape. The streaming format
-emits incremental JSON arguments under `toolcall_delta`; CubePi
+emits incremental JSON arguments under `toolcall_delta`; CubeLoop
 buffers and parses them through
-[`cubepi.utils.json_parse.parse_streaming_json`](../../api/cubepi-utils)
+[`cubeloop.utils.json_parse.parse_streaming_json`](../../api/cubeloop-utils)
 so partials always validate to the closest well-formed object.
 
 Multiple parallel tool calls in one assistant message just work —
@@ -171,7 +171,7 @@ provider.
 
 - **`stream_options.include_usage` rejected** — Some compatibles
   reject the whole `stream_options` field. **`on_payload` cannot fix
-  this**: CubePi 0.3 calls `kwargs.setdefault("stream_options", {})`
+  this**: CubeLoop 0.3 calls `kwargs.setdefault("stream_options", {})`
   *after* your callback runs, so deleting the key in `on_payload` is
   silently undone. Workarounds:
   - Subclass `OpenAIProvider` and override `stream()` to skip the
@@ -179,7 +179,7 @@ provider.
   - Set `include_usage=False` in `on_payload` (the field still goes
     out, but is usually accepted as a no-op even by strict
     backends).
-  - Use a [`CapabilityDescriptor`](./overview) (CubePi `0.5+`) to
+  - Use a [`CapabilityDescriptor`](./overview) (CubeLoop `0.5+`) to
     describe your backend's reasoning wiring declaratively.
 - **Thinking events but no `thinking_*` events** — Your backend
   surfaces reasoning under a non-standard field. Either add a fourth

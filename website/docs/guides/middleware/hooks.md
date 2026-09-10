@@ -1,16 +1,16 @@
 ---
 title: The 9 Hooks
-description: "Reference for the 9 middleware hooks in CubePi — transform_context, convert_to_llm, resolve_tool_call, before_tool_call, after_tool_call, on_run_end, and more."
+description: "Reference for the 9 middleware hooks in CubeLoop — transform_context, convert_to_llm, resolve_tool_call, before_tool_call, after_tool_call, on_run_end, and more."
 ---
 
 # The 9 Hooks
 
 `Middleware` is a class with up to nine optional async methods. Each
 hook fires at a precise point in the agent loop. Implement only the
-ones you need — CubePi only wires in the ones you override.
+ones you need — CubeLoop only wires in the ones you override.
 
 ```python
-from cubepi import Middleware
+from cubeloop import Middleware
 
 class MyMiddleware(Middleware):
     async def transform_context(self, messages, *, ctx, signal=None):
@@ -130,7 +130,7 @@ Fires **per tool call**, after argument validation, before
 - `ctx.context` — the full `AgentContext`.
 
 Return `BeforeToolCallResult(block=True, reason="…")` to short-circuit
-— CubePi feeds the reason back as the tool result with
+— CubeLoop feeds the reason back as the tool result with
 `is_error=True`. Return `None` (or no return) to proceed.
 
 Use for: permissions, rate limiting, dry-run modes, sandboxing,
@@ -193,8 +193,8 @@ Fires **immediately after** the assistant message lands, **before**
 hook returns a `TurnAction`:
 
 ```python
-from cubepi.middleware.base import TurnAction
-from cubepi.providers.base import synthetic_user_message
+from cubeloop.middleware.base import TurnAction
+from cubeloop.providers.base import synthetic_user_message
 
 TurnAction(
     response=modified_message,            # replace the message; None to keep
@@ -278,7 +278,7 @@ ones you need; the base class's unimplemented hooks raise
 automatically.
 
 ```python
-from cubepi import Middleware
+from cubeloop import Middleware
 
 class MaxTurnsMiddleware(Middleware):
     def __init__(self, max_turns: int) -> None:

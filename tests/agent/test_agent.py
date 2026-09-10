@@ -2,17 +2,17 @@ import asyncio
 
 import pytest
 
-from cubepi.agent.agent import Agent, _MessageQueue
-from cubepi.agent.types import AgentTool
-from cubepi.middleware.base import Middleware
-from cubepi.providers.base import (
+from cubeloop.agent.agent import Agent, _MessageQueue
+from cubeloop.agent.types import AgentTool
+from cubeloop.middleware.base import Middleware
+from cubeloop.providers.base import (
     AssistantMessage,
     Model,
     ReasoningControl,
     TextContent,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 from pydantic import BaseModel
 
 
@@ -235,7 +235,7 @@ class TestAgentPromptGuards:
         provider = FauxProvider(provider_id="faux")
 
         async def slow_stream(*args, **kwargs):
-            from cubepi.providers.base import MessageStream, StreamEvent
+            from cubeloop.providers.base import MessageStream, StreamEvent
 
             ms = MessageStream()
 
@@ -269,7 +269,7 @@ class TestAgentPromptGuards:
         provider = FauxProvider(provider_id="faux")
 
         async def slow_stream(*args, **kwargs):
-            from cubepi.providers.base import MessageStream, StreamEvent
+            from cubeloop.providers.base import MessageStream, StreamEvent
 
             ms = MessageStream()
 
@@ -447,7 +447,7 @@ class TestAgentAbortSignal:
         provider = FauxProvider(provider_id="faux")
 
         async def slow_stream(*args, **kwargs):
-            from cubepi.providers.base import MessageStream, StreamEvent
+            from cubeloop.providers.base import MessageStream, StreamEvent
 
             ms = MessageStream()
 
@@ -489,7 +489,7 @@ class TestAgentWaitForIdle:
         provider = FauxProvider(provider_id="faux")
 
         async def slow_stream(*args, **kwargs):
-            from cubepi.providers.base import MessageStream, StreamEvent
+            from cubeloop.providers.base import MessageStream, StreamEvent
 
             ms = MessageStream()
 

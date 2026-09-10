@@ -1,20 +1,20 @@
 ---
 title: Loading MCP Tools
-description: "Load tools from MCP servers into your CubePi agent, including SSE-based remote servers."
+description: "Load tools from MCP servers into your CubeLoop agent, including SSE-based remote servers."
 ---
 
 # Loading MCP Tools
 
 The [Model Context Protocol](https://modelcontextprotocol.io) defines
 a standard way for tool servers to expose capabilities to agents.
-CubePi ships two loaders that connect to an MCP server, enumerate its
+CubeLoop ships two loaders that connect to an MCP server, enumerate its
 tools, and turn each one into a regular `AgentTool` you can hand to
 `Agent(tools=…)`.
 
 Install the extra:
 
 ```bash
-pip install "cubepi[mcp]"
+pip install "cubeloop[mcp]"
 ```
 
 This pulls in the `mcp` SDK.
@@ -27,9 +27,9 @@ Python module, an internal CLI):
 ```python
 import asyncio
 import sys
-from cubepi import Agent
-from cubepi.mcp import load_mcp_tools_stdio
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.mcp import load_mcp_tools_stdio
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 async def main():
@@ -70,7 +70,7 @@ Arguments:
 For hosted MCP servers (Sentry, GitHub, internal services):
 
 ```python
-from cubepi.mcp import load_mcp_tools_http
+from cubeloop.mcp import load_mcp_tools_http
 
 tools = await load_mcp_tools_http(
     server_url="https://mcp.example.com/sse",
@@ -123,14 +123,14 @@ call to the right implementation.
 If you wire up several MCP servers and only a few are needed per
 conversation, eagerly loading every schema into the system prompt
 becomes the dominant context cost. Wrap each server's tools in a
-[`DeferredToolGroup`](../middleware/deferred-tools) — CubePi replaces
+[`DeferredToolGroup`](../middleware/deferred-tools) — CubeLoop replaces
 the full schemas with a compact catalog and lets the model expand a
 group on demand via the built-in `load_tools` tool.
 :::
 
 ## Per-call vs reusable connections
 
-CubePi opens a new transport per `execute` call. That's:
+CubeLoop opens a new transport per `execute` call. That's:
 
 - ✅ Simple — no pool lifecycle to manage.
 - ✅ Robust — a hung connection can't poison other tools.
@@ -142,7 +142,7 @@ HTTP service instead and use `load_mcp_tools_http`.
 
 ## Image and structured content
 
-If an MCP tool returns image content blocks, CubePi maps them to
+If an MCP tool returns image content blocks, CubeLoop maps them to
 `ImageContent` and includes them in the `AgentToolResult.content`.
 Anthropic provider relays these as image blocks in tool results;
 OpenAI providers currently strip them (the wire format doesn't
@@ -173,7 +173,7 @@ downstream programmatic access, but not shown to the model.
 - [MCP Auth](./auth) — bearer tokens, headers, env-based credentials.
 - [Tool Use](../agents/tool-use) — how tools (MCP or otherwise) are
   dispatched.
-- [`make_mcp_agent_tool` source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/mcp/_adapter.py)
+- [`make_mcp_agent_tool` source](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/mcp/_adapter.py)
   — the schema → Pydantic adapter, if you need to customise.
 - [Deferred Tool Groups](../middleware/deferred-tools) — hide MCP
   schemas from the system prompt and let the model expand them on

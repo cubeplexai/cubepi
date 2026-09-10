@@ -5,9 +5,9 @@ import json
 
 from pydantic import BaseModel
 
-from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent, ToolCall
-from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
+from cubeloop.agent.types import AgentContext, AgentTool, AgentToolResult
+from cubeloop.providers.base import TextContent, ToolCall
+from cubeloop.deferred import DeferredToolGroup, DeferredToolsMiddleware
 from tests.deferred._helpers import _dummy_tool, _echo_tool, _mw
 from tests.deferred._helpers import _make_group as _make_group_base
 
@@ -120,8 +120,8 @@ class TestDispatchStrategy:
     async def test_direct_native_call_to_hidden_tool_executes(self) -> None:
         """If the model hallucinates a direct tool_use with the real name,
         the engine resolves it from context.tools despite expose_to_model=False."""
-        from cubepi.agent.tools import execute_tool_calls
-        from cubepi.providers.faux import faux_assistant_message
+        from cubeloop.agent.tools import execute_tool_calls
+        from cubeloop.providers.faux import faux_assistant_message
 
         mw = _mw([_make_group("g", ["t1"])])
         ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
@@ -191,7 +191,7 @@ class _CapturingFaux:
     """FauxProvider subclass recording every request's (system_prompt, tools)."""
 
     def __new__(cls, **kwargs):
-        from cubepi.providers.faux import FauxProvider
+        from cubeloop.providers.faux import FauxProvider
 
         class _Capturing(FauxProvider):
             def __init__(self, **kw):
@@ -228,8 +228,8 @@ class _CapturingFaux:
 
 class TestByteStability:
     async def test_prefix_static_across_load_and_dispatch(self) -> None:
-        from cubepi.agent.agent import Agent
-        from cubepi.providers.faux import faux_assistant_message, faux_tool_call
+        from cubeloop.agent.agent import Agent
+        from cubeloop.providers.faux import faux_assistant_message, faux_tool_call
 
         provider = _CapturingFaux()
         provider.set_responses(
@@ -278,9 +278,9 @@ class TestDispatchFork:
         """Forks forward the resolver, so deferred_tool_call works on tools
         the parent already loaded (regression guard: v1 forks could call
         expanded tools natively)."""
-        from cubepi.agent.agent import Agent
-        from cubepi.checkpointer.memory import MemoryCheckpointer
-        from cubepi.providers.faux import (
+        from cubeloop.agent.agent import Agent
+        from cubeloop.checkpointer.memory import MemoryCheckpointer
+        from cubeloop.providers.faux import (
             FauxProvider,
             faux_assistant_message,
             faux_tool_call,
@@ -334,8 +334,8 @@ class TestCodexReviewFindings:
         parallel executor."""
         import asyncio as aio
 
-        from cubepi.agent.tools import execute_tool_calls
-        from cubepi.providers.faux import faux_assistant_message
+        from cubeloop.agent.tools import execute_tool_calls
+        from cubeloop.providers.faux import faux_assistant_message
 
         order: list[str] = []
 
@@ -411,8 +411,8 @@ class TestCodexReviewFindings:
         assert seen == []
 
     async def test_implicit_load_failure_surfaces_loader_error(self) -> None:
-        from cubepi.agent.tools import execute_tool_calls
-        from cubepi.providers.faux import faux_assistant_message
+        from cubeloop.agent.tools import execute_tool_calls
+        from cubeloop.providers.faux import faux_assistant_message
 
         async def _failing_loader():
             raise RuntimeError("connection refused")
@@ -448,8 +448,8 @@ class TestCodexReviewFindings:
     async def test_dispatcher_rejects_non_dict_arguments(self) -> None:
         """Garbage inner arguments must hit the dispatcher's own schema
         validation, not be coerced to {} and silently run the tool."""
-        from cubepi.agent.tools import execute_tool_calls
-        from cubepi.providers.faux import faux_assistant_message
+        from cubeloop.agent.tools import execute_tool_calls
+        from cubeloop.providers.faux import faux_assistant_message
 
         mw = _mw([_make_group("g", ["t1"])])
         ctx = AgentContext(system_prompt="", messages=[], tools=list(mw.tools))
@@ -476,8 +476,8 @@ class TestSequentialOrderingPreserved:
         """In a batch that is sequential by raw names, a later dispatcher
         call's loader must NOT run before an earlier sequential tool has
         executed (the loader may depend on state that tool sets up)."""
-        from cubepi.agent.tools import execute_tool_calls
-        from cubepi.providers.faux import faux_assistant_message
+        from cubeloop.agent.tools import execute_tool_calls
+        from cubeloop.providers.faux import faux_assistant_message
 
         class _NoArgs(BaseModel):
             pass

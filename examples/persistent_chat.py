@@ -19,8 +19,8 @@ Set ANTHROPIC_API_KEY or OPENAI_API_KEY before running (see _provider.py).
 import asyncio
 import sys
 
-from cubepi import Agent
-from cubepi.checkpointer import SQLiteCheckpointer
+from cubeloop import Agent
+from cubeloop.checkpointer import SQLiteCheckpointer
 
 from _provider import MODEL_ID, provider
 

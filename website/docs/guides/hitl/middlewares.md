@@ -13,7 +13,7 @@ description: "Gate tool calls with ConfirmToolCallMiddleware / ApprovalPolicyMid
 "Always ask the human for tool *names* in this set."
 
 ```python
-from cubepi.hitl import ConfirmToolCallMiddleware
+from cubeloop.hitl import ConfirmToolCallMiddleware
 
 # Set-based matching — only ask for these tool names
 agent = Agent(
@@ -46,7 +46,7 @@ For hosts with a **policy engine** that classifies tool calls into three
 tiers — auto-allow, hard-deny, or human-confirm.
 
 ```python
-from cubepi.hitl import Approve, ApprovalPolicyMiddleware, AskUser, Deny
+from cubeloop.hitl import Approve, ApprovalPolicyMiddleware, AskUser, Deny
 
 def my_policy(ctx):
     if ctx.tool_call.name == "read_file":
@@ -79,7 +79,7 @@ The factory returns an `AgentTool` named `"ask_user"` with
 `execution_mode="sequential"` — it can't run in parallel with other tools.
 
 ```python
-from cubepi.hitl import ask_user_tool
+from cubeloop.hitl import ask_user_tool
 
 agent = Agent(
     ...,

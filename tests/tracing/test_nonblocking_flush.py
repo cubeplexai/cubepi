@@ -22,10 +22,10 @@ import time
 
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from cubepi.agent.agent import Agent
-from cubepi.providers.base import Model
-from cubepi.providers.faux import FauxProvider
-from cubepi.tracing import Tracer, trace
+from cubeloop.agent.agent import Agent
+from cubeloop.providers.base import Model
+from cubeloop.providers.faux import FauxProvider
+from cubeloop.tracing import Tracer, trace
 
 MODEL = Model(id="faux-1", provider_id="faux")
 
@@ -127,8 +127,8 @@ async def test_meter_force_flush_calls_provider_off_the_loop_thread():
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
     from opentelemetry.sdk.resources import Resource
 
-    from cubepi.tracing import Meter
-    from cubepi.tracing.schema import SCHEMA_URL
+    from cubeloop.tracing import Meter
+    from cubeloop.tracing.schema import SCHEMA_URL
 
     reader = InMemoryMetricReader()
     resource = Resource.create({"service.name": "test"}, schema_url=SCHEMA_URL)

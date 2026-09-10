@@ -1,6 +1,6 @@
 ---
 title: SQLite Checkpointing
-description: "Use SQLiteCheckpointer for lightweight single-process agent state persistence in CubePi."
+description: "Use SQLiteCheckpointer for lightweight single-process agent state persistence in CubeLoop."
 ---
 
 # SQLite Checkpointing
@@ -13,7 +13,7 @@ environment where one Python process owns the conversation.
 Install the extra:
 
 ```bash
-pip install "cubepi[sqlite]"
+pip install "cubeloop[sqlite]"
 ```
 
 This pulls in `aiosqlite`.
@@ -22,9 +22,9 @@ This pulls in `aiosqlite`.
 
 ```python
 import asyncio
-from cubepi import Agent
-from cubepi.checkpointer import SQLiteCheckpointer
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.checkpointer import SQLiteCheckpointer
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 async def main():
@@ -80,7 +80,7 @@ CREATE TABLE thread_extra (
   `thread_extra`. Middleware that wants thread-scoped state should
   write into `context.extra`.
 
-This schema is append-only. CubePi never updates or deletes rows.
+This schema is append-only. CubeLoop never updates or deletes rows.
 
 ## HITL tables
 
@@ -113,9 +113,9 @@ execute the batch only after every gate is satisfied.
 No manual migration is needed — `CREATE TABLE IF NOT EXISTS` is
 idempotent.
 
-## When CubePi reads
+## When CubeLoop reads
 
-On the **first** `prompt()` after instantiation, CubePi calls
+On the **first** `prompt()` after instantiation, CubeLoop calls
 `load(thread_id)`. If the thread exists, history is restored into
 `agent.state.messages` and `extra` is restored into the agent's
 private `_extra` dict.
@@ -141,7 +141,7 @@ isolates them.
 ## Concurrency model
 
 The checkpointer uses an `asyncio.Lock` around every read and write.
-SQLite itself can be written from multiple processes, but CubePi's
+SQLite itself can be written from multiple processes, but CubeLoop's
 expectation is that a single agent instance owns a thread. If you
 have multiple processes writing the same `agent.db`:
 
@@ -163,10 +163,10 @@ the [Conversation Forking](../agents/forking) guide for the user-facing API.
 
 ## Schema v3 → v4 migration
 
-Unlike Postgres and MySQL, SQLite's schema is managed by CubePi
+Unlike Postgres and MySQL, SQLite's schema is managed by CubeLoop
 itself: the v3→v4 upgrade (adding `run_id` to `messages` and
-creating a `cubepi_runs` table) runs automatically on `__aenter__`
-the first time a v4 CubePi connects to a v3 file. No host action is
+creating a `runs` table) runs automatically on `__aenter__`
+the first time a v4 CubeLoop connects to a v3 file. No host action is
 required.
 
 Pre-feature messages keep `run_id = NULL` and remain readable; see
@@ -205,7 +205,7 @@ sqlite3 agent.db "VACUUM"
   None`. Always wrap in `async with`.
 - **Two processes writing the same thread** — Interleaved history.
   Use Postgres or coordinate at the application layer.
-- **WAL mode not enabled** — CubePi uses the default journal mode for
+- **WAL mode not enabled** — CubeLoop uses the default journal mode for
   portability. For a single-writer, many-reader app, enable WAL once
   via `sqlite3 agent.db "PRAGMA journal_mode=WAL"` for better read
   concurrency.
@@ -216,7 +216,7 @@ sqlite3 agent.db "VACUUM"
   failed to deserialize (bad JSON, schema-invalid data, or an unknown
   role). The error's `row_ref` (e.g. `messages.id=42`) locates the bad
   row so you can inspect or repair it with plain SQL; `thread_id` and
-  `__cause__` carry the rest of the context. CubePi never skips corrupt
+  `__cause__` carry the rest of the context. CubeLoop never skips corrupt
   rows silently — dropping a message that carries `tool_calls` would
   leave the transcript in a state every provider rejects.
 

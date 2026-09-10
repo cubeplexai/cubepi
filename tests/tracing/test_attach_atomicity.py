@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.providers.base import Model
-from cubepi.providers.faux import FauxProvider
-from cubepi.tracing import Tracer
+from cubeloop.agent.agent import Agent
+from cubeloop.providers.base import Model
+from cubeloop.providers.faux import FauxProvider
+from cubeloop.tracing import Tracer
 
 MODEL = Model(id="faux-1", provider_id="faux")
 
@@ -71,7 +71,7 @@ async def test_recorder_attach_unwinds_on_partial_provider_subscription_failure(
 async def test_tracer_attach_unwinds_recorder_on_mcp_register_failure(monkeypatch):
     agent, provider, tracer = _build_unattached()
     try:
-        import cubepi.mcp._tracing as mcp_tracing
+        import cubeloop.mcp._tracing as mcp_tracing
 
         def _boom(_provider, **_kwargs):  # noqa: ANN001, ANN202
             raise RuntimeError("register_provider failed")
@@ -127,7 +127,7 @@ async def test_tracer_attach_cleanup_swallows_recorder_detach_error(monkeypatch)
         # raises inside the recorder's synchronous cleanup).
         monkeypatch.setattr(agent, "subscribe", lambda listener: _raising_unsub)
 
-        import cubepi.mcp._tracing as mcp_tracing
+        import cubeloop.mcp._tracing as mcp_tracing
 
         def _boom(_provider, **_kwargs):  # noqa: ANN001, ANN202
             raise RuntimeError("register_provider failed")

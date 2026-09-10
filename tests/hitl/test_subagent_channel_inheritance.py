@@ -1,13 +1,13 @@
 from pydantic import BaseModel
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.hitl import ApproveAnswer
-from cubepi.hitl.channel import InMemoryChannel
-from cubepi.hitl.testing import NoopChannel, ScriptedChannel
-from cubepi.hitl.types import Question
-from cubepi.providers.base import TextContent
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.hitl import ApproveAnswer
+from cubeloop.hitl.channel import InMemoryChannel
+from cubeloop.hitl.testing import NoopChannel, ScriptedChannel
+from cubeloop.hitl.types import Question
+from cubeloop.providers.base import TextContent
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 
 def _faux_with(responses):

@@ -1,9 +1,9 @@
 import tempfile
 import pytest
 
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.checkpointer.sqlite import SQLiteCheckpointer
-from cubepi.hitl.types import ApproveRequest, HitlRequest
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.checkpointer.sqlite import SQLiteCheckpointer
+from cubeloop.hitl.types import ApproveRequest, HitlRequest
 
 
 def _req(thread_id="t-1", qid="q-1") -> HitlRequest:

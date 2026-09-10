@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from cubepi.cli.trace.follow import format_event, is_run_complete, iter_new_spans
-from cubepi.cli.trace.model import Span
+from cubeloop.cli.trace.follow import format_event, is_run_complete, iter_new_spans
+from cubeloop.cli.trace.model import Span
 
 
 def _line(span_id, parent_id, name):

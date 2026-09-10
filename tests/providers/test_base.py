@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     BaseProvider,
     ImageContent,

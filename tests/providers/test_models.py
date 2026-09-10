@@ -1,5 +1,5 @@
-from cubepi.providers.base import Model
-from cubepi.providers.models import models_are_equal
+from cubeloop.providers.base import Model
+from cubeloop.providers.models import models_are_equal
 
 
 def test_models_are_equal_by_provider_and_model_id():

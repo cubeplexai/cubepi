@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from cubepi import Agent
-from cubepi.agent.types import AgentContext
-from cubepi.middleware.goal import GoalMiddleware
-from cubepi.middleware.todo import TodoListMiddleware
-from cubepi.providers.base import (
+from cubeloop import Agent
+from cubeloop.agent.types import AgentContext
+from cubeloop.middleware.goal import GoalMiddleware
+from cubeloop.middleware.todo import TodoListMiddleware
+from cubeloop.providers.base import (
     SYNTHETIC_METADATA_KEY,
     SYNTHETIC_SOURCE_METADATA_KEY,
     AssistantMessage,
@@ -23,7 +23,7 @@ from cubepi.providers.base import (
     is_synthetic_message,
     synthetic_user_message,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 # ---------------------------------------------------------------------------
 # Factory + predicate unit tests

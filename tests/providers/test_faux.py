@@ -1,7 +1,7 @@
 import asyncio
 from unittest.mock import patch
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     Model,
     StreamEvent,
     StreamOptions,
@@ -9,7 +9,7 @@ from cubepi.providers.base import (
     ToolDefinition,
     UserMessage,
 )
-from cubepi.providers.faux import (
+from cubeloop.providers.faux import (
     FauxProvider,
     _can_accept_extended_args,
     faux_assistant_message,
@@ -66,7 +66,7 @@ class TestFauxHelpers:
 
 class TestFauxProvider:
     def _make_model(self):
-        from cubepi.providers.base import Model
+        from cubeloop.providers.base import Model
 
         return Model(id="faux-1", provider_id="faux")
 
@@ -321,7 +321,7 @@ class TestFauxProviderExtendedFactory:
     """Tests for extended factory signature (messages, model, system_prompt, tools)."""
 
     def _make_model(self):
-        from cubepi.providers.base import Model
+        from cubeloop.providers.base import Model
 
         return Model(id="faux-1", provider_id="faux")
 
@@ -468,7 +468,7 @@ class TestFauxProviderPromptCache:
     """Tests for prompt cache simulation."""
 
     def _make_model(self):
-        from cubepi.providers.base import Model
+        from cubeloop.providers.base import Model
 
         return Model(id="faux-1", provider_id="faux")
 
@@ -731,7 +731,7 @@ class TestFauxProviderAbortDuringBlocks:
         push via a patched MessageStream.push, so it's set before the
         for-block check runs for the next block.
         """
-        from cubepi.providers.base import MessageStream
+        from cubeloop.providers.base import MessageStream
 
         provider = FauxProvider(token_size_min=100, token_size_max=100)
         signal = asyncio.Event()
@@ -760,7 +760,7 @@ class TestFauxProviderAbortDuringBlocks:
         Uses push-patching to set the signal synchronously in the producer,
         avoiding consumer-side races.
         """
-        from cubepi.providers.base import MessageStream
+        from cubeloop.providers.base import MessageStream
 
         long_thinking = "a" * 200
         provider = FauxProvider(token_size_min=1, token_size_max=1)
@@ -798,7 +798,7 @@ class TestFauxProviderAbortDuringBlocks:
         Uses push-patching to set the signal synchronously in the producer,
         avoiding consumer-side races.
         """
-        from cubepi.providers.base import MessageStream
+        from cubeloop.providers.base import MessageStream
 
         large_args = {f"key_{i}": f"value_{i}" for i in range(20)}
         provider = FauxProvider(token_size_min=1, token_size_max=1)
@@ -837,7 +837,7 @@ class TestFauxProviderAbortDuringBlocks:
         Uses push-patching to set the signal synchronously in the producer,
         avoiding consumer-side races.
         """
-        from cubepi.providers.base import MessageStream
+        from cubeloop.providers.base import MessageStream
 
         long_text = "word " * 100
         provider = FauxProvider(token_size_min=1, token_size_max=1)

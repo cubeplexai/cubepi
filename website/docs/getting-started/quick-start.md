@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: "Build your first CubePi agent in minutes with this step-by-step quick-start guide."
+description: "Build your first CubeLoop agent in minutes with this step-by-step quick-start guide."
 ---
 
 # Quick Start
@@ -12,7 +12,7 @@ response token-by-token, and exits cleanly.
 ## Prerequisites
 
 - Python 3.11+
-- `cubepi` installed (`pip install cubepi`)
+- `cubeloop` installed (`pip install cubeloop`)
 - An `ANTHROPIC_API_KEY` in your environment
 
 ## The full script
@@ -23,8 +23,8 @@ Save this as `weather_agent.py`:
 import asyncio
 import os
 
-from cubepi import Agent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 @tool
@@ -69,11 +69,11 @@ tool result threaded through.
 
 ## What just happened
 
-CubePi ran a loop that looks (conceptually) like this:
+CubeLoop ran a loop that looks (conceptually) like this:
 
 1. `agent.prompt("What's the weather in Tokyo?")` enqueued a
    `UserMessage` and called the model.
-2. The model decided to invoke `get_weather(city="Tokyo")` — CubePi
+2. The model decided to invoke `get_weather(city="Tokyo")` — CubeLoop
    parsed the JSON args against the schema `@tool` generated from your
    function signature, called your `async def`, and fed the result back
    as a `ToolResultMessage`.

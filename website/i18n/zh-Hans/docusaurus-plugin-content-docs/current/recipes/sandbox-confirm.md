@@ -1,6 +1,6 @@
 ---
 title: 使用 ApprovalPolicyMiddleware 做沙箱确认
-description: "使用 CubePi 的 ApprovalPolicyMiddleware 实现沙箱工具确认——自动放行、拒绝或人工确认。"
+description: "使用 CubeLoop 的 ApprovalPolicyMiddleware 实现沙箱工具确认——自动放行、拒绝或人工确认。"
 ---
 
 # 配方：使用 `ApprovalPolicyMiddleware` 做沙箱确认
@@ -14,7 +14,7 @@ description: "使用 CubePi 的 ApprovalPolicyMiddleware 实现沙箱工具确�
 `Approve()`、`Deny(reason)` 或 `AskUser(...)`。
 
 ```python
-from cubepi.hitl import Approve, AskUser, Deny
+from cubeloop.hitl import Approve, AskUser, Deny
 
 # 模拟规则引擎 —— 替换为你实际的策略目录。
 def classify_command(cmd: str) -> tuple[str, str | None]:
@@ -47,9 +47,9 @@ def sandbox_policy(ctx):
 ## 步骤 2：接入 agent
 
 ```python
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.postgres import PostgresCheckpointer
-from cubepi.hitl import ApprovalPolicyMiddleware, CheckpointedChannel
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.postgres import PostgresCheckpointer
+from cubeloop.hitl import ApprovalPolicyMiddleware, CheckpointedChannel
 
 async def main():
     async with PostgresCheckpointer("postgresql://...") as cp:
@@ -93,7 +93,7 @@ async def host_loop(channel: CheckpointedChannel):
                 timeout=timeout,
             )
             # 根据人类的决定构建 ApproveAnswer。
-            from cubepi.hitl import ApproveAnswer
+            from cubeloop.hitl import ApproveAnswer
             human_answer = ApproveAnswer(
                 decision=ui_response["decision"],          # "approve" | "deny" | "edit"
                 reason=ui_response.get("reason"),           # 仅用于 deny
@@ -139,11 +139,11 @@ await agent.abort_pending(reason="user closed tab")
 ## 运行示例
 
 仓库中有一份完整可运行的代码，位于
-[`examples/sandbox_confirm.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/sandbox_confirm.py)。
+[`examples/sandbox_confirm.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/sandbox_confirm.py)。
 示例接入了一个模拟的 bash 工具和一个策略函数：读操作自动允许、危险写操作硬拒绝、其他操作由 host 循环自动确认。
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync
 
 export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]

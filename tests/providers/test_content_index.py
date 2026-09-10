@@ -1,5 +1,5 @@
-from cubepi.providers.base import Model
-from cubepi.providers.faux import (
+from cubeloop.providers.base import Model
+from cubeloop.providers.faux import (
     FauxProvider,
     faux_assistant_message,
     faux_text,

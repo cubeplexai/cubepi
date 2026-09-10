@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     ImageContent,
     Model,
@@ -21,7 +21,7 @@ from cubepi.providers.base import (
     ToolResultMessage,
     UserMessage,
 )
-from cubepi.providers.openai_responses import OpenAIResponsesProvider
+from cubeloop.providers.openai_responses import OpenAIResponsesProvider
 
 
 # ---------------------------------------------------------------------------

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 
-from cubepi import Agent
-from cubepi.agent.types import AgentContext
-from cubepi.middleware.goal import GoalMiddleware, _format_messages_for_eval
-from cubepi.providers.base import (
+from cubeloop import Agent
+from cubeloop.agent.types import AgentContext
+from cubeloop.middleware.goal import GoalMiddleware, _format_messages_for_eval
+from cubeloop.providers.base import (
     AssistantMessage,
     ImageContent,
     Message,
@@ -15,7 +15,7 @@ from cubepi.providers.base import (
     ToolResultMessage,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 
 def _ctx(messages: list[Message] | None = None) -> AgentContext:

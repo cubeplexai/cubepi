@@ -12,7 +12,7 @@ description: "使用 SQLiteCheckpointer 实现轻量级单进程 agent 状态持
 安装 extra:
 
 ```bash
-pip install "cubepi[sqlite]"
+pip install "cubeloop[sqlite]"
 ```
 
 会拉入 `aiosqlite`。
@@ -21,9 +21,9 @@ pip install "cubepi[sqlite]"
 
 ```python
 import asyncio
-from cubepi import Agent
-from cubepi.checkpointer import SQLiteCheckpointer
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.checkpointer import SQLiteCheckpointer
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 async def main():
@@ -75,7 +75,7 @@ CREATE TABLE thread_extra (
 - `AgentContext` 的 `extra` dict 在 `agent_end` 时持久化到 `thread_extra`。
   Middleware 需要持久化线程级状态时,往 `context.extra` 写。
 
-这个 schema 是追加式的。CubePi 从不 update 或 delete 行。
+这个 schema 是追加式的。CubeLoop 从不 update 或 delete 行。
 
 ## HITL 挂起表
 
@@ -91,9 +91,9 @@ CREATE TABLE IF NOT EXISTS thread_pending_request (
 
 无需手动迁移 —— `CREATE TABLE IF NOT EXISTS` 是零等的。
 
-## CubePi 什么时候读
+## CubeLoop 什么时候读
 
-构造 Agent 后的 **第一次** `prompt()`,CubePi 会调
+构造 Agent 后的 **第一次** `prompt()`,CubeLoop 会调
 `load(thread_id)`。如果线程存在,历史恢复到 `agent.state.messages`,
 `extra` 恢复到 agent 私有的 `_extra` dict。
 
@@ -116,7 +116,7 @@ async with SQLiteCheckpointer("agent.db") as cp:
 ## 并发模型
 
 Checkpointer 内部对每次读写都用 `asyncio.Lock`。SQLite 本身允许
-多进程写,但 CubePi 的假设是单 Agent 实例独占一个 thread。多进程
+多进程写,但 CubeLoop 的假设是单 Agent 实例独占一个 thread。多进程
 同时写同一个 `agent.db`:
 
 - 读是安全的。
@@ -159,7 +159,7 @@ sqlite3 agent.db "VACUUM"
   一定要用 `async with` 包。
 - **两个进程写同一个 thread** —— 交错历史。要么用 Postgres,要么在
   应用层协调。
-- **未启用 WAL 模式** —— CubePi 走默认 journal mode 以确保可移植性。
+- **未启用 WAL 模式** —— CubeLoop 走默认 journal mode 以确保可移植性。
   对单写多读应用,一次性 `sqlite3 agent.db "PRAGMA journal_mode=WAL"`
   能显著提升并发读。
 - **忘传 `thread_id`** —— 不传时,Agent 没有持久化绑定。checkpointer

@@ -14,10 +14,10 @@ import asyncio
 
 import pytest
 
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl import ApproveAnswer
-from cubepi.hitl.channel import CheckpointedChannel
-from cubepi.hitl.types import Question
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl import ApproveAnswer
+from cubeloop.hitl.channel import CheckpointedChannel
+from cubeloop.hitl.types import Question
 
 
 async def test_run_id_persisted_on_approve():
@@ -90,7 +90,7 @@ async def test_legacy_checkpointer_works_without_run_id_kwarg():
     keep working when the host constructs CheckpointedChannel WITHOUT
     a run_id — the channel must not unconditionally pass the new kwarg.
     """
-    from cubepi.hitl.types import HitlRequest
+    from cubeloop.hitl.types import HitlRequest
 
     class LegacyCheckpointer:
         """Mimics a v2-era third-party checkpointer. save_pending_request
@@ -150,13 +150,13 @@ async def test_run_id_cleared_on_detach_stays_persisted():
     async def detacher():
         while ch.pending is None:
             await asyncio.sleep(0)
-        from cubepi.hitl.exceptions import HitlDetached
+        from cubeloop.hitl.exceptions import HitlDetached
 
         if ch._future is not None and not ch._future.done():
             ch._future.set_exception(HitlDetached())
 
     asyncio.create_task(detacher())
-    from cubepi.hitl.exceptions import HitlDetached
+    from cubeloop.hitl.exceptions import HitlDetached
 
     with pytest.raises(HitlDetached):
         await ch.confirm("ok?")

@@ -1,9 +1,9 @@
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.providers.base import AssistantMessage, TextContent
-from cubepi.providers.faux import FauxProvider
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.providers.base import AssistantMessage, TextContent
+from cubeloop.providers.faux import FauxProvider
 
 
 def _ok_faux() -> FauxProvider:
@@ -54,7 +54,7 @@ async def test_agent_fork_v3_only_checkpointer_raises_CheckpointerError():
     'degraded mode': vanilla prompt() works but fork() must surface
     CheckpointerError so callers know the backend cannot support fork.
     """
-    from cubepi.checkpointer.exceptions import CheckpointerError
+    from cubeloop.checkpointer.exceptions import CheckpointerError
 
     class _V3Only:
         async def load(self, thread_id):

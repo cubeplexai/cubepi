@@ -15,9 +15,9 @@ description: "用 GoalMiddleware 让 agent 持续运行，直到一个独立的�
 ## 基础用法
 
 ```python
-from cubepi import Agent
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.middleware.goal import GoalMiddleware
+from cubeloop import Agent
+from cubeloop.providers.anthropic import AnthropicProvider
+from cubeloop.middleware.goal import GoalMiddleware
 
 provider = AnthropicProvider(api_key="...")
 

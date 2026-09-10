@@ -3,8 +3,8 @@ import tempfile
 
 import pytest
 
-from cubepi.checkpointer.sqlite import SQLiteCheckpointer
-from cubepi.providers.base import TextContent, ToolResultMessage, UserMessage
+from cubeloop.checkpointer.sqlite import SQLiteCheckpointer
+from cubeloop.providers.base import TextContent, ToolResultMessage, UserMessage
 
 
 @pytest.fixture
@@ -104,7 +104,7 @@ class TestSQLiteCheckpointer:
         """Unknown roles are corruption, matching the postgres/mysql
         backends — the old silent raw-dict passthrough let bad data flow
         into the message list and fail far from the cause."""
-        from cubepi.checkpointer.exceptions import CheckpointCorruptionError
+        from cubeloop.checkpointer.exceptions import CheckpointCorruptionError
 
         async with SQLiteCheckpointer(db_path) as cp:
             raw_msg = {"role": "custom", "data": "test"}
@@ -116,7 +116,7 @@ class TestSQLiteCheckpointer:
 
 class TestCheckpointCorruption:
     async def test_corrupt_json_row_raises_typed(self, db_path):
-        from cubepi.checkpointer.exceptions import CheckpointCorruptionError
+        from cubeloop.checkpointer.exceptions import CheckpointCorruptionError
 
         async with SQLiteCheckpointer(db_path) as cp:
             await cp.append(
@@ -143,7 +143,7 @@ class TestCheckpointCorruption:
         assert err.__cause__ is not None
 
     async def test_unknown_role_raises_typed(self, db_path):
-        from cubepi.checkpointer.exceptions import CheckpointCorruptionError
+        from cubeloop.checkpointer.exceptions import CheckpointCorruptionError
 
         async with SQLiteCheckpointer(db_path) as cp:
             await cp.append("thread-1", [UserMessage(content=[TextContent(text="ok")])])

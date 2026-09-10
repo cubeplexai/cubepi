@@ -3,10 +3,10 @@ import asyncio
 import pytest
 from pydantic import Field
 
-from cubepi import AgentTool, AgentToolResult, TextContent, tool
-from cubepi.agent.tools import execute_tool_calls
-from cubepi.agent.types import AgentContext
-from cubepi.providers.base import AssistantMessage, ToolCall
+from cubeloop import AgentTool, AgentToolResult, TextContent, tool
+from cubeloop.agent.tools import execute_tool_calls
+from cubeloop.agent.types import AgentContext
+from cubeloop.providers.base import AssistantMessage, ToolCall
 
 
 def _ctx(tools: list[AgentTool]) -> AgentContext:

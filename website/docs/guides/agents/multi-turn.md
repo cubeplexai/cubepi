@@ -1,11 +1,11 @@
 ---
 title: Multi-turn Conversations
-description: "Build multi-turn conversational agents with CubePi's stateful agent loop and message history."
+description: "Build multi-turn conversational agents with CubeLoop's stateful agent loop and message history."
 ---
 
 # Multi-turn Conversations
 
-A "turn" in CubePi is one round of: user input → model response (and
+A "turn" in CubeLoop is one round of: user input → model response (and
 maybe tools) → optional more model responses to tool results. The
 agent's `_messages` list grows across turns; this guide covers how to
 drive multi-turn flows correctly and how to inject input while the
@@ -21,7 +21,7 @@ await agent.prompt("What's my name?")
 # → "Your name is Sam."
 ```
 
-History lives on `agent.state.messages`. CubePi appends each user
+History lives on `agent.state.messages`. CubeLoop appends each user
 message, each assistant message, and each tool result. The provider
 gets the full list every time, so context windows matter (see
 [Context Management](#context-management) below).
@@ -92,7 +92,7 @@ Subsequent calls just append.
 
 ## Context management
 
-CubePi does **not** truncate or summarise context on your behalf. The
+CubeLoop does **not** truncate or summarise context on your behalf. The
 full message list is sent to the model on every turn. Strategies:
 
 - **Manual truncation** — Implement a
@@ -121,7 +121,7 @@ to call anywhere.
 ## Restoring state from disk
 
 ```python
-from cubepi.checkpointer import SQLiteCheckpointer
+from cubeloop.checkpointer import SQLiteCheckpointer
 
 async with SQLiteCheckpointer("conv.db") as cp:
     agent = Agent(

@@ -14,18 +14,18 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.checkpointer.exceptions import (
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.checkpointer.exceptions import (
     CompletionMarkerFailedError,
     RunNotClaimedError,
 )
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl import AskUser
-from cubepi.hitl.channel import CheckpointedChannel
-from cubepi.hitl.middleware import ApprovalPolicyMiddleware
-from cubepi.providers.base import AssistantMessage, TextContent
-from cubepi.providers.faux import (
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl import AskUser
+from cubeloop.hitl.channel import CheckpointedChannel
+from cubeloop.hitl.middleware import ApprovalPolicyMiddleware
+from cubeloop.providers.base import AssistantMessage, TextContent
+from cubeloop.providers.faux import (
     FauxProvider,
     faux_assistant_message,
     faux_text,

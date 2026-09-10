@@ -1,5 +1,5 @@
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.providers.base import TextContent, UserMessage
 
 
 class TestMemoryCheckpointer:

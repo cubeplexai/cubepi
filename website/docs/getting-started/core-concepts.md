@@ -1,11 +1,11 @@
 ---
 title: Core Concepts
-description: "Learn the six core concepts of CubePi: Agent, Tool, Provider, Stream & Events, Middleware, and Checkpointer."
+description: "Learn the six core concepts of CubeLoop: Agent, Tool, Provider, Stream & Events, Middleware, and Checkpointer."
 ---
 
 # Core Concepts
 
-Six concepts cover everything CubePi does. Read this page once, then
+Six concepts cover everything CubeLoop does. Read this page once, then
 the rest of the docs become a lookup table.
 
 ## Agent
@@ -35,10 +35,10 @@ sync or async.
 ## Tool
 
 A tool is an async function the model can call. Decorate it with
-`@tool` and CubePi generates the input schema from the parameters:
+`@tool` and CubeLoop generates the input schema from the parameters:
 
 ```python
-from cubepi import tool
+from cubeloop import tool
 
 @tool
 async def search(query: str, limit: int = 10) -> str:
@@ -159,7 +159,7 @@ backends implement them. See [HITL guide](../guides/hitl/overview).
 
 ## HITL (Human-in-the-Loop)
 
-CubePi ships a built-in `cubepi.hitl` module for scenarios where the
+CubeLoop ships a built-in `cubeloop.hitl` module for scenarios where the
 agent needs to **pause and wait for a human**:
 
 - **Sandbox confirmation** — a dangerous tool (bash, file write) needs
@@ -168,7 +168,7 @@ agent needs to **pause and wait for a human**:
   and waits for the answer.
 
 ```python
-from cubepi.hitl import InMemoryChannel, ConfirmToolCallMiddleware, ask_user_tool
+from cubeloop.hitl import InMemoryChannel, ConfirmToolCallMiddleware, ask_user_tool
 
 channel = InMemoryChannel()
 
@@ -206,21 +206,21 @@ can ingest agent runs without custom instrumentation. Install the
 extra:
 
 ```bash
-pip install "cubepi[tracing]"           # OTel SDK
-pip install "cubepi[tracing-otlp]"      # + OTLP/HTTP exporter
+pip install "cubeloop[tracing]"           # OTel SDK
+pip install "cubeloop[tracing-otlp]"      # + OTLP/HTTP exporter
 ```
 
 then wrap your agent in an `async with`:
 
 ```python
-from cubepi.tracing import Tracer
-from cubepi.tracing.exporters import JsonlSpanExporter
+from cubeloop.tracing import Tracer
+from cubeloop.tracing.exporters import JsonlSpanExporter
 
 async with (
     Tracer(
         service_name="my-bot",
         agent_name="assistant",
-        exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+        exporters=[JsonlSpanExporter(directory="./cubeloop-traces")],
     ) as tracer,
     tracer.attached(agent),
 ):
@@ -228,7 +228,7 @@ async with (
 ```
 
 Each run emits an `invoke_agent` root span containing one
-`cubepi.turn` per LLM round-trip, plus `chat` (CLIENT) and
+`cubeloop.turn` per LLM round-trip, plus `chat` (CLIENT) and
 `execute_tool` children. By default **no prompt content or model
 output is recorded** — opt in with `Tracer(record_content=True)` and
 a `redact` callback for PII. Pair with `Meter(...)` for token /

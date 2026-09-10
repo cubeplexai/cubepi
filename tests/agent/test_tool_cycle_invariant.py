@@ -2,23 +2,23 @@ import asyncio
 
 import pytest
 
-from cubepi.agent._tool_cycle import (
+from cubeloop.agent._tool_cycle import (
     ToolCycleViolation,
     check_tool_cycle,
 )
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl.ask_user import ask_user_tool
-from cubepi.hitl.channel import CheckpointedChannel
-from cubepi.middleware.base import TurnAction
-from cubepi.providers.base import (
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl.ask_user import ask_user_tool
+from cubeloop.hitl.channel import CheckpointedChannel
+from cubeloop.middleware.base import TurnAction
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,
     ToolResultMessage,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider
+from cubeloop.providers.faux import FauxProvider
 
 
 def _asst(call_ids, run_id="R"):

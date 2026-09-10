@@ -15,17 +15,17 @@ from __future__ import annotations
 import asyncio
 import os
 
-from cubepi import Agent, FallbackBoundModel
-from cubepi.errors import (
+from cubeloop import Agent, FallbackBoundModel
+from cubeloop.errors import (
     ContextLengthExceeded,
     ProviderAuthFailed,
     ProviderBadRequest,
     ProviderUnavailable,
     RateLimited,
 )
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.providers.base import BoundModel
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop.providers.anthropic import AnthropicProvider
+from cubeloop.providers.base import BoundModel
+from cubeloop.providers.openai import OpenAIProvider
 
 from _provider import MODEL_ID, provider
 

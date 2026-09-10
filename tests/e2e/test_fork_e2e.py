@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.providers.base import AssistantMessage, TextContent
-from cubepi.providers.faux import FauxProvider
+from cubeloop.agent.agent import Agent
+from cubeloop.providers.base import AssistantMessage, TextContent
+from cubeloop.providers.faux import FauxProvider
 
 
 def _ok_faux() -> FauxProvider:
@@ -58,14 +58,14 @@ async def _run_happy_path(cp) -> None:
 
 @pytest.mark.asyncio
 async def test_fork_e2e_memory():
-    from cubepi.checkpointer.memory import MemoryCheckpointer
+    from cubeloop.checkpointer.memory import MemoryCheckpointer
 
     await _run_happy_path(MemoryCheckpointer())
 
 
 @pytest.mark.asyncio
 async def test_fork_e2e_sqlite(tmp_path):
-    from cubepi.checkpointer.sqlite import SQLiteCheckpointer
+    from cubeloop.checkpointer.sqlite import SQLiteCheckpointer
 
     async with SQLiteCheckpointer(str(tmp_path / "x.db")) as cp:
         await _run_happy_path(cp)
@@ -73,7 +73,7 @@ async def test_fork_e2e_sqlite(tmp_path):
 
 @pytest.mark.asyncio
 async def test_fork_e2e_postgres(pg_v4_dsn):
-    from cubepi.checkpointer.postgres.checkpointer import PostgresCheckpointer
+    from cubeloop.checkpointer.postgres.checkpointer import PostgresCheckpointer
 
     async with PostgresCheckpointer(pg_v4_dsn) as cp:
         await _run_happy_path(cp)
@@ -81,7 +81,7 @@ async def test_fork_e2e_postgres(pg_v4_dsn):
 
 @pytest.mark.asyncio
 async def test_fork_e2e_mysql(mysql_v4_dsn):
-    from cubepi.checkpointer.mysql.checkpointer import MySQLCheckpointer
+    from cubeloop.checkpointer.mysql.checkpointer import MySQLCheckpointer
 
     async with MySQLCheckpointer(mysql_v4_dsn) as cp:
         await _run_happy_path(cp)

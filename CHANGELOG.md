@@ -1,11 +1,21 @@
 # Changelog
 
-All notable changes to CubePi are documented here.
+All notable changes to CubeLoop are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Breaking
+
+- **Renamed CubePi / `cubepi` to CubeLoop / `cubeloop`.** The import path,
+  PyPI project, CLI, docs site (`https://cubeloop.dev`), OTel vendor
+  namespace (`cubeloop.*`), and Postgres/MySQL table names (`cubeloop_*`)
+  all move. `pip install cubepi` 0.14+ is a transitional wrapper that
+  depends on `cubeloop` and warns. Postgres/MySQL hosts must run
+  `upgrade_v5_to_v6_op()` before opening 0.14. SQLite table names are
+  unchanged. See the [migration guide](https://cubeloop.dev/docs/migration/from-cubepi).
 
 ## [0.13.6] - 2026-09-04
 
@@ -103,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   normalized output messages where derivable", but only
   `cubepi.llm.raw_response` was ever set on this span;
   `gen_ai.output.messages` was written only on `invoke_agent` and
-  `cubepi.turn`. The recorder now reconstructs the semconv
+  `cubeloop.turn`. The recorder now reconstructs the semconv
   output-message parts (text / reasoning / tool_call) directly from the
   assembled response body via a new `_derive_output_message_from_body()`
   helper, mirroring the existing three-way provider-shape dispatch
@@ -266,7 +276,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `metadata["synthetic"] = True` so downstream UIs can tell internal
   scaffolding apart from real human input. Real `Agent.prompt()` /
   `Agent.steer()` messages remain unmarked. Closes #171. Exported from
-  `cubepi` and `cubepi.providers`. Use this factory (not bare
+  `cubepi` and `cubeloop.providers`. Use this factory (not bare
   `UserMessage`) when returning messages from `TurnAction.inject_messages`
   or `on_run_end`.
 
@@ -403,7 +413,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ProviderUnavailable`, or `ContextLengthExceeded` (configurable via
   `trigger_errors`), or on a first-event stream error, the next model in the
   chain is tried transparently. Optional `on_failover` callback for
-  billing/metrics hooks. Exported from `cubepi` and `cubepi.providers`.
+  billing/metrics hooks. Exported from `cubepi` and `cubeloop.providers`.
 
 - **`DEFAULT_TRIGGER_ERRORS`** — `frozenset({RateLimited, ProviderUnavailable,
   ContextLengthExceeded})`. The default set of error types that trigger failover
@@ -430,7 +440,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Middleware.extra_llm_calls()` returns `Iterable[BoundModel]`** instead
   of `Iterable[tuple[Provider, Model]]`. Third-party middleware overriding
   this hook must update the return shape (see Migration). The recorder
-  consumer in `cubepi.tracing` was adapted in lock-step; built-in
+  consumer in `cubeloop.tracing` was adapted in lock-step; built-in
   `CompactionMiddleware` already updated.
 - **`cubepi.middleware.compaction.summarizer.summarize()` takes
   `model: BoundModel`** instead of separate `provider: Provider, model: Model`
@@ -616,7 +626,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so its `chat` span lands as a child:
   ```
   invoke_agent
-  └── cubepi.turn
+  └── cubeloop.turn
       ├── cubepi.compaction.summarize
       │   └── chat <summary-model>
       └── chat <main-model>
@@ -706,7 +716,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same `(provider, model)` pair as the agent's main.
 - The compaction summarizer's wrapper span now installs `turn_span` as the
   OTel current span, so `cubepi.compaction.summarize` lands as a child of
-  `cubepi.turn` instead of becoming an orphan root.
+  `cubeloop.turn` instead of becoming an orphan root.
 
 ### Removed
 
@@ -735,7 +745,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`MySQLCheckpointer`** — full-featured MySQL/MariaDB checkpointer with
   Alembic schema management, matching the Postgres implementation.
 - **Stream recording + `trace convert`** — `record_stream()` captures a raw
-  provider `MessageStream` to JSONL; `cubepi trace convert` replays the
+  provider `MessageStream` to JSONL; `cubeloop trace convert` replays the
   recording as a structured trace. Useful for offline debugging and testing
   without live API calls.
 - **Trace CLI — run-metadata filtering** (`--meta` / `--show-meta`): filter
@@ -767,7 +777,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mapping (int budget / effort / enum), and the `max_tokens` field name. It now
   drives the OpenAI, OpenAI Responses, Anthropic, and DeepSeek providers, and is
   exported from the top-level package.
-- **`cubepi trace` CLI** (install with the `trace-cli` extra): discover, list,
+- **`cubeloop trace` CLI** (install with the `trace-cli` extra): discover, list,
   view, follow, and aggregate stats over local agent-run traces, with rich
   rendering and run-id prefix matching.
 - **Tracing**: an OTLP exporter and a best-effort `trace()` scope helper. The
@@ -799,23 +809,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v0.13.6...HEAD
-[0.13.6]: https://github.com/cubeplexai/cubepi/compare/v0.13.5...v0.13.6
-[0.13.5]: https://github.com/cubeplexai/cubepi/compare/v0.13.4...v0.13.5
-[0.13.4]: https://github.com/cubeplexai/cubepi/compare/v0.13.3...v0.13.4
-[0.13.3]: https://github.com/cubeplexai/cubepi/compare/v0.13.2...v0.13.3
-[0.13.2]: https://github.com/cubeplexai/cubepi/compare/v0.13.1...v0.13.2
-[0.13.1]: https://github.com/cubeplexai/cubepi/compare/v0.13.0...v0.13.1
-[0.13.0]: https://github.com/cubeplexai/cubepi/compare/v0.12.0...v0.13.0
-[0.12.0]: https://github.com/cubeplexai/cubepi/compare/v0.11.0...v0.12.0
-[0.11.0]: https://github.com/cubeplexai/cubepi/compare/v0.10.0...v0.11.0
-[0.10.0]: https://github.com/cubeplexai/cubepi/compare/v0.9.0...v0.10.0
-[0.9.0]: https://github.com/cubeplexai/cubepi/compare/v0.8.0...v0.9.0
-[0.8.0]: https://github.com/cubeplexai/cubepi/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/cubeplexai/cubepi/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/cubeplexai/cubepi/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/cubeplexai/cubepi/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/cubeplexai/cubepi/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/cubeplexai/cubepi/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/cubeplexai/cubepi/compare/v0.1.0...v0.2.0
+[Unreleased]: https://github.com/cubeplexai/cubeloop/compare/v0.13.6...HEAD
+[0.13.6]: https://github.com/cubeplexai/cubeloop/compare/v0.13.5...v0.13.6
+[0.13.5]: https://github.com/cubeplexai/cubeloop/compare/v0.13.4...v0.13.5
+[0.13.4]: https://github.com/cubeplexai/cubeloop/compare/v0.13.3...v0.13.4
+[0.13.3]: https://github.com/cubeplexai/cubeloop/compare/v0.13.2...v0.13.3
+[0.13.2]: https://github.com/cubeplexai/cubeloop/compare/v0.13.1...v0.13.2
+[0.13.1]: https://github.com/cubeplexai/cubeloop/compare/v0.13.0...v0.13.1
+[0.13.0]: https://github.com/cubeplexai/cubeloop/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/cubeplexai/cubeloop/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/cubeplexai/cubeloop/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/cubeplexai/cubeloop/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/cubeplexai/cubeloop/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/cubeplexai/cubeloop/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/cubeplexai/cubeloop/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/cubeplexai/cubeloop/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/cubeplexai/cubeloop/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/cubeplexai/cubeloop/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/cubeplexai/cubeloop/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/cubeplexai/cubeloop/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0

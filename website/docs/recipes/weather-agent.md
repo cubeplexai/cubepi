@@ -1,6 +1,6 @@
 ---
 title: Weather Agent
-description: "Build a weather agent that fetches live API data with CubePi tools."
+description: "Build a weather agent that fetches live API data with CubeLoop tools."
 ---
 
 # Recipe: Weather Agent
@@ -10,7 +10,7 @@ Demonstrates HTTP-calling tools, error handling, streaming UI, and
 cancellation.
 
 **Time to run:** 5 minutes.
-**Deps:** `cubepi`, `httpx`, an `ANTHROPIC_API_KEY`.
+**Deps:** `cubeloop`, `httpx`, an `ANTHROPIC_API_KEY`.
 
 ## The script
 
@@ -22,8 +22,8 @@ import httpx
 from typing import Annotated
 from pydantic import Field
 
-from cubepi import Agent, AgentToolResult, TextContent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent, AgentToolResult, TextContent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 # --- The tool -----------------------------------------------------------
@@ -108,7 +108,7 @@ if __name__ == "__main__":
 Run:
 
 ```bash
-pip install cubepi httpx
+pip install cubeloop httpx
 export ANTHROPIC_API_KEY=sk-…
 python weather_agent.py
 ```
@@ -124,7 +124,7 @@ Tokyo is currently 18°C with a wind speed of 12 km/h. São Paulo is 25°C with 
 ## What's going on
 
 - **Two tools in parallel.** The model emits two `get_weather` tool
-  calls in the same assistant turn. CubePi runs them concurrently —
+  calls in the same assistant turn. CubeLoop runs them concurrently —
   the second one doesn't wait for the first.
 - **Streaming text + tool events interleave.** The `on_event` filter
   handles both `text_delta` (for the final answer) and
@@ -148,10 +148,10 @@ Tokyo is currently 18°C with a wind speed of 12 km/h. São Paulo is 25°C with 
 ## Run the example
 
 A self-contained, runnable version of this recipe is in the repository at
-[`examples/weather_agent.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/weather_agent.py).
+[`examples/weather_agent.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/weather_agent.py).
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync
 
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]

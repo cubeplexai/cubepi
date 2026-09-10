@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cubepi.providers.openai import OpenAIProvider
-from cubepi.providers.base import (
+from cubeloop.providers.openai import OpenAIProvider
+from cubeloop.providers.base import (
     AssistantMessage,
     ImageContent,
     Model,
@@ -963,7 +963,7 @@ class TestOpenAITypedErrorWrapping:
 
     @pytest.mark.asyncio
     async def test_rate_limit_429_delivers_rate_limited_to_listener(self) -> None:
-        from cubepi.errors import RateLimited
+        from cubeloop.errors import RateLimited
 
         exc = _FakeSdkExc("Rate limit exceeded", status_code=429)
         mock_client = MagicMock()
@@ -996,7 +996,7 @@ class TestOpenAITypedErrorWrapping:
     async def test_context_length_message_delivers_context_length_exceeded(
         self,
     ) -> None:
-        from cubepi.errors import ContextLengthExceeded
+        from cubeloop.errors import ContextLengthExceeded
 
         exc = _FakeSdkExc(
             "This model's maximum context length is 128000 tokens.", status_code=400

@@ -1,11 +1,11 @@
 ---
 title: Tool Use & Parallel Execution
-description: "Register tools, execute them in parallel or sequentially, and handle results with Pydantic validation in CubePi."
+description: "Register tools, execute them in parallel or sequentially, and handle results with Pydantic validation in CubeLoop."
 ---
 
 # Tool Use & Parallel Execution
 
-Tools are how an agent acts on the world. CubePi turns each `AgentTool`
+Tools are how an agent acts on the world. CubeLoop turns each `AgentTool`
 into a JSON Schema for the model, validates arguments with Pydantic,
 runs the work, and feeds the result back as a `ToolResultMessage`. By
 default tools run in parallel when the model calls more than one in a
@@ -13,14 +13,14 @@ single turn.
 
 ## The `@tool` decorator
 
-The quickest way to define a tool is to decorate an async function. CubePi
+The quickest way to define a tool is to decorate an async function. CubeLoop
 generates the input schema from the parameters, so there's no separate model
 or boilerplate `execute` signature to write:
 
 ```python
 from typing import Annotated
 from pydantic import Field
-from cubepi import tool
+from cubeloop import tool
 
 
 @tool
@@ -45,7 +45,7 @@ The return value can be a plain `str` (wrapped as text, as above), a
 `details`, `is_error`, or `terminate`:
 
 ```python
-from cubepi import tool, AgentToolResult, TextContent
+from cubeloop import tool, AgentToolResult, TextContent
 
 
 @tool
@@ -78,7 +78,7 @@ tools dynamically or share one params model across several tools:
 
 ```python
 from pydantic import BaseModel, Field
-from cubepi import AgentTool, AgentToolResult, TextContent
+from cubeloop import AgentTool, AgentToolResult, TextContent
 
 
 class SearchParams(BaseModel):
@@ -109,7 +109,7 @@ into the JSON Schema and helps the model understand each parameter.
 ## Parallel by default
 
 When the model emits multiple tool calls in one assistant message,
-CubePi schedules them on `asyncio.create_task()` and gathers them.
+CubeLoop schedules them on `asyncio.create_task()` and gathers them.
 That's almost always what you want.
 
 ```python
@@ -213,7 +213,7 @@ underlying library.
 
 Two ways:
 
-1. **Raise an exception.** CubePi catches it, turns it into an
+1. **Raise an exception.** CubeLoop catches it, turns it into an
    `AgentToolResult` with `is_error=True` and the exception string as
    `TextContent`.
 2. **Return `is_error=True` explicitly.** Useful when you want a
@@ -244,7 +244,7 @@ async def submit_final_answer(tool_call_id, params, *, signal=None, on_update=No
     )
 ```
 
-CubePi only terminates if *every* tool result in the current batch is
+CubeLoop only terminates if *every* tool result in the current batch is
 `terminate=True`. The agent loop emits `turn_end`, then `agent_end`,
 and exits.
 
@@ -268,9 +268,9 @@ tools into the model-visible tools array as native tools — remains
 available via `deferred_tool_strategy="inject"`.)
 
 ```python
-from cubepi import Agent
-from cubepi.deferred import DeferredToolGroup
-from cubepi.mcp import load_mcp_tools_stdio
+from cubeloop import Agent
+from cubeloop.deferred import DeferredToolGroup
+from cubeloop.mcp import load_mcp_tools_stdio
 
 async def load_github_tools():
     result = await load_mcp_tools_stdio(
@@ -318,7 +318,7 @@ and the advanced middleware constructor.
   there unless you have a downstream consumer.
 - **Pydantic strictness surprises** — `Field(..., min_length=1)` lets
   the model see the constraint via JSON Schema; constraints help, but
-  remember the model still sometimes sends bad JSON. CubePi turns the
+  remember the model still sometimes sends bad JSON. CubeLoop turns the
   `ValidationError` into a tool error result; you don't need to wrap
   validation yourself.
 - **`tools=[]` and the model still asks for a tool** — Usually means

@@ -4,9 +4,9 @@ import asyncio
 
 import pytest
 
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl import ApproveAnswer, HitlDurabilityNotGuaranteed, HitlError
-from cubepi.hitl.channel import CheckpointedChannel
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl import ApproveAnswer, HitlDurabilityNotGuaranteed, HitlError
+from cubeloop.hitl.channel import CheckpointedChannel
 
 
 async def test_checkpointed_persists_pending_on_ask():
@@ -28,7 +28,7 @@ async def test_checkpointed_persists_pending_on_ask():
 
 
 async def test_checkpointed_durability_guard_rejects_inside_custom_tool():
-    from cubepi.hitl.channel import _in_custom_tool_var
+    from cubeloop.hitl.channel import _in_custom_tool_var
 
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
@@ -41,7 +41,7 @@ async def test_checkpointed_durability_guard_rejects_inside_custom_tool():
 
 
 async def test_checkpointed_durability_optin_allows():
-    from cubepi.hitl.channel import _in_custom_tool_var
+    from cubeloop.hitl.channel import _in_custom_tool_var
 
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(
@@ -73,12 +73,12 @@ async def test_detach_leaves_pending_persisted():
         while ch.pending is None:
             await asyncio.sleep(0)
         if ch._future is not None and not ch._future.done():
-            from cubepi.hitl.exceptions import HitlDetached
+            from cubeloop.hitl.exceptions import HitlDetached
 
             ch._future.set_exception(HitlDetached())
 
     asyncio.create_task(detacher())
-    from cubepi.hitl.exceptions import HitlDetached
+    from cubeloop.hitl.exceptions import HitlDetached
 
     with pytest.raises(HitlDetached):
         await ch.confirm("ok?")
@@ -87,7 +87,7 @@ async def test_detach_leaves_pending_persisted():
 
 
 def test_checkpointed_channel_public_export():
-    from cubepi.hitl import CheckpointedChannel as Exported
+    from cubeloop.hitl import CheckpointedChannel as Exported
 
     assert Exported is CheckpointedChannel
 

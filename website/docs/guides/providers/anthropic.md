@@ -1,6 +1,6 @@
 ---
 title: Anthropic
-description: "Use Anthropic Claude models with CubePi's AnthropicProvider — supports thinking, caching, and tool use."
+description: "Use Anthropic Claude models with CubeLoop's AnthropicProvider — supports thinking, caching, and tool use."
 ---
 
 # Anthropic Provider
@@ -12,7 +12,7 @@ caching, and tool use.
 ## Construction
 
 ```python
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(
     api_key="sk-ant-…",          # or read from os.environ["ANTHROPIC_API_KEY"]
@@ -38,13 +38,13 @@ model = provider.model(
 ```
 
 The first argument is the model name exactly as you'd pass it to the
-SDK. `provider_id` is a free-form label used by CubePi internals — keep
+SDK. `provider_id` is a free-form label used by CubeLoop internals — keep
 it stable across your codebase, and set it when you want tracing and
 error messages to show a specific source label.
 
 ## Extended thinking (reasoning)
 
-CubePi exposes a provider-independent `ReasoningControl(mode, effort,
+CubeLoop exposes a provider-independent `ReasoningControl(mode, effort,
 summary)` and maps it onto Anthropic's `thinking` + `budget_tokens`:
 
 | `effort` | Budget |
@@ -59,7 +59,7 @@ summary)` and maps it onto Anthropic's `thinking` + `budget_tokens`:
 the given `effort`. Set it per-agent:
 
 ```python
-from cubepi import ReasoningControl
+from cubeloop import ReasoningControl
 
 agent = Agent(
     model=model,
@@ -68,7 +68,7 @@ agent = Agent(
 ```
 
 A non-reasoning model (`Model(reasoning=False)`) never receives an
-enabled `thinking` payload, regardless of the requested `mode` — CubePi
+enabled `thinking` payload, regardless of the requested `mode` — CubeLoop
 clamps it to `"off"` for you.
 
 To change the per-effort budgets, supply a
@@ -76,8 +76,8 @@ To change the per-effort budgets, supply a
 `effort_values` map is the single source of truth for budget values:
 
 ```python
-from cubepi import CapabilityDescriptor, ReasoningCapability
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import CapabilityDescriptor, ReasoningCapability
+from cubeloop.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(
     api_key="sk-ant-…",
@@ -102,11 +102,11 @@ The `thinking` / `ThinkingLevel` / `ThinkingBudgets` API (and
 `ReasoningCapability`. `Agent(thinking=…)` is now `Agent(reasoning=…)`.
 :::
 
-When reasoning is on, CubePi **omits `temperature`** because the
+When reasoning is on, CubeLoop **omits `temperature`** because the
 Anthropic API rejects non-default temperatures alongside extended
 thinking ([feature compatibility](https://platform.claude.com/docs/en/build-with-claude/extended-thinking#feature-compatibility)).
 Set `Model.temperature` to the value you want when reasoning is off;
-CubePi handles the rest.
+CubeLoop handles the rest.
 
 Thinking content streams as `thinking_start` / `thinking_delta` /
 `thinking_end` events and ends up in `AssistantMessage.content` as
@@ -136,7 +136,7 @@ rate.
 
 For custom cache strategies (a different breakpoint policy), implement
 the `CacheMarkerPolicy` Protocol and pass `cache_policy=…`. The
-default policy lives at `cubepi.providers.anthropic.DefaultCacheMarkerPolicy`.
+default policy lives at `cubeloop.providers.anthropic.DefaultCacheMarkerPolicy`.
 
 ## Custom payloads with `on_payload`
 
@@ -175,7 +175,7 @@ Both callbacks may be sync or async.
 
 ## Pointing at Bedrock / Vertex / proxies
 
-The Anthropic SDK accepts a `base_url`; CubePi forwards it:
+The Anthropic SDK accepts a `base_url`; CubeLoop forwards it:
 
 ```python
 provider = AnthropicProvider(
@@ -189,7 +189,7 @@ and inject it via a [custom provider](./custom).
 
 ## Common pitfalls
 
-- **`temperature` ignored** — Expected. CubePi drops it when reasoning
+- **`temperature` ignored** — Expected. CubeLoop drops it when reasoning
   is on; that's an API constraint, not a bug.
 - **`effort="max"` looks the same as `"high"`** — Anthropic doesn't
   expose a budget tier above `high`, so the built-in profile maps both

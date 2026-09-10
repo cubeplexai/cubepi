@@ -5,19 +5,19 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl import (
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl import (
     ApproveAnswer,
     AskUser,
     HitlNoPendingRequest,
     HitlStaleAnswer,
 )
-from cubepi.hitl.channel import CheckpointedChannel
-from cubepi.hitl.middleware import ApprovalPolicyMiddleware
-from cubepi.providers.base import TextContent
-from cubepi.providers.faux import (
+from cubeloop.hitl.channel import CheckpointedChannel
+from cubeloop.hitl.middleware import ApprovalPolicyMiddleware
+from cubeloop.providers.base import TextContent
+from cubeloop.providers.faux import (
     FauxProvider,
     faux_assistant_message,
     faux_text,
@@ -111,7 +111,7 @@ async def test_respond_stale_answer():
         thread_id="t-1",
     )
     # Manually persist a pending then try the wrong qid.
-    from cubepi.hitl.types import ApproveRequest, HitlRequest
+    from cubeloop.hitl.types import ApproveRequest, HitlRequest
 
     await cp.save_pending_request(
         "t-1",

@@ -3,17 +3,17 @@
 import aiomysql
 import pytest
 
-from cubepi.checkpointer.exceptions import (
+from cubeloop.checkpointer.exceptions import (
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
     RunNotClaimedError,
 )
-from cubepi.checkpointer.mysql import MySQLCheckpointer
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.checkpointer.mysql import MySQLCheckpointer
+from cubeloop.providers.base import TextContent, UserMessage
 
 
 async def _connect(dsn: str):
-    from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
+    from cubeloop.checkpointer.mysql.checkpointer import _parse_dsn
 
     return await aiomysql.connect(autocommit=True, **_parse_dsn(dsn))
 
@@ -26,13 +26,13 @@ async def test_claim_run_creates_threads_row_lazily(mysql_v4_dsn) -> None:
     try:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT thread_id FROM cubepi_threads WHERE thread_id = %s",
+                "SELECT thread_id FROM cubeloop_threads WHERE thread_id = %s",
                 ("t-lazy",),
             )
             row = await cur.fetchone()
             assert row is not None
             await cur.execute(
-                "SELECT completed_at FROM cubepi_runs "
+                "SELECT completed_at FROM cubeloop_runs "
                 "WHERE thread_id = %s AND run_id = %s",
                 ("t-lazy", "r1"),
             )
@@ -96,7 +96,7 @@ async def test_completion_seq_monotonic_per_thread(mysql_v4_dsn) -> None:
     try:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT run_id, completion_seq FROM cubepi_runs "
+                "SELECT run_id, completion_seq FROM cubeloop_runs "
                 "WHERE thread_id = %s ORDER BY completion_seq",
                 ("t",),
             )
@@ -111,7 +111,7 @@ async def test_completion_seq_monotonic_per_thread(mysql_v4_dsn) -> None:
 
 @pytest.mark.asyncio
 async def test_load_pending_returns_tuple_with_run_id(mysql_v4_dsn) -> None:
-    from cubepi.hitl.types import ConfirmRequest, HitlRequest
+    from cubeloop.hitl.types import ConfirmRequest, HitlRequest
 
     async with MySQLCheckpointer(mysql_v4_dsn) as cp:
         req = HitlRequest(
@@ -144,7 +144,7 @@ async def test_append_persists_run_id_into_column(mysql_v4_dsn) -> None:
     try:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT run_id FROM cubepi_messages WHERE thread_id = %s",
+                "SELECT run_id FROM cubeloop_messages WHERE thread_id = %s",
                 ("t",),
             )
             row = await cur.fetchone()

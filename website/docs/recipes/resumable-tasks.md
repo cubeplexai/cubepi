@@ -1,6 +1,6 @@
 ---
 title: Resumable Long Tasks
-description: "Build crash-resilient long-running tasks with CubePi checkpointing and recovery."
+description: "Build crash-resilient long-running tasks with CubeLoop checkpointing and recovery."
 ---
 
 # Recipe: Resumable Long Tasks
@@ -8,12 +8,12 @@ description: "Build crash-resilient long-running tasks with CubePi checkpointing
 When an agent is mid-flight through a long-running operation (a series
 of tool calls, a multi-turn reasoning session) and the process dies,
 you want to come back and pick up where it left off — not start over.
-CubePi's append-only checkpointing plus `agent.resume()` makes this
+CubeLoop's append-only checkpointing plus `agent.resume()` makes this
 trivial *between turns*; for resumption *mid-tool*, you need a little
 more care.
 
 **Time to run:** 15 minutes.
-**Deps:** `cubepi[sqlite]`, an `ANTHROPIC_API_KEY`.
+**Deps:** `cubeloop[sqlite]`, an `ANTHROPIC_API_KEY`.
 
 ## The pattern
 
@@ -26,7 +26,7 @@ There are three crash points to think about:
    persisted. `resume()` sees the last message is a `ToolResultMessage`
    and re-invokes the model. *Free with the checkpointer.*
 3. **Mid-tool** — The tool started but didn't finish. Nothing is
-   persisted yet (CubePi only persists messages). You need
+   persisted yet (CubeLoop only persists messages). You need
    tool-internal idempotency. *Requires care.*
 
 This recipe focuses on case 3.
@@ -41,11 +41,11 @@ import os
 import json
 from pathlib import Path
 
-from cubepi import AgentToolResult, TextContent, tool
+from cubeloop import AgentToolResult, TextContent, tool
 
 
 # Simple file-backed job store; replace with Redis / Postgres in prod.
-JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/cubepi-jobs"))
+JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/cubeloop-jobs"))
 JOB_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -91,9 +91,9 @@ import asyncio
 import os
 import sys
 
-from cubepi import Agent
-from cubepi.checkpointer import SQLiteCheckpointer
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.checkpointer import SQLiteCheckpointer
+from cubeloop.providers.anthropic import AnthropicProvider
 
 from tools import transcode_video   # the @tool-decorated AgentTool from above
 
@@ -128,7 +128,7 @@ async def main(thread_id: str, initial_prompt: str | None):
             #   AssistantMessage with no queued steer/follow_up → raises
             last = agent.state.messages[-1]
             if type(last).__name__ == "AssistantMessage":
-                from cubepi.providers.base import ToolCall
+                from cubeloop.providers.base import ToolCall
                 has_pending_tools = any(isinstance(c, ToolCall) for c in last.content)
                 if not has_pending_tools:
                     # Job finished normally — no pending tool calls.
@@ -194,7 +194,7 @@ idempotency guards handle the rest.
 
 ## What about persisting partial tool state?
 
-CubePi doesn't expose a "persist a partial tool result" API. The
+CubeLoop doesn't expose a "persist a partial tool result" API. The
 intended pattern is: keep partial state in the tool's own
 external store (filesystem, Redis, S3), keyed deterministically by the
 tool args. That's what `transcode_video` above does with `JOB_DIR`.
@@ -221,10 +221,10 @@ tool args. That's what `transcode_video` above does with `JOB_DIR`.
 ## Run the example
 
 A self-contained, runnable version of this recipe is in the repository at
-[`examples/resumable_tasks.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/resumable_tasks.py).
+[`examples/resumable_tasks.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/resumable_tasks.py).
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync --extra sqlite
 
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]

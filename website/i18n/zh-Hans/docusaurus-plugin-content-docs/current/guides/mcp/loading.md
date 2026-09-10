@@ -1,16 +1,16 @@
 ---
 title: 加载 MCP 工具
-description: "将 MCP 服务器中的工具加载到 CubePi agent，包括基于 SSE 的远程服务器。"
+description: "将 MCP 服务器中的工具加载到 CubeLoop agent，包括基于 SSE 的远程服务器。"
 ---
 
 # 加载 MCP 工具
 
-[Model Context Protocol](https://modelcontextprotocol.io) 定义了一套标准方式，让工具服务器向 agent 暴露能力。CubePi 内置两个加载器，可连接 MCP 服务器、枚举其工具，并将每个工具转换为标准的 `AgentTool`，直接传给 `Agent(tools=…)` 使用。
+[Model Context Protocol](https://modelcontextprotocol.io) 定义了一套标准方式，让工具服务器向 agent 暴露能力。CubeLoop 内置两个加载器，可连接 MCP 服务器、枚举其工具，并将每个工具转换为标准的 `AgentTool`，直接传给 `Agent(tools=…)` 使用。
 
 安装额外依赖：
 
 ```bash
-pip install "cubepi[mcp]"
+pip install "cubeloop[mcp]"
 ```
 
 这将引入 `mcp` SDK。
@@ -22,9 +22,9 @@ pip install "cubepi[mcp]"
 ```python
 import asyncio
 import sys
-from cubepi import Agent
-from cubepi.mcp import load_mcp_tools_stdio
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.mcp import load_mcp_tools_stdio
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 async def main():
@@ -63,7 +63,7 @@ asyncio.run(main())
 适用于托管的 MCP 服务器（Sentry、GitHub、内部服务等）：
 
 ```python
-from cubepi.mcp import load_mcp_tools_http
+from cubeloop.mcp import load_mcp_tools_http
 
 tools = await load_mcp_tools_http(
     server_url="https://mcp.example.com/sse",
@@ -106,14 +106,14 @@ agent = Agent(
 :::tip MCP server 很多？延迟加载它们
 如果你接了好几个 MCP server、但每次对话只用到其中一两个，把每个 server
 的 schema 全部塞进 system prompt 就成了主要的上下文成本。把每组 tool
-包成一个 [`DeferredToolGroup`](../middleware/deferred-tools)——CubePi 会把
+包成一个 [`DeferredToolGroup`](../middleware/deferred-tools)——CubeLoop 会把
 完整 schema 换成一份紧凑目录，让模型通过内置的 `load_tools` 工具按需
 展开。
 :::
 
 ## 按次连接与复用连接
 
-CubePi 每次 `execute` 调用都会建立新的传输连接。这样做：
+CubeLoop 每次 `execute` 调用都会建立新的传输连接。这样做：
 
 - ✅ 简单——无需管理连接池的生命周期。
 - ✅ 健壮——挂起的连接不会污染其他工具。
@@ -123,7 +123,7 @@ CubePi 每次 `execute` 调用都会建立新的传输连接。这样做：
 
 ## 图片与结构化内容
 
-如果 MCP 工具返回图片内容块，CubePi 会将其映射为 `ImageContent` 并包含在 `AgentToolResult.content` 中。Anthropic provider 会将其作为工具结果中的图片块转发；OpenAI provider 目前会将其去除（wire 格式不支持携带图片的工具结果）。
+如果 MCP 工具返回图片内容块，CubeLoop 会将其映射为 `ImageContent` 并包含在 `AgentToolResult.content` 中。Anthropic provider 会将其作为工具结果中的图片块转发；OpenAI provider 目前会将其去除（wire 格式不支持携带图片的工具结果）。
 
 如果服务器返回 `structuredContent`，它会暴露在 `AgentToolResult.details["structuredContent"]` 下——便于下游代码访问，但不会展示给模型。
 
@@ -138,7 +138,7 @@ CubePi 每次 `execute` 调用都会建立新的传输连接。这样做：
 
 - [MCP 认证](./auth) —— Bearer token、请求头、基于环境变量的凭据。
 - [工具使用](../agents/tool-use) —— 工具（MCP 或其他）的分发机制。
-- [`make_mcp_agent_tool` 源码](https://github.com/cubeplexai/cubepi/blob/main/cubepi/mcp/_adapter.py) —— schema → Pydantic 适配器，如需自定义可参考。
+- [`make_mcp_agent_tool` 源码](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/mcp/_adapter.py) —— schema → Pydantic 适配器，如需自定义可参考。
 - [延迟工具组](../middleware/deferred-tools) —— 把 MCP schema 从 system
   prompt 里藏起来，让模型按需展开。当多个 MCP server 加起来构成一个
   上下文沉重的工具集时很有用。

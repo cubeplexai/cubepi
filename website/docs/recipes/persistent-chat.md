@@ -1,6 +1,6 @@
 ---
 title: Persistent Chat
-description: "Build a persistent chat application with CubePi and SQLiteCheckpointer."
+description: "Build a persistent chat application with CubeLoop and SQLiteCheckpointer."
 ---
 
 # Recipe: Persistent Chat (SQLite)
@@ -9,7 +9,7 @@ A REPL chat that survives restarts. Conversation history is kept in a
 SQLite file; each user gets a `thread_id`.
 
 **Time to run:** 5 minutes.
-**Deps:** `cubepi[sqlite]`, an `ANTHROPIC_API_KEY`.
+**Deps:** `cubeloop[sqlite]`, an `ANTHROPIC_API_KEY`.
 
 ## The script
 
@@ -18,9 +18,9 @@ import asyncio
 import os
 import sys
 
-from cubepi import Agent
-from cubepi.checkpointer import SQLiteCheckpointer
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent
+from cubeloop.checkpointer import SQLiteCheckpointer
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 async def main(thread_id: str):
@@ -63,7 +63,7 @@ if __name__ == "__main__":
 Run:
 
 ```bash
-pip install "cubepi[sqlite]"
+pip install "cubeloop[sqlite]"
 export ANTHROPIC_API_KEY=sk-…
 python chat.py alice
 # Have a chat, then Ctrl-D.
@@ -78,7 +78,7 @@ python chat.py bob
 
 ## What's going on
 
-- **First `prompt()` per process loads history.** CubePi checks the
+- **First `prompt()` per process loads history.** CubeLoop checks the
   checkpointer once at the start of the first prompt, restores
   `agent.state.messages`, and proceeds.
 - **Each `message_end` appends to the database.** No batching, no
@@ -120,7 +120,7 @@ After a long conversation, the model's context gets expensive. Add a
 middleware:
 
 ```python
-from cubepi import Middleware
+from cubeloop import Middleware
 
 class SlidingWindow(Middleware):
     def __init__(self, n: int) -> None:
@@ -147,7 +147,7 @@ complete.
 Same code, different checkpointer:
 
 ```python
-from cubepi.checkpointer import PostgresCheckpointer
+from cubeloop.checkpointer import PostgresCheckpointer
 
 async with PostgresCheckpointer("postgresql://…") as cp:
     agent = Agent(model=…, checkpointer=cp, thread_id=…)
@@ -168,10 +168,10 @@ concurrent users — see [Postgres + FastAPI](./postgres-fastapi).
 ## Run the example
 
 A self-contained, runnable version of this recipe is in the repository at
-[`examples/persistent_chat.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/persistent_chat.py).
+[`examples/persistent_chat.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/persistent_chat.py).
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync --extra sqlite
 
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]

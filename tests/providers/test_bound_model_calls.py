@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     BaseProvider,
     Message,
@@ -15,7 +15,7 @@ from cubepi.providers.base import (
     ToolDefinition,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 
 class _RecordingProvider(BaseProvider):

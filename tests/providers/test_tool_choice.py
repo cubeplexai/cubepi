@@ -10,11 +10,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.providers.base import Model, ToolDefinition, UserMessage, TextContent
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
-from cubepi.providers.openai import OpenAIProvider
-from cubepi.providers.openai_responses import OpenAIResponsesProvider
+from cubeloop.providers.anthropic import AnthropicProvider
+from cubeloop.providers.base import Model, ToolDefinition, UserMessage, TextContent
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.providers.openai import OpenAIProvider
+from cubeloop.providers.openai_responses import OpenAIResponsesProvider
 
 
 # ---------------------------------------------------------------------------

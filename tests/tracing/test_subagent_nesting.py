@@ -23,11 +23,11 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from pydantic import BaseModel
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import Model, TextContent, ToolCall
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
-from cubepi.tracing import Tracer
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import Model, TextContent, ToolCall
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.tracing import Tracer
 
 
 MODEL = Model(id="faux-1", provider_id="faux")
@@ -174,12 +174,12 @@ async def test_cancelled_inner_gate_released_for_parents_next_turn():
 
     # Identify the parent run unambiguously via the execute_tool span's run_id.
     tool_span = next(s for s in exporter.spans if s.name == "execute_tool spawn")
-    parent_run_id = (tool_span.attributes or {}).get("cubepi.run_id")
+    parent_run_id = (tool_span.attributes or {}).get("cubeloop.run_id")
     parent_chats = [
         s
         for s in exporter.spans
         if (s.attributes or {}).get("gen_ai.operation.name") == "chat"
-        and (s.attributes or {}).get("cubepi.run_id") == parent_run_id
+        and (s.attributes or {}).get("cubeloop.run_id") == parent_run_id
     ]
     assert len(parent_chats) == 2, (
         f"expected 2 parent-run chat spans, got {len(parent_chats)}"
@@ -192,7 +192,7 @@ async def test_inner_run_nests_under_active_tool_span():
     invoke_agent span must nest under that tool span — inheriting trace_id
     and setting parent_span_id — instead of starting a new root.
     """
-    from cubepi.mcp import _tracing as mcp_tracing
+    from cubeloop.mcp import _tracing as mcp_tracing
 
     provider = FauxProvider(provider_id="faux")
     exporter = InMemoryExporter()
@@ -233,7 +233,7 @@ async def test_inner_run_nests_under_active_tool_span():
 async def test_full_nested_subtree_via_real_tool():
     """End-to-end composition of Tasks 1+2: a tool whose body attaches and runs
     an inner agent (which itself calls a tool) yields the full nested subtree
-    ``execute_tool spawn -> invoke_agent -> cubepi.turn -> {chat,
+    ``execute_tool spawn -> invoke_agent -> cubeloop.turn -> {chat,
     execute_tool inner_tool}`` — the inner chat and inner tool span both descend
     from the inner run's root, and the inner root nests under the tool span.
     """
@@ -337,7 +337,7 @@ async def test_provider_chunk_and_response_gated_when_run_not_active():
     even if this recorder's run still has an open chat_span. Defensive backstop
     beyond the ``chat_span is None`` guard (a non-owning recorder normally never
     opens a chat_span at all)."""
-    from cubepi.tracing import recorder as rec
+    from cubeloop.tracing import recorder as rec
 
     exporter = InMemoryExporter()
     tracer = Tracer(service_name="t", agent_name="a", exporters=[exporter])

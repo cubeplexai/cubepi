@@ -8,22 +8,22 @@ pytest.importorskip("opentelemetry.sdk.trace")
 
 from opentelemetry.sdk.trace import TracerProvider  # noqa: E402
 
-from cubepi.cli.trace.loader import load_run  # noqa: E402
-from cubepi.cli.trace.model import build_forest  # noqa: E402
-from cubepi.tracing.exporters import JsonlSpanExporter  # noqa: E402
-from cubepi.tracing.schema import CUBEPI_RUN_ID  # noqa: E402
+from cubeloop.cli.trace.loader import load_run  # noqa: E402
+from cubeloop.cli.trace.model import build_forest  # noqa: E402
+from cubeloop.tracing.exporters import JsonlSpanExporter  # noqa: E402
+from cubeloop.tracing.schema import CUBELOOP_RUN_ID  # noqa: E402
 
 
 def test_real_exporter_output_parses(tmp_path):
     exporter = JsonlSpanExporter(directory=tmp_path)
     provider = TracerProvider()
-    tracer = provider.get_tracer("cubepi.tracing")
+    tracer = provider.get_tracer("cubeloop.tracing")
     # After the `with` blocks exit the spans have ended; the span objects are
     # ReadableSpans, so we can hand them straight to the exporter.
     with tracer.start_as_current_span("invoke_agent") as root:
-        root.set_attribute(CUBEPI_RUN_ID, "roundtrip")
+        root.set_attribute(CUBELOOP_RUN_ID, "roundtrip")
         with tracer.start_as_current_span("chat") as chat:
-            chat.set_attribute(CUBEPI_RUN_ID, "roundtrip")
+            chat.set_attribute(CUBELOOP_RUN_ID, "roundtrip")
     exporter.export([root, chat])
 
     # One file per trace; stem is the 32-hex trace_id, not the run_id.

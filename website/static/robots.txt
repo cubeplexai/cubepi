@@ -1,8 +1,8 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://cubepi.ai/sitemap.xml
-Sitemap: https://cubepi.ai/zh-Hans/sitemap.xml
+Sitemap: https://cubeloop.dev/sitemap.xml
+Sitemap: https://cubeloop.dev/zh-Hans/sitemap.xml
 
 # AI/LLM crawlers — explicitly allowed
 User-agent: GPTBot
@@ -18,4 +18,4 @@ User-agent: anthropic-ai
 Allow: /
 
 # LLM context file (https://llmstxt.org)
-LLMs: https://cubepi.ai/llms.txt
+LLMs: https://cubeloop.dev/llms.txt

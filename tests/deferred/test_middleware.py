@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult
-from cubepi.deferred.middleware import DeferredToolsMiddleware
-from cubepi.deferred.types import DeferredToolGroup
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentContext, AgentTool, AgentToolResult
+from cubeloop.deferred.middleware import DeferredToolsMiddleware
+from cubeloop.deferred.types import DeferredToolGroup
+from cubeloop.providers.base import TextContent
 from tests.deferred._helpers import _dummy_tool, _make_group
 
 
@@ -392,9 +392,9 @@ class TestAfterToolCallHook:
     """Tests that exercise the after_tool_call hook directly (not via _expand)."""
 
     async def test_drains_pending_on_load_tools_call(self) -> None:
-        from cubepi.agent.types import AfterToolCallContext
-        from cubepi.deferred._expand_tool import TOOL_NAME
-        from cubepi.providers.base import AssistantMessage, ToolCall
+        from cubeloop.agent.types import AfterToolCallContext
+        from cubeloop.deferred._expand_tool import TOOL_NAME
+        from cubeloop.providers.base import AssistantMessage, ToolCall
 
         extra: dict = {}
         group = _make_group("mcp:github", ["t1", "t2"])
@@ -424,8 +424,8 @@ class TestAfterToolCallHook:
         assert len(mw._pending_injection) == 0
 
     async def test_skips_non_load_tools_call(self) -> None:
-        from cubepi.agent.types import AfterToolCallContext
-        from cubepi.providers.base import AssistantMessage, ToolCall
+        from cubeloop.agent.types import AfterToolCallContext
+        from cubeloop.providers.base import AssistantMessage, ToolCall
 
         extra: dict = {}
         group = _make_group("mcp:github", ["t1"])
@@ -450,9 +450,9 @@ class TestAfterToolCallHook:
         assert len(mw._pending_injection) == 1  # not drained
 
     async def test_skips_error_result(self) -> None:
-        from cubepi.agent.types import AfterToolCallContext
-        from cubepi.deferred._expand_tool import TOOL_NAME
-        from cubepi.providers.base import AssistantMessage, ToolCall
+        from cubeloop.agent.types import AfterToolCallContext
+        from cubeloop.deferred._expand_tool import TOOL_NAME
+        from cubeloop.providers.base import AssistantMessage, ToolCall
 
         extra: dict = {}
         group = _make_group("mcp:github", ["t1"])

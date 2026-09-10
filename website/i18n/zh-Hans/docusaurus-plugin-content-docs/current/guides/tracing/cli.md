@@ -1,28 +1,28 @@
 ---
 title: Trace CLI
-description: "使用 CubePi trace CLI 检查、过滤并展示 OpenTelemetry trace span。"
+description: "使用 CubeLoop trace CLI 检查、过滤并展示 OpenTelemetry trace span。"
 ---
 
-# 使用 `cubepi trace` 检查 trace
+# 使用 `cubeloop trace` 检查 trace
 
-`JsonlSpanExporter` 在 `./cubepi-traces/<date>/<trace_id>.jsonl` 下每条
-trace 写入一个文件。`cubepi trace` CLI（由 `trace-cli` extra 提供）读取这些
+`JsonlSpanExporter` 在 `./cubeloop-traces/<date>/<trace_id>.jsonl` 下每条
+trace 写入一个文件。`cubeloop trace` CLI（由 `trace-cli` extra 提供）读取这些
 文件，让你无需重新运行即可了解一次运行的详细情况——哪些 LLM 和工具调用被
 触发、顺序如何、各自返回什么、在哪里出错以及 token 数量。
 
 ```bash
-pip install 'cubepi[trace-cli]'      # 或：uv sync --extra trace-cli
-cubepi trace --help
+pip install 'cubeloop[trace-cli]'      # 或：uv sync --extra trace-cli
+cubeloop trace --help
 ```
 
-`--dir` 默认为 `./cubepi-traces`；若 trace 文件存放在其他位置，传入
+`--dir` 默认为 `./cubeloop-traces`；若 trace 文件存放在其他位置，传入
 `--dir <path>` 即可。每个文件是一条 **trace**：运行本身加上所有嵌套
 subagent 运行（它们继承父级的 `trace_id`，因此写入同一文件）。
 
 ## `ls` —— 列出近期 trace
 
 ```bash
-cubepi trace ls          # 最新优先；-n N 限制数量
+cubeloop trace ls          # 最新优先；-n N 限制数量
 ```
 
 | 列 | 含义 |
@@ -41,8 +41,8 @@ cubepi trace ls          # 最新优先；-n N 限制数量
 `user_id`、`org_id`、`workspace_id`），可以只过滤出匹配的 trace：
 
 ```bash
-cubepi trace ls --meta conversation_id=conv_123
-cubepi trace ls --meta user_id=usr_9 --meta org_id=org_1   # 可重复 = AND，精确匹配
+cubeloop trace ls --meta conversation_id=conv_123
+cubeloop trace ls --meta user_id=usr_9 --meta org_id=org_1   # 可重复 = AND，精确匹配
 ```
 
 每个 `--meta KEY=VALUE` 与 trace 根节点元数据精确匹配；重复该标志表示 AND 关系。
@@ -50,48 +50,48 @@ cubepi trace ls --meta user_id=usr_9 --meta org_id=org_1   # 可重复 = AND，�
 如需将元数据值**显示**为列（而不只是过滤），添加 `--show-meta KEY[,KEY…]`：
 
 ```bash
-cubepi trace ls --show-meta conversation_id,user_id
-cubepi trace ls --meta org_id=org_1 --show-meta conversation_id   # 过滤 + 显示
+cubeloop trace ls --show-meta conversation_id,user_id
+cubeloop trace ls --meta org_id=org_1 --show-meta conversation_id   # 过滤 + 显示
 ```
 
-（或通过 `cubepi trace view <id> -v` 查看单条 trace 的所有元数据。）
+（或通过 `cubeloop trace view <id> -v` 查看单条 trace 的所有元数据。）
 
 ## `view` —— 将 trace 渲染为 span 树
 
 trace-id 的**前缀**即可（表格会截断 ID）；如果前缀不唯一，会列出候选结果。
 
 ```bash
-cubepi trace view 1cd97cdb
+cubeloop trace view 1cd97cdb
 ```
 
 ```
 trace
 └── invoke_agent  14425.8ms  [0x1cd97cdb]
-    ├── cubepi.turn  1283.1ms  [0x5cfda93e]
+    ├── cubeloop.turn  1283.1ms  [0x5cfda93e]
     │   ├── chat deepseek-v4-flash  1208.7ms  tok 6845/68  [0x0d130229]
     │   └── execute_tool subagent  9610.2ms  subagent  [0x38bdd10a]
     │       └── invoke_agent  9601.0ms  [0x8094f99b]   ← subagent 运行，嵌套其中
-    │           └── cubepi.turn  9598.4ms  [0x57c5cfc7]
+    │           └── cubeloop.turn  9598.4ms  [0x57c5cfc7]
     │               ├── chat deepseek-v4-flash  1190.3ms  [0x8205ca6b]
     │               └── execute_tool web_search  6500.2ms  web_search  [0xca4e59fc]
-    └── cubepi.turn  491.9ms  ERROR  [0xce25f242]
+    └── cubeloop.turn  491.9ms  ERROR  [0xce25f242]
         └── chat deepseek-v4-flash  427.2ms  ERROR  [0x0bff68ec]
             └── error: Error code: 400 - ... `tool_use` ids were found without
                 `tool_result` blocks immediately after: call_01_...
 ```
 
-从上到下阅读：`invoke_agent`（一次运行）→ `cubepi.turn`（一个 agent 循环
+从上到下阅读：`invoke_agent`（一次运行）→ `cubeloop.turn`（一个 agent 循环
 turn）→ `chat <model>`（一次 LLM 调用，含 `tok <input>/<output>`）和
 `execute_tool <name>`（一次工具调用）。**subagent** 显示为
-`execute_tool subagent`，其自身的 `invoke_agent → cubepi.turn → …` 直接
+`execute_tool subagent`，其自身的 `invoke_agent → cubeloop.turn → …` 直接
 嵌套在其下方。每个节点后缀的 `[0x…]` 是该 span 的 `span_id`——在原始
 JSONL 中 grep 它即可检查对应的具体 span。错误信息内联显示在失败 span 的下方。
 
 标志：
 
 ```bash
-cubepi trace view <id> --content   # 展开 gen_ai prompt / 工具参数 / 结果
-cubepi trace view <id> -v          # 展开所有 span 属性（详细，输出量大）
+cubeloop trace view <id> --content   # 展开 gen_ai prompt / 工具参数 / 结果
+cubeloop trace view <id> -v          # 展开所有 span 属性（详细，输出量大）
 ```
 
 `--content` 要求该运行以 `record_content=True` 方式录制
@@ -100,22 +100,22 @@ cubepi trace view <id> -v          # 展开所有 span 属性（详细，输出�
 ## `follow` —— 实时观察 trace
 
 ```bash
-cubepi trace follow <id>           # 轮询 span 完成情况；适合正在进行中的运行
+cubeloop trace follow <id>           # 轮询 span 完成情况；适合正在进行中的运行
 ```
 
 ## `stats` —— 跨 trace 聚合统计
 
 ```bash
-cubepi trace stats --by model                  # 延迟 p50/p95、错误率、token 数量
-cubepi trace stats --by tool --since 2026-05-20
+cubeloop trace stats --by model                  # 延迟 p50/p95、错误率、token 数量
+cubeloop trace stats --by tool --since 2026-05-20
 ```
 
 `stats` 同样接受 `--meta KEY=VALUE`（语义与 `ls` 相同），仅对匹配的 trace
 进行聚合——例如按单个用户或对话统计延迟/错误率/token：
 
 ```bash
-cubepi trace stats --by model --meta user_id=usr_9
-cubepi trace stats --by tool --meta conversation_id=conv_123
+cubeloop trace stats --by model --meta user_id=usr_9
+cubeloop trace stats --by tool --meta conversation_id=conv_123
 ```
 
 ## `convert` —— 重建 API 请求体
@@ -128,16 +128,16 @@ cubepi trace stats --by tool --meta conversation_id=conv_123
 
 ```bash
 # 默认：trace 中最后一个 chat span，OpenAI JSON 格式
-cubepi trace convert <trace_id>
+cubeloop trace convert <trace_id>
 
 # 选择要重建的 LLM 调用
-cubepi trace convert <trace_id> --turn 2        # 第 2 个 chat span（从 1 计数）
-cubepi trace convert <trace_id> --span 0xbb7eb1 # 按 span_id 前缀（来自 `view`）
+cubeloop trace convert <trace_id> --turn 2        # 第 2 个 chat span（从 1 计数）
+cubeloop trace convert <trace_id> --span 0xbb7eb1 # 按 span_id 前缀（来自 `view`）
 
 # 输出格式
-cubepi trace convert <trace_id> --format openai     # 默认——JSON 请求体
-cubepi trace convert <trace_id> --format anthropic  # Anthropic Messages API 请求体
-cubepi trace convert <trace_id> --format curl       # 可直接执行的 curl 命令
+cubeloop trace convert <trace_id> --format openai     # 默认——JSON 请求体
+cubeloop trace convert <trace_id> --format anthropic  # Anthropic Messages API 请求体
+cubeloop trace convert <trace_id> --format curl       # 可直接执行的 curl 命令
 ```
 
 `view` 输出中的 `[0x…]` span id 可直接传给 `--span`：
@@ -159,11 +159,11 @@ cubepi trace convert <trace_id> --format curl       # 可直接执行的 curl �
 `gen_ai.client.operation.exception` 的 span **event** 中。
 
 :::tip 为 AI agent 准备
-内置的 `cubepi-trace` skill 可驱动此 CLI 进行调试（"这次运行为何没有回复？"、
+内置的 `cubeloop-trace` skill 可驱动此 CLI 进行调试（"这次运行为何没有回复？"、
 "工具结果不对"）。它内置了快速路径（`ls` → `view <prefix>`）以及
 token/缓存命中率的约定。
 
 ```bash
-npx skills add cubeplexai/cubepi@cubepi-trace -a claude-code
+npx skills add cubeplexai/cubeloop@cubeloop-trace -a claude-code
 ```
 :::

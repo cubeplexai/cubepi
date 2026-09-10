@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.checkpointer.sqlite import SQLiteCheckpointer
-from cubepi.hitl.types import ApproveRequest, HitlRequest
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.checkpointer.sqlite import SQLiteCheckpointer
+from cubeloop.hitl.types import ApproveRequest, HitlRequest
 
 
 def _req(thread_id: str = "t-1", qid: str = "tc-1") -> HitlRequest:
@@ -137,9 +137,7 @@ async def _setup_pg_schema_v3(dsn: str) -> None:
     """Bootstrap a v3 schema in a fresh Postgres DB."""
     import asyncpg
 
-    from cubepi.checkpointer.postgres.alembic_helpers import (
-        add_pending_request_column_op,
-        add_run_id_column_op,
+    from cubeloop.checkpointer.postgres.alembic_helpers import (
         create_message_partitions_op,
         write_schema_version_op,
     )
@@ -147,20 +145,20 @@ async def _setup_pg_schema_v3(dsn: str) -> None:
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute("""
-            CREATE TABLE cubepi_threads (
+            CREATE TABLE cubeloop_threads (
                 thread_id TEXT PRIMARY KEY,
-                parent_thread_id TEXT NULL REFERENCES cubepi_threads(thread_id),
+                parent_thread_id TEXT NULL REFERENCES cubeloop_threads(thread_id),
                 forked_at_seq BIGINT NULL,
                 extra JSONB NOT NULL DEFAULT '{}'::jsonb,
+                pending_request JSONB,
+                run_id TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
         """)
-        await conn.execute(add_pending_request_column_op())
-        await conn.execute(add_run_id_column_op())
         await conn.execute("""
-            CREATE TABLE cubepi_messages (
-                thread_id TEXT NOT NULL REFERENCES cubepi_threads(thread_id) ON DELETE CASCADE,
+            CREATE TABLE cubeloop_messages (
+                thread_id TEXT NOT NULL REFERENCES cubeloop_threads(thread_id) ON DELETE CASCADE,
                 seq BIGINT NOT NULL,
                 role TEXT NOT NULL,
                 metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -171,11 +169,11 @@ async def _setup_pg_schema_v3(dsn: str) -> None:
         """)
         await conn.execute(create_message_partitions_op())
         await conn.execute("""
-            CREATE INDEX ix_cubepi_messages_metadata_gin
-            ON cubepi_messages USING GIN (metadata jsonb_path_ops);
+            CREATE INDEX ix_cubeloop_messages_metadata_gin
+            ON cubeloop_messages USING GIN (metadata jsonb_path_ops);
         """)
         await conn.execute("""
-            CREATE TABLE cubepi_schema_version (version INTEGER PRIMARY KEY);
+            CREATE TABLE cubeloop_schema_version (version INTEGER PRIMARY KEY);
         """)
         await conn.execute(write_schema_version_op())
     finally:
@@ -184,7 +182,7 @@ async def _setup_pg_schema_v3(dsn: str) -> None:
 
 @pytest.mark.asyncio
 async def test_postgres_save_with_run_id_roundtrip(clean_db) -> None:
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
 
     await _setup_pg_schema_v3(clean_db)
     async with PostgresCheckpointer(clean_db) as cp:
@@ -195,7 +193,7 @@ async def test_postgres_save_with_run_id_roundtrip(clean_db) -> None:
 
 @pytest.mark.asyncio
 async def test_postgres_legacy_save_without_run_id(clean_db) -> None:
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
 
     await _setup_pg_schema_v3(clean_db)
     async with PostgresCheckpointer(clean_db) as cp:
@@ -205,7 +203,7 @@ async def test_postgres_legacy_save_without_run_id(clean_db) -> None:
 
 @pytest.mark.asyncio
 async def test_postgres_clear_clears_both_pending_and_run_id(clean_db) -> None:
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
 
     await _setup_pg_schema_v3(clean_db)
     async with PostgresCheckpointer(clean_db) as cp:
@@ -217,7 +215,7 @@ async def test_postgres_clear_clears_both_pending_and_run_id(clean_db) -> None:
 
 @pytest.mark.asyncio
 async def test_postgres_load_pending_run_id_missing_thread(clean_db) -> None:
-    from cubepi.checkpointer.postgres import PostgresCheckpointer
+    from cubeloop.checkpointer.postgres import PostgresCheckpointer
 
     await _setup_pg_schema_v3(clean_db)
     async with PostgresCheckpointer(clean_db) as cp:
@@ -230,35 +228,33 @@ async def test_postgres_load_pending_run_id_missing_thread(clean_db) -> None:
 async def _setup_mysql_schema_v3(dsn: str) -> None:
     import aiomysql
 
-    from cubepi.checkpointer.mysql.alembic_helpers import (
-        add_pending_request_column_op,
-        add_run_id_column_op,
+    from cubeloop.checkpointer.mysql.alembic_helpers import (
         messages_partition_clause,
         write_schema_version_op,
     )
-    from cubepi.checkpointer.mysql.checkpointer import _parse_dsn
+    from cubeloop.checkpointer.mysql.checkpointer import _parse_dsn
 
     conn = await aiomysql.connect(autocommit=True, **_parse_dsn(dsn))
     try:
         async with conn.cursor() as cur:
             await cur.execute("""
-                CREATE TABLE cubepi_threads (
+                CREATE TABLE cubeloop_threads (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin PRIMARY KEY,
                     parent_thread_id VARCHAR(255) COLLATE utf8mb4_bin NULL,
                     forked_at_seq BIGINT NULL,
                     extra JSON NOT NULL DEFAULT (JSON_OBJECT()),
+                    pending_request JSON NULL,
+                    run_id VARCHAR(64) NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                         ON UPDATE CURRENT_TIMESTAMP,
                     CONSTRAINT fk_parent FOREIGN KEY (parent_thread_id)
-                        REFERENCES cubepi_threads (thread_id)
+                        REFERENCES cubeloop_threads (thread_id)
                 ) ENGINE=InnoDB
             """)
-            await cur.execute(add_pending_request_column_op())
-            await cur.execute(add_run_id_column_op())
             await cur.execute(
                 """
-                CREATE TABLE cubepi_messages (
+                CREATE TABLE cubeloop_messages (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
                     seq BIGINT NOT NULL,
                     role VARCHAR(32) NOT NULL,
@@ -270,7 +266,7 @@ async def _setup_mysql_schema_v3(dsn: str) -> None:
                 + messages_partition_clause()
             )
             await cur.execute("""
-                CREATE TABLE cubepi_schema_version (
+                CREATE TABLE cubeloop_schema_version (
                     version INT PRIMARY KEY
                 ) ENGINE=InnoDB
             """)
@@ -283,7 +279,7 @@ async def _setup_mysql_schema_v3(dsn: str) -> None:
 
 @pytest.mark.asyncio
 async def test_mysql_save_with_run_id_roundtrip(clean_mysql_db) -> None:
-    from cubepi.checkpointer.mysql import MySQLCheckpointer
+    from cubeloop.checkpointer.mysql import MySQLCheckpointer
 
     await _setup_mysql_schema_v3(clean_mysql_db)
     async with MySQLCheckpointer(clean_mysql_db) as cp:
@@ -294,7 +290,7 @@ async def test_mysql_save_with_run_id_roundtrip(clean_mysql_db) -> None:
 
 @pytest.mark.asyncio
 async def test_mysql_legacy_save_without_run_id(clean_mysql_db) -> None:
-    from cubepi.checkpointer.mysql import MySQLCheckpointer
+    from cubeloop.checkpointer.mysql import MySQLCheckpointer
 
     await _setup_mysql_schema_v3(clean_mysql_db)
     async with MySQLCheckpointer(clean_mysql_db) as cp:
@@ -304,7 +300,7 @@ async def test_mysql_legacy_save_without_run_id(clean_mysql_db) -> None:
 
 @pytest.mark.asyncio
 async def test_mysql_clear_clears_both_pending_and_run_id(clean_mysql_db) -> None:
-    from cubepi.checkpointer.mysql import MySQLCheckpointer
+    from cubeloop.checkpointer.mysql import MySQLCheckpointer
 
     await _setup_mysql_schema_v3(clean_mysql_db)
     async with MySQLCheckpointer(clean_mysql_db) as cp:
@@ -316,7 +312,7 @@ async def test_mysql_clear_clears_both_pending_and_run_id(clean_mysql_db) -> Non
 
 @pytest.mark.asyncio
 async def test_mysql_load_pending_run_id_missing_thread(clean_mysql_db) -> None:
-    from cubepi.checkpointer.mysql import MySQLCheckpointer
+    from cubeloop.checkpointer.mysql import MySQLCheckpointer
 
     await _setup_mysql_schema_v3(clean_mysql_db)
     async with MySQLCheckpointer(clean_mysql_db) as cp:

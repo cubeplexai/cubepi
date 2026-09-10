@@ -1,14 +1,14 @@
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.providers.base import (
+from cubeloop.agent.agent import Agent
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,
     ToolResultMessage,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider
+from cubeloop.providers.faux import FauxProvider
 
 
 def _agent(**kw):
@@ -27,7 +27,7 @@ def test_messages_kw_seeds_initial_history():
 
 
 def test_messages_kw_conflicts_with_thread_id_checkpointer():
-    from cubepi.checkpointer.memory import MemoryCheckpointer
+    from cubeloop.checkpointer.memory import MemoryCheckpointer
 
     msgs = [UserMessage(content=[TextContent(text="hi")])]
     with pytest.raises(ValueError):

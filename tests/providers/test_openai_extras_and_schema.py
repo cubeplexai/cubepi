@@ -12,13 +12,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     Model,
     StreamOptions,
     TextContent,
     UserMessage,
 )
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop.providers.openai import OpenAIProvider
 
 
 def _model() -> Model:

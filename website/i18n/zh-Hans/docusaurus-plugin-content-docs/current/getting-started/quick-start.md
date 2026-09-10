@@ -1,6 +1,6 @@
 ---
 title: 快速开始
-description: "在几分钟内构建你的第一个 CubePi agent。"
+description: "在几分钟内构建你的第一个 CubeLoop agent。"
 ---
 
 # 快速开始
@@ -12,7 +12,7 @@ description: "在几分钟内构建你的第一个 CubePi agent。"
 ## 前置条件
 
 - Python 3.11+
-- 已安装 `cubepi`（`pip install cubepi`)
+- 已安装 `cubeloop`（`pip install cubeloop`)
 - 环境变量中有 `ANTHROPIC_API_KEY`
 
 ## 完整脚本
@@ -23,8 +23,8 @@ description: "在几分钟内构建你的第一个 CubePi agent。"
 import asyncio
 import os
 
-from cubepi import Agent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 @tool
@@ -68,11 +68,11 @@ python weather_agent.py
 
 ## 刚刚发生了什么
 
-CubePi 跑了一个概念上长这样的循环：
+CubeLoop 跑了一个概念上长这样的循环：
 
 1. `agent.prompt("东京现在天气怎么样？")` 把一条 `UserMessage` 入队,
    然后调用模型。
-2. 模型决定调用 `get_weather(city="Tokyo")`——CubePi 按 `@tool` 从函数
+2. 模型决定调用 `get_weather(city="Tokyo")`——CubeLoop 按 `@tool` 从函数
    签名生成的 schema 解析 JSON 参数,调用你的 `async def`,把结果作为
    `ToolResultMessage` 反馈回去。
 3. 模型产生最终的 assistant 回复,以 `text_delta` 事件流的形式回来。

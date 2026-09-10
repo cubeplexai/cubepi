@@ -1,6 +1,6 @@
 [project]
-name = "cubepi"
-version = "0.13.6"
+name = "cubeloop"
+version = "0.14.0"
 description = "Pythonic async-native agent framework"
 readme = "README.md"
 license = "MIT"
@@ -22,11 +22,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://cubepi.ai"
-Documentation = "https://cubepi.ai/docs"
-Repository = "https://github.com/cubeplexai/cubepi"
-Changelog = "https://cubepi.ai/changelog"
-Issues = "https://github.com/cubeplexai/cubepi/issues"
+Homepage = "https://cubeloop.dev"
+Documentation = "https://cubeloop.dev/docs"
+Repository = "https://github.com/cubeplexai/cubeloop"
+Changelog = "https://cubeloop.dev/changelog"
+Issues = "https://github.com/cubeplexai/cubeloop/issues"
 
 [project.optional-dependencies]
 sqlite = [
@@ -62,7 +62,7 @@ trace-cli = [
 ]
 
 [project.scripts]
-cubepi = "cubepi.cli.__main__:main"
+cubeloop = "cubeloop.cli.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -78,7 +78,11 @@ dev = [
     "ruff>=0.15.12",
     "sqlalchemy>=2.0",
     "mypy>=2.1.0",
+    "cubepi",
 ]
+
+[tool.uv.sources]
+cubepi = { workspace = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -86,7 +90,7 @@ testpaths = ["tests", "website/scripts/tests"]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["cubepi"]
+files = ["cubeloop"]
 ignore_missing_imports = true
 warn_redundant_casts = true
 warn_unused_ignores = true
@@ -96,4 +100,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["cubepi"]
+packages = ["cubeloop"]
+
+[tool.uv.workspace]
+members = ["compat/cubepi"]

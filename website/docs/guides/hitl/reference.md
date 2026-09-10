@@ -1,7 +1,7 @@
 ---
 title: API, events & reference
 sidebar_position: 4
-description: "CubePi HITL reference: Agent API, events, trace spans, error reference, testing helpers, and architecture notes."
+description: "CubeLoop HITL reference: Agent API, events, trace spans, error reference, testing helpers, and architecture notes."
 ---
 
 # API, events & reference
@@ -62,7 +62,7 @@ suspended transition is committed.
 
 ## Trace spans
 
-When the `cubepi[tracing]` extra is installed, each HITL await is wrapped
+When the `cubeloop[tracing]` extra is installed, each HITL await is wrapped
 in an OpenTelemetry span:
 
 | Span name | Attributes |
@@ -92,14 +92,14 @@ channel silently falls back to a no-op span.
 
 `HitlControlException` (the parent of the four `BaseException` subclasses)
 is intentionally NOT caught by the existing broad `except Exception:` handlers
-in `cubepi.agent.tools._prepare_tool_call` and `_execute_prepared` — this
+in `cubeloop.agent.tools._prepare_tool_call` and `_execute_prepared` — this
 mirrors `asyncio.CancelledError`'s pattern.
 
 
 ## Testing helpers
 
 ```python
-from cubepi.hitl.testing import ScriptedChannel, NoopChannel
+from cubeloop.hitl.testing import ScriptedChannel, NoopChannel
 
 # ScriptedChannel: pre-programmed answers, consumed in order.
 ch = ScriptedChannel(answers=[
@@ -123,7 +123,7 @@ assert await ch.ask([Question(key="k", prompt="p")]) == {"k": ""}
   raises `HitlConcurrencyError`.
 - **Parallel approval batches collect answers before execution.** If one
   assistant turn contains multiple parallel tool calls that require approval,
-  CubePi still exposes one pending request at a time. Each approved answer is
+  CubeLoop still exposes one pending request at a time. Each approved answer is
   persisted by `question_id` and replayed on the next resume attempt. Tool
   bodies start only after every gate in the parallel batch has been answered.
 - **Prompt-cache prefix invariant.** Between pause and resume, the messages
@@ -135,5 +135,5 @@ assert await ch.ask([Question(key="k", prompt="p")]) == {"k": ""}
   pass it directly.
 - **Resume re-enters the unresolved tool cycle.** The last assistant message's
   unresolved tool calls dictate what prepares and executes next. Persisted HITL
-  answers can be replayed by `question_id`, but CubePi does not use node-based
+  answers can be replayed by `question_id`, but CubeLoop does not use node-based
   graph replay semantics.

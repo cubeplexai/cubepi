@@ -3,14 +3,14 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool, ForkOnceResult
-from cubepi.checkpointer.exceptions import CheckpointerError
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.hitl.binding import HitlBinding
-from cubepi.middleware.base import Middleware
-from cubepi.providers.base import AssistantMessage, ReasoningControl, TextContent
-from cubepi.providers.faux import FauxProvider
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import AgentTool, ForkOnceResult
+from cubeloop.checkpointer.exceptions import CheckpointerError
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.hitl.binding import HitlBinding
+from cubeloop.middleware.base import Middleware
+from cubeloop.providers.base import AssistantMessage, ReasoningControl, TextContent
+from cubeloop.providers.faux import FauxProvider
 
 
 def _ok_faux() -> FauxProvider:

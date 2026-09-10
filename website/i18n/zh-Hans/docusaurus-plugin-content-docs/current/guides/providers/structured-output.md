@@ -11,7 +11,7 @@ description: "通过 generate_structured() 和 tool_choice 从 LLM 调用获得�
 
 ```python
 from pydantic import BaseModel
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.providers.base import TextContent, UserMessage
 
 class Sentiment(BaseModel):
     label: str
@@ -69,7 +69,7 @@ await model.generate_structured(
 `generate_structured()` 在两种情况下抛 `StructuredOutputError`：
 
 ```python
-from cubepi.providers.base import StructuredOutputError
+from cubeloop.providers.base import StructuredOutputError
 
 try:
     result = await model.generate_structured(MySchema, messages=[...])

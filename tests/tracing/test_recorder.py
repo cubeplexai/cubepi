@@ -14,15 +14,15 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.trace import SpanKind, StatusCode
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import (
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import (
     AgentTool,
     AgentToolResult,
     BeforeToolCallResult,
 )
-from cubepi.providers.base import BoundModel, Model, TextContent, ToolCall
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
-from cubepi.tracing import Tracer
+from cubeloop.providers.base import BoundModel, Model, TextContent, ToolCall
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.tracing import Tracer
 
 
 MODEL = Model(id="faux-1", provider_id="faux")
@@ -77,7 +77,7 @@ def _find_attached_recorder(provider):
     """Walk a provider's request_listeners to return the cubepi
     Recorder instance — used by tests that need to drive recorder
     callbacks directly with synthetic provider events."""
-    from cubepi.tracing.recorder import Recorder
+    from cubeloop.tracing.recorder import Recorder
 
     for cb in getattr(provider, "_request_listeners", []):
         if hasattr(cb, "__self__") and isinstance(cb.__self__, Recorder):
@@ -100,7 +100,7 @@ class TestSpanTreeBasic:
 
         names = sorted(s.name for s in exporter.spans)
         assert "invoke_agent" in names
-        assert "cubepi.turn" in names
+        assert "cubeloop.turn" in names
         assert any(n.startswith("chat ") for n in names)
         assert len(exporter.spans) == 3
 
@@ -117,8 +117,8 @@ class TestSpanTreeBasic:
         attrs = _attrs(roots[0])
         assert attrs["gen_ai.operation.name"] == "invoke_agent"
         assert attrs["gen_ai.provider.name"] == "faux"
-        assert "cubepi.run_id" in attrs
-        assert "cubepi.agent.system_prompt.sha256" in attrs
+        assert "cubeloop.run_id" in attrs
+        assert "cubeloop.agent.system_prompt.sha256" in attrs
         assert roots[0].kind == SpanKind.INTERNAL
 
 
@@ -154,12 +154,12 @@ class TestTurnSpan:
         await agent.wait_for_idle()
         await tracer.shutdown()
 
-        turn = [s for s in exporter.spans if s.name == "cubepi.turn"][0]
+        turn = [s for s in exporter.spans if s.name == "cubeloop.turn"][0]
         attrs = _attrs(turn)
         assert "gen_ai.operation.name" not in attrs
         assert "gen_ai.workflow.name" not in attrs
-        assert attrs["cubepi.turn.index"] == 0
-        assert attrs["cubepi.turn.stop_reason"] == "stop"
+        assert attrs["cubeloop.turn.index"] == 0
+        assert attrs["cubeloop.turn.stop_reason"] == "stop"
 
     async def test_multi_turn_indexes_increment(self):
         from pydantic import BaseModel
@@ -188,12 +188,12 @@ class TestTurnSpan:
         await tracer.shutdown()
 
         turns = sorted(
-            [s for s in exporter.spans if s.name == "cubepi.turn"],
+            [s for s in exporter.spans if s.name == "cubeloop.turn"],
             key=lambda s: s.start_time or 0,
         )
         assert len(turns) == 2
-        assert _attrs(turns[0])["cubepi.turn.index"] == 0
-        assert _attrs(turns[1])["cubepi.turn.index"] == 1
+        assert _attrs(turns[0])["cubeloop.turn.index"] == 0
+        assert _attrs(turns[1])["cubeloop.turn.index"] == 1
 
 
 class TestExecuteToolSpan:
@@ -241,9 +241,9 @@ class TestExecuteToolSpan:
         # Recorder reads them off the agent's tool registry at exec
         # start.
         assert attrs["gen_ai.tool.description"] == "echo a thing"
-        assert attrs["cubepi.tool.execution_mode"] in {"parallel", "sequential"}
-        assert attrs["cubepi.tool.is_error"] is False
-        assert "cubepi.tool.terminate" not in attrs
+        assert attrs["cubeloop.tool.execution_mode"] in {"parallel", "sequential"}
+        assert attrs["cubeloop.tool.is_error"] is False
+        assert "cubeloop.tool.terminate" not in attrs
 
     async def test_tool_terminate_flag_propagates(self):
         from pydantic import BaseModel
@@ -271,9 +271,9 @@ class TestExecuteToolSpan:
         await tracer.shutdown()
 
         t_span = [s for s in exporter.spans if s.name.startswith("execute_tool ")][0]
-        assert _attrs(t_span)["cubepi.tool.terminate"] is True
-        turn = [s for s in exporter.spans if s.name == "cubepi.turn"][0]
-        assert _attrs(turn)["cubepi.turn.terminated_by_tool"] is True
+        assert _attrs(t_span)["cubeloop.tool.terminate"] is True
+        turn = [s for s in exporter.spans if s.name == "cubeloop.turn"][0]
+        assert _attrs(turn)["cubeloop.turn.terminated_by_tool"] is True
 
     async def test_tool_blocked_by_hook(self):
         from pydantic import BaseModel
@@ -308,11 +308,11 @@ class TestExecuteToolSpan:
 
         t_span = [s for s in exporter.spans if s.name.startswith("execute_tool ")][0]
         attrs = _attrs(t_span)
-        assert attrs["cubepi.tool.is_error"] is True
-        assert attrs["cubepi.tool.blocked_by_hook"] is True
-        assert attrs["cubepi.tool.block_reason"] == "no thanks"
+        assert attrs["cubeloop.tool.is_error"] is True
+        assert attrs["cubeloop.tool.blocked_by_hook"] is True
+        assert attrs["cubeloop.tool.block_reason"] == "no thanks"
         assert t_span.status.status_code == StatusCode.ERROR
-        assert attrs["error.type"] == "cubepi.tool.blocked_by_hook"
+        assert attrs["error.type"] == "cubeloop.tool.blocked_by_hook"
 
 
 class TestParentChild:
@@ -348,13 +348,13 @@ class TestParentChild:
         by_name = _spans_by_name(exporter)
         root = by_name["invoke_agent"][0]
         assert root.parent is None
-        for turn in by_name["cubepi.turn"]:
+        for turn in by_name["cubeloop.turn"]:
             assert turn.parent is not None
             assert turn.parent.span_id == root.context.span_id
         for chat in [s for s in exporter.spans if s.name.startswith("chat ")]:
             assert chat.parent is not None
             assert chat.parent.span_id in {
-                t.context.span_id for t in by_name["cubepi.turn"]
+                t.context.span_id for t in by_name["cubeloop.turn"]
             }
 
 
@@ -400,7 +400,7 @@ class TestErrorAndAbort:
 
         root = [s for s in exporter.spans if s.name == "invoke_agent"][0]
         attrs = _attrs(root)
-        assert attrs.get("cubepi.aborted") is True
+        assert attrs.get("cubeloop.aborted") is True
 
     async def test_chat_span_marks_aborted_when_provider_returns_no_body(self):
         """Real Anthropic/OpenAI/OpenAI-Responses abort branches return
@@ -433,7 +433,7 @@ class TestErrorAndAbort:
 
         recorder = _find_attached_recorder(provider)
         assert recorder is not None
-        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
+        from cubeloop.agent.types import AgentStartEvent, TurnStartEvent
 
         await recorder._on_agent_event(AgentStartEvent())
         await recorder._on_agent_event(TurnStartEvent())
@@ -450,8 +450,8 @@ class TestErrorAndAbort:
         assert len(chats) >= 2
         aborted_chat = chats[-1]
         attrs = _attrs(aborted_chat)
-        assert attrs.get("cubepi.aborted") is True
-        assert attrs.get("error.type") == "cubepi.aborted"
+        assert attrs.get("cubeloop.aborted") is True
+        assert attrs.get("error.type") == "cubeloop.aborted"
         assert aborted_chat.status.status_code == StatusCode.UNSET
 
     async def test_no_body_without_signal_keeps_chat_unset(self):
@@ -473,7 +473,7 @@ class TestErrorAndAbort:
 
         recorder = _find_attached_recorder(provider)
         assert recorder is not None
-        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
+        from cubeloop.agent.types import AgentStartEvent, TurnStartEvent
 
         await recorder._on_agent_event(AgentStartEvent())
         await recorder._on_agent_event(TurnStartEvent())
@@ -487,10 +487,10 @@ class TestErrorAndAbort:
         assert len(chats) >= 2
         fallback_chat = chats[-1]
         attrs = _attrs(fallback_chat)
-        assert "cubepi.aborted" not in attrs, (
+        assert "cubeloop.aborted" not in attrs, (
             "non-abort (None, None) fallback must not be marked aborted"
         )
-        assert attrs.get("error.type") != "cubepi.aborted"
+        assert attrs.get("error.type") != "cubeloop.aborted"
         assert fallback_chat.status.status_code == StatusCode.UNSET
 
 
@@ -501,9 +501,9 @@ class TestMiddlewareProviders:
     turn is recorded."""
 
     async def test_compaction_summary_provider_emits_chat_span(self):
-        from cubepi.checkpointer.memory import MemoryCheckpointer
-        from cubepi.middleware.compaction import CompactionMiddleware
-        from cubepi.providers.base import UserMessage
+        from cubeloop.checkpointer.memory import MemoryCheckpointer
+        from cubeloop.middleware.compaction import CompactionMiddleware
+        from cubeloop.providers.base import UserMessage
 
         main = FauxProvider()
         summarizer = FauxProvider()
@@ -564,7 +564,7 @@ class TestMiddlewareProviders:
 
         # Both chat spans share the agent run's trace_id — the summarizer
         # call must be part of the same trace, not a sibling root.
-        turn = [s for s in exporter.spans if s.name == "cubepi.turn"][0]
+        turn = [s for s in exporter.spans if s.name == "cubeloop.turn"][0]
         for chat in chats:
             assert chat.context.trace_id == turn.context.trace_id
 
@@ -581,9 +581,9 @@ class TestMiddlewareProviders:
         # dedupe would route the summarizer through the main listener and
         # let it clobber the root attribution. The fix gates on the model,
         # not the listener — this regression test pins that contract.
-        from cubepi.checkpointer.memory import MemoryCheckpointer
-        from cubepi.middleware.compaction import CompactionMiddleware
-        from cubepi.providers.base import UserMessage
+        from cubeloop.checkpointer.memory import MemoryCheckpointer
+        from cubeloop.middleware.compaction import CompactionMiddleware
+        from cubeloop.providers.base import UserMessage
 
         shared = FauxProvider()
         agent_model = Model(id="agent-1", provider_id="faux-main")
@@ -645,7 +645,7 @@ class TestMiddlewareProviders:
         # ``Middleware.extra_llm_calls()`` default must return an empty
         # iterable so middlewares that don't drive any LLM are zero-cost on
         # Recorder.attach.
-        from cubepi.middleware.base import Middleware
+        from cubeloop.middleware.base import Middleware
 
         assert list(Middleware().extra_llm_calls()) == []
 
@@ -657,7 +657,7 @@ class TestMiddlewareProviders:
         # degenerate keys from the extra set so the run still gets a
         # concrete root attribution (even if it ends up reflecting whichever
         # call fired first).
-        from cubepi.middleware.base import Middleware
+        from cubeloop.middleware.base import Middleware
 
         class _SameModelMiddleware(Middleware):
             def __init__(self, provider, model):
@@ -695,7 +695,7 @@ class TestMiddlewareProviders:
         # ``_subscribe`` — its calls simply won't be observable, but attach
         # must not error. Covers the early-return branch in ``_subscribe``
         # that codecov flagged.
-        from cubepi.middleware.base import Middleware
+        from cubeloop.middleware.base import Middleware
 
         class _DuckProvider:
             pass
@@ -730,7 +730,7 @@ class TestMiddlewareProviders:
         # If a middleware's ``extra_llm_calls()`` raises during attach the
         # recorder must keep going — the agent's own provider is the
         # load-bearing subscription, a buggy middleware mustn't break tracing.
-        from cubepi.middleware.base import Middleware
+        from cubeloop.middleware.base import Middleware
 
         class _BoomMiddleware(Middleware):
             def extra_llm_calls(self):
@@ -767,12 +767,12 @@ class TestSafeToolName:
     overall-review MINOR)."""
 
     def test_top_level_name(self):
-        from cubepi.tracing.recorder import _safe_tool_name
+        from cubeloop.tracing.recorder import _safe_tool_name
 
         assert _safe_tool_name({"name": "search"}) == "search"
 
     def test_openai_chat_nested_function_shape(self):
-        from cubepi.tracing.recorder import _safe_tool_name
+        from cubeloop.tracing.recorder import _safe_tool_name
 
         assert (
             _safe_tool_name({"type": "function", "function": {"name": "fetch"}})
@@ -780,7 +780,7 @@ class TestSafeToolName:
         )
 
     def test_object_attribute(self):
-        from cubepi.tracing.recorder import _safe_tool_name
+        from cubeloop.tracing.recorder import _safe_tool_name
 
         class _T:
             name = "calc"
@@ -788,7 +788,7 @@ class TestSafeToolName:
         assert _safe_tool_name(_T()) == "calc"
 
     def test_missing_name_returns_empty(self):
-        from cubepi.tracing.recorder import _safe_tool_name
+        from cubeloop.tracing.recorder import _safe_tool_name
 
         assert _safe_tool_name({}) == ""
         assert _safe_tool_name({"type": "function"}) == ""
@@ -810,7 +810,7 @@ class TestRequestMaxTokensCrossProvider:
 
         recorder = _find_attached_recorder(provider)
         assert recorder is not None
-        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
+        from cubeloop.agent.types import AgentStartEvent, TurnStartEvent
 
         await recorder._on_agent_event(AgentStartEvent())
         await recorder._on_agent_event(TurnStartEvent())
@@ -835,7 +835,7 @@ class TestChatSpanOutputMessages:
     provider actually returned - independent of the turn/agent-level rollup,
     which is built later from the agent's own message accumulation and isn't
     available yet inside the `subscribe_response` callback. Previously only
-    `cubepi.llm.raw_response` was recorded here despite the code comment
+    `cubeloop.llm.raw_response` was recorded here despite the code comment
     already saying otherwise.
     """
 
@@ -850,7 +850,7 @@ class TestChatSpanOutputMessages:
 
         recorder = _find_attached_recorder(provider)
         assert recorder is not None
-        from cubepi.agent.types import AgentStartEvent, TurnStartEvent
+        from cubeloop.agent.types import AgentStartEvent, TurnStartEvent
 
         await recorder._on_agent_event(AgentStartEvent())
         await recorder._on_agent_event(TurnStartEvent())
@@ -1018,24 +1018,24 @@ class TestCancellationExportsSpans:
         detach()
         await tracer.shutdown()
 
-        # invoke_agent + cubepi.turn + chat must all have been ended
+        # invoke_agent + cubeloop.turn + chat must all have been ended
         # and exported, even though no AgentEnd/TurnEnd fired.
         names = {s.name for s in exporter.spans}
         assert "invoke_agent" in names, (
             f"cancelled run's invoke_agent span not exported; got {names}"
         )
-        assert "cubepi.turn" in names
+        assert "cubeloop.turn" in names
         assert any(n.startswith("chat ") for n in names)
 
-        # Each must carry cubepi.aborted so the backend sees the
+        # Each must carry cubeloop.aborted so the backend sees the
         # interruption rather than thinking the run completed.
         for span in exporter.spans:
-            if span.name in ("invoke_agent", "cubepi.turn") or span.name.startswith(
+            if span.name in ("invoke_agent", "cubeloop.turn") or span.name.startswith(
                 "chat "
             ):
                 attrs = _attrs(span)
-                assert attrs.get("cubepi.aborted") is True, (
-                    f"{span.name} missing cubepi.aborted after cancellation"
+                assert attrs.get("cubeloop.aborted") is True, (
+                    f"{span.name} missing cubeloop.aborted after cancellation"
                 )
 
 
@@ -1046,7 +1046,7 @@ class TestCloseOpenSpansDefensive:
     (codex overall-review BLOCKING follow-up: pure coverage)."""
 
     def test_close_open_spans_swallows_set_attribute_errors(self):
-        from cubepi.tracing.recorder import Recorder, _RunState
+        from cubeloop.tracing.recorder import Recorder, _RunState
 
         tracer = Tracer(service_name="t", exporters=[])
         recorder = Recorder(tracer)
@@ -1080,7 +1080,7 @@ class TestAgentSignalHelper:
     no-agent and signal-raises edges so codecov accepts the patch."""
 
     def test_returns_false_when_no_agent_attached(self):
-        from cubepi.tracing.recorder import Recorder
+        from cubeloop.tracing.recorder import Recorder
 
         tracer = Tracer(service_name="t", exporters=[])
         recorder = Recorder(tracer)
@@ -1088,7 +1088,7 @@ class TestAgentSignalHelper:
         assert recorder._agent_signal_is_set() is False
 
     def test_returns_false_when_agent_has_no_signal(self):
-        from cubepi.tracing.recorder import Recorder
+        from cubeloop.tracing.recorder import Recorder
 
         tracer = Tracer(service_name="t", exporters=[])
         recorder = Recorder(tracer)
@@ -1100,7 +1100,7 @@ class TestAgentSignalHelper:
         assert recorder._agent_signal_is_set() is False
 
     def test_returns_false_when_signal_is_set_raises(self):
-        from cubepi.tracing.recorder import Recorder
+        from cubeloop.tracing.recorder import Recorder
 
         tracer = Tracer(service_name="t", exporters=[])
         recorder = Recorder(tracer)
@@ -1124,8 +1124,8 @@ class TestTranscriptSeedingDefensiveBranches:
     raising-state branches so the patch is fully covered."""
 
     async def test_no_seed_when_agent_has_no_state(self):
-        from cubepi.tracing.recorder import Recorder
-        from cubepi.agent.types import AgentStartEvent
+        from cubeloop.tracing.recorder import Recorder
+        from cubeloop.agent.types import AgentStartEvent
 
         tracer = Tracer(service_name="t", exporters=[])
         recorder = Recorder(tracer)
@@ -1141,8 +1141,8 @@ class TestTranscriptSeedingDefensiveBranches:
         assert recorder._run.transcript == []
 
     async def test_seed_handles_exception_in_state_messages(self):
-        from cubepi.tracing.recorder import Recorder
-        from cubepi.agent.types import AgentStartEvent
+        from cubeloop.tracing.recorder import Recorder
+        from cubeloop.agent.types import AgentStartEvent
 
         tracer = Tracer(service_name="t", exporters=[])
         recorder = Recorder(tracer)
@@ -1183,7 +1183,7 @@ class TestAttachedContextManager:
         # After the block, spans have been flushed.
         names = {s.name for s in exporter.spans}
         assert "invoke_agent" in names
-        assert "cubepi.turn" in names
+        assert "cubeloop.turn" in names
         assert any(n.startswith("chat ") for n in names)
 
     async def test_cancellation_inside_block_still_closes_spans(self):
@@ -1206,11 +1206,11 @@ class TestAttachedContextManager:
         assert "invoke_agent" in names, (
             f"cancelled run's invoke_agent span did not export; got {names}"
         )
-        # Each open-at-cancel span carries cubepi.aborted.
+        # Each open-at-cancel span carries cubeloop.aborted.
         for span in exporter.spans:
-            if span.name == "invoke_agent" or span.name == "cubepi.turn":
+            if span.name == "invoke_agent" or span.name == "cubeloop.turn":
                 attrs = _attrs(span)
-                assert attrs.get("cubepi.aborted") is True
+                assert attrs.get("cubeloop.aborted") is True
 
     async def test_exception_inside_block_still_detaches(self):
         provider = FauxProvider(provider_id="faux")
@@ -1245,7 +1245,7 @@ class TestAttachedContextManager:
             raise sentinel
 
         # Patch the underlying force_flush to fail.
-        import cubepi.tracing.tracer as _t_mod
+        import cubeloop.tracing.tracer as _t_mod
 
         original = tracer.force_flush
         tracer.force_flush = _bad_flush  # type: ignore[method-assign]
@@ -1298,11 +1298,11 @@ class TestAttachedContextManager:
 
 
 class TestTracingContext:
-    """``cubepi.tracing.tracing_context`` sets per-task tags +
+    """``cubeloop.tracing.tracing_context`` sets per-task tags +
     metadata that the recorder stamps onto the invoke_agent span."""
 
     async def test_tags_land_on_invoke_agent_span(self):
-        from cubepi.tracing import tracing_context
+        from cubeloop.tracing import tracing_context
 
         agent, provider, exporter, tracer = await _build()
         provider.append_responses([faux_assistant_message("ok")])
@@ -1314,10 +1314,10 @@ class TestTracingContext:
 
         root = next(s for s in exporter.spans if s.name == "invoke_agent")
         attrs = _attrs(root)
-        assert attrs.get("cubepi.tags") == ("beta-arm", "test-suite")
+        assert attrs.get("cubeloop.tags") == ("beta-arm", "test-suite")
 
     async def test_metadata_keys_land_with_prefix(self):
-        from cubepi.tracing import tracing_context
+        from cubeloop.tracing import tracing_context
 
         agent, provider, exporter, tracer = await _build()
         provider.append_responses([faux_assistant_message("ok")])
@@ -1329,8 +1329,8 @@ class TestTracingContext:
 
         root = next(s for s in exporter.spans if s.name == "invoke_agent")
         attrs = _attrs(root)
-        assert attrs.get("cubepi.metadata.user_id") == "u-42"
-        assert attrs.get("cubepi.metadata.ab_arm") == "control"
+        assert attrs.get("cubeloop.metadata.user_id") == "u-42"
+        assert attrs.get("cubeloop.metadata.ab_arm") == "control"
 
     async def test_no_context_means_no_tag_attr(self):
         agent, provider, exporter, tracer = await _build()
@@ -1341,12 +1341,12 @@ class TestTracingContext:
 
         root = next(s for s in exporter.spans if s.name == "invoke_agent")
         attrs = _attrs(root)
-        assert "cubepi.tags" not in attrs
+        assert "cubeloop.tags" not in attrs
 
     async def test_context_does_not_leak_across_runs(self):
         """The contextvar resets on block exit — the next run started
         outside the block must NOT carry the previous tags."""
-        from cubepi.tracing import tracing_context
+        from cubeloop.tracing import tracing_context
 
         agent, provider, exporter, tracer = await _build()
         provider.append_responses(
@@ -1368,11 +1368,11 @@ class TestTracingContext:
             key=lambda s: s.start_time or 0,
         )
         assert len(roots) == 2
-        assert _attrs(roots[0]).get("cubepi.tags") == ("scoped",)
-        assert "cubepi.tags" not in _attrs(roots[1])
+        assert _attrs(roots[0]).get("cubeloop.tags") == ("scoped",)
+        assert "cubeloop.tags" not in _attrs(roots[1])
 
     async def test_nested_contexts_merge_additively(self):
-        from cubepi.tracing import tracing_context
+        from cubeloop.tracing import tracing_context
 
         agent, provider, exporter, tracer = await _build()
         provider.append_responses([faux_assistant_message("ok")])
@@ -1387,13 +1387,13 @@ class TestTracingContext:
 
         root = next(s for s in exporter.spans if s.name == "invoke_agent")
         attrs = _attrs(root)
-        assert attrs.get("cubepi.tags") == ("outer", "inner")
-        assert attrs.get("cubepi.metadata.k") == "inner-val"
-        assert attrs.get("cubepi.metadata.x") == "new"
+        assert attrs.get("cubeloop.tags") == ("outer", "inner")
+        assert attrs.get("cubeloop.metadata.k") == "inner-val"
+        assert attrs.get("cubeloop.metadata.x") == "new"
 
     async def test_unsupported_metadata_value_is_dropped(self):
         """OTel attributes can't hold dicts or arbitrary objects."""
-        from cubepi.tracing import tracing_context
+        from cubeloop.tracing import tracing_context
 
         agent, provider, exporter, tracer = await _build()
         provider.append_responses([faux_assistant_message("ok")])
@@ -1411,9 +1411,9 @@ class TestTracingContext:
 
         root = next(s for s in exporter.spans if s.name == "invoke_agent")
         attrs = _attrs(root)
-        assert attrs.get("cubepi.metadata.good_str") == "yes"
-        assert attrs.get("cubepi.metadata.good_int") == 42
-        assert "cubepi.metadata.bad_dict" not in attrs
+        assert attrs.get("cubeloop.metadata.good_str") == "yes"
+        assert attrs.get("cubeloop.metadata.good_int") == 42
+        assert "cubeloop.metadata.bad_dict" not in attrs
 
     async def test_metadata_set_attribute_typeerror_is_swallowed(self, monkeypatch):
         """OTel SDK silently drops most invalid attribute values, but
@@ -1422,20 +1422,20 @@ class TestTracingContext:
         per-key so one bad metadata entry can't crash the whole span
         (covers the defensive ``except (TypeError, ValueError)``
         branch)."""
-        from cubepi.tracing import tracing_context
+        from cubeloop.tracing import tracing_context
         from opentelemetry.sdk.trace import Span as _SdkSpan
 
         agent, provider, exporter, tracer = await _build()
         provider.append_responses([faux_assistant_message("ok")])
 
-        # Patch set_attribute to raise on a specific cubepi.metadata.*
+        # Patch set_attribute to raise on a specific cubeloop.metadata.*
         # key while letting every other attribute go through. The
-        # recorder writes many cubepi.* / gen_ai.* attrs at agent
+        # recorder writes many cubeloop.* / gen_ai.* attrs at agent
         # start, so we need to be surgical.
         original = _SdkSpan.set_attribute
 
         def _selective_set_attribute(self, key, value):
-            if key == "cubepi.metadata.boom":
+            if key == "cubeloop.metadata.boom":
                 raise TypeError("simulated OTel reject")
             return original(self, key, value)
 
@@ -1449,17 +1449,17 @@ class TestTracingContext:
         root = next(s for s in exporter.spans if s.name == "invoke_agent")
         attrs = _attrs(root)
         # bad key swallowed; good key landed.
-        assert "cubepi.metadata.boom" not in attrs
-        assert attrs.get("cubepi.metadata.good") == "yes"
+        assert "cubeloop.metadata.boom" not in attrs
+        assert attrs.get("cubeloop.metadata.good") == "yes"
 
     async def test_metadata_cannot_clobber_reserved_cubepi_attrs(self):
         """User-supplied metadata keys must not be able to overwrite
-        recorder-owned schema attributes like ``cubepi.run_id`` —
+        recorder-owned schema attributes like ``cubeloop.run_id`` —
         the JSONL exporter shards spans by that key, so an
         invoke_agent span with a clobbered ``run_id`` ends up in a
         different file than its turn/chat/tool spans (codex P2 on
-        PR #92). The fix is the ``cubepi.metadata.*`` sub-namespace."""
-        from cubepi.tracing import tracing_context
+        PR #92). The fix is the ``cubeloop.metadata.*`` sub-namespace."""
+        from cubeloop.tracing import tracing_context
 
         agent, provider, exporter, tracer = await _build()
         provider.append_responses([faux_assistant_message("ok")])
@@ -1472,14 +1472,14 @@ class TestTracingContext:
         root = next(s for s in exporter.spans if s.name == "invoke_agent")
         attrs = _attrs(root)
         # The genuine recorder-owned value is unchanged…
-        assert attrs.get("cubepi.run_id") and attrs["cubepi.run_id"] != "hijacked"
+        assert attrs.get("cubeloop.run_id") and attrs["cubeloop.run_id"] != "hijacked"
         # …and the user-supplied values land under the safe namespace.
-        assert attrs.get("cubepi.metadata.run_id") == "hijacked"
-        assert attrs.get("cubepi.metadata.turn.index") == "x"
+        assert attrs.get("cubeloop.metadata.run_id") == "hijacked"
+        assert attrs.get("cubeloop.metadata.turn.index") == "x"
 
 
 class TestBusinessRunIdAlignment:
-    """cubepi.run_id must equal the agent/host business run id.
+    """cubeloop.run_id must equal the agent/host business run id.
 
     See dev/specs/2026-08-10-unify-trace-run-id.md — no second tracer-
     private uuid when active_run_id is set.
@@ -1495,7 +1495,7 @@ class TestBusinessRunIdAlignment:
 
         assert returned == "host-run-42"
         assert exporter.spans
-        run_ids = {_attrs(s).get("cubepi.run_id") for s in exporter.spans}
+        run_ids = {_attrs(s).get("cubeloop.run_id") for s in exporter.spans}
         assert run_ids == {"host-run-42"}
 
     async def test_agent_minted_run_id_matches_prompt_return(self):
@@ -1507,7 +1507,7 @@ class TestBusinessRunIdAlignment:
         await tracer.shutdown()
 
         assert returned
-        run_ids = {_attrs(s).get("cubepi.run_id") for s in exporter.spans}
+        run_ids = {_attrs(s).get("cubeloop.run_id") for s in exporter.spans}
         assert run_ids == {returned}
 
     async def test_sequential_runs_do_not_leak_run_id(self):
@@ -1528,7 +1528,7 @@ class TestBusinessRunIdAlignment:
         assert r1 == "run-a" and r2 == "run-b"
         by_run: dict[str, int] = {}
         for s in exporter.spans:
-            rid = _attrs(s).get("cubepi.run_id")
+            rid = _attrs(s).get("cubeloop.run_id")
             assert rid in ("run-a", "run-b")
             by_run[rid] = by_run.get(rid, 0) + 1
         assert by_run.get("run-a", 0) >= 1
@@ -1674,7 +1674,7 @@ class TestAtexitFlush:
 
 class TestJsonlExporter:
     async def test_writes_jsonl_files(self, tmp_path):
-        from cubepi.tracing.exporters import JsonlSpanExporter
+        from cubeloop.tracing.exporters import JsonlSpanExporter
 
         provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("ok")])
@@ -1706,7 +1706,7 @@ class TestFallbackChainCoverage:
     async def test_attach_subscribes_to_every_chain_provider(self):
         """When agent.model is a FallbackBoundModel, attach() should listen
         on each unique provider in chain — not just chain[0]."""
-        from cubepi.providers.fallback import FallbackBoundModel
+        from cubeloop.providers.fallback import FallbackBoundModel
 
         primary = FauxProvider(provider_id="primary")
         secondary = FauxProvider(provider_id="secondary")
@@ -1730,7 +1730,7 @@ class TestFallbackChainCoverage:
     async def test_attach_dedupes_shared_provider_across_chain(self):
         """If chain[0] and chain[1] share the same provider instance,
         attach() must register listeners on it only once."""
-        from cubepi.providers.fallback import FallbackBoundModel
+        from cubeloop.providers.fallback import FallbackBoundModel
 
         shared = FauxProvider(provider_id="shared")
         chain_model = FallbackBoundModel(
@@ -1767,7 +1767,7 @@ class TestFallbackChainCoverage:
         attach, then verify secondary's spec key is absent from the recorder's
         ``_extra_call_models`` set.
         """
-        from cubepi.providers.fallback import FallbackBoundModel
+        from cubeloop.providers.fallback import FallbackBoundModel
 
         primary = FauxProvider(provider_id="primary")
         secondary = FauxProvider(provider_id="secondary")

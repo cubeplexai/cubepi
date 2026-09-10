@@ -1,6 +1,6 @@
 ---
 title: 示例
-description: "CubePi 中间件实用示例：速率限制、重试、结构化日志、上下文截断和 HITL。"
+description: "CubeLoop 中间件实用示例：速率限制、重试、结构化日志、上下文截断和 HITL。"
 ---
 
 # 中间件示例
@@ -14,8 +14,8 @@ description: "CubePi 中间件实用示例：速率限制、重试、结构化�
 
 ```python
 import time
-from cubepi import Middleware
-from cubepi.agent.types import BeforeToolCallResult
+from cubeloop import Middleware
+from cubeloop.agent.types import BeforeToolCallResult
 
 
 class RateLimitMiddleware(Middleware):
@@ -51,8 +51,8 @@ agent = Agent(model=…, middleware=[RateLimitMiddleware(max_calls_per_min=30)])
 
 ```python
 import asyncio
-from cubepi import Middleware
-from cubepi.agent.types import AfterToolCallResult
+from cubeloop import Middleware
+from cubeloop.agent.types import AfterToolCallResult
 
 
 class RetryMiddleware(Middleware):
@@ -102,9 +102,9 @@ class RetryMiddleware(Middleware):
 
 ```python
 import time, logging
-from cubepi import Middleware
+from cubeloop import Middleware
 
-log = logging.getLogger("cubepi.tools")
+log = logging.getLogger("cubeloop.tools")
 
 
 class ToolLoggingMiddleware(Middleware):
@@ -138,7 +138,7 @@ class ToolLoggingMiddleware(Middleware):
 通过仅保留最近的 N 条消息（加上 system prompt）来保持模型上下文边界：
 
 ```python
-from cubepi import Middleware
+from cubeloop import Middleware
 
 
 class SlidingWindow(Middleware):
@@ -181,7 +181,7 @@ class MaxTurns(Middleware):
 class BudgetCap(Middleware):
     def __init__(self, usd: float, model_cost) -> None:
         self.cap = usd
-        self.cost = model_cost   # cubepi.providers.ModelCost 或类似
+        self.cost = model_cost   # cubeloop.providers.ModelCost 或类似
         self.spent = 0.0
 
     async def should_stop_after_turn(self, ctx):
@@ -200,9 +200,9 @@ class BudgetCap(Middleware):
 
 ```python
 import json
-from cubepi import Middleware
-from cubepi.middleware.base import TurnAction
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop import Middleware
+from cubeloop.middleware.base import TurnAction
+from cubeloop.providers.base import TextContent, UserMessage
 
 
 class JSONOutputValidator(Middleware):
@@ -230,12 +230,12 @@ Agent 将跳过工具执行，并立即用上下文中的反馈消息重新提�
 
 ## 人机协同工具确认
 
-CubePi 在 `cubepi.hitl` 中内置了两个 HITL 中间件：
+CubeLoop 在 `cubeloop.hitl` 中内置了两个 HITL 中间件：
 
 **`ConfirmToolCallMiddleware`** —— "对此工具始终询问人类"：
 
 ```python
-from cubepi.hitl import ConfirmToolCallMiddleware, InMemoryChannel
+from cubeloop.hitl import ConfirmToolCallMiddleware, InMemoryChannel
 
 channel = InMemoryChannel()
 agent = Agent(
@@ -256,7 +256,7 @@ Agent 在每次 `bash` 或 `write_file` 调用时暂停，等待宿主调用
 **`ApprovalPolicyMiddleware`** —— 适用于通过策略引擎对工具调用进行分类的宿主：
 
 ```python
-from cubepi.hitl import Approve, ApprovalPolicyMiddleware, AskUser, Deny
+from cubeloop.hitl import Approve, ApprovalPolicyMiddleware, AskUser, Deny
 
 def my_policy(ctx):
     if ctx.tool_call.name in ("read_file", "grep"):

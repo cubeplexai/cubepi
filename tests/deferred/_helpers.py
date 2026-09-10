@@ -6,9 +6,9 @@ from collections.abc import Callable
 
 from pydantic import BaseModel
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.deferred import DeferredToolGroup, DeferredToolsMiddleware
+from cubeloop.providers.base import TextContent
 
 
 class _Empty(BaseModel):
@@ -76,7 +76,7 @@ def _mw(groups, *, strategy="dispatch", extra=None) -> DeferredToolsMiddleware:
 
 def _make_faux_model():
     """Create a minimal BoundModel for Agent construction."""
-    from cubepi.providers.faux import FauxProvider
+    from cubeloop.providers.faux import FauxProvider
 
     provider = FauxProvider()
     return provider.model("faux")

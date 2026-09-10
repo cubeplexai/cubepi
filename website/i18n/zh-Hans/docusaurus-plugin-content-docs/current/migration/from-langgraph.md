@@ -1,21 +1,21 @@
 ---
 title: 从 langgraph 迁移
-description: "将你的 agent 从 LangGraph 迁移到 CubePi。"
+description: "将你的 agent 从 LangGraph 迁移到 CubeLoop。"
 ---
 
 # 从 langgraph 迁移
 
-CubePi 和 [langgraph](https://github.com/langchain-ai/langgraph) 都用于构建
+CubeLoop 和 [langgraph](https://github.com/langchain-ai/langgraph) 都用于构建
 使用工具的 LLM agent，但两者的思维模型有所不同。
-本页将 langgraph 概念映射到 CubePi，让你无需从头学起就能移植代码。
+本页将 langgraph 概念映射到 CubeLoop，让你无需从头学起就能移植代码。
 
 ## 思维模型转换
 
-| langgraph | CubePi | 原因 |
+| langgraph | CubeLoop | 原因 |
 |---|---|---|
-| **状态图**，包含节点、边、channel | **Agent 循环**，就是一个可读的普通 `while` 循环 | 线性循环比图更易于推理；CubePi 在运行时从不分支 —— 控制流在 middleware 中 |
+| **状态图**，包含节点、边、channel | **Agent 循环**，就是一个可读的普通 `while` 循环 | 线性循环比图更易于推理；CubeLoop 在运行时从不分支 —— 控制流在 middleware 中 |
 | **Channels**（类型化状态槽） | **`AgentContext.extra`** + `AgentState.messages` | 一个 dict 加一个消息列表，覆盖了我们见过的所有状态结构 |
-| **`StateGraph.add_node(name, fn)`** | middleware hook 或一个工具 | langgraph 节点中的函数在 CubePi 中分为两种角色：工具执行（由模型决定时）和 middleware（始终生效的变换） |
+| **`StateGraph.add_node(name, fn)`** | middleware hook 或一个工具 | langgraph 节点中的函数在 CubeLoop 中分为两种角色：工具执行（由模型决定时）和 middleware（始终生效的变换） |
 | **`add_edge(a, b)`** / `add_conditional_edges` | 内置：工具 → 下一轮 → 工具 → … | 条件形式（工具调用 → 重新提示）就是循环本身，无需显式构建 |
 | **`MemorySaver` / `SqliteSaver` / `PostgresSaver`** | `MemoryCheckpointer` / `SQLiteCheckpointer` / `PostgresCheckpointer` | 思路相同，但采用追加写入 schema，而非完整快照 |
 | **`config: {"configurable": {"thread_id": …}}`** | `Agent(thread_id=…)` | 作为 agent 的一等参数 |
@@ -23,7 +23,7 @@ CubePi 和 [langgraph](https://github.com/langchain-ai/langgraph) 都用于构�
 | **以 `@tool` 装饰器修饰的工具函数** | 带有 Pydantic 参数和 async execute 的 `AgentTool` | 更接近 OpenAI/Anthropic 原生形式 |
 | **`HumanMessage`、`AIMessage`** | `UserMessage`、`AssistantMessage` | 相同的角色标记消息，只是重命名 |
 | **通过 `interrupt_before` / `interrupt_after` 中断** | `agent.steer(...)`、`agent.follow_up(...)`、`agent.abort()` | 命令式控制，而非声明式中断点 |
-| **任意检查点的时间旅行 / 分叉** | **`Agent.fork()`** / **`Agent.fork_once()`**，在 run 边界处 | CubePi 以已完成的 `run_id` 为基准；参见 [会话分叉](../guides/agents/forking) |
+| **任意检查点的时间旅行 / 分叉** | **`Agent.fork()`** / **`Agent.fork_once()`**，在 run 边界处 | CubeLoop 以已完成的 `run_id` 为基准；参见 [会话分叉](../guides/agents/forking) |
 | **`config_schema`** | `Agent` 的构造函数参数 | 没有独立的 schema 层 |
 
 ## 并排对比：一个使用工具的 agent
@@ -68,12 +68,12 @@ for chunk in app.stream({"messages": [("user", "Weather in Tokyo?")]}):
     print(chunk)
 ```
 
-### CubePi
+### CubeLoop
 
 ```python
 import asyncio
-from cubepi import Agent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 @tool
@@ -96,7 +96,7 @@ docstring 作为描述,返回的普通 `str` 会自动包装。(若工具需要�
 或动态构建,完整的 `AgentTool(...)` 写法依然可用 —— 见
 [工具使用](../guides/agents/tool-use)。)
 
-CubePi 版本去除了：
+CubeLoop 版本去除了：
 
 - `StateGraph`、边、节点、`END` 哨兵、条件边。
 - `ToolNode` 注册表 —— 工具直接传给 `Agent`。
@@ -112,13 +112,13 @@ CubePi 版本去除了：
 from langgraph.checkpoint.sqlite import SqliteSaver
 graph.compile(checkpointer=SqliteSaver.from_conn_string(":memory:"))
 
-# CubePi
-from cubepi.checkpointer import SQLiteCheckpointer
+# CubeLoop
+from cubeloop.checkpointer import SQLiteCheckpointer
 async with SQLiteCheckpointer("agent.db") as cp:
     agent = Agent(..., checkpointer=cp, thread_id="conv-1")
 ```
 
-CubePi 的追加写入模型每条消息的复杂度为 O(1)，与对话长度无关。
+CubeLoop 的追加写入模型每条消息的复杂度为 O(1)，与对话长度无关。
 langgraph 保存完整快照，随历史记录线性增长。
 
 ### 流式输出
@@ -129,7 +129,7 @@ for chunk in app.stream(state, stream_mode="messages"):
     if chunk["event"] == "on_chat_model_stream":
         print(chunk["data"]["chunk"].content, end="")
 
-# CubePi
+# CubeLoop
 def on_event(event, signal=None):
     if event.type == "message_update" and event.stream_event.type == "text_delta":
         print(event.stream_event.delta, end="")
@@ -146,7 +146,7 @@ await agent.prompt("…")
 # langgraph
 graph.compile(interrupt_before=["tools"])
 
-# CubePi
+# CubeLoop
 class HumanApproval(Middleware):
     async def before_tool_call(self, ctx, *, signal=None):
         approved = await ask_human(f"Run {ctx.tool_call.name}({ctx.args})?")
@@ -168,7 +168,7 @@ graph.add_edge("summary", END)
 ```
 
 ```python
-# CubePi
+# CubeLoop
 class SummariseAtEnd(Middleware):
     async def should_stop_after_turn(self, ctx) -> bool:
         msg = ctx.message
@@ -190,14 +190,14 @@ config = {"configurable": {"thread_id": "t1", "checkpoint_id": "<id>"}}
 app.update_state(config, {"messages": [...]})
 result = app.invoke(None, config)
 
-# CubePi — 在已完成的 run 边界处持久化分叉
+# CubeLoop — 在已完成的 run 边界处持久化分叉
 await agent.fork(
     src_thread_id="conv_123",
     new_thread_id="conv_456",
     after_run_id="R1",
 )
 
-# CubePi — 临时一次性探针（不写入任何线程）
+# CubeLoop — 临时一次性探针（不写入任何线程）
 result = await agent.fork_once(
     src_thread_id="conv_123",
     message="如果你当时回答了'是'呢？",
@@ -206,19 +206,19 @@ result = await agent.fork_once(
 print(result.text)
 ```
 
-CubePi 在已完成的 run 边界处分叉，而非任意 mid-run 检查点。`fork`
+CubeLoop 在已完成的 run 边界处分叉，而非任意 mid-run 检查点。`fork`
 创建可继续对话的持久化分支；`fork_once` 运行单次探针并丢弃所有内容。
 参见[会话分叉](../guides/agents/forking)。
 
-## LangGraph 仍优于 CubePi 的能力
+## LangGraph 仍优于 CubeLoop 的能力
 
-- **图原生的多智能体编排。** CubePi 提供 `SubagentMiddleware`，支持工具驱动的委派：
+- **图原生的多智能体编排。** CubeLoop 提供 `SubagentMiddleware`，支持工具驱动的委派：
   父 Agent 可以将自包含任务分派给具有专属 prompt、model、tools 和 middleware 的
-  类型化子 Agent。CubePi 目前尚未提供 LangGraph 那种显式、可持久化的图模型，
+  类型化子 Agent。CubeLoop 目前尚未提供 LangGraph 那种显式、可持久化的图模型，
   用于 supervisor 路由、条件分支、并行 fan-out/fan-in 以及图级状态管理。
 - **可视化图渲染。** 没有 `app.get_graph().draw_mermaid()` 的等价物。
-  CubePi 的流程是线性的，画出来也只是一条直线。
-- **原生 trace 可视化 UI。** CubePi 不像 LangSmith / Langfuse 那样
+  CubeLoop 的流程是线性的，画出来也只是一条直线。
+- **原生 trace 可视化 UI。** CubeLoop 不像 LangSmith / Langfuse 那样
   渲染自己的 trace 可视化界面；它改为发射符合厂商中立标准的
   OpenTelemetry —— 通过
   `Tracer(exporters=[OTLPSpanExporter(...)])` 将任意 OTLP 后端
@@ -226,7 +226,7 @@ CubePi 在已完成的 run 边界处分叉，而非任意 mid-run 检查点。`f
   Honeycomb、Datadog 等）接入。参见
   [Tracing → OTLP & Backends](../guides/tracing/otlp)。
 
-## CubePi 有而 langgraph 没有的功能
+## CubeLoop 有而 langgraph 没有的功能
 
 - **原生 OpenTelemetry tracing** —— `Tracer` + `Meter` 开箱即用地
   发射带 GenAI-semconv 属性的 OTel span，可被任意 OTLP 后端采集。

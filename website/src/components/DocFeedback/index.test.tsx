@@ -2,10 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import DocFeedback from './index';
 
-declare global { interface Window { __cubepi_posthog?: { capture: (e: string, p: object) => void } } }
+declare global { interface Window { __cubeloop_posthog?: { capture: (e: string, p: object) => void } } }
 
 beforeEach(() => {
-  window.__cubepi_posthog = { capture: vi.fn() };
+  window.__cubeloop_posthog = { capture: vi.fn() };
 });
 
 describe('DocFeedback', () => {
@@ -18,7 +18,7 @@ describe('DocFeedback', () => {
 
   it('captures a doc_feedback event with helpful=true on 👍', () => {
     const capture = vi.fn();
-    window.__cubepi_posthog = { capture };
+    window.__cubeloop_posthog = { capture };
     render(<DocFeedback slug="/foo" version="0.3" locale="en" />);
     fireEvent.click(screen.getByRole('button', { name: /yes/i }));
     expect(capture).toHaveBeenCalledWith('doc_feedback', {
@@ -29,7 +29,7 @@ describe('DocFeedback', () => {
 
   it('shows a comment textarea on 👎 and captures doc_feedback_comment on submit', () => {
     const capture = vi.fn();
-    window.__cubepi_posthog = { capture };
+    window.__cubeloop_posthog = { capture };
     render(<DocFeedback slug="/foo" version="0.3" locale="en" />);
     fireEvent.click(screen.getByRole('button', { name: /no/i }));
     expect(capture).toHaveBeenCalledWith('doc_feedback', {

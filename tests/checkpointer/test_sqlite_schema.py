@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from cubepi.checkpointer.sqlite import SQLiteCheckpointer
+from cubeloop.checkpointer.sqlite import SQLiteCheckpointer
 
 
 @pytest.mark.asyncio

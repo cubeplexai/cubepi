@@ -4,15 +4,15 @@ import { useIsZhHans } from '@site/src/hooks/useIsZhHans';
 
 const EN: CompareContent = {
   them: 'LangGraph',
-  title: 'CubePi vs LangGraph — a leaner Python agent framework',
+  title: 'CubeLoop vs LangGraph — a leaner Python agent framework',
   description:
-    'CubePi vs LangGraph: a side-by-side comparison of two Python agent frameworks. CubePi models the agent as a plain async while-loop with append-only checkpointing and 3 core dependencies, instead of a state graph of nodes, edges, and channels.',
+    'CubeLoop vs LangGraph: a side-by-side comparison of two Python agent frameworks. CubeLoop models the agent as a plain async while-loop with append-only checkpointing and 3 core dependencies, instead of a state graph of nodes, edges, and channels.',
   keywords:
-    'CubePi vs LangGraph, LangGraph alternative, Python agent framework, async agent framework, LangGraph vs CubePi, state graph alternative, langgraph 替代品',
-  h1: 'CubePi vs LangGraph',
+    'CubeLoop vs LangGraph, LangGraph alternative, Python agent framework, async agent framework, LangGraph vs CubeLoop, state graph alternative, langgraph 替代品',
+  h1: 'CubeLoop vs LangGraph',
   intro: [
-    'CubePi and LangGraph both build tool-using LLM agents in Python, but they start from opposite mental models. LangGraph asks you to express your agent as a state graph — nodes, edges, and typed channels you wire together. CubePi models the same agent as a plain async while-loop you can read top to bottom.',
-    'If you find yourself drawing graphs to express what is fundamentally a linear "call the model → run tools → repeat" loop, CubePi is the leaner alternative. Here is how the two compare.',
+    'CubeLoop and LangGraph both build tool-using LLM agents in Python, but they start from opposite mental models. LangGraph asks you to express your agent as a state graph — nodes, edges, and typed channels you wire together. CubeLoop models the same agent as a plain async while-loop you can read top to bottom.',
+    'If you find yourself drawing graphs to express what is fundamentally a linear "call the model → run tools → repeat" loop, CubeLoop is the leaner alternative. Here is how the two compare.',
   ],
   tableHeading: 'Side-by-side',
   rows: [
@@ -59,9 +59,9 @@ graph.add_conditional_edges("llm", should_continue)
 graph.add_edge("tools", "llm")
 app = graph.compile()
 `,
-    usTitle: '# CubePi',
-    us: `from cubepi import Agent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+    usTitle: '# CubeLoop',
+    us: `from cubeloop import Agent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 @tool
@@ -82,20 +82,20 @@ await agent.prompt("Weather in Tokyo?")
     {
       h2: 'Why the loop instead of a graph',
       body: [
-        'A LangGraph agent never branches at runtime the way a general graph suggests — the "graph" is almost always the same shape: call the model, and if it asked for tools, run them and call the model again. CubePi makes that shape the runtime. There is no StateGraph, no END sentinel, no should_continue function, no ToolNode registry, and no State TypedDict to keep in sync.',
+        'A LangGraph agent never branches at runtime the way a general graph suggests — the "graph" is almost always the same shape: call the model, and if it asked for tools, run them and call the model again. CubeLoop makes that shape the runtime. There is no StateGraph, no END sentinel, no should_continue function, no ToolNode registry, and no State TypedDict to keep in sync.',
         'Flow control that does need to vary — stop early, summarize, gate a tool behind human approval — lives in typed middleware hooks instead of conditional edges, so it is imperative and testable in isolation.',
       ],
     },
     {
       h2: 'Persistence that does not grow with the conversation',
       body: [
-        'LangGraph checkpointers snapshot the full state at every step, so write cost grows linearly with conversation length. CubePi checkpointing is append-only: each turn writes O(1) regardless of how long the thread is, and messages stay JSONB-queryable. The same MemorySaver / SqliteSaver / PostgresSaver idea maps onto MemoryCheckpointer / SQLiteCheckpointer / PostgresCheckpointer.',
+        'LangGraph checkpointers snapshot the full state at every step, so write cost grows linearly with conversation length. CubeLoop checkpointing is append-only: each turn writes O(1) regardless of how long the thread is, and messages stay JSONB-queryable. The same MemorySaver / SqliteSaver / PostgresSaver idea maps onto MemoryCheckpointer / SQLiteCheckpointer / PostgresCheckpointer.',
       ],
     },
     {
       h2: 'When LangGraph is the better fit',
       body: [
-        'LangGraph is the better choice if you need explicit, durable multi-agent graphs for supervisor routing, conditional branches, or parallel fan-out/fan-in, or if you need visual graph rendering. CubePi supports tool-driven delegation through `SubagentMiddleware`: a parent agent can dispatch self-contained work to typed child agents with dedicated prompts, models, tools, and middleware. CubePi keeps its core flow linear by design and emits vendor-neutral OpenTelemetry rather than shipping its own trace UI. CubePi has `Agent.fork()` and `Agent.fork_once()` for branching at completed-run boundaries; LangGraph supports finer-grained mid-run checkpoint forks if you need that granularity. If your agent is fundamentally a loop, CubePi removes the graph machinery you were not really using.',
+        'LangGraph is the better choice if you need explicit, durable multi-agent graphs for supervisor routing, conditional branches, or parallel fan-out/fan-in, or if you need visual graph rendering. CubeLoop supports tool-driven delegation through `SubagentMiddleware`: a parent agent can dispatch self-contained work to typed child agents with dedicated prompts, models, tools, and middleware. CubeLoop keeps its core flow linear by design and emits vendor-neutral OpenTelemetry rather than shipping its own trace UI. CubeLoop has `Agent.fork()` and `Agent.fork_once()` for branching at completed-run boundaries; LangGraph supports finer-grained mid-run checkpoint forks if you need that granularity. If your agent is fundamentally a loop, CubeLoop removes the graph machinery you were not really using.',
       ],
     },
   ],
@@ -107,15 +107,15 @@ await agent.prompt("Weather in Tokyo?")
 
 const ZH: CompareContent = {
   them: 'LangGraph',
-  title: 'CubePi vs LangGraph — 更精简的 Python Agent 框架',
+  title: 'CubeLoop vs LangGraph — 更精简的 Python Agent 框架',
   description:
-    'CubePi 与 LangGraph 对比:两个 Python Agent 框架的并排比较。CubePi 用普通的 async while 循环建模 agent,配合追加式 checkpointing 和 3 个核心依赖,而非由节点、边、通道组成的状态图。',
+    'CubeLoop 与 LangGraph 对比:两个 Python Agent 框架的并排比较。CubeLoop 用普通的 async while 循环建模 agent,配合追加式 checkpointing 和 3 个核心依赖,而非由节点、边、通道组成的状态图。',
   keywords:
-    'CubePi vs LangGraph, LangGraph 替代品, Python Agent 框架, 异步 Agent 框架, 状态图替代方案, langgraph alternative',
-  h1: 'CubePi vs LangGraph',
+    'CubeLoop vs LangGraph, LangGraph 替代品, Python Agent 框架, 异步 Agent 框架, 状态图替代方案, langgraph alternative',
+  h1: 'CubeLoop vs LangGraph',
   intro: [
-    'CubePi 和 LangGraph 都用 Python 构建会调用工具的 LLM agent,但出发点完全相反。LangGraph 要求你把 agent 表达成一张状态图 —— 手动连接节点、边和类型化通道。CubePi 则把同样的 agent 建模为一个可以从上读到下的普通 async while 循环。',
-    '如果你发现自己在用画图的方式去表达本质上线性的「调用模型 → 执行工具 → 重复」循环,CubePi 就是更精简的替代方案。下面是两者的对比。',
+    'CubeLoop 和 LangGraph 都用 Python 构建会调用工具的 LLM agent,但出发点完全相反。LangGraph 要求你把 agent 表达成一张状态图 —— 手动连接节点、边和类型化通道。CubeLoop 则把同样的 agent 建模为一个可以从上读到下的普通 async while 循环。',
+    '如果你发现自己在用画图的方式去表达本质上线性的「调用模型 → 执行工具 → 重复」循环,CubeLoop 就是更精简的替代方案。下面是两者的对比。',
   ],
   tableHeading: '并排对比',
   rows: [
@@ -162,9 +162,9 @@ graph.add_conditional_edges("llm", should_continue)
 graph.add_edge("tools", "llm")
 app = graph.compile()
 `,
-    usTitle: '# CubePi',
-    us: `from cubepi import Agent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+    usTitle: '# CubeLoop',
+    us: `from cubeloop import Agent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 @tool
@@ -185,20 +185,20 @@ await agent.prompt("Weather in Tokyo?")
     {
       h2: '为什么用循环而不是图',
       body: [
-        'LangGraph 的 agent 在运行时其实从不像通用图那样随意分支 —— 那张「图」几乎永远是同一个形状:调用模型,如果它请求了工具就执行,然后再次调用模型。CubePi 直接把这个形状变成运行时。没有 StateGraph、没有 END 哨兵、没有 should_continue 函数、没有 ToolNode 注册表,也没有需要同步维护的 State TypedDict。',
+        'LangGraph 的 agent 在运行时其实从不像通用图那样随意分支 —— 那张「图」几乎永远是同一个形状:调用模型,如果它请求了工具就执行,然后再次调用模型。CubeLoop 直接把这个形状变成运行时。没有 StateGraph、没有 END 哨兵、没有 should_continue 函数、没有 ToolNode 注册表,也没有需要同步维护的 State TypedDict。',
         '确实需要变化的流程控制 —— 提前停止、生成总结、把某个工具放到人工审批之后 —— 都放在类型化的 middleware hook 里,而非条件边,因此是命令式的,也能单独测试。',
       ],
     },
     {
       h2: '不随对话增长的持久化',
       body: [
-        'LangGraph 的 checkpointer 在每一步都对完整状态做快照,写入成本随对话长度线性增长。CubePi 的 checkpointing 是追加式的:无论线程多长,每轮写入都是 O(1),且消息保持 JSONB 可查询。MemorySaver / SqliteSaver / PostgresSaver 的思路对应到 MemoryCheckpointer / SQLiteCheckpointer / PostgresCheckpointer。',
+        'LangGraph 的 checkpointer 在每一步都对完整状态做快照,写入成本随对话长度线性增长。CubeLoop 的 checkpointing 是追加式的:无论线程多长,每轮写入都是 O(1),且消息保持 JSONB 可查询。MemorySaver / SqliteSaver / PostgresSaver 的思路对应到 MemoryCheckpointer / SQLiteCheckpointer / PostgresCheckpointer。',
       ],
     },
     {
       h2: '什么时候 LangGraph 更合适',
       body: [
-        '如果你需要用于 supervisor 路由、条件分支或并行 fan-out/fan-in 的显式、可持久化多智能体图，或需要可视化图渲染，LangGraph 更合适。CubePi 通过 `SubagentMiddleware` 支持工具驱动的委派：父 Agent 可以将自包含任务分派给具有专属 prompt、model、tools 和 middleware 的类型化子 Agent。CubePi 在设计上保持核心流程线性，并输出厂商中立的 OpenTelemetry，而不是自带一套 trace UI。CubePi 已有 `Agent.fork()` 和 `Agent.fork_once()` 在已完成的 run 边界处分叉；如果你需要 mid-run 粒度的任意检查点分叉，LangGraph 粒度更细。但如果你的 agent 本质上就是一个循环，CubePi 帮你去掉了那些你其实没真正用上的图机制。',
+        '如果你需要用于 supervisor 路由、条件分支或并行 fan-out/fan-in 的显式、可持久化多智能体图，或需要可视化图渲染，LangGraph 更合适。CubeLoop 通过 `SubagentMiddleware` 支持工具驱动的委派：父 Agent 可以将自包含任务分派给具有专属 prompt、model、tools 和 middleware 的类型化子 Agent。CubeLoop 在设计上保持核心流程线性，并输出厂商中立的 OpenTelemetry，而不是自带一套 trace UI。CubeLoop 已有 `Agent.fork()` 和 `Agent.fork_once()` 在已完成的 run 边界处分叉；如果你需要 mid-run 粒度的任意检查点分叉，LangGraph 粒度更细。但如果你的 agent 本质上就是一个循环，CubeLoop 帮你去掉了那些你其实没真正用上的图机制。',
       ],
     },
   ],

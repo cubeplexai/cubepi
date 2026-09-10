@@ -1,10 +1,10 @@
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool
-from cubepi.hitl.binding import HitlBinding
-from cubepi.providers.base import AssistantMessage, TextContent
-from cubepi.providers.faux import FauxProvider
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import AgentTool
+from cubeloop.hitl.binding import HitlBinding
+from cubeloop.providers.base import AssistantMessage, TextContent
+from cubeloop.providers.faux import FauxProvider
 from pydantic import BaseModel
 
 

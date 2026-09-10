@@ -1,6 +1,6 @@
 # Examples
 
-Runnable scripts demonstrating CubePi features.
+Runnable scripts demonstrating CubeLoop features.
 
 Run any example with `uv`:
 
@@ -33,12 +33,12 @@ when both are set.
 | Example | What it shows | Extra deps |
 |---|---|---|
 | [`weather_agent.py`](weather_agent.py) | Tool calling, streaming output, Ctrl-C cancellation | `httpx` |
-| [`persistent_chat.py`](persistent_chat.py) | SQLite-backed chat that survives restarts | `cubepi[sqlite]` |
+| [`persistent_chat.py`](persistent_chat.py) | SQLite-backed chat that survives restarts | `cubeloop[sqlite]` |
 | [`multi_provider_failover.py`](multi_provider_failover.py) | Automatic failover between providers on error | — |
 | [`ask_user_form.py`](ask_user_form.py) | HITL multi-question form via `ask_user_tool` | — |
 | [`sandbox_confirm.py`](sandbox_confirm.py) | `ApprovalPolicyMiddleware` — auto-allow, deny, or confirm tool calls | — |
-| [`resumable_tasks.py`](resumable_tasks.py) | Crash-resilient tasks with idempotent tools and checkpointing | `cubepi[sqlite]` |
-| [`postgres_fastapi.py`](postgres_fastapi.py) | Production HTTP service: FastAPI + SSE streaming + Postgres | `cubepi[postgres]` `fastapi` `uvicorn[standard]` `sse-starlette` |
+| [`resumable_tasks.py`](resumable_tasks.py) | Crash-resilient tasks with idempotent tools and checkpointing | `cubeloop[sqlite]` |
+| [`postgres_fastapi.py`](postgres_fastapi.py) | Production HTTP service: FastAPI + SSE streaming + Postgres | `cubeloop[postgres]` `fastapi` `uvicorn[standard]` `sse-starlette` |
 
 ### weather_agent.py
 
@@ -56,7 +56,7 @@ uv run python examples/persistent_chat.py bob
 # Different thread, clean slate.
 ```
 
-Requires: `cubepi[sqlite]`
+Requires: `cubeloop[sqlite]`
 
 ### multi_provider_failover.py
 
@@ -96,15 +96,15 @@ uv run python examples/resumable_tasks.py job-1
 ```
 
 Items already processed are skipped on resume (idempotent tool backed by
-a file-based job store in `/tmp/cubepi-jobs/`).
+a file-based job store in `/tmp/cubeloop-jobs/`).
 
-Requires: `cubepi[sqlite]`
+Requires: `cubeloop[sqlite]`
 
 ### postgres_fastapi.py
 
 ```bash
 uv sync --extra postgres
-export DATABASE_URL=postgresql://user:pass@localhost/cubepi
+export DATABASE_URL=postgresql://user:pass@localhost/cubeloop
 uv run --with fastapi --with "uvicorn[standard]" --with sse-starlette \
   uvicorn examples.postgres_fastapi:app --reload --port 8000
 
@@ -124,18 +124,18 @@ Both use `FauxProvider` (no API key needed) and create a **throwaway database**
 that is dropped on exit — safe to re-run against a dev server.
 
 ```bash
-CUBEPI_PG_DSN=postgresql://user:pass@host:5432/dbname \
+CUBELOOP_PG_DSN=postgresql://user:pass@host:5432/dbname \
     uv run python examples/checkpointing_postgres.py
 
-CUBEPI_MYSQL_DSN=mysql://user:pass@host:3306/dbname \
+CUBELOOP_MYSQL_DSN=mysql://user:pass@host:3306/dbname \
     uv run python examples/checkpointing_mysql.py
 ```
 
-Each script bootstraps the CubePi schema inline so it runs standalone, but in
+Each script bootstraps the CubeLoop schema inline so it runs standalone, but in
 production the schema is owned by your host application's Alembic migration.
 See the host-integration runbooks for the migration recipe and version-upgrade flow:
 
-- [`cubepi/checkpointer/postgres/README.md`](../cubepi/checkpointer/postgres/README.md)
-- [`cubepi/checkpointer/mysql/README.md`](../cubepi/checkpointer/mysql/README.md)
+- [`cubeloop/checkpointer/postgres/README.md`](../cubeloop/checkpointer/postgres/README.md)
+- [`cubeloop/checkpointer/mysql/README.md`](../cubeloop/checkpointer/mysql/README.md)
 - User guides: [Postgres](../website/docs/guides/checkpointing/postgres.md) ·
   [MySQL](../website/docs/guides/checkpointing/mysql.md)

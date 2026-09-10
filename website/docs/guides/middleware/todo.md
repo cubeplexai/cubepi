@@ -20,8 +20,8 @@ the model to show the user a live breakdown of what it's doing.
 through this reference so state survives checkpointing.
 
 ```python
-from cubepi import Agent
-from cubepi.middleware import TodoListMiddleware
+from cubeloop import Agent
+from cubeloop.middleware import TodoListMiddleware
 
 agent_extra: dict = {}
 
@@ -38,9 +38,9 @@ When the agent is checkpointed, pass the same `extra_ref` that points to
 `AgentContext.extra` so todo state is persisted and restored across sessions:
 
 ```python
-from cubepi import Agent
-from cubepi.checkpointer import PostgresCheckpointer
-from cubepi.middleware import TodoListMiddleware
+from cubeloop import Agent
+from cubeloop.checkpointer import PostgresCheckpointer
+from cubeloop.middleware import TodoListMiddleware
 
 # extra_ref must return the same object as AgentContext.extra.
 # The helper below is the standard pattern with a checkpointed agent.

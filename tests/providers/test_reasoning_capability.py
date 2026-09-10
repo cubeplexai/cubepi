@@ -1,5 +1,5 @@
-from cubepi.providers.base import Model, ReasoningControl, StreamOptions
-from cubepi.providers.capability import (
+from cubeloop.providers.base import Model, ReasoningControl, StreamOptions
+from cubeloop.providers.capability import (
     CapabilityDescriptor,
     CapabilityWarning,
     PayloadPreview,
@@ -8,7 +8,7 @@ from cubepi.providers.capability import (
     lint_capability,
     preview_payload,
 )
-from cubepi.providers.reasoning_profiles import get_capability_profile
+from cubeloop.providers.reasoning_profiles import get_capability_profile
 
 
 def test_stream_options_default_reasoning_is_off_medium_none():

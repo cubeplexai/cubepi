@@ -5,14 +5,14 @@ on:
     branches: [main]
     paths:
       - 'website/**'
-      - 'cubepi/**'
+      - 'cubeloop/**'
       - 'pyproject.toml'
       - 'README.md'
       - '.github/workflows/docs.yml'
   pull_request:
     paths:
       - 'website/**'
-      - 'cubepi/**'
+      - 'cubeloop/**'
       - 'pyproject.toml'
       - 'README.md'
       - '.github/workflows/docs.yml'
@@ -46,7 +46,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Guard against hand-edited API mdx
         run: |
-          if find website/docs/api -type f -name 'cubepi-*.mdx' 2>/dev/null | grep .; then
+          if find website/docs/api -type f -name 'cubeloop-*.mdx' 2>/dev/null | grep .; then
             echo "::error::Generated API MDX files were committed. Delete them." && exit 1
           fi
       - name: Build (runs griffe via prebuild)

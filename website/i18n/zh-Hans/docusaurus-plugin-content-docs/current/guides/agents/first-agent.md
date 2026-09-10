@@ -1,6 +1,6 @@
 ---
 title: 第一个 Agent
-description: "从零开始创建并运行你的第一个 CubePi agent。"
+description: "从零开始创建并运行你的第一个 CubeLoop agent。"
 ---
 
 # 构建你的第一个 Agent
@@ -16,7 +16,7 @@ provider 是到 LLM API 的连接；用 `provider.model("id", ...)` 把模型 ID
 
 ```python
 import os
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(provider_id="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
 model = provider.model(
@@ -36,7 +36,7 @@ model = provider.model(
 工具就是一个用 `@tool` 装饰的 async 函数:
 
 ```python
-from cubepi import tool
+from cubeloop import tool
 
 
 @tool
@@ -53,7 +53,7 @@ async def get_weather(city: str) -> str:
 - 返回 `str`(自动包成文本)、`Content`、内容列表,或在需要
   `details`/`is_error` 时返回完整的 `AgentToolResult`。
 - 需要取消或进度流?在签名里声明 `signal`(用户取消时被 set 的
-  `asyncio.Event`)和/或 `on_update(partial)`,CubePi 会注入它们 —— 见
+  `asyncio.Event`)和/或 `on_update(partial)`,CubeLoop 会注入它们 —— 见
   [工具使用](./tool-use)。
 - 需要共享参数模型或动态构建?长写法 `AgentTool(...)` 与之等价 —— 见
   [工具使用](./tool-use)。
@@ -61,7 +61,7 @@ async def get_weather(city: str) -> str:
 ## 第 3 步 —— 组装 Agent
 
 ```python
-from cubepi import Agent
+from cubeloop import Agent
 
 agent = Agent(
     model=model,
@@ -152,10 +152,10 @@ async def main():
 - **没有 `text_delta` 事件** —— 是不是在 `prompt()` 之后才订阅的？
   Listener 只看得到注册之后的事件。
 - **Tool not found** —— 模型调了一个 `name` 不在 `tools=[...]` 里的
-  工具。CubePi 把这种情况包装成一个 `is_error=True` 的工具结果,
+  工具。CubeLoop 把这种情况包装成一个 `is_error=True` 的工具结果,
   不会崩 —— 在 `tool_execution_end` 事件的 `result` 里能看到。
 - **Pydantic ValidationError 被吞掉了** —— 如果模型产出格式错误的
-  JSON,CubePi 会把 validation error 也包成工具的 error result 喂
+  JSON,CubeLoop 会把 validation error 也包成工具的 error result 喂
   回去,模型通常下一轮自动纠正。
 
 ## 下一步

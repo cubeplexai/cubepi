@@ -2,14 +2,14 @@ import asyncio
 
 import pytest
 
-from cubepi.agent.agent import Agent
-from cubepi.checkpointer.exceptions import (
+from cubeloop.agent.agent import Agent
+from cubeloop.checkpointer.exceptions import (
     RunAlreadyClaimedError,
     RunAlreadyCompletedError,
 )
-from cubepi.checkpointer.memory import MemoryCheckpointer
-from cubepi.providers.base import AssistantMessage, TextContent
-from cubepi.providers.faux import FauxProvider
+from cubeloop.checkpointer.memory import MemoryCheckpointer
+from cubeloop.providers.base import AssistantMessage, TextContent
+from cubeloop.providers.faux import FauxProvider
 
 
 def _ok_faux() -> FauxProvider:
@@ -93,7 +93,7 @@ async def test_resume_claims_run_and_stamps_messages():
     treat NULL as legacy / always-copy) would copy them into forks even
     if the resumed work is still in flight or later abandoned.
     """
-    from cubepi.providers.base import TextContent, UserMessage
+    from cubeloop.providers.base import TextContent, UserMessage
 
     cp = MemoryCheckpointer()
     a = _agent(checkpointer=cp, thread_id="t")
@@ -122,7 +122,7 @@ async def test_resume_claims_run_and_stamps_messages():
 @pytest.mark.asyncio
 async def test_resume_auto_generates_run_id_when_not_supplied():
     """resume() without an explicit run_id auto-generates one."""
-    from cubepi.providers.base import TextContent, UserMessage
+    from cubeloop.providers.base import TextContent, UserMessage
 
     cp = MemoryCheckpointer()
     a = _agent(checkpointer=cp, thread_id="t")
@@ -141,7 +141,7 @@ async def test_resume_precondition_failure_does_not_claim():
     must NOT call claim_run — otherwise a dangling claimed run would
     block re-resume with the same run_id.
     """
-    from cubepi.providers.base import AssistantMessage, TextContent
+    from cubeloop.providers.base import AssistantMessage, TextContent
 
     cp = MemoryCheckpointer()
     a = _agent(checkpointer=cp, thread_id="t")

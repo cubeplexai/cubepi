@@ -14,7 +14,7 @@ if (typeof window !== 'undefined' && key) {
     autocapture: false,
     disable_session_recording: true,
   });
-  (window as any).__cubepi_posthog = posthog;
+  (window as any).__cubeloop_posthog = posthog;
 }
 
 export {};

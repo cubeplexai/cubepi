@@ -1,6 +1,6 @@
 ---
 id: intro
-title: CubePi
+title: CubeLoop
 description: "一个 Pythonic、原生异步的 Agent 框架。普通的 async 函数、追加式 checkpointing、三个依赖。"
 slug: /
 sidebar_position: 0
@@ -8,17 +8,17 @@ sidebar_position: 0
 
 import PackageVersion from '@site/src/components/PackageVersion';
 
-# CubePi
+# CubeLoop
 
-**CubePi** 是一个 Pythonic、原生异步的 Agent 框架，为高性能、可读性和
+**CubeLoop** 是一个 Pythonic、原生异步的 Agent 框架，为高性能、可读性和
 生产级持久化而设计。它把一次 Agent 运行建模为一个线性的 `while`
 循环——可追踪、可调试，没有 DAG、没有图 DSL、没有出人意料的控制流。
 整个核心循环你五分钟就能读完。
 
-[CubePlex](https://github.com/cubeplexai/cubeplex) 基于 CubePi 构建，是面向团队工作区的云原生托管 Agent 平台——技能、共享记忆、MCP 工具、持久化沙箱、权限治理，并可在 Docker Compose 或 Kubernetes 上自托管。
+[CubePlex](https://github.com/cubeplexai/cubeplex) 基于 CubeLoop 构建，是面向团队工作区的云原生托管 Agent 平台——技能、共享记忆、MCP 工具、持久化沙箱、权限治理，并可在 Docker Compose 或 Kubernetes 上自托管。
 
 ```bash
-pip install cubepi
+pip install cubeloop
 ```
 
 然后跳到 [快速开始](./getting-started/quick-start.md)，五分钟内跑通一个
@@ -70,11 +70,11 @@ pip install cubepi
 这里描述的 API 在打 tag 发布之前还可能变动。
 
 最新已发布版本是 v<PackageVersion />（[从右上角版本选择器切换](pathname:///)）。
-CubePi 0.13 新增所有 provider 的推理能力原语和控制、运行内作用域的
+CubeLoop 0.13 新增所有 provider 的推理能力原语和控制、运行内作用域的
 压缩和真实令牌触发、工具批处理故障隔离保留所有检查点状态、以及
 耐用的并行 HITL 批准重放。0.13.1 修复了 tracing flush 路径：`force_flush`
 现在脱离 event loop 运行，`trace()` 新增 `flush="background"` 模式，
 适用于不能让 span 导出阻塞用户响应的服务路径。
 
 源代码、Issue 和讨论都在
-[GitHub](https://github.com/cubeplexai/cubepi)。
+[GitHub](https://github.com/cubeplexai/cubeloop)。

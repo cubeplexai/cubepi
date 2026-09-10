@@ -81,8 +81,8 @@ Pass `deferred_tool_groups` to `Agent`. The middleware is created
 automatically — no manual wiring needed:
 
 ```python
-from cubepi import Agent
-from cubepi.deferred import DeferredToolGroup
+from cubeloop import Agent
+from cubeloop.deferred import DeferredToolGroup
 
 # load_github_tools / load_linear_tools are zero-arg async callables
 # returning list[AgentTool]. See "Writing a loader" below for the two
@@ -125,7 +125,7 @@ agent = Agent(
 ### Writing a loader
 
 The loader is a zero-argument async callable that returns
-`list[AgentTool]`. CubePi only cares about its return type — where the
+`list[AgentTool]`. CubeLoop only cares about its return type — where the
 `AgentTool` objects come from is up to you. Two common shapes:
 
 **From an MCP server.** `load_mcp_tools_stdio` / `load_mcp_tools_http`
@@ -133,8 +133,8 @@ return an `MCPDiscoveryResult` whose `.tools` is the `list[AgentTool]`
 you want. Wrap it:
 
 ```python
-from cubepi.deferred import DeferredToolGroup
-from cubepi.mcp import load_mcp_tools_stdio
+from cubeloop.deferred import DeferredToolGroup
+from cubeloop.mcp import load_mcp_tools_stdio
 
 async def load_github_tools():
     result = await load_mcp_tools_stdio(
@@ -164,8 +164,8 @@ name, overridable via `@tool(name="…")`). A loader for hand-written
 tools is just `async lambda` over a list:
 
 ```python
-from cubepi import tool
-from cubepi.deferred import DeferredToolGroup
+from cubeloop import tool
+from cubeloop.deferred import DeferredToolGroup
 
 @tool
 async def create_issue(*, repo: str, title: str, body: str) -> str:
@@ -258,7 +258,7 @@ handles this — the `strategy` argument is **required** and must match
 the middleware's strategy:
 
 ```python
-from cubepi.deferred import DeferredToolsMiddleware
+from cubeloop.deferred import DeferredToolsMiddleware
 
 # saved_extra is the persisted ctx.extra from the previous run
 resumed = await DeferredToolsMiddleware.prepare_resumed_state(
@@ -293,7 +293,7 @@ For full control over the catalog header or resume seeding, construct
 `DeferredToolsMiddleware` yourself:
 
 ```python
-from cubepi.deferred import DeferredToolsMiddleware
+from cubeloop.deferred import DeferredToolsMiddleware
 
 mw = DeferredToolsMiddleware(
     groups=[github_group, linear_group],
@@ -325,7 +325,7 @@ is automatically bound to `self._extra`.
 
 ## Migrating from 0.10
 
-Deferred tool groups shipped in CubePi 0.10 with what is now the
+Deferred tool groups shipped in CubeLoop 0.10 with what is now the
 `inject` strategy. Upgrading changes behavior:
 
 - **The default strategy is now `dispatch`.** The catalog wording

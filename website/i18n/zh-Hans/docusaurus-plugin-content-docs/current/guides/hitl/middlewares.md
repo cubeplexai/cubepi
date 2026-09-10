@@ -13,7 +13,7 @@ description: "用 ConfirmToolCallMiddleware / ApprovalPolicyMiddleware 把关工
 "在集合中的工具名一律询问人类。"
 
 ```python
-from cubepi.hitl import ConfirmToolCallMiddleware
+from cubeloop.hitl import ConfirmToolCallMiddleware
 
 agent = Agent(
     ...,
@@ -41,7 +41,7 @@ agent = Agent(
 human-confirm 三类的宿主。
 
 ```python
-from cubepi.hitl import Approve, ApprovalPolicyMiddleware, AskUser, Deny
+from cubeloop.hitl import Approve, ApprovalPolicyMiddleware, AskUser, Deny
 
 def my_policy(ctx):
     if ctx.tool_call.name == "read_file":
@@ -70,7 +70,7 @@ agent = Agent(
 `"ask_user"` 的 `AgentTool`，`execution_mode="sequential"`。
 
 ```python
-from cubepi.hitl import ask_user_tool
+from cubeloop.hitl import ask_user_tool
 
 agent = Agent(
     ...,

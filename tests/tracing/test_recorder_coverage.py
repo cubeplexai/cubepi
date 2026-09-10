@@ -1,4 +1,4 @@
-"""Extra coverage for cubepi.tracing.recorder — pins the contracts
+"""Extra coverage for cubeloop.tracing.recorder — pins the contracts
 codex flagged in the round-1 review and exercises the response-body
 shape parsers and error-type derivation paths that aren't covered by
 the FauxProvider end-to-end tests.
@@ -14,11 +14,11 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.trace import StatusCode
 
-from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import Model, TextContent, ToolCall
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
-from cubepi.tracing import Tracer
+from cubeloop.agent.agent import Agent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import Model, TextContent, ToolCall
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.tracing import Tracer
 
 
 MODEL = Model(id="faux-1", provider_id="faux")
@@ -44,7 +44,7 @@ def _attrs(span: ReadableSpan) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# P2-1: every span must carry cubepi.run_id (codex round 1)
+# P2-1: every span must carry cubeloop.run_id (codex round 1)
 # ---------------------------------------------------------------------------
 
 
@@ -62,19 +62,19 @@ class TestRunIdOnEverySpan:
         await tracer.shutdown()
 
         assert exporter.spans, "expected spans"
-        run_ids = {_attrs(s).get("cubepi.run_id") for s in exporter.spans}
+        run_ids = {_attrs(s).get("cubeloop.run_id") for s in exporter.spans}
         assert len(run_ids) == 1
         assert None not in run_ids
-        # Same run id appears on invoke_agent / cubepi.turn / chat ...
+        # Same run id appears on invoke_agent / cubeloop.turn / chat ...
         assert run_ids.pop() is not None
 
 
 class TestJsonlSharding:
     async def test_jsonl_shards_all_spans_under_run_file(self, tmp_path):
         """All spans from one run must end up in the same per-run file —
-        codex flagged that without cubepi.run_id on child spans the
+        codex flagged that without cubeloop.run_id on child spans the
         JsonlSpanExporter routed them to unknown-run.jsonl."""
-        from cubepi.tracing.exporters import JsonlSpanExporter
+        from cubeloop.tracing.exporters import JsonlSpanExporter
 
         provider = FauxProvider(provider_id="faux")
         provider.append_responses([faux_assistant_message("ok")])
@@ -116,8 +116,8 @@ class TestChatSpanAbort:
         assert len(chats) == 1
         attrs = _attrs(chats[0])
         # Cooperative abort: no exception, but body has stop_reason="aborted".
-        assert attrs.get("cubepi.aborted") is True
-        assert attrs.get("error.type") == "cubepi.aborted"
+        assert attrs.get("cubeloop.aborted") is True
+        assert attrs.get("error.type") == "cubeloop.aborted"
         # Status remains UNSET — abort is a control signal, not a failure.
         assert chats[0].status.status_code == StatusCode.UNSET
 
@@ -138,7 +138,7 @@ class _Span:
 
 
 def _recorder():
-    from cubepi.tracing.recorder import Recorder
+    from cubeloop.tracing.recorder import Recorder
 
     tracer = Tracer(service_name="t", exporters=[])
     return Recorder(tracer)
@@ -226,12 +226,12 @@ class TestOpenAIResponsesShape:
 
 class TestSystemPromptExtraction:
     def test_anthropic_string_system(self):
-        from cubepi.tracing.recorder import _extract_system_prompt
+        from cubeloop.tracing.recorder import _extract_system_prompt
 
         assert _extract_system_prompt({"system": "hi"}) == "hi"
 
     def test_anthropic_cached_system_blocks(self):
-        from cubepi.tracing.recorder import _extract_system_prompt
+        from cubeloop.tracing.recorder import _extract_system_prompt
 
         payload = {
             "system": [
@@ -242,12 +242,12 @@ class TestSystemPromptExtraction:
         assert _extract_system_prompt(payload) == "helloworld"
 
     def test_faux_system_prompt_key(self):
-        from cubepi.tracing.recorder import _extract_system_prompt
+        from cubeloop.tracing.recorder import _extract_system_prompt
 
         assert _extract_system_prompt({"system_prompt": "faux"}) == "faux"
 
     def test_openai_chat_first_system_message(self):
-        from cubepi.tracing.recorder import _extract_system_prompt
+        from cubeloop.tracing.recorder import _extract_system_prompt
 
         payload = {
             "messages": [
@@ -258,7 +258,7 @@ class TestSystemPromptExtraction:
         assert _extract_system_prompt(payload) == "be helpful"
 
     def test_openai_responses_developer_role(self):
-        from cubepi.tracing.recorder import _extract_system_prompt
+        from cubeloop.tracing.recorder import _extract_system_prompt
 
         payload = {
             "input": [
@@ -269,7 +269,7 @@ class TestSystemPromptExtraction:
         assert _extract_system_prompt(payload) == "be precise"
 
     def test_no_system_returns_none(self):
-        from cubepi.tracing.recorder import _extract_system_prompt
+        from cubeloop.tracing.recorder import _extract_system_prompt
 
         assert _extract_system_prompt({}) is None
         assert _extract_system_prompt({"messages": []}) is None
@@ -283,34 +283,34 @@ class TestSystemPromptExtraction:
 
 class TestErrorType:
     def test_cancelled_error(self):
-        from cubepi.tracing.errors import cubepi_error_type_for
+        from cubeloop.tracing.errors import cubeloop_error_type_for
 
-        assert cubepi_error_type_for(asyncio.CancelledError()) == "cubepi.aborted"
+        assert cubeloop_error_type_for(asyncio.CancelledError()) == "cubeloop.aborted"
 
     def test_timeout(self):
-        from cubepi.tracing.errors import cubepi_error_type_for
+        from cubeloop.tracing.errors import cubeloop_error_type_for
 
-        assert cubepi_error_type_for(asyncio.TimeoutError()) == "timeout"
-        assert cubepi_error_type_for(TimeoutError()) == "timeout"
+        assert cubeloop_error_type_for(asyncio.TimeoutError()) == "timeout"
+        assert cubeloop_error_type_for(TimeoutError()) == "timeout"
 
     def test_connection_error(self):
-        from cubepi.tracing.errors import cubepi_error_type_for
+        from cubeloop.tracing.errors import cubeloop_error_type_for
 
-        assert cubepi_error_type_for(ConnectionError()) == "connection_error"
+        assert cubeloop_error_type_for(ConnectionError()) == "connection_error"
 
     def test_builtin_exception_uses_qualname(self):
-        from cubepi.tracing.errors import cubepi_error_type_for
+        from cubeloop.tracing.errors import cubeloop_error_type_for
 
-        assert cubepi_error_type_for(ValueError("x")) == "ValueError"
+        assert cubeloop_error_type_for(ValueError("x")) == "ValueError"
 
     def test_module_qualified_class(self):
-        from cubepi.tracing.errors import cubepi_error_type_for
+        from cubeloop.tracing.errors import cubeloop_error_type_for
 
         class CustomErr(Exception):
             pass
 
         err = CustomErr()
-        out = cubepi_error_type_for(err)
+        out = cubeloop_error_type_for(err)
         assert out.endswith("CustomErr")
 
 
@@ -321,12 +321,12 @@ class TestErrorType:
 
 class TestSchemaConstants:
     def test_schema_url_pinned(self):
-        from cubepi.tracing.schema import SCHEMA_URL
+        from cubeloop.tracing.schema import SCHEMA_URL
 
         assert SCHEMA_URL == "https://opentelemetry.io/schemas/1.41.0"
 
     def test_provider_name_known(self):
-        from cubepi.tracing.schema import map_provider_name
+        from cubeloop.tracing.schema import map_provider_name
 
         assert map_provider_name("anthropic") == "anthropic"
         assert map_provider_name("azure_openai") == "azure.ai.openai"
@@ -334,7 +334,7 @@ class TestSchemaConstants:
         assert map_provider_name("vertex_ai") == "gcp.vertex_ai"
 
     def test_provider_name_unknown_prefixed(self):
-        from cubepi.tracing.schema import map_provider_name
+        from cubeloop.tracing.schema import map_provider_name
 
         assert map_provider_name("nobody") == "unknown:nobody"
 
@@ -730,7 +730,7 @@ class TestStreamRecording:
         # Now simulate a second run where the file write raises.
         # We directly patch the stream_file.write on the recorder's _run state
         # after the second AgentStart so the open succeeds but every write fails.
-        import cubepi.tracing.recorder as _rec_mod
+        import cubeloop.tracing.recorder as _rec_mod
 
         _orig_on_agent_start = _rec_mod.Recorder._on_agent_start
 
@@ -777,7 +777,7 @@ class TestStreamRecording:
 
     async def test_stream_close_exception_swallowed_on_agent_end(self, tmp_path):
         """If stream_file.close() raises during _on_agent_end, it is swallowed."""
-        import cubepi.tracing.recorder as _rec_mod
+        import cubeloop.tracing.recorder as _rec_mod
         from unittest.mock import MagicMock, patch
 
         provider = FauxProvider(provider_id="faux")
@@ -814,7 +814,7 @@ class TestStreamRecording:
 
     async def test_stream_close_exception_swallowed_on_cancel(self, tmp_path):
         """If stream_file.close() raises during _close_open_spans, it is swallowed."""
-        import cubepi.tracing.recorder as _rec_mod
+        import cubeloop.tracing.recorder as _rec_mod
         from unittest.mock import MagicMock, patch
 
         provider = FauxProvider(tokens_per_second=5.0)

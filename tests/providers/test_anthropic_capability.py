@@ -12,15 +12,15 @@ from typing import Any
 
 import pytest
 
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.providers.base import (
+from cubeloop.providers.anthropic import AnthropicProvider
+from cubeloop.providers.base import (
     Model,
     ReasoningControl,
     StreamOptions,
     TextContent,
     UserMessage,
 )
-from cubepi.providers.capability import (
+from cubeloop.providers.capability import (
     CapabilityDescriptor,
     ReasoningCapability,
     TemperatureSpec,

@@ -1,11 +1,11 @@
 ---
 title: 核心概念
-description: "了解 CubePi 的六个核心概念：Agent、Tool、Provider、Stream & Events、Middleware 和 Checkpointer。"
+description: "了解 CubeLoop 的六个核心概念：Agent、Tool、Provider、Stream & Events、Middleware 和 Checkpointer。"
 ---
 
 # 核心概念
 
-CubePi 的全部能力可以归纳为六个概念。这一页读一遍,后面的文档基本就
+CubeLoop 的全部能力可以归纳为六个概念。这一页读一遍,后面的文档基本就
 变成查表了。
 
 ## Agent
@@ -32,11 +32,11 @@ Subscriber 会收到循环发出的每一个 `AgentEvent`。可以是同步或�
 
 ## Tool
 
-工具就是一个模型可以调用的 async 函数。用 `@tool` 装饰它,CubePi 会从
+工具就是一个模型可以调用的 async 函数。用 `@tool` 装饰它,CubeLoop 会从
 参数生成输入 schema:
 
 ```python
-from cubepi import tool
+from cubeloop import tool
 
 @tool
 async def search(query: str, limit: int = 10) -> str:
@@ -135,7 +135,7 @@ HITL 为跨进程挂起/恢复新增了两个可选方法：`save_pending_reques
 
 ## HITL（人机协同）
 
-CubePi 内置了 `cubepi.hitl` 模块，用于 agent 需要**暂停并等待人类输入**的
+CubeLoop 内置了 `cubeloop.hitl` 模块，用于 agent 需要**暂停并等待人类输入**的
 场景：
 
 - **沙箱确认** —— 危险工具（bash、写入文件）在执行前需要人类
@@ -143,7 +143,7 @@ CubePi 内置了 `cubepi.hitl` 模块，用于 agent 需要**暂停并等待人�
 - **运行中提问** —— agent 在运行中途向用户弹出一个结构化表单，等待回答。
 
 ```python
-from cubepi.hitl import InMemoryChannel, ConfirmToolCallMiddleware, ask_user_tool
+from cubeloop.hitl import InMemoryChannel, ConfirmToolCallMiddleware, ask_user_tool
 
 channel = InMemoryChannel()
 
@@ -177,21 +177,21 @@ Channel 是一个可 `await` 的协程协作者：工具和中间件作者写
 X-Ray 等）都能直接接收,无需额外 instrumentation。先装 extra：
 
 ```bash
-pip install "cubepi[tracing]"           # OTel SDK
-pip install "cubepi[tracing-otlp]"      # + OTLP/HTTP 导出器
+pip install "cubeloop[tracing]"           # OTel SDK
+pip install "cubeloop[tracing-otlp]"      # + OTLP/HTTP 导出器
 ```
 
 然后用 `async with` 包住 Agent：
 
 ```python
-from cubepi.tracing import Tracer
-from cubepi.tracing.exporters import JsonlSpanExporter
+from cubeloop.tracing import Tracer
+from cubeloop.tracing.exporters import JsonlSpanExporter
 
 async with (
     Tracer(
         service_name="my-bot",
         agent_name="assistant",
-        exporters=[JsonlSpanExporter(directory="./cubepi-traces")],
+        exporters=[JsonlSpanExporter(directory="./cubeloop-traces")],
     ) as tracer,
     tracer.attached(agent),
 ):
@@ -199,7 +199,7 @@ async with (
 ```
 
 每次 run 会发出一个 `invoke_agent` 根 span,其下每轮 LLM 往返对应
-一个 `cubepi.turn`,再嵌套 `chat`（CLIENT）和 `execute_tool` 子
+一个 `cubeloop.turn`,再嵌套 `chat`（CLIENT）和 `execute_tool` 子
 span。**默认不记录任何 prompt 内容或模型输出** —— 需要的话用
 `Tracer(record_content=True)` 显式打开,搭配 `redact` 回调脱敏。配
 合 `Meter(...)` 还能拿到 token / 时延 / TTFC 直方图。完整指南：

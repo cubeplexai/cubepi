@@ -2,10 +2,10 @@
 
 import pytest
 
-from cubepi import Agent
-from cubepi.agent.types import AgentContext
-from cubepi.middleware.base import Middleware, compose_middleware
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop import Agent
+from cubeloop.agent.types import AgentContext
+from cubeloop.middleware.base import Middleware, compose_middleware
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 
 class _AppendA(Middleware):

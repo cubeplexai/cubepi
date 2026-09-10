@@ -1,8 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from cubepi.providers.base import Model, ReasoningControl
-from cubepi.providers.capability import (
+from cubeloop.providers.base import Model, ReasoningControl
+from cubeloop.providers.capability import (
     CapabilityDescriptor,
     ReasoningCapability,
     TemperatureSpec,

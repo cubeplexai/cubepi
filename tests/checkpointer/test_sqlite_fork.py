@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from cubepi.checkpointer.exceptions import (
+from cubeloop.checkpointer.exceptions import (
     RunNotCompletedError,
     ThreadAlreadyExistsError,
     ThreadNotFoundError,
 )
-from cubepi.checkpointer.sqlite import SQLiteCheckpointer
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.checkpointer.sqlite import SQLiteCheckpointer
+from cubeloop.providers.base import TextContent, UserMessage
 
 
 def _msg(run_id: str | None, text: str) -> UserMessage:

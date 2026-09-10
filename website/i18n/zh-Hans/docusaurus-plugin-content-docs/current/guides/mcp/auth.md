@@ -1,6 +1,6 @@
 ---
 title: MCP 服务器认证
-description: "为 CubePi 中的 MCP 服务器配置认证——API 密钥、OAuth 及自定义请求头。"
+description: "为 CubeLoop 中的 MCP 服务器配置认证——API 密钥、OAuth 及自定义请求头。"
 ---
 
 # MCP 服务器认证
@@ -19,7 +19,7 @@ MCP 传输层本身不规定认证方案——由服务器自行决定。实践�
 
 ```python
 import os
-from cubepi.mcp import load_mcp_tools_http
+from cubeloop.mcp import load_mcp_tools_http
 
 tools = await load_mcp_tools_http(
     server_url="https://mcp.example.com/sse",
@@ -54,7 +54,7 @@ headers = {
 
 ## HTTP：短期 token / 刷新
 
-CubePi 的加载器在加载时接受静态的 `headers` 字典。对于会过期的 token（OAuth、短 TTL 的 JWT），有两种处理方案：
+CubeLoop 的加载器在加载时接受静态的 `headers` 字典。对于会过期的 token（OAuth、短 TTL 的 JWT），有两种处理方案：
 
 ### 方案 A——到期后重新加载
 
@@ -78,8 +78,8 @@ tools = await load_with_fresh_token()
 自己构建 `AgentTool`，通过闭包持有刷新逻辑：
 
 ```python
-from cubepi.mcp._adapter import make_mcp_agent_tool
-from cubepi.mcp import load_mcp_tools_http
+from cubeloop.mcp._adapter import make_mcp_agent_tool
+from cubeloop.mcp import load_mcp_tools_http
 
 async def call_remote_with_refresh(tool_name, args):
     headers = {"Authorization": f"Bearer {await fetch_token()}"}
@@ -109,7 +109,7 @@ stdio 服务器从自身进程环境中读取凭据。传入 `env` 字典即可�
 
 ```python
 import os
-from cubepi.mcp import load_mcp_tools_stdio
+from cubeloop.mcp import load_mcp_tools_stdio
 
 tools = await load_mcp_tools_stdio(
     command="npx",

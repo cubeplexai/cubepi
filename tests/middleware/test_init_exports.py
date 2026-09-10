@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-import cubepi.middleware as middleware
+import cubeloop.middleware as middleware
 
 
 def test_lazy_exports_resolve_builtin_middleware() -> None:

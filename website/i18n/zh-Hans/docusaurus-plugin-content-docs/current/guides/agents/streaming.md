@@ -1,11 +1,11 @@
 ---
 title: 流式输出
-description: "通过 subscriber 和 MessageStream 实时流式接收 CubePi agent 的事件和 token。"
+description: "通过 subscriber 和 MessageStream 实时流式接收 CubeLoop agent 的事件和 token。"
 ---
 
 # 流式事件
 
-CubePi 暴露两层流：
+CubeLoop 暴露两层流：
 
 1. **Provider 流** —— `provider.stream(...)` 返回的 `MessageStream`,
    产出 `StreamEvent` 描述原始线缆输出：文本 delta、思考 delta、
@@ -90,7 +90,7 @@ def on_event(event, signal=None):
             print(sub.delta, end="", flush=True)
 ```
 
-CubePi 保证的稳定结构是上面表格里那一种(`message_update.stream_event.delta`)。
+CubeLoop 保证的稳定结构是上面表格里那一种(`message_update.stream_event.delta`)。
 代码里对内部类型做防御性判断。
 
 ## Provider 的 `StreamEvent` 类型
@@ -148,5 +148,5 @@ final = await stream.result()   # 拿最终的 AssistantMessage
 
 - [工具使用](./tool-use) —— 详解 `tool_execution_*` 三联事件。
 - [多轮会话](./multi-turn) —— steering 和 resume 周边的事件顺序。
-- [API Reference → StreamEvent](../../api/cubepi-providers#streamevent)
+- [API Reference → StreamEvent](../../api/cubeloop-providers#streamevent)
   里有字段级 schema。

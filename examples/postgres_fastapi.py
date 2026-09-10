@@ -27,8 +27,8 @@ from fastapi import FastAPI, Depends
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from cubepi import Agent
-from cubepi.checkpointer import PostgresCheckpointer
+from cubeloop import Agent
+from cubeloop.checkpointer import PostgresCheckpointer
 
 # Works both when run as a script (python examples/postgres_fastapi.py) and
 # when loaded as a package by uvicorn (uvicorn examples.postgres_fastapi:app).

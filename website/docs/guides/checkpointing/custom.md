@@ -1,6 +1,6 @@
 ---
 title: Custom Backends
-description: "Implement a custom checkpointer backend for CubePi using the Checkpointer protocol."
+description: "Implement a custom checkpointer backend for CubeLoop using the Checkpointer protocol."
 ---
 
 # Custom Checkpointing Backends
@@ -35,8 +35,8 @@ on first call.
 import json
 from typing import Any
 import redis.asyncio as aredis
-from cubepi.checkpointer.base import CheckpointData
-from cubepi.providers.base import AssistantMessage, Message, ToolResultMessage, UserMessage
+from cubeloop.checkpointer.base import CheckpointData
+from cubeloop.providers.base import AssistantMessage, Message, ToolResultMessage, UserMessage
 
 
 _ROLE_TO_CLS: dict[str, type[Message]] = {
@@ -47,7 +47,7 @@ _ROLE_TO_CLS: dict[str, type[Message]] = {
 
 
 class RedisCheckpointer:
-    def __init__(self, redis_url: str, prefix: str = "cubepi:") -> None:
+    def __init__(self, redis_url: str, prefix: str = "cubeloop:") -> None:
         self._url = redis_url
         self._prefix = prefix
         self._r: aredis.Redis | None = None
@@ -115,7 +115,7 @@ async with RedisCheckpointer("redis://localhost:6379") as cp:
 2. **Order preserved.** `load` returns messages in the order they were
    appended. Use a list, a sorted key, or a sequence column.
 3. **Idempotent re-`load`.** Calling `load` twice on the same thread
-   should yield identical results. (CubePi calls it once, but tools
+   should yield identical results. (CubeLoop calls it once, but tools
    often need to too.)
 4. **`extra` is a merge.** `save_extra({"a": 1})` followed by
    `save_extra({"b": 2})` should leave `{"a": 1, "b": 2}` — not just
@@ -154,8 +154,8 @@ agent = Agent(model=…, checkpointer=FileCheckpointer("/tmp/cp"), thread_id="x"
 Drop-in test pattern using `FauxProvider`:
 
 ```python
-from cubepi import Agent
-from cubepi.providers import FauxProvider, faux_assistant_message
+from cubeloop import Agent
+from cubeloop.providers import FauxProvider, faux_assistant_message
 
 async def test_roundtrip():
     cp = MyCheckpointer(…)
@@ -181,7 +181,7 @@ async def test_roundtrip():
 ## Common pitfalls
 
 - **Mutating returned `CheckpointData`** — Either deep-copy on the way
-  in, or document that the agent owns the list. CubePi's built-ins
+  in, or document that the agent owns the list. CubeLoop's built-ins
   copy.
 - **Losing `metadata`** — `model_dump(mode="json")` preserves
   `metadata`. If you serialise via `__dict__` you'll drop it.
@@ -194,9 +194,9 @@ async def test_roundtrip():
 
 ## See also
 
-- [`Checkpointer` Protocol API](../../api/cubepi-checkpointer) — full
+- [`Checkpointer` Protocol API](../../api/cubeloop-checkpointer) — full
   signature.
-- [SQLiteCheckpointer source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/sqlite.py)
+- [SQLiteCheckpointer source](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/checkpointer/sqlite.py)
   — a complete reference implementation.
-- [PostgresCheckpointer source](https://github.com/cubeplexai/cubepi/blob/main/cubepi/checkpointer/postgres/checkpointer.py)
+- [PostgresCheckpointer source](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/checkpointer/postgres/checkpointer.py)
   — production-grade reference.

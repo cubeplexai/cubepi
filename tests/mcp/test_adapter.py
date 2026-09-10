@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from cubepi.mcp._adapter import (
+from cubeloop.mcp._adapter import (
     make_mcp_agent_tool,
     mcp_schema_to_pydantic_model,
 )
@@ -196,7 +196,7 @@ async def test_make_mcp_agent_tool_routes_to_call_remote() -> None:
     result = await tool.execute("test-call-id-1", args, signal=None, on_update=None)
     assert called == {"name": "search", "args": {"query": "cats"}}
     assert len(result.content) == 1
-    from cubepi.providers.base import TextContent
+    from cubeloop.providers.base import TextContent
 
     assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == "result"
@@ -262,7 +262,7 @@ async def test_signal_abort_cancels_in_flight_mcp_call() -> None:
     isn't bounded by MCP timeout (codex overall-review MAJOR)."""
     import asyncio as _asyncio
 
-    from cubepi.mcp._adapter import make_mcp_agent_tool
+    from cubeloop.mcp._adapter import make_mcp_agent_tool
 
     started = _asyncio.Event()
     finished = _asyncio.Event()
@@ -320,10 +320,10 @@ async def test_agent_abort_during_mcp_call_does_not_raise() -> None:
     follow-up on PR #88."""
     import asyncio as _asyncio
 
-    from cubepi.agent.agent import Agent
-    from cubepi.mcp._adapter import make_mcp_agent_tool
-    from cubepi.providers.base import ToolCall
-    from cubepi.providers.faux import FauxProvider, faux_assistant_message
+    from cubeloop.agent.agent import Agent
+    from cubeloop.mcp._adapter import make_mcp_agent_tool
+    from cubeloop.providers.base import ToolCall
+    from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
     in_flight = _asyncio.Event()
 
@@ -382,8 +382,8 @@ async def test_signal_abort_swallows_span_set_attribute_errors(monkeypatch) -> N
     path (defensive-branch coverage)."""
     import asyncio as _asyncio
 
-    from cubepi.mcp._adapter import make_mcp_agent_tool
-    from cubepi.mcp import _tracing as mcp_tracing
+    from cubeloop.mcp._adapter import make_mcp_agent_tool
+    from cubeloop.mcp import _tracing as mcp_tracing
 
     # Force mcp_client_span to yield a span whose set_attribute raises.
     class _BoomSpan:
@@ -403,7 +403,7 @@ async def test_signal_abort_swallows_span_set_attribute_errors(monkeypatch) -> N
     async def _fake_span(**_kw):
         yield _BoomSpan()
 
-    monkeypatch.setattr("cubepi.mcp._adapter.mcp_client_span", _fake_span)
+    monkeypatch.setattr("cubeloop.mcp._adapter.mcp_client_span", _fake_span)
 
     async def _call(_name, _args):
         return {"content": [], "isError": False}
@@ -439,7 +439,7 @@ async def test_signal_abort_does_not_block_on_slow_call_cleanup() -> None:
     import asyncio as _asyncio
     import time as _time
 
-    from cubepi.mcp._adapter import make_mcp_agent_tool
+    from cubeloop.mcp._adapter import make_mcp_agent_tool
 
     in_flight = _asyncio.Event()
     cleanup_started = _asyncio.Event()
@@ -497,7 +497,7 @@ async def test_signal_already_set_before_call_aborts_immediately() -> None:
     on PR #88)."""
     import asyncio as _asyncio
 
-    from cubepi.mcp._adapter import make_mcp_agent_tool
+    from cubeloop.mcp._adapter import make_mcp_agent_tool
 
     called = False
 

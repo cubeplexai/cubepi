@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from cubepi.agent.agent import Agent
-from cubepi.deferred import DeferredToolsMiddleware
-from cubepi.middleware.base import Middleware
+from cubeloop.agent.agent import Agent
+from cubeloop.deferred import DeferredToolsMiddleware
+from cubeloop.middleware.base import Middleware
 from tests.deferred._helpers import _dummy_tool, _make_faux_model, _make_group
 
 
@@ -108,7 +108,7 @@ class TestAgentDeferredToolGroups:
 
     async def test_on_tools_expanded_deduplicates(self) -> None:
         """Pre-loaded tools from resume are not duplicated by on_tools_expanded."""
-        from cubepi.agent.types import AgentContext
+        from cubeloop.agent.types import AgentContext
 
         model = _make_faux_model()
         t1 = _dummy_tool("t1")
@@ -136,7 +136,7 @@ class TestAgentDeferredToolGroups:
 class TestForkOnceDeniesMiddlewareTools:
     def test_fork_keeps_load_tools_in_schema(self) -> None:
         """load_tools stays in the tool list for prompt-cache parity."""
-        from cubepi.agent.agent import _deny_in_fork
+        from cubeloop.agent.agent import _deny_in_fork
 
         model = _make_faux_model()
         group = _make_group("mcp:github", ["t1", "t2"])
@@ -157,7 +157,7 @@ class TestForkOnceDeniesMiddlewareTools:
 
     async def test_fork_load_tools_returns_error(self) -> None:
         """load_tools in fork returns is_error=True instead of executing."""
-        from cubepi.agent.agent import _deny_in_fork
+        from cubeloop.agent.agent import _deny_in_fork
 
         model = _make_faux_model()
         group = _make_group("mcp:github", ["t1"])
@@ -208,8 +208,8 @@ class TestExplicitResolverComposition:
         """An explicit resolve_tool_call runs first but does NOT disable the
         auto-created deferred middleware's resolver (unlike other hooks,
         resolve_tool_call composes first-non-None)."""
-        from cubepi.agent.types import AgentContext
-        from cubepi.providers.base import ToolCall
+        from cubeloop.agent.types import AgentContext
+        from cubeloop.providers.base import ToolCall
 
         model = _make_faux_model()
         seen: list[str] = []
@@ -239,8 +239,8 @@ class TestExplicitResolverComposition:
         assert seen == ["deferred_tool_call"]  # explicit resolver ran first
 
     async def test_explicit_resolver_wins_when_it_rewrites(self) -> None:
-        from cubepi.agent.types import AgentContext
-        from cubepi.providers.base import ToolCall
+        from cubeloop.agent.types import AgentContext
+        from cubeloop.providers.base import ToolCall
 
         model = _make_faux_model()
 

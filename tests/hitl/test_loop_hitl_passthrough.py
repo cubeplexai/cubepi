@@ -1,8 +1,8 @@
 import pytest
-from cubepi.hitl.exceptions import HitlAborted, HitlCancelled, HitlDetached
-from cubepi.agent.tools import execute_tool_calls
-from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
+from cubeloop.hitl.exceptions import HitlAborted, HitlCancelled, HitlDetached
+from cubeloop.agent.tools import execute_tool_calls
+from cubeloop.agent.types import AgentContext, AgentTool, AgentToolResult
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall
 from pydantic import BaseModel
 
 
@@ -133,7 +133,7 @@ async def test_parallel_detach_does_not_leak_start_events():
 
     Codex PR #127 review feedback (P2 agent/tools.py).
     """
-    from cubepi.agent.types import ToolExecutionStartEvent
+    from cubeloop.agent.types import ToolExecutionStartEvent
 
     async def t1_execute(call_id, args, *, signal=None, on_update=None):
         return AgentToolResult(content=[TextContent(text="ok")])

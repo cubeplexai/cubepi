@@ -4,15 +4,15 @@ import { useIsZhHans } from '@site/src/hooks/useIsZhHans';
 
 const EN: CompareContent = {
   them: 'PydanticAI',
-  title: 'CubePi vs PydanticAI — Python agent frameworks compared',
+  title: 'CubeLoop vs PydanticAI — Python agent frameworks compared',
   description:
-    'CubePi vs PydanticAI: both are async-first Python agent frameworks built on Pydantic. PydanticAI centres on dependency injection and structured output. CubePi centres on append-only checkpointing, composable middleware, and vendor-neutral OpenTelemetry observability.',
+    'CubeLoop vs PydanticAI: both are async-first Python agent frameworks built on Pydantic. PydanticAI centres on dependency injection and structured output. CubeLoop centres on append-only checkpointing, composable middleware, and vendor-neutral OpenTelemetry observability.',
   keywords:
-    'CubePi vs PydanticAI, PydanticAI alternative, pydantic-ai alternative, Python agent framework, async agent framework, PydanticAI vs CubePi, pydantic ai 替代品',
-  h1: 'CubePi vs PydanticAI',
+    'CubeLoop vs PydanticAI, PydanticAI alternative, pydantic-ai alternative, Python agent framework, async agent framework, PydanticAI vs CubeLoop, pydantic ai 替代品',
+  h1: 'CubeLoop vs PydanticAI',
   intro: [
-    'PydanticAI and CubePi share the same foundation — Pydantic v2, asyncio-native design, and a belief that agents should be plain Python rather than graph-based state machines. Where they diverge is in the abstractions built on top.',
-    'PydanticAI centres on type-safe structured output and dependency injection via `RunContext`. CubePi centres on persistent multi-turn conversations, composable middleware hooks, and vendor-neutral OpenTelemetry tracing. Here is how the two compare.',
+    'PydanticAI and CubeLoop share the same foundation — Pydantic v2, asyncio-native design, and a belief that agents should be plain Python rather than graph-based state machines. Where they diverge is in the abstractions built on top.',
+    'PydanticAI centres on type-safe structured output and dependency injection via `RunContext`. CubeLoop centres on persistent multi-turn conversations, composable middleware hooks, and vendor-neutral OpenTelemetry tracing. Here is how the two compare.',
   ],
   tableHeading: 'Side-by-side',
   rows: [
@@ -48,9 +48,9 @@ async def get_weather(city: str) -> str:
 result = await agent.run("What's the weather in Tokyo?")
 print(result.output)
 `,
-    usTitle: '# CubePi',
-    us: `from cubepi import Agent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+    usTitle: '# CubeLoop',
+    us: `from cubeloop import Agent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 @tool
@@ -72,28 +72,28 @@ await agent.prompt("What's the weather in Tokyo?")
     {
       h2: 'Where structured output sits in the API',
       body: [
-        'Both frameworks ship first-class structured output backed by Pydantic. CubePi 0.10 added `BoundModel.generate_structured(Pydantic, ...)`, which injects a synthetic tool from the model\'s JSON schema, forces the call via `tool_choice`, and validates the response through `output_type.model_validate()` — the same `ToolOutput` mode PydanticAI uses by default.',
-        'Where the two diverge is which abstraction owns the contract. PydanticAI lifts the output type up to the agent itself: `Agent[Deps, Sentiment].run(...)` types the whole run as `Sentiment`, and the framework offers `NativeOutput` (provider `response_format` / JSON-schema endpoints) and `PromptedOutput` as alternative modes alongside `ToolOutput`. CubePi keeps the agent loop as free-form text plus tool calls and exposes structured output as a one-shot `BoundModel` call you reach for when you need it — well-suited for extraction subroutines inside a larger multi-turn agent.',
-        'CubePi optimises a different primary axis: multi-turn conversations that survive restarts. Append-only checkpointing keeps a thread\'s write cost flat regardless of conversation length, which matters when you have thousands of concurrent long-lived sessions.',
+        'Both frameworks ship first-class structured output backed by Pydantic. CubeLoop 0.10 added `BoundModel.generate_structured(Pydantic, ...)`, which injects a synthetic tool from the model\'s JSON schema, forces the call via `tool_choice`, and validates the response through `output_type.model_validate()` — the same `ToolOutput` mode PydanticAI uses by default.',
+        'Where the two diverge is which abstraction owns the contract. PydanticAI lifts the output type up to the agent itself: `Agent[Deps, Sentiment].run(...)` types the whole run as `Sentiment`, and the framework offers `NativeOutput` (provider `response_format` / JSON-schema endpoints) and `PromptedOutput` as alternative modes alongside `ToolOutput`. CubeLoop keeps the agent loop as free-form text plus tool calls and exposes structured output as a one-shot `BoundModel` call you reach for when you need it — well-suited for extraction subroutines inside a larger multi-turn agent.',
+        'CubeLoop optimises a different primary axis: multi-turn conversations that survive restarts. Append-only checkpointing keeps a thread\'s write cost flat regardless of conversation length, which matters when you have thousands of concurrent long-lived sessions.',
       ],
     },
     {
       h2: 'Dependency injection vs middleware',
       body: [
-        'PydanticAI\'s `RunContext[Deps]` is a clean pattern for injecting services (databases, HTTP clients) into tool functions. CubePi achieves the same via closures — capture your dependencies when you define the tool function — which requires no new abstraction to learn.',
-        'Where CubePi adds structure is in cross-cutting concerns: middleware hooks (`before_tool_call`, `transform_context`, `should_stop_after_turn`, etc.) let you add rate-limiting, safety checks, compaction, or subagent orchestration without touching the core agent loop.',
+        'PydanticAI\'s `RunContext[Deps]` is a clean pattern for injecting services (databases, HTTP clients) into tool functions. CubeLoop achieves the same via closures — capture your dependencies when you define the tool function — which requires no new abstraction to learn.',
+        'Where CubeLoop adds structure is in cross-cutting concerns: middleware hooks (`before_tool_call`, `transform_context`, `should_stop_after_turn`, etc.) let you add rate-limiting, safety checks, compaction, or subagent orchestration without touching the core agent loop.',
       ],
     },
     {
       h2: 'Observability: Logfire vs vendor-neutral OTel',
       body: [
-        'PydanticAI integrates with Logfire, Pydantic\'s own observability platform. It works well if Logfire fits your stack. CubePi emits standard OpenTelemetry spans with GenAI semantic-convention attributes that land in any OTLP-compatible backend — Jaeger, Grafana Tempo, Honeycomb, Datadog, AWS X-Ray — with no vendor dependency. The `cubepi trace` CLI also lets you inspect traces locally from JSONL files without a backend at all.',
+        'PydanticAI integrates with Logfire, Pydantic\'s own observability platform. It works well if Logfire fits your stack. CubeLoop emits standard OpenTelemetry spans with GenAI semantic-convention attributes that land in any OTLP-compatible backend — Jaeger, Grafana Tempo, Honeycomb, Datadog, AWS X-Ray — with no vendor dependency. The `cubeloop trace` CLI also lets you inspect traces locally from JSONL files without a backend at all.',
       ],
     },
     {
       h2: 'When PydanticAI is the better fit',
       body: [
-        'PydanticAI is the stronger choice when you want the agent itself typed by its output (`Agent[Deps, OutputType]`), when you need provider-native JSON-schema endpoints (`NativeOutput`) instead of the tool-output mode CubePi uses, or if you are already on Logfire and want tight integration. Choose CubePi when you need production-grade multi-turn persistence, composable middleware, provider failover, or vendor-neutral observability — and you are happy to reach for `BoundModel.generate_structured(...)` as a one-shot when you do need a validated Pydantic instance.',
+        'PydanticAI is the stronger choice when you want the agent itself typed by its output (`Agent[Deps, OutputType]`), when you need provider-native JSON-schema endpoints (`NativeOutput`) instead of the tool-output mode CubeLoop uses, or if you are already on Logfire and want tight integration. Choose CubeLoop when you need production-grade multi-turn persistence, composable middleware, provider failover, or vendor-neutral observability — and you are happy to reach for `BoundModel.generate_structured(...)` as a one-shot when you do need a validated Pydantic instance.',
       ],
     },
   ],
@@ -105,15 +105,15 @@ await agent.prompt("What's the weather in Tokyo?")
 
 const ZH: CompareContent = {
   them: 'PydanticAI',
-  title: 'CubePi vs PydanticAI — Python Agent 框架对比',
+  title: 'CubeLoop vs PydanticAI — Python Agent 框架对比',
   description:
-    'CubePi 与 PydanticAI 对比：两者都是基于 Pydantic 的异步优先 Python Agent 框架。PydanticAI 聚焦于依赖注入和结构化输出；CubePi 聚焦于追加式 checkpointing、可组合中间件和厂商中立的 OpenTelemetry 可观测性。',
+    'CubeLoop 与 PydanticAI 对比：两者都是基于 Pydantic 的异步优先 Python Agent 框架。PydanticAI 聚焦于依赖注入和结构化输出；CubeLoop 聚焦于追加式 checkpointing、可组合中间件和厂商中立的 OpenTelemetry 可观测性。',
   keywords:
-    'CubePi vs PydanticAI, PydanticAI 替代品, pydantic-ai 替代品, Python Agent 框架, 异步 Agent 框架, pydantic ai 替代品',
-  h1: 'CubePi vs PydanticAI',
+    'CubeLoop vs PydanticAI, PydanticAI 替代品, pydantic-ai 替代品, Python Agent 框架, 异步 Agent 框架, pydantic ai 替代品',
+  h1: 'CubeLoop vs PydanticAI',
   intro: [
-    'PydanticAI 和 CubePi 共享同一基础 —— Pydantic v2、asyncio 原生设计，以及"Agent 应该是普通 Python 而非基于图的状态机"的理念。两者的分歧在于在此之上构建的抽象。',
-    'PydanticAI 聚焦于通过 `RunContext` 实现类型安全的结构化输出和依赖注入。CubePi 聚焦于持久化多轮对话、可组合的中间件钩子和厂商中立的 OpenTelemetry 追踪。以下是两者的详细对比。',
+    'PydanticAI 和 CubeLoop 共享同一基础 —— Pydantic v2、asyncio 原生设计，以及"Agent 应该是普通 Python 而非基于图的状态机"的理念。两者的分歧在于在此之上构建的抽象。',
+    'PydanticAI 聚焦于通过 `RunContext` 实现类型安全的结构化输出和依赖注入。CubeLoop 聚焦于持久化多轮对话、可组合的中间件钩子和厂商中立的 OpenTelemetry 追踪。以下是两者的详细对比。',
   ],
   tableHeading: '并排对比',
   rows: [
@@ -133,28 +133,28 @@ const ZH: CompareContent = {
     {
       h2: '结构化输出在 API 里的位置',
       body: [
-        '两者都把结构化输出做成一等公民、并以 Pydantic 为校验后端。CubePi 0.10 加了 `BoundModel.generate_structured(Pydantic, ...)`：它从模型的 JSON schema 注入一个合成 tool、通过 `tool_choice` 强制调用、再用 `output_type.model_validate()` 校验回来——这正是 PydanticAI 默认的 `ToolOutput` 模式。',
-        '真正的差异是「契约绑在哪个抽象上」。PydanticAI 把输出类型抬到 Agent 本身：`Agent[Deps, Sentiment].run(...)` 把整个 run 的类型签到 `Sentiment`，且除了 `ToolOutput` 之外还提供 `NativeOutput`（Provider 的 `response_format` / JSON schema 端点）和 `PromptedOutput` 两种备选。CubePi 保持 agent 循环为自由文本 + 工具调用，把结构化输出做成一次性的 `BoundModel` 调用——适合作为多轮 agent 里的「抽取子例程」按需取用。',
-        'CubePi 的主轴在另一边：可在重启后存活的多轮对话。追加式 checkpointing 让单线程的写入成本不随对话长度增长，在你有数千个并发长存会话时尤其重要。',
+        '两者都把结构化输出做成一等公民、并以 Pydantic 为校验后端。CubeLoop 0.10 加了 `BoundModel.generate_structured(Pydantic, ...)`：它从模型的 JSON schema 注入一个合成 tool、通过 `tool_choice` 强制调用、再用 `output_type.model_validate()` 校验回来——这正是 PydanticAI 默认的 `ToolOutput` 模式。',
+        '真正的差异是「契约绑在哪个抽象上」。PydanticAI 把输出类型抬到 Agent 本身：`Agent[Deps, Sentiment].run(...)` 把整个 run 的类型签到 `Sentiment`，且除了 `ToolOutput` 之外还提供 `NativeOutput`（Provider 的 `response_format` / JSON schema 端点）和 `PromptedOutput` 两种备选。CubeLoop 保持 agent 循环为自由文本 + 工具调用，把结构化输出做成一次性的 `BoundModel` 调用——适合作为多轮 agent 里的「抽取子例程」按需取用。',
+        'CubeLoop 的主轴在另一边：可在重启后存活的多轮对话。追加式 checkpointing 让单线程的写入成本不随对话长度增长，在你有数千个并发长存会话时尤其重要。',
       ],
     },
     {
       h2: '依赖注入 vs 中间件',
       body: [
-        'PydanticAI 的 `RunContext[Deps]` 是将服务（数据库、HTTP 客户端）注入工具函数的简洁模式。CubePi 通过闭包实现同样效果 —— 在定义工具函数时捕获依赖 —— 无需学习新抽象。',
-        'CubePi 在横切关注点上增加了结构：中间件钩子（`before_tool_call`、`transform_context`、`should_stop_after_turn` 等）让你在不触碰核心 agent 循环的情况下添加限速、安全检查、上下文压缩或子 Agent 编排。',
+        'PydanticAI 的 `RunContext[Deps]` 是将服务（数据库、HTTP 客户端）注入工具函数的简洁模式。CubeLoop 通过闭包实现同样效果 —— 在定义工具函数时捕获依赖 —— 无需学习新抽象。',
+        'CubeLoop 在横切关注点上增加了结构：中间件钩子（`before_tool_call`、`transform_context`、`should_stop_after_turn` 等）让你在不触碰核心 agent 循环的情况下添加限速、安全检查、上下文压缩或子 Agent 编排。',
       ],
     },
     {
       h2: '可观测性：Logfire vs 厂商中立的 OTel',
       body: [
-        'PydanticAI 与 Logfire（Pydantic 自有的可观测性平台）集成。如果 Logfire 适合你的技术栈，效果很好。CubePi 输出带有 GenAI 语义约定属性的标准 OpenTelemetry span，可以落入任何 OTLP 兼容后端 —— Jaeger、Grafana Tempo、Honeycomb、Datadog、AWS X-Ray —— 无厂商依赖。`cubepi trace` CLI 也可以让你在没有后端的情况下从 JSONL 文件本地检查追踪。',
+        'PydanticAI 与 Logfire（Pydantic 自有的可观测性平台）集成。如果 Logfire 适合你的技术栈，效果很好。CubeLoop 输出带有 GenAI 语义约定属性的标准 OpenTelemetry span，可以落入任何 OTLP 兼容后端 —— Jaeger、Grafana Tempo、Honeycomb、Datadog、AWS X-Ray —— 无厂商依赖。`cubeloop trace` CLI 也可以让你在没有后端的情况下从 JSONL 文件本地检查追踪。',
       ],
     },
     {
       h2: 'PydanticAI 更适合的场景',
       body: [
-        '如果你希望 agent 本身被它的输出类型化（`Agent[Deps, OutputType]`）、需要 Provider 原生 JSON-schema 端点（`NativeOutput`）而不是 CubePi 现在用的 tool-output 模式、或者你已经在 Logfire 上希望紧密集成，那么 PydanticAI 是更强的选择。当你需要生产级多轮持久化、可组合中间件、Provider 故障转移或厂商中立可观测性，并且能接受用 `BoundModel.generate_structured(...)` 作为一次性子例程获取已校验的 Pydantic 实例时，选择 CubePi。',
+        '如果你希望 agent 本身被它的输出类型化（`Agent[Deps, OutputType]`）、需要 Provider 原生 JSON-schema 端点（`NativeOutput`）而不是 CubeLoop 现在用的 tool-output 模式、或者你已经在 Logfire 上希望紧密集成，那么 PydanticAI 是更强的选择。当你需要生产级多轮持久化、可组合中间件、Provider 故障转移或厂商中立可观测性，并且能接受用 `BoundModel.generate_structured(...)` 作为一次性子例程获取已校验的 Pydantic 实例时，选择 CubeLoop。',
       ],
     },
   ],

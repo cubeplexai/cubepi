@@ -4,9 +4,9 @@ from __future__ import annotations
 
 
 def test_capability_types_re_exported():
-    import cubepi
+    import cubeloop
 
-    assert hasattr(cubepi, "CapabilityDescriptor")
-    assert hasattr(cubepi, "ReasoningCapability")
-    assert hasattr(cubepi, "TemperatureSpec")
-    assert not hasattr(cubepi, "ReasoningLevelSpec")
+    assert hasattr(cubeloop, "CapabilityDescriptor")
+    assert hasattr(cubeloop, "ReasoningCapability")
+    assert hasattr(cubeloop, "TemperatureSpec")
+    assert not hasattr(cubeloop, "ReasoningLevelSpec")

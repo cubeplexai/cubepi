@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from cubepi.mcp.types import (
+from cubeloop.mcp.types import (
     MCPIcon,
     MCPServerInfo,
     MCPToolInfo,

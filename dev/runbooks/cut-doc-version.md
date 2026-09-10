@@ -75,7 +75,7 @@ them before running the cut, not after the build fails.
 
 ### 1. Run `pnpm apiref` **before** `docusaurus docs:version`
 
-`website/docs/api/cubepi-*.mdx` is gitignored (only `index.mdx` is committed)
+`website/docs/api/cubeloop-*.mdx` is gitignored (only `index.mdx` is committed)
 because it's regenerated from Python source on every build by `pnpm apiref`
 (wired into `prebuild`/`prestart`). If you cut without running `apiref`
 first, the snapshot copies an empty `api/` directory, the next build fails
@@ -149,11 +149,11 @@ at section indices (`overview` pages) rather than specific subpages.
 
 ### 6. Don't commit generated API mdx into `current/`
 
-CI has a guard that fails the build if `website/docs/api/cubepi-*.mdx` is
+CI has a guard that fails the build if `website/docs/api/cubeloop-*.mdx` is
 present in a commit (only `index.mdx` is allowed). The snapshot is allowed
 to contain them because the path is different
 (`versioned_docs/version-X.Y/api/`). If your local cut accidentally staged
-`website/docs/api/cubepi-*.mdx`, unstage them — they regenerate on every
+`website/docs/api/cubeloop-*.mdx`, unstage them — they regenerate on every
 build.
 
 ### 7. `versions.json` order matters
@@ -242,10 +242,10 @@ When promoting `[Unreleased]` → `[X.Y.0] - YYYY-MM-DD`, also patch the
 link block at the bottom of `CHANGELOG.md`:
 
 ```diff
--[Unreleased]: https://github.com/cubeplexai/cubepi/compare/v(X.Y-1).0...HEAD
-+[Unreleased]: https://github.com/cubeplexai/cubepi/compare/vX.Y.0...HEAD
-+[X.Y.0]: https://github.com/cubeplexai/cubepi/compare/v(X.Y-1).0...vX.Y.0
- [(X.Y-1).0]: https://github.com/cubeplexai/cubepi/compare/v(X.Y-2).0...v(X.Y-1).0
+-[Unreleased]: https://github.com/cubeplexai/cubeloop/compare/v(X.Y-1).0...HEAD
++[Unreleased]: https://github.com/cubeplexai/cubeloop/compare/vX.Y.0...HEAD
++[X.Y.0]: https://github.com/cubeplexai/cubeloop/compare/v(X.Y-1).0...vX.Y.0
+ [(X.Y-1).0]: https://github.com/cubeplexai/cubeloop/compare/v(X.Y-2).0...v(X.Y-1).0
 ```
 
 Verify before commit — every `## [N.M.0]` heading must have a matching

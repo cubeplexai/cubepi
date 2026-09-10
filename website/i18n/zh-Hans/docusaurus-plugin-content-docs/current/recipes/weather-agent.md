@@ -1,6 +1,6 @@
 ---
 title: 天气 Agent
-description: "使用 CubePi 工具构建一个调用真实 API 数据的天气 agent。"
+description: "使用 CubeLoop 工具构建一个调用真实 API 数据的天气 agent。"
 ---
 
 # Recipe：天气 Agent
@@ -21,8 +21,8 @@ import httpx
 from typing import Annotated
 from pydantic import Field
 
-from cubepi import Agent, AgentToolResult, TextContent, tool
-from cubepi.providers.anthropic import AnthropicProvider
+from cubeloop import Agent, AgentToolResult, TextContent, tool
+from cubeloop.providers.anthropic import AnthropicProvider
 
 
 # --- 工具 -----------------------------------------------------------------
@@ -107,7 +107,7 @@ if __name__ == "__main__":
 运行：
 
 ```bash
-pip install cubepi httpx
+pip install cubeloop httpx
 export ANTHROPIC_API_KEY=sk-…
 python weather_agent.py
 ```
@@ -123,7 +123,7 @@ Tokyo is currently 18°C with a wind speed of 12 km/h. São Paulo is 25°C with 
 ## 运行原理
 
 - **两个工具并行执行。** 模型在同一个 assistant 轮次中发出两次
-  `get_weather` 工具调用。CubePi 并发运行它们 ——
+  `get_weather` 工具调用。CubeLoop 并发运行它们 ——
   第二个不等第一个完成。
 - **流式文本和工具事件交错。** `on_event` 过滤器同时处理
   `text_delta`（用于最终答案）和 `tool_execution_start`（用于"思考中"指示器）。
@@ -150,10 +150,10 @@ Tokyo is currently 18°C with a wind speed of 12 km/h. São Paulo is 25°C with 
 ## 运行示例
 
 仓库中有一份完整可运行的代码，位于
-[`examples/weather_agent.py`](https://github.com/cubeplexai/cubepi/blob/main/examples/weather_agent.py)。
+[`examples/weather_agent.py`](https://github.com/cubeplexai/cubeloop/blob/main/examples/weather_agent.py)。
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync
 
 export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]

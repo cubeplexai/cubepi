@@ -1,6 +1,6 @@
 ---
 title: 自定义 Provider
-description: "通过实现 Provider 协议，为 CubePi 编写自定义 provider。"
+description: "通过实现 Provider 协议，为 CubeLoop 编写自定义 provider。"
 ---
 
 # 自定义 Provider
@@ -34,7 +34,7 @@ class Provider(Protocol):
 ```python
 import asyncio
 import time
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     Message,
     MessageStream,
@@ -118,7 +118,7 @@ class MyProvider:
 如果你的模型会产生工具调用，在流式传输时将 `ToolCall` 块追加到 `partial.content`，并发出 `toolcall_start` / `toolcall_delta` / `toolcall_end` 事件：
 
 ```python
-from cubepi.providers.base import ToolCall
+from cubeloop.providers.base import ToolCall
 
 tc = ToolCall(id=block_id, name=tool_name, arguments={})
 partial.content.append(tc)
@@ -130,14 +130,14 @@ ms.push(StreamEvent(type="toolcall_delta", delta=partial_json_chunk, …))
 # replace tc.arguments with the parsed dict, push toolcall_end
 ```
 
-CubePi 的 agent 循环会在收到 `done` 事件后自动分发工具调用。
+CubeLoop 的 agent 循环会在收到 `done` 事件后自动分发工具调用。
 
 ## 挂钩 `on_payload` / `on_response`
 
-如果你的 provider 发送 HTTP 请求，请调用 `cubepi.providers.base` 中的辅助函数：
+如果你的 provider 发送 HTTP 请求，请调用 `cubeloop.providers.base` 中的辅助函数：
 
 ```python
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     ProviderResponse,
     invoke_on_payload,
     invoke_on_response,
@@ -156,11 +156,11 @@ await invoke_on_response(
 
 ## 在测试中使用 `FauxProvider` {#using-fauxprovider-in-tests}
 
-CubePi 内置 `FauxProvider`，用于确定性测试——无网络调用，无不稳定性，且有真实的流式事件：
+CubeLoop 内置 `FauxProvider`，用于确定性测试——无网络调用，无不稳定性，且有真实的流式事件：
 
 ```python
-from cubepi import Agent
-from cubepi.providers import FauxProvider, faux_assistant_message, faux_text, faux_tool_call
+from cubeloop import Agent
+from cubeloop.providers import FauxProvider, faux_assistant_message, faux_text, faux_tool_call
 
 
 def test_my_agent():
@@ -204,6 +204,6 @@ def test_my_agent():
 - [图片生成](./image-generation) —— 使用 `openai-images` 与 OpenAI 图片模型。
 
 - [Providers Overview](./overview) —— 在从头编写类之前，先检查你的后端是否只是一个 `CapabilityDescriptor` 或内置预设已经覆盖的 OpenAI/Anthropic 兼容端点。
-- [API 参考 → providers/base](../../api/cubepi-providers) —— 完整类型列表。
-- [Anthropic Provider 源码](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/anthropic.py) —— 一个真实完整的示例。
-- [`FauxProvider` 源码](https://github.com/cubeplexai/cubepi/blob/main/cubepi/providers/faux.py) —— 测试原语，包含流式真实性的细节。
+- [API 参考 → providers/base](../../api/cubeloop-providers) —— 完整类型列表。
+- [Anthropic Provider 源码](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/providers/anthropic.py) —— 一个真实完整的示例。
+- [`FauxProvider` 源码](https://github.com/cubeplexai/cubeloop/blob/main/cubeloop/providers/faux.py) —— 测试原语，包含流式真实性的细节。

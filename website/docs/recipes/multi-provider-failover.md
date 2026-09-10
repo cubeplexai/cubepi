@@ -7,18 +7,18 @@ description: "Automatic failover between LLM providers using FallbackBoundModel.
 
 When the primary provider is rate-limited, unavailable, or has hit its context
 limit, fall over to the next one automatically — without crashing the agent.
-CubePi ships `FallbackBoundModel` for this out of the box.
+CubeLoop ships `FallbackBoundModel` for this out of the box.
 
 **Time to read:** 5 minutes.
-**Deps:** `cubepi`, API keys for two providers.
+**Deps:** `cubeloop`, API keys for two providers.
 
 ## The built-in: `FallbackBoundModel`
 
 ```python
 import os
-from cubepi import Agent, FallbackBoundModel
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop import Agent, FallbackBoundModel
+from cubeloop.providers.anthropic import AnthropicProvider
+from cubeloop.providers.openai import OpenAIProvider
 
 anthropic = AnthropicProvider(api_key=os.environ["ANTHROPIC_API_KEY"])
 openai = OpenAIProvider(api_key=os.environ["OPENAI_API_KEY"])
@@ -78,8 +78,8 @@ aggregated `ProviderUnavailable.errors` list keeps every leg.
 Pass `trigger_errors` to override:
 
 ```python
-from cubepi import FallbackBoundModel
-from cubepi.errors import ProviderAuthFailed, ProviderUnavailable, RateLimited
+from cubeloop import FallbackBoundModel
+from cubeloop.errors import ProviderAuthFailed, ProviderUnavailable, RateLimited
 
 model = FallbackBoundModel(
     chain=(primary, fallback),
@@ -120,7 +120,7 @@ same-model retry. Optional `on_retry(failed, error, attempt, wait_s)` covers
 retries. Both sync and async callables are accepted. Exceptions raised inside
 either callback are logged and swallowed.
 
-When every leg fails, CubePi raises `ProviderUnavailable` whose `.errors`
+When every leg fails, CubeLoop raises `ProviderUnavailable` whose `.errors`
 list holds the per-leg failures (typed when possible). `__cause__` is the
 last typed error.
 
@@ -156,7 +156,7 @@ really responded.
 A runnable version is in the repository:
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync
 
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY [+ OPENAI_BASE_URL]

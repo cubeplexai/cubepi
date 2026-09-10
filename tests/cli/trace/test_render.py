@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cubepi.cli.trace.loader import RunSummary
-from cubepi.cli.trace.model import Span, build_forest
-from cubepi.cli.trace.render import render_runs, render_tree_to_text
+from cubeloop.cli.trace.loader import RunSummary
+from cubeloop.cli.trace.model import Span, build_forest
+from cubeloop.cli.trace.render import render_runs, render_tree_to_text
 
 
 def _raw(

@@ -1,11 +1,11 @@
 ---
 title: Providers Overview
-description: "Provider setup, capabilities, and presets in CubePi."
+description: "Provider setup, capabilities, and presets in CubeLoop."
 ---
 
 # Providers Overview
 
-_Start here for provider setup in CubePi._
+_Start here for provider setup in CubeLoop._
 
 This page is the entry point for provider configuration. It covers the
 default path for Anthropic and OpenAI, then explains how to describe
@@ -40,7 +40,7 @@ arguments:
 fishing the provider back out:
 
 ```python
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.providers.base import TextContent, UserMessage
 
 bound = provider.model("claude-sonnet-4-6")
 
@@ -66,8 +66,8 @@ for utilities (summarizers, classifiers) where you already hold a
 all models served by that provider:
 
 ```python
-from cubepi import CapabilityDescriptor, ReasoningCapability
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop import CapabilityDescriptor, ReasoningCapability
+from cubeloop.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="...",
@@ -88,8 +88,8 @@ If only one model needs an override, use
 `model_capability_overrides`:
 
 ```python
-from cubepi import CapabilityDescriptor, ReasoningCapability
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop import CapabilityDescriptor, ReasoningCapability
+from cubeloop.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="...",
@@ -121,10 +121,10 @@ provider = OpenAIProvider(
   by host UI and product code.
 
 :::note Preset catalogs live in the host application
-CubePi ships the **mechanism** (the `CapabilityDescriptor` and the wire
+CubeLoop ships the **mechanism** (the `CapabilityDescriptor` and the wire
 runtime that applies it), not a catalog of vendors. A ready-made list of
 providers — base URLs, auth, regional/coding-plan endpoints, model lists —
-is product data and belongs to the application embedding CubePi (for
+is product data and belongs to the application embedding CubeLoop (for
 example, cubebox maintains its own provider catalog). To reach a specific
 vendor, build the provider with the right `base_url` + `CapabilityDescriptor`
 as shown below.
@@ -136,9 +136,9 @@ Most users never touch capabilities. The built-in providers ship with
 sensible defaults:
 
 ```python
-import cubepi
-from cubepi import Agent
-from cubepi.providers.anthropic import AnthropicProvider
+import cubeloop
+from cubeloop import Agent
+from cubeloop.providers.anthropic import AnthropicProvider
 
 provider = AnthropicProvider(provider_id="anthropic")  # reads ANTHROPIC_API_KEY
 agent = Agent(model=provider.model("claude-sonnet-4-6"))
@@ -146,7 +146,7 @@ await agent.prompt("Hello!")
 ```
 
 That's the whole setup. A provider built without `capability=` produces
-byte-identical output to CubePi `0.4` — the machinery below only kicks in
+byte-identical output to CubeLoop `0.4` — the machinery below only kicks in
 when you ask for it.
 
 ## 2. Off-default endpoints — the CapabilityDescriptor
@@ -155,14 +155,14 @@ When you want a model that isn't OpenAI or Anthropic — DeepSeek, Qwen,
 Doubao, an OpenRouter route, a local server — the awkward part is each
 one's wire dialect (does it want `max_tokens` or `max_completion_tokens`?
 how is reasoning toggled?). You don't subclass a provider; you describe the
-quirks as a [`CapabilityDescriptor`](pathname:///pydoc/cubepi/providers/capability.html)
+quirks as a [`CapabilityDescriptor`](pathname:///pydoc/cubeloop/providers/capability.html)
 and pass it in, along with the right `base_url` and provider class for the
 endpoint's wire shape:
 
 ```python
 import os
-from cubepi import CapabilityDescriptor, ReasoningCapability
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop import CapabilityDescriptor, ReasoningCapability
+from cubeloop.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key=os.environ["DEEPSEEK_API_KEY"],
@@ -201,7 +201,7 @@ cap or 400s.
 A `TemperatureSpec` controlling how the caller's temperature is treated:
 
 ```python
-from cubepi import TemperatureSpec
+from cubeloop import TemperatureSpec
 
 TemperatureSpec(mode="free", min=0.0, max=2.0, default=1.0)  # clamp into [min, max]
 TemperatureSpec(mode="fixed", fixed_value=1.0)               # always overwrite
@@ -224,7 +224,7 @@ TemperatureSpec(mode="ignored")                              # drop the key
 `ReasoningControl.mode` is deep-merged into the request:
 
 ```python
-from cubepi import CapabilityDescriptor, ReasoningCapability
+from cubeloop import CapabilityDescriptor, ReasoningCapability
 
 CapabilityDescriptor(
     reasoning=ReasoningCapability(
@@ -255,13 +255,13 @@ You still need two call-site controls:
   (defaults to `mode="off"`).
 
 ```python
-from cubepi import (
+from cubeloop import (
     Agent,
     CapabilityDescriptor,
     ReasoningCapability,
     ReasoningControl,
 )
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop.providers.openai import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="...",
@@ -286,7 +286,7 @@ agent = Agent(
 ```
 
 ```python
-from cubepi import ReasoningCapability
+from cubeloop import ReasoningCapability
 
 # A token budget (Anthropic).
 ReasoningCapability(
@@ -341,7 +341,7 @@ Resolution is exact-match on `model_id`; anything not listed falls back to
 
 ## Image providers
 
-Image generation has its own provider surface (`cubepi.providers.images`)
+Image generation has its own provider surface (`cubeloop.providers.images`)
 that follows the same conventions described above: `provider_id` on the
 provider, `provider.model("id", ...)` factory, typed `ProviderError`
 failures, and a capability descriptor for backend wire differences. See
@@ -354,7 +354,7 @@ failures, and a capability descriptor for backend wire differences. See
 a first-event stream error — it transparently tries the next model:
 
 ```python
-from cubepi import FallbackBoundModel
+from cubeloop import FallbackBoundModel
 
 model = FallbackBoundModel(
     chain=(
@@ -376,4 +376,4 @@ full guide.
 - [Anthropic Provider](./anthropic) — the token-budget reasoning shape in practice.
 - [Writing a Custom Provider](./custom) — when the endpoint isn't even OpenAI/Anthropic-shaped.
 - [Multi-Provider Failover](../../recipes/multi-provider-failover) — `FallbackBoundModel` in action.
-- [API Reference → `cubepi.providers`](../../api/cubepi-providers).
+- [API Reference → `cubeloop.providers`](../../api/cubeloop-providers).

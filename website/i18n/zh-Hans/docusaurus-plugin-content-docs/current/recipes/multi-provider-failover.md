@@ -6,7 +6,7 @@ description: "用内置 FallbackBoundModel 在 LLM provider 之间自动降级�
 # Recipe：多 Provider 故障转移
 
 主 provider 限流、不可用或撞上上下文窗口时，自动切到下一条，不要把 agent 打崩。
-CubePi 内置 `FallbackBoundModel`，不必再手写适配器。
+CubeLoop 内置 `FallbackBoundModel`，不必再手写适配器。
 
 **预计耗时：** 5 分钟。
 **依赖：** `cubepi`，以及至少两套 provider API key。
@@ -15,9 +15,9 @@ CubePi 内置 `FallbackBoundModel`，不必再手写适配器。
 
 ```python
 import os
-from cubepi import Agent, FallbackBoundModel
-from cubepi.providers.anthropic import AnthropicProvider
-from cubepi.providers.openai import OpenAIProvider
+from cubeloop import Agent, FallbackBoundModel
+from cubeloop.providers.anthropic import AnthropicProvider
+from cubeloop.providers.openai import OpenAIProvider
 
 anthropic = AnthropicProvider(api_key=os.environ["ANTHROPIC_API_KEY"])
 openai = OpenAIProvider(api_key=os.environ["OPENAI_API_KEY"])
@@ -74,8 +74,8 @@ await agent.prompt("Capital of Mongolia?")
 用 `trigger_errors` 覆盖默认集合：
 
 ```python
-from cubepi import FallbackBoundModel
-from cubepi.errors import ProviderAuthFailed, ProviderUnavailable, RateLimited
+from cubeloop import FallbackBoundModel
+from cubeloop.errors import ProviderAuthFailed, ProviderUnavailable, RateLimited
 
 model = FallbackBoundModel(
     chain=(primary, fallback),
@@ -143,7 +143,7 @@ error: BaseException | str)`，**只在真正 hop 时**触发，同模型重试�
 仓库里有可运行版本：
 
 ```bash
-git clone https://github.com/cubeplexai/cubepi && cd cubepi
+git clone https://github.com/cubeplexai/cubeloop && cd cubeloop
 uv sync
 
 export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY [+ OPENAI_BASE_URL]
