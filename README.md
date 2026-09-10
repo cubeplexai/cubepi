@@ -430,7 +430,7 @@ with this repo:
 
 ## Credits
 
-Architecture inspired by pi-agent-core (TypeScript); CubeLoop is an independent Python reimplementation with Pydantic v2, asyncio-native primitives, and built-in checkpointing.
+Architecture inspired by pi-agent-core (TypeScript) and LangGraph; CubeLoop is an independent Python reimplementation with Pydantic v2, asyncio-native primitives, and built-in checkpointing.
 
 ## License
 
