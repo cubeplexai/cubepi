@@ -20,13 +20,13 @@ Before the service starts, run the CubeLoop schema migration. The
 quickest way for this recipe:
 
 ```bash
-# Throwaway / recipe: copy the v6 bootstrap from
-# examples/checkpointing_postgres.py (cubeloop_threads, cubeloop_messages +
-# 64 partitions, cubeloop_runs + 64 partitions, cubeloop_hitl_answers,
-# cubeloop_schema_version = 6).
+# Throwaway / recipe: copy the v5 bootstrap from
+# examples/checkpointing_postgres.py (cubepi_threads, cubepi_messages +
+# 64 partitions, cubepi_runs + 64 partitions, cubepi_hitl_answers,
+# cubepi_schema_version = 5).
 ```
 
-Existing v5 databases must run `upgrade_v5_to_v6_op()` instead of CREATE.
+Existing v5 databases need no migration for the CubeLoop package rename.
 
 For a real deployment, generate this via Alembic — see
 [Postgres Checkpointing → Bootstrapping via Alembic](../guides/checkpointing/postgres#bootstrapping-via-alembic).

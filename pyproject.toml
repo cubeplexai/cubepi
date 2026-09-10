@@ -1,6 +1,6 @@
 [project]
 name = "cubeloop"
-version = "0.14.0"
+version = "0.14.1"
 description = "Pythonic async-native agent framework"
 readme = "README.md"
 license = "MIT"

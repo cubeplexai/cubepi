@@ -68,7 +68,7 @@ _ROLE_TO_CLS: dict[str, type[Message]] = {
 def _deserialize_row(
     thread_id: str, seq: int, role: str, metadata: Any, payload: Any
 ) -> Message:
-    """Deserialize one cubeloop_messages row; corruption raises typed."""
+    """Deserialize one cubepi_messages row; corruption raises typed."""
     try:
         cls = _ROLE_TO_CLS.get(role)
         if cls is None:
@@ -80,7 +80,7 @@ def _deserialize_row(
         raise CheckpointCorruptionError(
             thread_id=thread_id,
             backend="mysql",
-            row_ref=f"cubeloop_messages.seq={seq}",
+            row_ref=f"cubepi_messages.seq={seq}",
             cause=exc,
         ) from exc
 
@@ -175,18 +175,29 @@ class MySQLCheckpointer:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
-                row, missing = await self._select_version(
-                    cur, "cubeloop_schema_version"
-                )
+                row, missing = await self._select_version(cur, "cubepi_schema_version")
                 if not missing:
                     if row is None:
                         raise CubeloopSchemaUninitialized(
-                            "cubeloop_schema_version table is empty. Host "
+                            "cubepi_schema_version table is empty. Host "
                             "alembic migration must INSERT the current version "
                             "(use write_schema_version_op())."
                         )
                     actual = row[0]
                     if actual != EXPECTED_SCHEMA_VERSION:
+                        if actual > EXPECTED_SCHEMA_VERSION:
+                            raise CubeloopSchemaMismatch(
+                                expected=EXPECTED_SCHEMA_VERSION,
+                                actual=actual,
+                                hint=(
+                                    "database schema is newer than this CubeLoop "
+                                    "release. If withdrawn 0.14.0 wrote version 6, "
+                                    "inspect the database and follow "
+                                    "https://cubeloop.dev/docs/migration/"
+                                    "from-cubepi#emergency-recovery-from-withdrawn-0140; "
+                                    "do not run a forward migration."
+                                ),
+                            )
                         steps = ", ".join(
                             f"upgrade_v{v}_to_v{v + 1}_op()"
                             for v in range(actual, EXPECTED_SCHEMA_VERSION)
@@ -205,20 +216,20 @@ class MySQLCheckpointer:
                         )
                     return
 
-                legacy, legacy_missing = await self._select_version(
-                    cur, "cubepi_schema_version"
+                withdrawn, withdrawn_missing = await self._select_version(
+                    cur, "cubeloop_schema_version"
                 )
-                if not legacy_missing:
-                    actual = 0 if legacy is None else int(legacy[0])
+                if not withdrawn_missing and withdrawn is not None:
+                    actual = int(withdrawn[0])
                     raise CubeloopSchemaMismatch(
                         expected=EXPECTED_SCHEMA_VERSION,
                         actual=actual,
                         hint=(
-                            "Generate a new alembic revision that calls "
-                            "upgrade_v5_to_v6_op() + write_schema_version_op() "
-                            "(see cubeloop.checkpointer.mysql.alembic_helpers) "
-                            "and run `alembic upgrade head` against this "
-                            "database."
+                            "database uses the withdrawn 0.14.0 cubeloop_* "
+                            "schema. Inspect it and follow "
+                            "https://cubeloop.dev/docs/migration/"
+                            "from-cubepi#emergency-recovery-from-withdrawn-0140; "
+                            "do not run a forward migration."
                         ),
                     )
 
@@ -234,14 +245,13 @@ class MySQLCheckpointer:
                         actual=0,
                         hint=(
                             "data tables exist but schema_version is missing; "
-                            "cannot auto-classify. If tables are still cubepi_*, "
-                            "CREATE TABLE cubepi_schema_version and INSERT 5, "
-                            "then run upgrade_v5_to_v6_op(). Do not apply fresh "
-                            "v6 CREATE TABLE on existing data."
+                            "cannot auto-classify. Restore cubepi_schema_version "
+                            "from the host's Alembic history; do not apply fresh "
+                            "CREATE TABLE statements on existing data."
                         ),
                     )
                 raise CubeloopSchemaUninitialized(
-                    "cubeloop tables not found. Run host application's alembic upgrade."
+                    "cubepi tables not found. Run host application's alembic upgrade."
                 )
 
     @staticmethod
@@ -264,13 +274,13 @@ class MySQLCheckpointer:
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT seq, role, metadata, payload FROM cubeloop_messages "
+                    "SELECT seq, role, metadata, payload FROM cubepi_messages "
                     "WHERE thread_id = %s ORDER BY seq",
                     (thread_id,),
                 )
                 msg_rows = await cur.fetchall()
                 await cur.execute(
-                    "SELECT extra, parent_thread_id FROM cubeloop_threads "
+                    "SELECT extra, parent_thread_id FROM cubepi_threads "
                     "WHERE thread_id = %s",
                     (thread_id,),
                 )
@@ -310,12 +320,12 @@ class MySQLCheckpointer:
                     # also swallow unrelated errors and emit a duplicate-key
                     # warning when the row already exists.
                     await cur.execute(
-                        "INSERT INTO cubeloop_threads (thread_id) VALUES (%s) "
+                        "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
                         "ON DUPLICATE KEY UPDATE thread_id = thread_id",
                         (thread_id,),
                     )
                     await cur.execute(
-                        "SELECT thread_id FROM cubeloop_threads "
+                        "SELECT thread_id FROM cubepi_threads "
                         "WHERE thread_id = %s FOR UPDATE",
                         (thread_id,),
                     )
@@ -323,7 +333,7 @@ class MySQLCheckpointer:
                     if run_ids:
                         placeholders = ", ".join(["%s"] * len(run_ids))
                         await cur.execute(
-                            f"SELECT run_id FROM cubeloop_runs "
+                            f"SELECT run_id FROM cubepi_runs "
                             f"WHERE thread_id = %s "
                             f"AND run_id IN ({placeholders}) "
                             f"AND completed_at IS NOT NULL",
@@ -336,7 +346,7 @@ class MySQLCheckpointer:
                                 f"append on completed run thread={thread_id} runs={bad}"
                             )
                     await cur.execute(
-                        "SELECT COALESCE(MAX(seq), 0) FROM cubeloop_messages "
+                        "SELECT COALESCE(MAX(seq), 0) FROM cubepi_messages "
                         "WHERE thread_id = %s",
                         (thread_id,),
                     )
@@ -358,7 +368,7 @@ class MySQLCheckpointer:
                             )
                         )
                     await cur.executemany(
-                        "INSERT INTO cubeloop_messages "
+                        "INSERT INTO cubepi_messages "
                         "(thread_id, seq, role, metadata, payload, run_id) "
                         "VALUES (%s, %s, %s, %s, %s, %s)",
                         rows,
@@ -371,9 +381,9 @@ class MySQLCheckpointer:
     async def claim_run(self, thread_id: str, run_id: str) -> None:
         """Atomically claim a run_id on a thread.
 
-        Lazy-creates the cubeloop_threads row, takes a per-thread FOR UPDATE
+        Lazy-creates the cubepi_threads row, takes a per-thread FOR UPDATE
         lock to serialize concurrent claims for the same thread, then
-        checks cubeloop_runs for an existing row before inserting. The
+        checks cubepi_runs for an existing row before inserting. The
         pre-check matches the Postgres approach — using INSERT + catching
         IntegrityError would also work, but a pre-SELECT lets us
         distinguish in-flight vs completed cleanly without relying on the
@@ -386,19 +396,19 @@ class MySQLCheckpointer:
                 async with conn.cursor() as cur:
                     # Lazy thread row creation (claim may precede any append).
                     await cur.execute(
-                        "INSERT INTO cubeloop_threads (thread_id) VALUES (%s) "
+                        "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
                         "ON DUPLICATE KEY UPDATE thread_id = thread_id",
                         (thread_id,),
                     )
                     # Per-thread fence: serializes claim_run/append/fork on
                     # the same thread (matches Postgres's pg_advisory_xact_lock).
                     await cur.execute(
-                        "SELECT thread_id FROM cubeloop_threads "
+                        "SELECT thread_id FROM cubepi_threads "
                         "WHERE thread_id = %s FOR UPDATE",
                         (thread_id,),
                     )
                     await cur.execute(
-                        "SELECT completed_at FROM cubeloop_runs "
+                        "SELECT completed_at FROM cubepi_runs "
                         "WHERE thread_id = %s AND run_id = %s",
                         (thread_id, run_id),
                     )
@@ -412,7 +422,7 @@ class MySQLCheckpointer:
                             f"thread={thread_id} run={run_id} in flight"
                         )
                     await cur.execute(
-                        "INSERT INTO cubeloop_runs (thread_id, run_id) VALUES (%s, %s)",
+                        "INSERT INTO cubepi_runs (thread_id, run_id) VALUES (%s, %s)",
                         (thread_id, run_id),
                     )
                 await conn.commit()
@@ -434,12 +444,12 @@ class MySQLCheckpointer:
             try:
                 async with conn.cursor() as cur:
                     await cur.execute(
-                        "SELECT thread_id FROM cubeloop_threads "
+                        "SELECT thread_id FROM cubepi_threads "
                         "WHERE thread_id = %s FOR UPDATE",
                         (thread_id,),
                     )
                     await cur.execute(
-                        "SELECT completed_at FROM cubeloop_runs "
+                        "SELECT completed_at FROM cubepi_runs "
                         "WHERE thread_id = %s AND run_id = %s",
                         (thread_id, run_id),
                     )
@@ -453,13 +463,13 @@ class MySQLCheckpointer:
                         return  # idempotent success
                     await cur.execute(
                         "SELECT COALESCE(MAX(completion_seq), 0) + 1 "
-                        "FROM cubeloop_runs WHERE thread_id = %s "
+                        "FROM cubepi_runs WHERE thread_id = %s "
                         "AND completion_seq IS NOT NULL",
                         (thread_id,),
                     )
                     (next_seq,) = await cur.fetchone()
                     await cur.execute(
-                        "UPDATE cubeloop_runs SET completed_at = CURRENT_TIMESTAMP, "
+                        "UPDATE cubepi_runs SET completed_at = CURRENT_TIMESTAMP, "
                         "completion_seq = %s "
                         "WHERE thread_id = %s AND run_id = %s",
                         (next_seq, thread_id, run_id),
@@ -482,7 +492,7 @@ class MySQLCheckpointer:
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT pending_request, run_id FROM cubeloop_threads "
+                    "SELECT pending_request, run_id FROM cubepi_threads "
                     "WHERE thread_id = %s",
                     (thread_id,),
                 )
@@ -509,13 +519,13 @@ class MySQLCheckpointer:
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT 1 FROM cubeloop_threads WHERE thread_id = %s",
+                    "SELECT 1 FROM cubepi_threads WHERE thread_id = %s",
                     (thread_id,),
                 )
                 if await cur.fetchone() is None:
                     raise ThreadNotFoundError(f"thread={thread_id}")
                 await cur.execute(
-                    "SELECT completion_seq FROM cubeloop_runs "
+                    "SELECT completion_seq FROM cubepi_runs "
                     "WHERE thread_id = %s AND run_id = %s",
                     (thread_id, after_run_id),
                 )
@@ -526,10 +536,10 @@ class MySQLCheckpointer:
                     )
                 cutoff = cutoff_row[0]
                 await cur.execute(
-                    "SELECT seq, role, metadata, payload FROM cubeloop_messages "
+                    "SELECT seq, role, metadata, payload FROM cubepi_messages "
                     "WHERE thread_id = %s AND ("
                     "  run_id IS NULL OR run_id IN ("
-                    "    SELECT run_id FROM cubeloop_runs "
+                    "    SELECT run_id FROM cubepi_runs "
                     "    WHERE thread_id = %s "
                     "    AND completion_seq IS NOT NULL "
                     "    AND completion_seq <= %s"
@@ -553,10 +563,10 @@ class MySQLCheckpointer:
     ) -> None:
         """Copy completed prefix of ``src_thread_id`` into ``new_thread_id``.
 
-        Threads-row first: the destination ``cubeloop_threads`` row is
+        Threads-row first: the destination ``cubepi_threads`` row is
         inserted before the message + runs copies so callers see a
-        complete view if they probe mid-fork. There is no cubeloop_runs ->
-        cubeloop_threads FK on MySQL (partition limitation), but we keep
+        complete view if they probe mid-fork. There is no cubepi_runs ->
+        cubepi_threads FK on MySQL (partition limitation), but we keep
         the same ordering for semantic parity with Postgres.
 
         Per-thread serialization: a ``SELECT … FOR UPDATE`` on the source
@@ -571,7 +581,7 @@ class MySQLCheckpointer:
                 async with conn.cursor() as cur:
                     # Per-thread fence on the source thread.
                     await cur.execute(
-                        "SELECT thread_id FROM cubeloop_threads "
+                        "SELECT thread_id FROM cubepi_threads "
                         "WHERE thread_id = %s FOR UPDATE",
                         (src_thread_id,),
                     )
@@ -579,14 +589,14 @@ class MySQLCheckpointer:
                         raise ThreadNotFoundError(f"thread={src_thread_id}")
                     # Destination must not exist.
                     await cur.execute(
-                        "SELECT 1 FROM cubeloop_threads WHERE thread_id = %s",
+                        "SELECT 1 FROM cubepi_threads WHERE thread_id = %s",
                         (new_thread_id,),
                     )
                     if await cur.fetchone() is not None:
                         raise ThreadAlreadyExistsError(f"thread={new_thread_id}")
                     # Cutoff: after_run_id must be completed on src.
                     await cur.execute(
-                        "SELECT completion_seq FROM cubeloop_runs "
+                        "SELECT completion_seq FROM cubepi_runs "
                         "WHERE thread_id = %s AND run_id = %s",
                         (src_thread_id, after_run_id),
                     )
@@ -598,7 +608,7 @@ class MySQLCheckpointer:
                     cutoff = cutoff_row[0]
                     # Build merged extra (carry parent's extra + fork metadata).
                     await cur.execute(
-                        "SELECT extra FROM cubeloop_threads WHERE thread_id = %s",
+                        "SELECT extra FROM cubepi_threads WHERE thread_id = %s",
                         (src_thread_id,),
                     )
                     extra_row = await cur.fetchone()
@@ -612,7 +622,7 @@ class MySQLCheckpointer:
                     # with the Postgres FK-driven ordering, even though MySQL
                     # has no FK on the partitioned messages/runs tables).
                     await cur.execute(
-                        "INSERT INTO cubeloop_threads "
+                        "INSERT INTO cubepi_threads "
                         "(thread_id, parent_thread_id, forked_at_seq, extra) "
                         "VALUES (%s, %s, %s, %s)",
                         (
@@ -624,13 +634,13 @@ class MySQLCheckpointer:
                     )
                     # Copy messages: legacy NULL run_id OR completed-at-cutoff.
                     await cur.execute(
-                        "INSERT INTO cubeloop_messages "
+                        "INSERT INTO cubepi_messages "
                         "(thread_id, seq, role, metadata, payload, run_id) "
                         "SELECT %s, seq, role, metadata, payload, run_id "
-                        "FROM cubeloop_messages "
+                        "FROM cubepi_messages "
                         "WHERE thread_id = %s AND ("
                         "  run_id IS NULL OR run_id IN ("
-                        "    SELECT run_id FROM cubeloop_runs "
+                        "    SELECT run_id FROM cubepi_runs "
                         "    WHERE thread_id = %s "
                         "    AND completion_seq IS NOT NULL "
                         "    AND completion_seq <= %s"
@@ -640,12 +650,12 @@ class MySQLCheckpointer:
                     )
                     # Copy completed runs satisfying the cutoff.
                     await cur.execute(
-                        "INSERT INTO cubeloop_runs "
+                        "INSERT INTO cubepi_runs "
                         "(thread_id, run_id, claimed_at, completed_at, "
                         " completion_seq) "
                         "SELECT %s, run_id, claimed_at, completed_at, "
                         "       completion_seq "
-                        "FROM cubeloop_runs "
+                        "FROM cubepi_runs "
                         "WHERE thread_id = %s "
                         "AND completion_seq IS NOT NULL "
                         "AND completion_seq <= %s",
@@ -667,12 +677,12 @@ class MySQLCheckpointer:
                     # also swallow unrelated errors and emit a duplicate-key
                     # warning when the row already exists.
                     await cur.execute(
-                        "INSERT INTO cubeloop_threads (thread_id) VALUES (%s) "
+                        "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
                         "ON DUPLICATE KEY UPDATE thread_id = thread_id",
                         (thread_id,),
                     )
                     await cur.execute(
-                        "SELECT extra FROM cubeloop_threads "
+                        "SELECT extra FROM cubepi_threads "
                         "WHERE thread_id = %s FOR UPDATE",
                         (thread_id,),
                     )
@@ -680,7 +690,7 @@ class MySQLCheckpointer:
                     current = _decode_json(row[0]) if row is not None else {}
                     merged = {**current, **extra}
                     await cur.execute(
-                        "UPDATE cubeloop_threads "
+                        "UPDATE cubepi_threads "
                         "SET extra = %s, updated_at = CURRENT_TIMESTAMP "
                         "WHERE thread_id = %s",
                         (json.dumps(merged), thread_id),
@@ -712,13 +722,13 @@ class MySQLCheckpointer:
             try:
                 async with conn.cursor() as cur:
                     await cur.execute(
-                        "INSERT INTO cubeloop_threads (thread_id) VALUES (%s) "
+                        "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
                         "ON DUPLICATE KEY UPDATE thread_id = thread_id",
                         (thread_id,),
                     )
                     if request is None:
                         await cur.execute(
-                            "UPDATE cubeloop_threads "
+                            "UPDATE cubepi_threads "
                             "SET pending_request = NULL, run_id = NULL, "
                             "updated_at = CURRENT_TIMESTAMP WHERE thread_id = %s",
                             (thread_id,),
@@ -726,7 +736,7 @@ class MySQLCheckpointer:
                     else:
                         payload = request.model_dump_json()
                         await cur.execute(
-                            "UPDATE cubeloop_threads "
+                            "UPDATE cubepi_threads "
                             "SET pending_request = %s, run_id = %s, "
                             "updated_at = CURRENT_TIMESTAMP WHERE thread_id = %s",
                             (payload, run_id, thread_id),
@@ -741,7 +751,7 @@ class MySQLCheckpointer:
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT pending_request FROM cubeloop_threads WHERE thread_id = %s",
+                    "SELECT pending_request FROM cubepi_threads WHERE thread_id = %s",
                     (thread_id,),
                 )
                 row = await cur.fetchone()
@@ -766,7 +776,7 @@ class MySQLCheckpointer:
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT run_id FROM cubeloop_threads "
+                    "SELECT run_id FROM cubepi_threads "
                     "WHERE thread_id = %s AND pending_request IS NOT NULL",
                     (thread_id,),
                 )
@@ -788,12 +798,12 @@ class MySQLCheckpointer:
             try:
                 async with conn.cursor() as cur:
                     await cur.execute(
-                        "INSERT INTO cubeloop_threads (thread_id) VALUES (%s) "
+                        "INSERT INTO cubepi_threads (thread_id) VALUES (%s) "
                         "ON DUPLICATE KEY UPDATE thread_id = thread_id",
                         (thread_id,),
                     )
                     await cur.execute(
-                        "INSERT INTO cubeloop_hitl_answers "
+                        "INSERT INTO cubepi_hitl_answers "
                         "(thread_id, run_id, question_id, answer) "
                         "VALUES (%s, %s, %s, %s) "
                         "ON DUPLICATE KEY UPDATE "
@@ -817,7 +827,7 @@ class MySQLCheckpointer:
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT answer FROM cubeloop_hitl_answers "
+                    "SELECT answer FROM cubepi_hitl_answers "
                     "WHERE thread_id = %s AND run_id = %s AND question_id = %s",
                     (thread_id, _run_key(run_id), question_id),
                 )
@@ -841,7 +851,7 @@ class MySQLCheckpointer:
                 async with conn.cursor() as cur:
                     if question_ids is None:
                         await cur.execute(
-                            "DELETE FROM cubeloop_hitl_answers "
+                            "DELETE FROM cubepi_hitl_answers "
                             "WHERE thread_id = %s AND run_id = %s",
                             (thread_id, run_key),
                         )
@@ -850,7 +860,7 @@ class MySQLCheckpointer:
                         if qids:
                             placeholders = ",".join("%s" for _ in qids)
                             await cur.execute(
-                                "DELETE FROM cubeloop_hitl_answers "
+                                "DELETE FROM cubepi_hitl_answers "
                                 "WHERE thread_id = %s AND run_id = %s "
                                 f"AND question_id IN ({placeholders})",
                                 (thread_id, run_key, *qids),

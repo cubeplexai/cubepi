@@ -19,12 +19,12 @@ async def test_claim_run_creates_threads_row_lazily(pg_v4_dsn):
     conn = await asyncpg.connect(pg_v4_dsn)
     try:
         row = await conn.fetchrow(
-            "SELECT thread_id FROM cubeloop_threads WHERE thread_id = $1",
+            "SELECT thread_id FROM cubepi_threads WHERE thread_id = $1",
             "t-lazy",
         )
         assert row is not None
         run = await conn.fetchrow(
-            "SELECT completed_at FROM cubeloop_runs WHERE thread_id = $1 AND run_id = $2",
+            "SELECT completed_at FROM cubepi_runs WHERE thread_id = $1 AND run_id = $2",
             "t-lazy",
             "r1",
         )
@@ -86,7 +86,7 @@ async def test_completion_seq_monotonic_per_thread(pg_v4_dsn):
     conn = await asyncpg.connect(pg_v4_dsn)
     try:
         rows = await conn.fetch(
-            "SELECT run_id, completion_seq FROM cubeloop_runs "
+            "SELECT run_id, completion_seq FROM cubepi_runs "
             "WHERE thread_id = $1 ORDER BY completion_seq",
             "t",
         )
@@ -132,7 +132,7 @@ async def test_append_persists_run_id_into_column(pg_v4_dsn):
     conn = await asyncpg.connect(pg_v4_dsn)
     try:
         row = await conn.fetchrow(
-            "SELECT run_id FROM cubeloop_messages WHERE thread_id = $1",
+            "SELECT run_id FROM cubepi_messages WHERE thread_id = $1",
             "t",
         )
         assert row is not None

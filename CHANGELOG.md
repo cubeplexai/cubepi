@@ -7,17 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.14.0] - 2026-09-10
+## [0.14.1] - 2026-09-10
+
+### Fixed
+
+- **The CubeLoop rename no longer renames the persistent Postgres/MySQL
+  schema.** Physical tables, partitions, indexes, and the version marker remain
+  `cubepi_*` at schema version 5, so an existing 0.13.6 database opens without
+  DDL and historical host Alembic revisions remain reproducible. The withdrawn
+  0.14.0 release briefly used `cubeloop_*`; see the migration guide for the
+  exceptional recovery procedure.
+- **The transitional `cubepi` package accepts compatible 0.14 patch releases.**
+  Its dependency and forwarded extras now use `cubeloop>=0.14.1,<0.15`.
+
+## [0.14.0] - 2026-09-10 [YANKED]
 
 ### Breaking
 
 - **Renamed CubePi / `cubepi` to CubeLoop / `cubeloop`.** The import path,
   PyPI project, CLI, docs site (`https://cubeloop.dev`), OTel vendor
-  namespace (`cubeloop.*`), and Postgres/MySQL table names (`cubeloop_*`)
-  all move. `pip install cubepi` 0.14+ is a transitional wrapper that
-  depends on `cubeloop` and warns. Postgres/MySQL hosts must run
-  `upgrade_v5_to_v6_op()` before opening 0.14. SQLite table names are
-  unchanged. See the [migration guide](https://cubeloop.dev/docs/migration/from-cubepi).
+  namespace (`cubeloop.*`), and — incorrectly — Postgres/MySQL table names
+  (`cubeloop_*`) all moved. This release was withdrawn because the database
+  rename broke reproducible host Alembic histories and safe rollback. Use
+  0.14.1 or later. See the
+  [migration guide](https://cubeloop.dev/docs/migration/from-cubepi).
 
 ## [0.13.6] - 2026-09-04
 
@@ -811,7 +824,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[0.2.0]** - 2026-05-10 — see the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.2.0).
 - **[0.1.0]** - 2026-05-09 — initial release. See the [release notes](https://github.com/cubeplexai/cubepi/releases/tag/v0.1.0).
 
-[Unreleased]: https://github.com/cubeplexai/cubeloop/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/cubeplexai/cubeloop/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/cubeplexai/cubeloop/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/cubeplexai/cubeloop/compare/v0.13.6...v0.14.0
 [0.13.6]: https://github.com/cubeplexai/cubeloop/compare/v0.13.5...v0.13.6
 [0.13.5]: https://github.com/cubeplexai/cubeloop/compare/v0.13.4...v0.13.5

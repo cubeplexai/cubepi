@@ -52,6 +52,13 @@ def _schema_mismatch_hint(actual: int, expected: int) -> str:
     between ``actual`` and ``expected``, rather than hardcoding one version
     transition, so the hint stays correct as EXPECTED_SCHEMA_VERSION grows.
     """
+    if actual > expected:
+        return (
+            "database schema is newer than this CubeLoop release. If withdrawn "
+            "0.14.0 wrote version 6, inspect the database and follow "
+            "https://cubeloop.dev/docs/migration/from-cubepi#emergency-recovery-"
+            "from-withdrawn-0140; do not run a forward migration."
+        )
     steps = ", ".join(f"upgrade_v{v}_to_v{v + 1}_op()" for v in range(actual, expected))
     return (
         "cubeloop was upgraded but host alembic is behind. "
@@ -62,18 +69,16 @@ def _schema_mismatch_hint(actual: int, expected: int) -> str:
     )
 
 
-_V5_TO_V6_HINT = (
-    "Generate a new alembic revision that calls "
-    "upgrade_v5_to_v6_op() + write_schema_version_op() "
-    "(see cubeloop.checkpointer.postgres.alembic_helpers) and run "
-    "`alembic upgrade head` against this database."
-)
-
 _MISSING_VERSION_TABLE_HINT = (
     "data tables exist but schema_version is missing; cannot auto-classify. "
-    "If tables are still cubepi_*, CREATE TABLE cubepi_schema_version and "
-    "INSERT 5, then run upgrade_v5_to_v6_op(). Do not apply fresh v6 "
-    "CREATE TABLE on existing data."
+    "Restore cubepi_schema_version from the host's Alembic history; do not "
+    "apply fresh CREATE TABLE statements on existing data."
+)
+
+_WITHDRAWN_V6_HINT = (
+    "database uses the withdrawn 0.14.0 cubeloop_* schema. Inspect it and "
+    "follow https://cubeloop.dev/docs/migration/from-cubepi#emergency-recovery-"
+    "from-withdrawn-0140; do not run a forward migration."
 )
 
 
@@ -105,7 +110,7 @@ _ROLE_TO_CLS: dict[str, type[Message]] = {
 
 
 def _deserialize_row(thread_id: str, r: Any) -> Message:
-    """Deserialize one cubeloop_messages row; corruption raises typed."""
+    """Deserialize one cubepi_messages row; corruption raises typed."""
     try:
         cls = _ROLE_TO_CLS.get(r["role"])
         if cls is None:
@@ -122,7 +127,7 @@ def _deserialize_row(thread_id: str, r: Any) -> Message:
         raise CheckpointCorruptionError(
             thread_id=thread_id,
             backend="postgres",
-            row_ref=f"cubeloop_messages.seq={r['seq']}",
+            row_ref=f"cubepi_messages.seq={r['seq']}",
             cause=exc,
         ) from exc
 
@@ -172,37 +177,38 @@ class PostgresCheckpointer:
         async with self._pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
-                    "SELECT version FROM cubeloop_schema_version LIMIT 1"
+                    "SELECT version FROM cubepi_schema_version LIMIT 1"
                 )
             except asyncpg.UndefinedTableError:
                 try:
-                    legacy = await conn.fetchrow(
-                        "SELECT version FROM cubepi_schema_version LIMIT 1"
+                    withdrawn = await conn.fetchrow(
+                        "SELECT version FROM cubeloop_schema_version LIMIT 1"
                     )
-                except asyncpg.UndefinedTableError as e:
-                    has_data = await conn.fetchval(
-                        "SELECT to_regclass('cubepi_threads') IS NOT NULL "
-                        "OR to_regclass('cubeloop_threads') IS NOT NULL"
+                except asyncpg.UndefinedTableError:
+                    withdrawn = None
+                if withdrawn is not None:
+                    actual = int(withdrawn["version"])
+                    raise CubeloopSchemaMismatch(
+                        expected=EXPECTED_SCHEMA_VERSION,
+                        actual=actual,
+                        hint=_WITHDRAWN_V6_HINT,
                     )
-                    if has_data:
-                        raise CubeloopSchemaMismatch(
-                            expected=EXPECTED_SCHEMA_VERSION,
-                            actual=0,
-                            hint=_MISSING_VERSION_TABLE_HINT,
-                        ) from e
-                    raise CubeloopSchemaUninitialized(
-                        "cubeloop tables not found. Run host application's "
-                        "alembic upgrade."
-                    ) from e
-                actual = 0 if legacy is None else int(legacy["version"])
-                raise CubeloopSchemaMismatch(
-                    expected=EXPECTED_SCHEMA_VERSION,
-                    actual=actual,
-                    hint=_V5_TO_V6_HINT,
+                has_data = await conn.fetchval(
+                    "SELECT to_regclass('cubepi_threads') IS NOT NULL "
+                    "OR to_regclass('cubeloop_threads') IS NOT NULL"
+                )
+                if has_data:
+                    raise CubeloopSchemaMismatch(
+                        expected=EXPECTED_SCHEMA_VERSION,
+                        actual=0,
+                        hint=_MISSING_VERSION_TABLE_HINT,
+                    )
+                raise CubeloopSchemaUninitialized(
+                    "cubepi tables not found. Run host application's alembic upgrade."
                 )
             if row is None:
                 raise CubeloopSchemaUninitialized(
-                    "cubeloop_schema_version table is empty. Host alembic "
+                    "cubepi_schema_version table is empty. Host alembic "
                     "migration must INSERT the current version "
                     "(use write_schema_version_op())."
                 )
@@ -217,12 +223,12 @@ class PostgresCheckpointer:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             msg_rows = await conn.fetch(
-                "SELECT seq, role, metadata, payload FROM cubeloop_messages "
+                "SELECT seq, role, metadata, payload FROM cubepi_messages "
                 "WHERE thread_id = $1 ORDER BY seq",
                 thread_id,
             )
             extra_row = await conn.fetchrow(
-                "SELECT extra, parent_thread_id FROM cubeloop_threads "
+                "SELECT extra, parent_thread_id FROM cubepi_threads "
                 "WHERE thread_id = $1",
                 thread_id,
             )
@@ -264,14 +270,14 @@ class PostgresCheckpointer:
                 )
                 # Lazy thread row creation
                 await conn.execute(
-                    "INSERT INTO cubeloop_threads (thread_id) "
+                    "INSERT INTO cubepi_threads (thread_id) "
                     "VALUES ($1) ON CONFLICT DO NOTHING",
                     thread_id,
                 )
                 # Pre-flight: reject append on any completed run_id.
                 if run_ids:
                     done_rows = await conn.fetch(
-                        "SELECT run_id FROM cubeloop_runs "
+                        "SELECT run_id FROM cubepi_runs "
                         "WHERE thread_id = $1 AND run_id = ANY($2::text[]) "
                         "AND completed_at IS NOT NULL",
                         thread_id,
@@ -284,7 +290,7 @@ class PostgresCheckpointer:
                         )
                 last_seq = (
                     await conn.fetchval(
-                        "SELECT COALESCE(MAX(seq), 0) FROM cubeloop_messages "
+                        "SELECT COALESCE(MAX(seq), 0) FROM cubepi_messages "
                         "WHERE thread_id = $1",
                         thread_id,
                     )
@@ -308,7 +314,7 @@ class PostgresCheckpointer:
                         )
                     )
                 await conn.executemany(
-                    "INSERT INTO cubeloop_messages "
+                    "INSERT INTO cubepi_messages "
                     "(thread_id, seq, role, metadata, payload, run_id) "
                     "VALUES ($1, $2, $3, $4, $5, $6)",
                     rows,
@@ -324,7 +330,7 @@ class PostgresCheckpointer:
                 )
                 # Lazy thread row creation (claim may precede any append).
                 await conn.execute(
-                    "INSERT INTO cubeloop_threads (thread_id) "
+                    "INSERT INTO cubepi_threads (thread_id) "
                     "VALUES ($1) ON CONFLICT (thread_id) DO NOTHING",
                     thread_id,
                 )
@@ -332,7 +338,7 @@ class PostgresCheckpointer:
                 # raise UniqueViolation (which would abort the txn before
                 # we could distinguish in-flight vs completed).
                 row = await conn.fetchrow(
-                    "SELECT completed_at FROM cubeloop_runs "
+                    "SELECT completed_at FROM cubepi_runs "
                     "WHERE thread_id = $1 AND run_id = $2",
                     thread_id,
                     run_id,
@@ -346,7 +352,7 @@ class PostgresCheckpointer:
                         f"thread={thread_id} run={run_id} in flight"
                     )
                 await conn.execute(
-                    "INSERT INTO cubeloop_runs (thread_id, run_id) VALUES ($1, $2)",
+                    "INSERT INTO cubepi_runs (thread_id, run_id) VALUES ($1, $2)",
                     thread_id,
                     run_id,
                 )
@@ -360,7 +366,7 @@ class PostgresCheckpointer:
                     thread_id,
                 )
                 row = await conn.fetchrow(
-                    "SELECT completed_at FROM cubeloop_runs "
+                    "SELECT completed_at FROM cubepi_runs "
                     "WHERE thread_id = $1 AND run_id = $2",
                     thread_id,
                     run_id,
@@ -373,12 +379,12 @@ class PostgresCheckpointer:
                     return  # idempotent success
                 next_seq = await conn.fetchval(
                     "SELECT COALESCE(MAX(completion_seq), 0) + 1 "
-                    "FROM cubeloop_runs WHERE thread_id = $1 "
+                    "FROM cubepi_runs WHERE thread_id = $1 "
                     "AND completion_seq IS NOT NULL",
                     thread_id,
                 )
                 await conn.execute(
-                    "UPDATE cubeloop_runs SET completed_at = now(), "
+                    "UPDATE cubepi_runs SET completed_at = now(), "
                     "completion_seq = $3 "
                     "WHERE thread_id = $1 AND run_id = $2",
                     thread_id,
@@ -392,7 +398,7 @@ class PostgresCheckpointer:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT pending_request, run_id FROM cubeloop_threads "
+                "SELECT pending_request, run_id FROM cubepi_threads "
                 "WHERE thread_id = $1",
                 thread_id,
             )
@@ -410,13 +416,13 @@ class PostgresCheckpointer:
         async with self._pool.acquire() as conn:
             # Source thread must exist.
             t_row = await conn.fetchrow(
-                "SELECT 1 FROM cubeloop_threads WHERE thread_id = $1",
+                "SELECT 1 FROM cubepi_threads WHERE thread_id = $1",
                 thread_id,
             )
             if t_row is None:
                 raise ThreadNotFoundError(f"thread={thread_id}")
             cutoff = await conn.fetchval(
-                "SELECT completion_seq FROM cubeloop_runs "
+                "SELECT completion_seq FROM cubepi_runs "
                 "WHERE thread_id = $1 AND run_id = $2",
                 thread_id,
                 after_run_id,
@@ -426,10 +432,10 @@ class PostgresCheckpointer:
                     f"thread={thread_id} run={after_run_id} not completed"
                 )
             rows = await conn.fetch(
-                "SELECT seq, role, metadata, payload FROM cubeloop_messages "
+                "SELECT seq, role, metadata, payload FROM cubepi_messages "
                 "WHERE thread_id = $1 AND ("
                 "  run_id IS NULL OR run_id IN ("
-                "    SELECT run_id FROM cubeloop_runs "
+                "    SELECT run_id FROM cubepi_runs "
                 "    WHERE thread_id = $1 "
                 "    AND completion_seq IS NOT NULL "
                 "    AND completion_seq <= $2"
@@ -461,21 +467,21 @@ class PostgresCheckpointer:
                 # / claim_run / save_extra / save_pending_request — so its
                 # presence is the canonical "thread exists" gate).
                 t_row = await conn.fetchrow(
-                    "SELECT 1 FROM cubeloop_threads WHERE thread_id = $1",
+                    "SELECT 1 FROM cubepi_threads WHERE thread_id = $1",
                     src_thread_id,
                 )
                 if t_row is None:
                     raise ThreadNotFoundError(f"thread={src_thread_id}")
                 # Destination must not exist.
                 dst_row = await conn.fetchrow(
-                    "SELECT 1 FROM cubeloop_threads WHERE thread_id = $1",
+                    "SELECT 1 FROM cubepi_threads WHERE thread_id = $1",
                     new_thread_id,
                 )
                 if dst_row is not None:
                     raise ThreadAlreadyExistsError(f"thread={new_thread_id}")
                 # Cutoff: after_run_id must be completed on src.
                 cutoff = await conn.fetchval(
-                    "SELECT completion_seq FROM cubeloop_runs "
+                    "SELECT completion_seq FROM cubepi_runs "
                     "WHERE thread_id = $1 AND run_id = $2",
                     src_thread_id,
                     after_run_id,
@@ -486,7 +492,7 @@ class PostgresCheckpointer:
                     )
                 # Build merged extra (carry parent's extra + fork metadata).
                 src_extra_row = await conn.fetchrow(
-                    "SELECT extra FROM cubeloop_threads WHERE thread_id = $1",
+                    "SELECT extra FROM cubepi_threads WHERE thread_id = $1",
                     src_thread_id,
                 )
                 raw_extra = (
@@ -499,9 +505,9 @@ class PostgresCheckpointer:
                 if metadata is not None:
                     base_extra["fork"] = json.loads(json.dumps(metadata))
                 # INSERT destination threads row first to satisfy the
-                # cubeloop_messages / cubeloop_runs FKs on subsequent copies.
+                # cubepi_messages / cubepi_runs FKs on subsequent copies.
                 await conn.execute(
-                    "INSERT INTO cubeloop_threads "
+                    "INSERT INTO cubepi_threads "
                     "(thread_id, parent_thread_id, forked_at_seq, extra) "
                     "VALUES ($1, $2, $3, $4::jsonb)",
                     new_thread_id,
@@ -512,13 +518,13 @@ class PostgresCheckpointer:
                 # Copy messages whose run is NULL (legacy prefix) or completed
                 # at or before cutoff. Preserve seq from the source.
                 await conn.execute(
-                    "INSERT INTO cubeloop_messages "
+                    "INSERT INTO cubepi_messages "
                     "(thread_id, seq, role, metadata, payload, run_id) "
                     "SELECT $1, seq, role, metadata, payload, run_id "
-                    "FROM cubeloop_messages "
+                    "FROM cubepi_messages "
                     "WHERE thread_id = $2 AND ("
                     "  run_id IS NULL OR run_id IN ("
-                    "    SELECT run_id FROM cubeloop_runs "
+                    "    SELECT run_id FROM cubepi_runs "
                     "    WHERE thread_id = $2 "
                     "    AND completion_seq IS NOT NULL "
                     "    AND completion_seq <= $3"
@@ -530,10 +536,10 @@ class PostgresCheckpointer:
                 )
                 # Copy completed runs satisfying the cutoff.
                 await conn.execute(
-                    "INSERT INTO cubeloop_runs "
+                    "INSERT INTO cubepi_runs "
                     "(thread_id, run_id, claimed_at, completed_at, completion_seq) "
                     "SELECT $1, run_id, claimed_at, completed_at, completion_seq "
-                    "FROM cubeloop_runs "
+                    "FROM cubepi_runs "
                     "WHERE thread_id = $2 "
                     "AND completion_seq IS NOT NULL "
                     "AND completion_seq <= $3",
@@ -546,10 +552,10 @@ class PostgresCheckpointer:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO cubeloop_threads (thread_id, extra, updated_at) "
+                "INSERT INTO cubepi_threads (thread_id, extra, updated_at) "
                 "VALUES ($1, $2::jsonb, now()) "
                 "ON CONFLICT (thread_id) DO UPDATE "
-                "SET extra = cubeloop_threads.extra || EXCLUDED.extra, "
+                "SET extra = cubepi_threads.extra || EXCLUDED.extra, "
                 "    updated_at = now()",
                 thread_id,
                 json.dumps(extra),
@@ -576,13 +582,13 @@ class PostgresCheckpointer:
             async with conn.transaction():
                 # Ensure thread row exists (lazy creation matches save_extra path).
                 await conn.execute(
-                    "INSERT INTO cubeloop_threads (thread_id) "
+                    "INSERT INTO cubepi_threads (thread_id) "
                     "VALUES ($1) ON CONFLICT DO NOTHING",
                     thread_id,
                 )
                 if request is None:
                     await conn.execute(
-                        "UPDATE cubeloop_threads "
+                        "UPDATE cubepi_threads "
                         "SET pending_request = NULL, run_id = NULL, "
                         "updated_at = now() WHERE thread_id = $1",
                         thread_id,
@@ -590,7 +596,7 @@ class PostgresCheckpointer:
                 else:
                     payload = request.model_dump_json()
                     await conn.execute(
-                        "UPDATE cubeloop_threads "
+                        "UPDATE cubepi_threads "
                         "SET pending_request = $2::jsonb, run_id = $3, "
                         "updated_at = now() WHERE thread_id = $1",
                         thread_id,
@@ -602,7 +608,7 @@ class PostgresCheckpointer:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT pending_request FROM cubeloop_threads WHERE thread_id = $1",
+                "SELECT pending_request FROM cubepi_threads WHERE thread_id = $1",
                 thread_id,
             )
         if row is None or row["pending_request"] is None:
@@ -624,7 +630,7 @@ class PostgresCheckpointer:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT run_id FROM cubeloop_threads "
+                "SELECT run_id FROM cubepi_threads "
                 "WHERE thread_id = $1 AND pending_request IS NOT NULL",
                 thread_id,
             )
@@ -643,12 +649,12 @@ class PostgresCheckpointer:
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute(
-                    "INSERT INTO cubeloop_threads (thread_id) "
+                    "INSERT INTO cubepi_threads (thread_id) "
                     "VALUES ($1) ON CONFLICT DO NOTHING",
                     thread_id,
                 )
                 await conn.execute(
-                    "INSERT INTO cubeloop_hitl_answers "
+                    "INSERT INTO cubepi_hitl_answers "
                     "(thread_id, run_id, question_id, answer) "
                     "VALUES ($1, $2, $3, $4::jsonb) "
                     "ON CONFLICT (thread_id, run_id, question_id) DO UPDATE "
@@ -669,7 +675,7 @@ class PostgresCheckpointer:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT answer FROM cubeloop_hitl_answers "
+                "SELECT answer FROM cubepi_hitl_answers "
                 "WHERE thread_id = $1 AND run_id = $2 AND question_id = $3",
                 thread_id,
                 _run_key(run_id),
@@ -691,7 +697,7 @@ class PostgresCheckpointer:
         async with self._pool.acquire() as conn:
             if question_ids is None:
                 await conn.execute(
-                    "DELETE FROM cubeloop_hitl_answers "
+                    "DELETE FROM cubepi_hitl_answers "
                     "WHERE thread_id = $1 AND run_id = $2",
                     thread_id,
                     run_key,
@@ -701,7 +707,7 @@ class PostgresCheckpointer:
             if not qids:
                 return
             await conn.execute(
-                "DELETE FROM cubeloop_hitl_answers "
+                "DELETE FROM cubepi_hitl_answers "
                 "WHERE thread_id = $1 AND run_id = $2 "
                 "AND question_id = ANY($3::text[])",
                 thread_id,

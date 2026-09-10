@@ -807,9 +807,9 @@ claim_run(thread_id: str, run_id: str) -> None
 
 Atomically claim a run_id on a thread.
 
-Lazy-creates the cubeloop_threads row, takes a per-thread FOR UPDATE
+Lazy-creates the cubepi_threads row, takes a per-thread FOR UPDATE
 lock to serialize concurrent claims for the same thread, then
-checks cubeloop_runs for an existing row before inserting. The
+checks cubepi_runs for an existing row before inserting. The
 pre-check matches the Postgres approach — using INSERT + catching
 IntegrityError would also work, but a pre-SELECT lets us
 distinguish in-flight vs completed cleanly without relying on the
@@ -880,10 +880,10 @@ fork(
 
 Copy completed prefix of `src_thread_id` into `new_thread_id`.
 
-Threads-row first: the destination `cubeloop_threads` row is
+Threads-row first: the destination `cubepi_threads` row is
 inserted before the message + runs copies so callers see a
-complete view if they probe mid-fork. There is no cubeloop_runs ->
-cubeloop_threads FK on MySQL (partition limitation), but we keep
+complete view if they probe mid-fork. There is no cubepi_runs ->
+cubepi_threads FK on MySQL (partition limitation), but we keep
 the same ordering for semantic parity with Postgres.
 
 Per-thread serialization: a `SELECT … FOR UPDATE` on the source

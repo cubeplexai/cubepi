@@ -54,8 +54,8 @@ async with PostgresCheckpointer(
 
 ## Schema
 
-The checkpointer expects `cubeloop_threads`, `cubeloop_messages`,
-`cubeloop_runs`, `cubeloop_hitl_answers`, and `cubeloop_schema_version`.
+The checkpointer expects `cubepi_threads`, `cubepi_messages`,
+`cubepi_runs`, `cubepi_hitl_answers`, and `cubepi_schema_version`.
 Unlike SQLite, CubeLoop
 **does not create these for you** — it verifies on `__aenter__` that
 they exist with the expected `schema_version`.
@@ -89,9 +89,9 @@ alembic revision --autogenerate -m "add cubeloop checkpointer"
 Autogenerate emits the `CREATE TABLE`s from `cubeloop_metadata`, but
 SQLAlchemy `MetaData` **cannot model two things CubeLoop needs**, so add
 them to the generated migration by hand: the 64 hash partitions of
-`cubeloop_messages` (via `create_message_partitions_op()`), the 64
-partitions of `cubeloop_runs` (via `create_runs_partitions_op()`), and
-the `cubeloop_schema_version` row (via `write_schema_version_op()`). Use
+`cubepi_messages` (via `create_message_partitions_op()`), the 64
+partitions of `cubepi_runs` (via `create_runs_partitions_op()`), and
+the `cubepi_schema_version` row (via `write_schema_version_op()`). Use
 the helpers:
 
 ```python
@@ -104,8 +104,8 @@ from cubeloop.checkpointer.postgres.alembic_helpers import (
 
 def upgrade():
     op.create_table(...)                            # auto-generated from cubeloop_metadata
-    op.execute(create_message_partitions_op())      # 64 hash partitions of cubeloop_messages
-    op.execute(create_runs_partitions_op())         # 64 hash partitions of cubeloop_runs
+    op.execute(create_message_partitions_op())      # 64 hash partitions of cubepi_messages
+    op.execute(create_runs_partitions_op())         # 64 hash partitions of cubepi_runs
     op.execute(write_schema_version_op())           # records EXPECTED_SCHEMA_VERSION
 ```
 
@@ -120,31 +120,31 @@ again.
 ## Data model
 
 ```
-cubeloop_threads
+cubepi_threads
     thread_id (PK)
     parent_thread_id   -- for forks
     forked_at_seq      -- seq number at fork point
     extra              -- JSONB
     created_at / updated_at
 
-cubeloop_messages
+cubepi_messages
     thread_id, seq     -- composite PK; partitioned by HASH(thread_id) into 64
     role               -- "user" | "assistant" | "tool"
     metadata           -- JSONB (indexed via GIN)
     payload            -- bytea (msgpack)
     created_at
 
-cubeloop_runs
+cubepi_runs
     thread_id, run_id  -- composite PK
     claimed_at / completed_at
     completion_seq
 
-cubeloop_hitl_answers
+cubepi_hitl_answers
     thread_id, run_id, question_id -- composite PK
     answer                         -- JSONB
     answered_at
 
-cubeloop_schema_version
+cubepi_schema_version
     version (PK)
 ```
 
@@ -182,7 +182,7 @@ The pool default of `min=1, max=10` is fine for most apps; bump
 `save_extra` does a JSONB merge, not a replace:
 
 ```sql
-extra = cubeloop_threads.extra || EXCLUDED.extra
+extra = cubepi_threads.extra || EXCLUDED.extra
 ```
 
 So writing `{"foo": 1}` then `{"bar": 2}` leaves `{"foo": 1, "bar":
@@ -194,8 +194,8 @@ keys.
 `PostgresCheckpointer` implements the v4 `snapshot` / `fork` /
 `claim_run` / `mark_run_complete` / `load_pending` Protocol methods,
 so it supports both `Agent.fork(...)` and `Agent.fork_once(...)`. The
-`parent_thread_id` and `forked_at_seq` columns on `cubeloop_threads`
-record fork lineage; `cubeloop_runs` (the v4 partitioned table) tracks
+`parent_thread_id` and `forked_at_seq` columns on `cubepi_threads`
+record fork lineage; `cubepi_runs` (the v4 partitioned table) tracks
 per-run claim/completion state.
 
 See the [Conversation Forking](../agents/forking) guide for the user-facing
@@ -246,26 +246,12 @@ def upgrade():
     op.execute(write_schema_version_op())  # bumps cubepi_schema_version to 5
 ```
 
-## Schema v5 → v6 migration
+## CubeLoop rename
 
-0.14 renames the Postgres tables from `cubepi_*` to `cubeloop_*`.
-`EXPECTED_SCHEMA_VERSION` is 6. Apply this **before** opening a 0.14
-checkpointer on an existing database:
-
-```python
-from cubeloop.checkpointer.postgres.alembic_helpers import (
-    upgrade_v5_to_v6_op,
-    write_schema_version_op,
-)
-
-def upgrade():
-    op.execute(upgrade_v5_to_v6_op())
-    op.execute(write_schema_version_op())  # writes 6 into cubeloop_schema_version
-```
-
-Do not run the v6 `CREATE TABLE` helpers against a v5 database — they
-would try to create tables that already exist under the old names.
-See the [migration guide](../../migration/from-cubepi).
+The package rename does not change the persistence schema: physical names stay
+`cubepi_*` and `EXPECTED_SCHEMA_VERSION` stays 5. Existing 0.13.6 databases need
+no migration. See the [migration guide](../../migration/from-cubepi), including
+the exceptional recovery path for withdrawn 0.14.0.
 
 ## Common pitfalls
 
@@ -295,7 +281,7 @@ See the [migration guide](../../migration/from-cubepi).
   — pass both to Alembic separately.
 - **`CheckpointCorruptionError` on `load()`** — A persisted message row
   failed to deserialize (bad msgpack payload, schema-invalid data, or an
-  unknown role). The error's `row_ref` (e.g. `cubeloop_messages.seq=42`)
+  unknown role). The error's `row_ref` (e.g. `cubepi_messages.seq=42`)
   locates the bad row for inspection or surgical repair; `thread_id` and
   `__cause__` carry the rest. CubeLoop never skips corrupt rows silently —
   dropping a message that carries `tool_calls` would leave the
