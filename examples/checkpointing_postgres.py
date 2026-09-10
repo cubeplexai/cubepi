@@ -48,17 +48,16 @@ THREAD_ID = "user-42"
 
 
 async def bootstrap_schema(dsn: str) -> None:
-    """Create the cubeloop v6 schema.
+    """Create the CubeLoop checkpointer schema v5.
 
-    In a real deployment this is your Alembic migration. Existing v5
-    databases should call upgrade_v5_to_v6_op() instead of this CREATE.
+    In a real deployment this DDL belongs in the host's Alembic history.
     """
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute("""
-            CREATE TABLE cubeloop_threads (
+            CREATE TABLE cubepi_threads (
                 thread_id TEXT PRIMARY KEY,
-                parent_thread_id TEXT REFERENCES cubeloop_threads(thread_id),
+                parent_thread_id TEXT REFERENCES cubepi_threads(thread_id),
                 forked_at_seq BIGINT,
                 extra JSONB NOT NULL DEFAULT '{}'::jsonb,
                 pending_request JSONB,
@@ -68,9 +67,9 @@ async def bootstrap_schema(dsn: str) -> None:
             );
         """)
         await conn.execute("""
-            CREATE TABLE cubeloop_messages (
+            CREATE TABLE cubepi_messages (
                 thread_id TEXT NOT NULL
-                    REFERENCES cubeloop_threads(thread_id) ON DELETE CASCADE,
+                    REFERENCES cubepi_threads(thread_id) ON DELETE CASCADE,
                 seq BIGINT NOT NULL,
                 role TEXT NOT NULL,
                 metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -82,15 +81,15 @@ async def bootstrap_schema(dsn: str) -> None:
         """)
         await conn.execute(create_message_partitions_op())
         await conn.execute("""
-            CREATE INDEX ix_cubeloop_messages_metadata_gin
-            ON cubeloop_messages USING GIN (metadata jsonb_path_ops);
+            CREATE INDEX ix_cubepi_messages_metadata_gin
+            ON cubepi_messages USING GIN (metadata jsonb_path_ops);
         """)
         await conn.execute("""
-            CREATE TABLE cubeloop_schema_version (version INTEGER PRIMARY KEY);
+            CREATE TABLE cubepi_schema_version (version INTEGER PRIMARY KEY);
         """)
         await conn.execute("""
-            CREATE TABLE cubeloop_runs (
-                thread_id TEXT NOT NULL REFERENCES cubeloop_threads(thread_id)
+            CREATE TABLE cubepi_runs (
+                thread_id TEXT NOT NULL REFERENCES cubepi_threads(thread_id)
                     ON DELETE CASCADE,
                 run_id TEXT NOT NULL,
                 claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -101,8 +100,8 @@ async def bootstrap_schema(dsn: str) -> None:
         """)
         await conn.execute(create_runs_partitions_op())
         await conn.execute("""
-            CREATE TABLE cubeloop_hitl_answers (
-                thread_id TEXT NOT NULL REFERENCES cubeloop_threads(thread_id)
+            CREATE TABLE cubepi_hitl_answers (
+                thread_id TEXT NOT NULL REFERENCES cubepi_threads(thread_id)
                     ON DELETE CASCADE,
                 run_id TEXT NOT NULL,
                 question_id TEXT NOT NULL,

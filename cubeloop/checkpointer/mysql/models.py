@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.mysql import JSON, LONGBLOB, VARCHAR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-EXPECTED_SCHEMA_VERSION = 6
+EXPECTED_SCHEMA_VERSION = 5
 PARTITION_COUNT = 64
 
 cubeloop_metadata = sa.MetaData()
@@ -29,13 +29,13 @@ class CubeloopBase(DeclarativeBase):
 
 
 class CubeloopThread(CubeloopBase):
-    __tablename__ = "cubeloop_threads"
+    __tablename__ = "cubepi_threads"
     __table_args__ = {"mysql_engine": "InnoDB"}
 
     thread_id: Mapped[str] = mapped_column(_TID, primary_key=True)
     parent_thread_id: Mapped[str | None] = mapped_column(
         _TID,
-        sa.ForeignKey("cubeloop_threads.thread_id"),
+        sa.ForeignKey("cubepi_threads.thread_id"),
         nullable=True,
     )
     forked_at_seq: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)
@@ -72,9 +72,9 @@ class CubeloopThread(CubeloopBase):
 
 
 class CubeloopMessage(CubeloopBase):
-    __tablename__ = "cubeloop_messages"
+    __tablename__ = "cubepi_messages"
     __table_args__ = (
-        sa.Index("ix_cubeloop_messages_thread_run", "thread_id", "run_id"),
+        sa.Index("ix_cubepi_messages_thread_run", "thread_id", "run_id"),
         {"mysql_engine": "InnoDB"},
     )
 
@@ -92,7 +92,7 @@ class CubeloopMessage(CubeloopBase):
     payload: Mapped[bytes] = mapped_column(LONGBLOB, nullable=False)
     # v4: opaque host-side run identifier stamped on each message. Lets
     # fork/snapshot include only messages from completed runs. VARCHAR(255)
-    # to match the cubeloop_messages indexing convention (thread_id is also
+    # to match the cubepi_messages indexing convention (thread_id is also
     # VARCHAR(255) — keeps the composite index cardinality consistent).
     run_id: Mapped[str | None] = mapped_column(
         VARCHAR(255),
@@ -109,15 +109,15 @@ class CubeloopRun(CubeloopBase):
     """v4 per-run lifecycle row.
 
     Primary key (thread_id, run_id). KEY-partitioned by thread_id to match
-    cubeloop_messages. NO FK to cubeloop_threads — MySQL forbids FKs on
+    cubepi_messages. NO FK to cubepi_threads — MySQL forbids FKs on
     partitioned tables. The partition clause cannot be expressed in
     SQLAlchemy declarative and lives in
     ``alembic_helpers.runs_partition_clause()``.
     """
 
-    __tablename__ = "cubeloop_runs"
+    __tablename__ = "cubepi_runs"
     __table_args__ = (
-        sa.Index("ix_cubeloop_runs_thread_seq", "thread_id", "completion_seq"),
+        sa.Index("ix_cubepi_runs_thread_seq", "thread_id", "completion_seq"),
         {"mysql_engine": "InnoDB"},
     )
 
@@ -136,7 +136,7 @@ class CubeloopRun(CubeloopBase):
 
 
 class CubeloopHitlAnswer(CubeloopBase):
-    __tablename__ = "cubeloop_hitl_answers"
+    __tablename__ = "cubepi_hitl_answers"
     __table_args__ = {"mysql_engine": "InnoDB"}
 
     thread_id: Mapped[str] = mapped_column(_TID, primary_key=True)
@@ -151,7 +151,7 @@ class CubeloopHitlAnswer(CubeloopBase):
 
 
 class CubeloopSchemaVersion(CubeloopBase):
-    __tablename__ = "cubeloop_schema_version"
+    __tablename__ = "cubepi_schema_version"
     __table_args__ = {"mysql_engine": "InnoDB"}
 
     version: Mapped[int] = mapped_column(sa.Integer, primary_key=True)

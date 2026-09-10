@@ -53,8 +53,8 @@ async with PostgresCheckpointer(
 
 ## Schema
 
-checkpointer 需要这些表：`cubeloop_threads`、`cubeloop_messages`、
-`cubeloop_runs`、`cubeloop_hitl_answers` 和 `cubeloop_schema_version`。
+checkpointer 需要这些表：`cubepi_threads`、`cubepi_messages`、
+`cubepi_runs`、`cubepi_hitl_answers` 和 `cubepi_schema_version`。
 与 SQLite 不同，CubeLoop **不会自动创建这些表**——
 它只在 `__aenter__` 时验证它们是否存在且 `schema_version` 是否匹配预期。
 
@@ -75,7 +75,7 @@ from cubeloop.checkpointer.postgres import cubeloop_metadata, EXPECTED_SCHEMA_VE
 target_metadata = [my_app_metadata, cubeloop_metadata]
 ```
 
-然后生成一个 revision 并执行。迁移还必须写入 `cubeloop_schema_version`。
+然后生成一个 revision 并执行。迁移还必须写入 `cubepi_schema_version`。
 使用辅助函数：
 
 ```python
@@ -88,8 +88,8 @@ from cubeloop.checkpointer.postgres.alembic_helpers import (
 
 def upgrade():
     op.create_table(...)                            # 从 cubeloop_metadata 自动生成
-    op.execute(create_message_partitions_op())      # cubeloop_messages 的 64 个哈希分区
-    op.execute(create_runs_partitions_op())         # cubeloop_runs 的 64 个哈希分区
+    op.execute(create_message_partitions_op())      # cubepi_messages 的 64 个哈希分区
+    op.execute(create_runs_partitions_op())         # cubepi_runs 的 64 个哈希分区
     op.execute(write_schema_version_op())           # 记录 EXPECTED_SCHEMA_VERSION
 ```
 
@@ -103,31 +103,31 @@ revision，再次调用 `op.execute(write_schema_version_op())`。
 ## 数据模型
 
 ```
-cubeloop_threads
+cubepi_threads
     thread_id (PK)
     parent_thread_id   -- 用于 fork
     forked_at_seq      -- fork 点处的序列号
     extra              -- JSONB
     created_at / updated_at
 
-cubeloop_messages
+cubepi_messages
     thread_id, seq     -- 复合 PK；按 HASH(thread_id) 分为 64 个分区
     role               -- "user" | "assistant" | "tool"
     metadata           -- JSONB（通过 GIN 索引）
     payload            -- bytea (msgpack)
     created_at
 
-cubeloop_runs
+cubepi_runs
     thread_id, run_id  -- 复合 PK
     claimed_at / completed_at
     completion_seq
 
-cubeloop_hitl_answers
+cubepi_hitl_answers
     thread_id, run_id, question_id -- 复合 PK
     answer                         -- JSONB
     answered_at
 
-cubeloop_schema_version
+cubepi_schema_version
     version (PK)
 ```
 
@@ -162,7 +162,7 @@ advisory lock 让同一线程上的追加操作跨进程安全：
 `save_extra` 做的是 JSONB 合并，而不是替换：
 
 ```sql
-extra = cubeloop_threads.extra || EXCLUDED.extra
+extra = cubepi_threads.extra || EXCLUDED.extra
 ```
 
 所以先写 `{"foo": 1}` 再写 `{"bar": 2}` 会得到 `{"foo": 1, "bar": 2}`。
@@ -172,7 +172,7 @@ extra = cubeloop_threads.extra || EXCLUDED.extra
 
 `parent_thread_id` + `forked_at_seq` 列用于支持
 [会话 Fork](../agents/forking)：fork 会创建一个新的 thread，并在其
-`cubeloop_threads` 行中写入指向源 thread 的 `parent_thread_id`，
+`cubepi_threads` 行中写入指向源 thread 的 `parent_thread_id`，
 以及拷贝时源 thread 末尾的 `forked_at_seq`（最后一条已拷贝消息的
 `seq`）。
 
@@ -201,24 +201,9 @@ def upgrade():
 关于混合数据的 fork 资格规则，请参阅
 [旧数据行为](../agents/forking#legacy-data-behaviour)。
 
-## Schema v5 → v6 migration
+## CubeLoop 更名
 
-0.14 把 Postgres 表从 `cubepi_*` 重命名为 `cubeloop_*`。
-`EXPECTED_SCHEMA_VERSION` 为 6。在已有库上打开 0.14 checkpointer **之前**执行：
-
-```python
-from cubeloop.checkpointer.postgres.alembic_helpers import (
-    upgrade_v5_to_v6_op,
-    write_schema_version_op,
-)
-
-def upgrade():
-    op.execute(upgrade_v5_to_v6_op())
-    op.execute(write_schema_version_op())  # 把 6 写入 cubeloop_schema_version
-```
-
-不要对 v5 数据库跑 v6 的 `CREATE TABLE` helper——旧表已经在，只是名字还是 `cubepi_*`。
-详见 [从 cubepi 迁移](../../migration/from-cubepi)。
+包名更改不会改变持久化 schema：物理名称继续使用 `cubepi_*`，`EXPECTED_SCHEMA_VERSION` 保持 5。已有 0.13.6 数据库无需迁移。撤回版本 0.14.0 的特殊恢复流程见[迁移指南](../../migration/from-cubepi)。
 
 ## 常见坑
 

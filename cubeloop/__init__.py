@@ -1,4 +1,4 @@
-"""cubepi — Pythonic async-native agent framework."""
+"""CubeLoop — Pythonic async-native agent framework."""
 
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 

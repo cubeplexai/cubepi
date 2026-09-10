@@ -145,9 +145,9 @@ async def _setup_pg_schema_v3(dsn: str) -> None:
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute("""
-            CREATE TABLE cubeloop_threads (
+            CREATE TABLE cubepi_threads (
                 thread_id TEXT PRIMARY KEY,
-                parent_thread_id TEXT NULL REFERENCES cubeloop_threads(thread_id),
+                parent_thread_id TEXT NULL REFERENCES cubepi_threads(thread_id),
                 forked_at_seq BIGINT NULL,
                 extra JSONB NOT NULL DEFAULT '{}'::jsonb,
                 pending_request JSONB,
@@ -157,8 +157,8 @@ async def _setup_pg_schema_v3(dsn: str) -> None:
             );
         """)
         await conn.execute("""
-            CREATE TABLE cubeloop_messages (
-                thread_id TEXT NOT NULL REFERENCES cubeloop_threads(thread_id) ON DELETE CASCADE,
+            CREATE TABLE cubepi_messages (
+                thread_id TEXT NOT NULL REFERENCES cubepi_threads(thread_id) ON DELETE CASCADE,
                 seq BIGINT NOT NULL,
                 role TEXT NOT NULL,
                 metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -169,11 +169,11 @@ async def _setup_pg_schema_v3(dsn: str) -> None:
         """)
         await conn.execute(create_message_partitions_op())
         await conn.execute("""
-            CREATE INDEX ix_cubeloop_messages_metadata_gin
-            ON cubeloop_messages USING GIN (metadata jsonb_path_ops);
+            CREATE INDEX ix_cubepi_messages_metadata_gin
+            ON cubepi_messages USING GIN (metadata jsonb_path_ops);
         """)
         await conn.execute("""
-            CREATE TABLE cubeloop_schema_version (version INTEGER PRIMARY KEY);
+            CREATE TABLE cubepi_schema_version (version INTEGER PRIMARY KEY);
         """)
         await conn.execute(write_schema_version_op())
     finally:
@@ -238,7 +238,7 @@ async def _setup_mysql_schema_v3(dsn: str) -> None:
     try:
         async with conn.cursor() as cur:
             await cur.execute("""
-                CREATE TABLE cubeloop_threads (
+                CREATE TABLE cubepi_threads (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin PRIMARY KEY,
                     parent_thread_id VARCHAR(255) COLLATE utf8mb4_bin NULL,
                     forked_at_seq BIGINT NULL,
@@ -249,12 +249,12 @@ async def _setup_mysql_schema_v3(dsn: str) -> None:
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                         ON UPDATE CURRENT_TIMESTAMP,
                     CONSTRAINT fk_parent FOREIGN KEY (parent_thread_id)
-                        REFERENCES cubeloop_threads (thread_id)
+                        REFERENCES cubepi_threads (thread_id)
                 ) ENGINE=InnoDB
             """)
             await cur.execute(
                 """
-                CREATE TABLE cubeloop_messages (
+                CREATE TABLE cubepi_messages (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
                     seq BIGINT NOT NULL,
                     role VARCHAR(32) NOT NULL,
@@ -266,7 +266,7 @@ async def _setup_mysql_schema_v3(dsn: str) -> None:
                 + messages_partition_clause()
             )
             await cur.execute("""
-                CREATE TABLE cubeloop_schema_version (
+                CREATE TABLE cubepi_schema_version (
                     version INT PRIMARY KEY
                 ) ENGINE=InnoDB
             """)

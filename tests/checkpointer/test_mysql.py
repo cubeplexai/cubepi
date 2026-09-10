@@ -1,5 +1,7 @@
 """MySQLCheckpointer tests — mirrors test_postgres.py."""
 
+from pathlib import Path
+
 import aiomysql
 import pytest
 
@@ -37,34 +39,34 @@ def test_models_import() -> None:
         cubeloop_metadata,
     )
 
-    assert EXPECTED_SCHEMA_VERSION == 6
+    assert EXPECTED_SCHEMA_VERSION == 5
     assert PARTITION_COUNT == 64
-    assert CubeloopThread.__tablename__ == "cubeloop_threads"
-    assert CubeloopMessage.__tablename__ == "cubeloop_messages"
-    assert CubeloopHitlAnswer.__tablename__ == "cubeloop_hitl_answers"
-    assert CubeloopSchemaVersion.__tablename__ == "cubeloop_schema_version"
-    assert "cubeloop_threads" in cubeloop_metadata.tables
-    assert "cubeloop_messages" in cubeloop_metadata.tables
-    assert "cubeloop_hitl_answers" in cubeloop_metadata.tables
-    assert "cubeloop_schema_version" in cubeloop_metadata.tables
+    assert CubeloopThread.__tablename__ == "cubepi_threads"
+    assert CubeloopMessage.__tablename__ == "cubepi_messages"
+    assert CubeloopHitlAnswer.__tablename__ == "cubepi_hitl_answers"
+    assert CubeloopSchemaVersion.__tablename__ == "cubepi_schema_version"
+    assert "cubepi_threads" in cubeloop_metadata.tables
+    assert "cubepi_messages" in cubeloop_metadata.tables
+    assert "cubepi_hitl_answers" in cubeloop_metadata.tables
+    assert "cubepi_schema_version" in cubeloop_metadata.tables
 
 
 def test_threads_parent_self_fk_present() -> None:
     """parent_thread_id keeps a self-FK (threads table is not partitioned)."""
     from cubeloop.checkpointer.mysql.models import cubeloop_metadata
 
-    threads = cubeloop_metadata.tables["cubeloop_threads"]
+    threads = cubeloop_metadata.tables["cubepi_threads"]
     fk_targets = {
         fk.column.table.name for col in threads.columns for fk in col.foreign_keys
     }
-    assert "cubeloop_threads" in fk_targets
+    assert "cubepi_threads" in fk_targets
 
 
 def test_messages_has_no_foreign_keys() -> None:
     """messages table is partitioned, so no FK is allowed."""
     from cubeloop.checkpointer.mysql.models import cubeloop_metadata
 
-    msgs = cubeloop_metadata.tables["cubeloop_messages"]
+    msgs = cubeloop_metadata.tables["cubepi_messages"]
     assert msgs.foreign_keys == set()
 
 
@@ -76,9 +78,9 @@ def test_messages_has_no_metadata_index() -> None:
     """
     from cubeloop.checkpointer.mysql.models import cubeloop_metadata
 
-    msgs = cubeloop_metadata.tables["cubeloop_messages"]
+    msgs = cubeloop_metadata.tables["cubepi_messages"]
     idx_names = {idx.name for idx in msgs.indexes}
-    assert idx_names == {"ix_cubeloop_messages_thread_run"}
+    assert idx_names == {"ix_cubepi_messages_thread_run"}
 
 
 def test_messages_partition_clause() -> None:
@@ -90,24 +92,11 @@ def test_write_schema_version_op_clears_stale_then_inserts() -> None:
     from cubeloop.checkpointer.mysql.models import EXPECTED_SCHEMA_VERSION
 
     sql = write_schema_version_op()
-    assert "cubeloop_schema_version" in sql
     assert "cubepi_schema_version" in sql
     assert f"WHERE version <> {EXPECTED_SCHEMA_VERSION}" in sql
-    assert "INSERT IGNORE INTO cubeloop_schema_version" in sql
-    assert "PREPARE cp_stmt FROM @cp_del" in sql
+    assert "INSERT IGNORE INTO cubepi_schema_version" in sql
+    assert len([stmt for stmt in sql.split(";") if stmt.strip()]) == 2
     assert sql.index("DELETE") < sql.index("INSERT")
-
-
-def test_upgrade_v5_to_v6_op_is_idempotent_guarded() -> None:
-    from cubeloop.checkpointer.mysql.alembic_helpers import upgrade_v5_to_v6_op
-
-    sql = upgrade_v5_to_v6_op()
-    assert "information_schema.tables" in sql
-    assert "cubeloop_threads" in sql
-    assert "cubeloop_schema_version" in sql
-    assert "PREPARE cp_v6 FROM @cp_sql" in sql
-    assert "RENAME TABLE" in sql
-    assert "DO 0" in sql
 
 
 def test_role_of_known_message_types() -> None:
@@ -232,7 +221,7 @@ async def _setup_schema(dsn: str) -> None:
     try:
         async with conn.cursor() as cur:
             await cur.execute("""
-                CREATE TABLE cubeloop_threads (
+                CREATE TABLE cubepi_threads (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin PRIMARY KEY,
                     parent_thread_id VARCHAR(255) COLLATE utf8mb4_bin NULL,
                     forked_at_seq BIGINT NULL,
@@ -243,12 +232,12 @@ async def _setup_schema(dsn: str) -> None:
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                         ON UPDATE CURRENT_TIMESTAMP,
                     CONSTRAINT fk_parent FOREIGN KEY (parent_thread_id)
-                        REFERENCES cubeloop_threads (thread_id)
+                        REFERENCES cubepi_threads (thread_id)
                 ) ENGINE=InnoDB
             """)
             await cur.execute(
                 """
-                CREATE TABLE cubeloop_messages (
+                CREATE TABLE cubepi_messages (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
                     seq BIGINT NOT NULL,
                     role VARCHAR(32) NOT NULL,
@@ -257,18 +246,18 @@ async def _setup_schema(dsn: str) -> None:
                     run_id VARCHAR(255) NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (thread_id, seq),
-                    KEY ix_cubeloop_messages_thread_run (thread_id, run_id)
+                    KEY ix_cubepi_messages_thread_run (thread_id, run_id)
                 ) ENGINE=InnoDB """
                 + messages_partition_clause()
             )
             await cur.execute("""
-                CREATE TABLE cubeloop_schema_version (
+                CREATE TABLE cubepi_schema_version (
                     version INT PRIMARY KEY
                 ) ENGINE=InnoDB
             """)
             await cur.execute(create_runs_table_op())
             await cur.execute("""
-                CREATE TABLE cubeloop_hitl_answers (
+                CREATE TABLE cubepi_hitl_answers (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
                     run_id VARCHAR(255) NOT NULL,
                     question_id VARCHAR(255) NOT NULL,
@@ -458,7 +447,7 @@ async def test_version_mismatch_raises(clean_mysql_db) -> None:
     conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
     try:
         async with conn.cursor() as cur:
-            await cur.execute("UPDATE cubeloop_schema_version SET version = 999")
+            await cur.execute("UPDATE cubepi_schema_version SET version = 999")
     finally:
         await conn.ensure_closed()
 
@@ -469,6 +458,8 @@ async def test_version_mismatch_raises(clean_mysql_db) -> None:
 
     assert exc_info.value.expected == EXPECTED_SCHEMA_VERSION
     assert exc_info.value.actual == 999
+    assert "withdrawn 0.14.0" in str(exc_info.value)
+    assert "call  +" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -569,7 +560,7 @@ async def test_empty_version_table_raises_uninitialized(clean_mysql_db) -> None:
     conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
     try:
         async with conn.cursor() as cur:
-            await cur.execute("DELETE FROM cubeloop_schema_version")
+            await cur.execute("DELETE FROM cubepi_schema_version")
     finally:
         await conn.ensure_closed()
 
@@ -594,11 +585,9 @@ async def test_load_unknown_role_raises(clean_mysql_db) -> None:
     conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
     try:
         async with conn.cursor() as cur:
+            await cur.execute("INSERT INTO cubepi_threads (thread_id) VALUES ('t-bad')")
             await cur.execute(
-                "INSERT INTO cubeloop_threads (thread_id) VALUES ('t-bad')"
-            )
-            await cur.execute(
-                "INSERT INTO cubeloop_messages "
+                "INSERT INTO cubepi_messages "
                 "(thread_id, seq, role, metadata, payload) "
                 "VALUES ('t-bad', 1, 'bogus', '{}', %s)",
                 (payload,),
@@ -610,7 +599,7 @@ async def test_load_unknown_role_raises(clean_mysql_db) -> None:
         with pytest.raises(CheckpointCorruptionError, match="unknown role in DB") as ei:
             await cp.load("t-bad")
     assert isinstance(ei.value.__cause__, ValueError)
-    assert ei.value.row_ref == "cubeloop_messages.seq=1"
+    assert ei.value.row_ref == "cubepi_messages.seq=1"
 
 
 @pytest.mark.asyncio
@@ -659,10 +648,10 @@ async def test_mysql_load_corrupt_row_raises_typed(clean_mysql_db) -> None:
         try:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "UPDATE cubeloop_messages SET payload = %s "
+                    "UPDATE cubepi_messages SET payload = %s "
                     "WHERE thread_id = 't-corrupt' AND seq = ("
                     "  SELECT max_seq FROM (SELECT max(seq) AS max_seq "
-                    "  FROM cubeloop_messages WHERE thread_id = 't-corrupt') AS sub)",
+                    "  FROM cubepi_messages WHERE thread_id = 't-corrupt') AS sub)",
                     (b"\xc1 not msgpack",),
                 )
         finally:
@@ -674,17 +663,28 @@ async def test_mysql_load_corrupt_row_raises_typed(clean_mysql_db) -> None:
     err = excinfo.value
     assert err.thread_id == "t-corrupt"
     assert err.backend == "mysql"
-    assert err.row_ref.startswith("cubeloop_messages.seq=")
+    assert err.row_ref.startswith("cubepi_messages.seq=")
     assert err.__cause__ is not None
 
 
 @pytest.mark.asyncio
-async def test_v5_to_v6_rename_is_idempotent_before_version_write(
+async def test_existing_v5_schema_round_trip_without_migration(
     clean_mysql_db,
 ) -> None:
-    """Rename can retry after a failure before write_schema_version_op."""
     from cubeloop.checkpointer.mysql import MySQLCheckpointer
-    from cubeloop.checkpointer.mysql.alembic_helpers import upgrade_v5_to_v6_op
+    from cubeloop.providers.base import TextContent, UserMessage
+
+    await _setup_schema_v5(clean_mysql_db)
+    async with MySQLCheckpointer(clean_mysql_db) as cp:
+        await cp.append("t-mig", [UserMessage(content=[TextContent(text="hi")])])
+        data = await cp.load("t-mig")
+    assert data is not None
+    assert len(data.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_withdrawn_v6_recovery_script_round_trip(clean_mysql_db) -> None:
+    from cubeloop.checkpointer.mysql import MySQLCheckpointer
     from cubeloop.checkpointer.mysql.checkpointer import _parse_dsn
     from cubeloop.providers.base import TextContent, UserMessage
 
@@ -692,30 +692,120 @@ async def test_v5_to_v6_rename_is_idempotent_before_version_write(
     conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
     try:
         async with conn.cursor() as cur:
-            for stmt in upgrade_v5_to_v6_op().split(";"):
-                if stmt.strip():
-                    await cur.execute(stmt)
-            # Simulate Alembic failing before the version writer, then retry.
-            for stmt in upgrade_v5_to_v6_op().split(";"):
-                if stmt.strip():
-                    await cur.execute(stmt)
-            for stmt in write_schema_version_op().split(";"):
-                if stmt.strip():
-                    await cur.execute(stmt)
             await cur.execute(
-                "SELECT table_name FROM information_schema.tables "
+                "INSERT INTO cubepi_threads (thread_id, extra) VALUES ('kept', JSON_OBJECT())"
+            )
+            await cur.execute(
+                "ALTER TABLE cubepi_messages RENAME INDEX "
+                "ix_cubepi_messages_thread_run TO ix_cubeloop_messages_thread_run"
+            )
+            await cur.execute(
+                "ALTER TABLE cubepi_runs RENAME INDEX "
+                "ix_cubepi_runs_thread_seq TO ix_cubeloop_runs_thread_seq"
+            )
+            await cur.execute(
+                "RENAME TABLE cubepi_threads TO cubeloop_threads, "
+                "cubepi_messages TO cubeloop_messages, "
+                "cubepi_runs TO cubeloop_runs, "
+                "cubepi_hitl_answers TO cubeloop_hitl_answers, "
+                "cubepi_schema_version TO cubeloop_schema_version"
+            )
+            await cur.execute("UPDATE cubeloop_schema_version SET version = 6")
+            script = Path(
+                "website/static/recovery/0.14.0/mysql-v6-to-v5.sql"
+            ).read_text()
+            for statement in script.split(";"):
+                if statement.strip():
+                    await cur.execute(statement)
+            await cur.execute(
+                "SELECT COUNT(*) FROM cubepi_threads WHERE thread_id = 'kept'"
+            )
+            assert (await cur.fetchone())[0] == 1
+            await cur.execute("SELECT version FROM cubepi_schema_version")
+            assert (await cur.fetchone())[0] == 5
+            await cur.execute(
+                "SELECT DISTINCT index_name FROM information_schema.statistics "
                 "WHERE table_schema = DATABASE()"
             )
-            names = {row[0] for row in await cur.fetchall()}
+            index_names = {row[0] for row in await cur.fetchall()}
+            assert "ix_cubepi_messages_thread_run" in index_names
+            assert "ix_cubepi_runs_thread_seq" in index_names
+            assert "ix_cubeloop_messages_thread_run" not in index_names
     finally:
         await conn.ensure_closed()
 
-    assert "cubeloop_threads" in names
-    assert "cubeloop_schema_version" in names
-    assert "cubepi_threads" not in names
-
     async with MySQLCheckpointer(clean_mysql_db) as cp:
-        await cp.append("t-mig", [UserMessage(content=[TextContent(text="hi")])])
-        data = await cp.load("t-mig")
+        await cp.append("recovered", [UserMessage(content=[TextContent(text="ok")])])
+        data = await cp.load("recovered")
     assert data is not None
     assert len(data.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_withdrawn_v6_recovery_collision_is_retryable(clean_mysql_db) -> None:
+    from cubeloop.checkpointer.mysql.checkpointer import _parse_dsn
+
+    await _setup_schema_v5(clean_mysql_db)
+    conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "RENAME TABLE cubepi_threads TO cubeloop_threads, "
+                "cubepi_messages TO cubeloop_messages, "
+                "cubepi_runs TO cubeloop_runs, "
+                "cubepi_hitl_answers TO cubeloop_hitl_answers, "
+                "cubepi_schema_version TO cubeloop_schema_version"
+            )
+            await cur.execute(
+                "CREATE TABLE cubepi_threads (thread_id VARCHAR(255) PRIMARY KEY)"
+            )
+            script = Path(
+                "website/static/recovery/0.14.0/mysql-v6-to-v5.sql"
+            ).read_text()
+            with pytest.raises(Exception):
+                for statement in script.split(";"):
+                    if statement.strip():
+                        await cur.execute(statement)
+            await cur.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = DATABASE() AND table_name IN "
+                "('cubeloop_threads', 'cubepi_threads')"
+            )
+            assert {row[0] for row in await cur.fetchall()} == {
+                "cubeloop_threads",
+                "cubepi_threads",
+            }
+            await cur.execute("DROP TABLE cubepi_threads")
+            for statement in script.split(";"):
+                if statement.strip():
+                    await cur.execute(statement)
+            await cur.execute(
+                "SELECT COUNT(*) FROM information_schema.routines "
+                "WHERE routine_schema = DATABASE() "
+                "AND routine_name = 'cubeloop_0140_recovery_preflight'"
+            )
+            assert (await cur.fetchone())[0] == 0
+    finally:
+        await conn.ensure_closed()
+
+
+@pytest.mark.asyncio
+async def test_withdrawn_v6_schema_points_to_recovery(clean_mysql_db) -> None:
+    from cubeloop.checkpointer.mysql import CubeloopSchemaMismatch, MySQLCheckpointer
+    from cubeloop.checkpointer.mysql.checkpointer import _parse_dsn
+
+    conn = await aiomysql.connect(autocommit=True, **_parse_dsn(clean_mysql_db))
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "CREATE TABLE cubeloop_schema_version "
+                "(version INT PRIMARY KEY) ENGINE=InnoDB"
+            )
+            await cur.execute("INSERT INTO cubeloop_schema_version VALUES (6)")
+    finally:
+        await conn.ensure_closed()
+    with pytest.raises(CubeloopSchemaMismatch) as exc_info:
+        async with MySQLCheckpointer(clean_mysql_db):
+            pass
+    assert exc_info.value.actual == 6
+    assert "withdrawn 0.14.0" in str(exc_info.value)

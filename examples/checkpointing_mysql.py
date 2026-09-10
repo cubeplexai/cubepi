@@ -49,16 +49,15 @@ THREAD_ID = "user-42"
 
 
 async def bootstrap_schema(dsn: str) -> None:
-    """Create the cubeloop v6 schema.
+    """Create the CubeLoop checkpointer schema v5.
 
-    In a real deployment this is your Alembic migration. Existing v5
-    databases should call upgrade_v5_to_v6_op() instead of this CREATE.
+    In a real deployment this DDL belongs in the host's Alembic history.
     """
     conn = await aiomysql.connect(autocommit=True, **_parse_dsn(dsn))
     try:
         async with conn.cursor() as cur:
             await cur.execute("""
-                CREATE TABLE cubeloop_threads (
+                CREATE TABLE cubepi_threads (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin PRIMARY KEY,
                     parent_thread_id VARCHAR(255) COLLATE utf8mb4_bin NULL,
                     forked_at_seq BIGINT NULL,
@@ -69,12 +68,12 @@ async def bootstrap_schema(dsn: str) -> None:
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                         ON UPDATE CURRENT_TIMESTAMP,
                     CONSTRAINT fk_parent FOREIGN KEY (parent_thread_id)
-                        REFERENCES cubeloop_threads (thread_id)
+                        REFERENCES cubepi_threads (thread_id)
                 ) ENGINE=InnoDB
             """)
             await cur.execute(
                 """
-                CREATE TABLE cubeloop_messages (
+                CREATE TABLE cubepi_messages (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
                     seq BIGINT NOT NULL,
                     role VARCHAR(32) NOT NULL,
@@ -83,17 +82,17 @@ async def bootstrap_schema(dsn: str) -> None:
                     run_id VARCHAR(255) NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (thread_id, seq),
-                    KEY ix_cubeloop_messages_thread_run (thread_id, run_id)
+                    KEY ix_cubepi_messages_thread_run (thread_id, run_id)
                 ) ENGINE=InnoDB """
                 + messages_partition_clause()
             )
             await cur.execute(
-                "CREATE TABLE cubeloop_schema_version (version INT PRIMARY KEY) "
+                "CREATE TABLE cubepi_schema_version (version INT PRIMARY KEY) "
                 "ENGINE=InnoDB"
             )
             await cur.execute(create_runs_table_op())
             await cur.execute("""
-                CREATE TABLE cubeloop_hitl_answers (
+                CREATE TABLE cubepi_hitl_answers (
                     thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
                     run_id VARCHAR(255) NOT NULL,
                     question_id VARCHAR(255) NOT NULL,

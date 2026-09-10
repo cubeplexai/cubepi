@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-EXPECTED_SCHEMA_VERSION = 6
+EXPECTED_SCHEMA_VERSION = 5
 PARTITION_COUNT = 64
 
 cubeloop_metadata = sa.MetaData()
@@ -26,12 +26,12 @@ class CubeloopBase(DeclarativeBase):
 
 
 class CubeloopThread(CubeloopBase):
-    __tablename__ = "cubeloop_threads"
+    __tablename__ = "cubepi_threads"
 
     thread_id: Mapped[str] = mapped_column(sa.Text, primary_key=True)
     parent_thread_id: Mapped[str | None] = mapped_column(
         sa.Text,
-        sa.ForeignKey("cubeloop_threads.thread_id"),
+        sa.ForeignKey("cubepi_threads.thread_id"),
         nullable=True,
     )
     forked_at_seq: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)
@@ -67,21 +67,21 @@ class CubeloopThread(CubeloopBase):
 
 
 class CubeloopMessage(CubeloopBase):
-    __tablename__ = "cubeloop_messages"
+    __tablename__ = "cubepi_messages"
     __table_args__ = (
         sa.Index(
-            "ix_cubeloop_messages_metadata_gin",
+            "ix_cubepi_messages_metadata_gin",
             "metadata",
             postgresql_using="gin",
             postgresql_ops={"metadata": "jsonb_path_ops"},
         ),
-        sa.Index("ix_cubeloop_messages_thread_run", "thread_id", "run_id"),
+        sa.Index("ix_cubepi_messages_thread_run", "thread_id", "run_id"),
         {"postgresql_partition_by": "HASH (thread_id)"},
     )
 
     thread_id: Mapped[str] = mapped_column(
         sa.Text,
-        sa.ForeignKey("cubeloop_threads.thread_id", ondelete="CASCADE"),
+        sa.ForeignKey("cubepi_threads.thread_id", ondelete="CASCADE"),
         primary_key=True,
     )
     seq: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True)
@@ -107,14 +107,14 @@ class CubeloopMessage(CubeloopBase):
 
 
 class CubeloopRun(CubeloopBase):
-    __tablename__ = "cubeloop_runs"
+    __tablename__ = "cubepi_runs"
     __table_args__ = (
-        sa.Index("ix_cubeloop_runs_thread_seq", "thread_id", "completion_seq"),
+        sa.Index("ix_cubepi_runs_thread_seq", "thread_id", "completion_seq"),
         {"postgresql_partition_by": "HASH (thread_id)"},
     )
     thread_id: Mapped[str] = mapped_column(
         sa.Text,
-        sa.ForeignKey("cubeloop_threads.thread_id", ondelete="CASCADE"),
+        sa.ForeignKey("cubepi_threads.thread_id", ondelete="CASCADE"),
         primary_key=True,
     )
     run_id: Mapped[str] = mapped_column(sa.Text, primary_key=True)
@@ -130,11 +130,11 @@ class CubeloopRun(CubeloopBase):
 
 
 class CubeloopHitlAnswer(CubeloopBase):
-    __tablename__ = "cubeloop_hitl_answers"
+    __tablename__ = "cubepi_hitl_answers"
 
     thread_id: Mapped[str] = mapped_column(
         sa.Text,
-        sa.ForeignKey("cubeloop_threads.thread_id", ondelete="CASCADE"),
+        sa.ForeignKey("cubepi_threads.thread_id", ondelete="CASCADE"),
         primary_key=True,
     )
     run_id: Mapped[str] = mapped_column(sa.Text, primary_key=True)
@@ -148,6 +148,6 @@ class CubeloopHitlAnswer(CubeloopBase):
 
 
 class CubeloopSchemaVersion(CubeloopBase):
-    __tablename__ = "cubeloop_schema_version"
+    __tablename__ = "cubepi_schema_version"
 
     version: Mapped[int] = mapped_column(sa.Integer, primary_key=True)

@@ -1,6 +1,6 @@
 [project]
 name = "cubepi"
-version = "0.14.0"
+version = "0.14.1"
 description = "DEPRECATED: Cubepi has been renamed to cubeloop. This package is a transitional wrapper."
 readme = "README.md"
 license = "MIT"
@@ -13,17 +13,17 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "cubeloop==0.14.0",
+    "cubeloop>=0.14.1,<0.15",
 ]
 
 [project.optional-dependencies]
-sqlite = ["cubeloop[sqlite]==0.14.0"]
-postgres = ["cubeloop[postgres]==0.14.0"]
-mysql = ["cubeloop[mysql]==0.14.0"]
-mcp = ["cubeloop[mcp]==0.14.0"]
-tracing = ["cubeloop[tracing]==0.14.0"]
-tracing-otlp = ["cubeloop[tracing-otlp]==0.14.0"]
-trace-cli = ["cubeloop[trace-cli]==0.14.0"]
+sqlite = ["cubeloop[sqlite]>=0.14.1,<0.15"]
+postgres = ["cubeloop[postgres]>=0.14.1,<0.15"]
+mysql = ["cubeloop[mysql]>=0.14.1,<0.15"]
+mcp = ["cubeloop[mcp]>=0.14.1,<0.15"]
+tracing = ["cubeloop[tracing]>=0.14.1,<0.15"]
+tracing-otlp = ["cubeloop[tracing-otlp]>=0.14.1,<0.15"]
+trace-cli = ["cubeloop[trace-cli]>=0.14.1,<0.15"]
 
 [project.scripts]
 cubepi = "cubepi.__main__:main"

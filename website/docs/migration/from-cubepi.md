@@ -21,25 +21,37 @@ from cubeloop import Agent, tool
 from cubeloop.providers.anthropic import AnthropicProvider
 ```
 
-`pip install -U cubepi` still works: 0.14+ is a wrapper that depends on
-`cubeloop==0.14.0`, re-exports the public API, and aliases `cubepi.*` imports.
+`pip install -U cubepi` still works: 0.14.1+ is a wrapper that depends on a
+compatible CubeLoop 0.14 release, re-exports the public API, and aliases
+`cubepi.*` imports.
 It warns on first import. Prefer depending on `cubeloop` directly.
 
 CLI: `cubeloop trace` (the wrapper still provides `cubepi trace` and warns).
 
-## Checkpointer schema v5 → v6
+## Checkpointer schema stays at v5
 
-Postgres and MySQL table names moved from `cubepi_*` to `cubeloop_*`.
+Postgres and MySQL keep their `cubepi_*` physical table and index names. They
+are persistent protocol identifiers, not product branding. Schema version 5 is
+unchanged, so an existing 0.13.6 database needs no migration for 0.14.1.
 SQLite table names were never prefixed; they stay `messages` / `runs` / ….
 
-Existing databases: add an Alembic revision that runs
-`upgrade_v5_to_v6_op()` then `write_schema_version_op()`. Opening 0.14 against
-an unmigrated v5 database raises `CubeloopSchemaMismatch` pointing at that
-helper — not “tables not found”.
+Historical host Alembic revisions may import helpers from
+`cubeloop.checkpointer.*.alembic_helpers`; those helpers retain their original
+v1–v5 SQL. Do not add a rename revision.
 
-If you have data tables but no `*_schema_version` table, do not apply the
-fresh v6 CREATE TABLE. Create `cubepi_schema_version` with version 5 first,
-then run the v5→v6 helper.
+### Emergency recovery from withdrawn 0.14.0
+
+0.14.0 was yanked because it briefly renamed these database objects to
+`cubeloop_*`. Only use this recovery if 0.14.0 created the database or you ran its withdrawn
+migration. Stop every application instance, take a verified backup, then run
+the script for your database with an administrative SQL client:
+
+- [Postgres v6→v5 recovery SQL](/recovery/0.14.0/postgres-v6-to-v5.sql)
+- [MySQL v6→v5 recovery SQL](/recovery/0.14.0/mysql-v6-to-v5.sql)
+
+The scripts refuse mixed/colliding schemas before renaming anything. Afterward,
+verify table and row counts, then deploy 0.14.1. Do not run them on a normal v5
+database.
 
 ## Tracing
 

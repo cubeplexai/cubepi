@@ -1,9 +1,6 @@
 """SQL helpers for host application alembic migrations (MySQL)."""
 
-from cubeloop.checkpointer.mysql.models import (
-    EXPECTED_SCHEMA_VERSION,
-    PARTITION_COUNT,
-)
+from cubeloop.checkpointer.mysql.models import PARTITION_COUNT
 
 
 def messages_partition_clause() -> str:
@@ -80,21 +77,19 @@ def add_messages_run_id_column_op() -> str:
 
 
 def create_runs_table_op() -> str:
-    """Return SQL creating the partitioned ``cubeloop_runs`` parent table.
+    """Return SQL creating the partitioned ``cubepi_runs`` parent table.
 
-    Current-schema factory (v6 names). Historical v3→v4 inlines the old
-    cubepi_runs CREATE and must not call this helper. NO FK to
-    ``cubeloop_threads`` — MySQL forbids FKs on partitioned tables.
+    NO FK to ``cubepi_threads`` — MySQL forbids FKs on partitioned tables.
     """
     return (
-        "CREATE TABLE cubeloop_runs ("
+        "CREATE TABLE cubepi_runs ("
         "  thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,"
         "  run_id VARCHAR(255) NOT NULL,"
         "  claimed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         "  completed_at TIMESTAMP NULL,"
         "  completion_seq BIGINT NULL,"
         "  PRIMARY KEY (thread_id, run_id),"
-        "  KEY ix_cubeloop_runs_thread_seq (thread_id, completion_seq)"
+        "  KEY ix_cubepi_runs_thread_seq (thread_id, completion_seq)"
         ") ENGINE=InnoDB " + runs_partition_clause()
     )
 
@@ -126,20 +121,7 @@ def upgrade_v3_to_v4_op() -> str:
             if stmt.strip():
                 op.execute(stmt)
     """
-    # Inline the pre-rename cubepi_runs CREATE. create_runs_table_op() now
-    # emits cubeloop_runs names for fresh installs.
-    legacy_runs = (
-        "CREATE TABLE cubepi_runs ("
-        "  thread_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,"
-        "  run_id VARCHAR(255) NOT NULL,"
-        "  claimed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-        "  completed_at TIMESTAMP NULL,"
-        "  completion_seq BIGINT NULL,"
-        "  PRIMARY KEY (thread_id, run_id),"
-        "  KEY ix_cubepi_runs_thread_seq (thread_id, completion_seq)"
-        ") ENGINE=InnoDB " + runs_partition_clause()
-    )
-    return f"{add_messages_run_id_column_op()} {legacy_runs};"
+    return f"{add_messages_run_id_column_op()} {create_runs_table_op()};"
 
 
 def create_hitl_answers_table_op() -> str:
@@ -166,59 +148,8 @@ def upgrade_v4_to_v5_op() -> str:
     return create_hitl_answers_table_op() + ";"
 
 
-def upgrade_v5_to_v6_op() -> str:
-    """Rename cubepi_* tables to cubeloop_* in one atomic RENAME TABLE.
-
-    Includes cubepi_schema_version. KEY partitions ride with the table.
-
-    Returns ';'-joined standalone statements (SET / PREPARE / EXECUTE).
-    Hosts must split the same way as ``write_schema_version_op``::
-
-        for stmt in upgrade_v5_to_v6_op().split(";"):
-            if stmt.strip():
-                op.execute(stmt)
-
-    Complete (no-op) iff both cubeloop_threads and cubeloop_schema_version
-    already exist. If data tables moved but the version table did not,
-    only the leftover version table is renamed. Requires a complete v5;
-    missing cubepi_schema_version fails the whole rename.
-    """
-    rename_all = (
-        "RENAME TABLE "
-        "cubepi_threads TO cubeloop_threads, "
-        "cubepi_messages TO cubeloop_messages, "
-        "cubepi_runs TO cubeloop_runs, "
-        "cubepi_hitl_answers TO cubeloop_hitl_answers, "
-        "cubepi_schema_version TO cubeloop_schema_version"
-    )
-    rename_ver = "RENAME TABLE cubepi_schema_version TO cubeloop_schema_version"
-    return (
-        "SET @cp_new_th = ("
-        "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = DATABASE() "
-        "AND table_name = 'cubeloop_threads'); "
-        "SET @cp_new_ver = ("
-        "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = DATABASE() "
-        "AND table_name = 'cubeloop_schema_version'); "
-        "SET @cp_old_ver = ("
-        "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = DATABASE() "
-        "AND table_name = 'cubepi_schema_version'); "
-        "SET @cp_sql = IF(@cp_new_th > 0 AND @cp_new_ver > 0, "
-        "'DO 0', "
-        "IF(@cp_new_th > 0 AND @cp_old_ver > 0, "
-        f"'{rename_ver}', "
-        f"'{rename_all}')); "
-        "PREPARE cp_v6 FROM @cp_sql; "
-        "EXECUTE cp_v6; "
-        "DEALLOCATE PREPARE cp_v6;"
-    )
-
-
 def write_schema_version_op() -> str:
-    """Write EXPECTED_SCHEMA_VERSION to cubeloop_schema_version if that
-    table exists, else to cubepi_schema_version.
+    """Return the immutable v5 schema-version write used by host migrations.
 
     Returns ';'-joined **standalone** statements. Hosts must split::
 
@@ -226,24 +157,9 @@ def write_schema_version_op() -> str:
             if stmt.strip():
                 op.execute(stmt)
 
-    No compound IF/THEN — internal semicolons would break the split contract.
+    The two standalone statements preserve the documented split contract.
     """
-    n = EXPECTED_SCHEMA_VERSION
     return (
-        "SET @cp_ver_new = ("
-        "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = DATABASE() "
-        "AND table_name = 'cubeloop_schema_version'); "
-        f"SET @cp_del = IF(@cp_ver_new > 0, "
-        f"'DELETE FROM cubeloop_schema_version WHERE version <> {n}', "
-        f"'DELETE FROM cubepi_schema_version WHERE version <> {n}'); "
-        "PREPARE cp_stmt FROM @cp_del; "
-        "EXECUTE cp_stmt; "
-        "DEALLOCATE PREPARE cp_stmt; "
-        f"SET @cp_ins = IF(@cp_ver_new > 0, "
-        f"'INSERT IGNORE INTO cubeloop_schema_version (version) VALUES ({n})', "
-        f"'INSERT IGNORE INTO cubepi_schema_version (version) VALUES ({n})'); "
-        "PREPARE cp_stmt FROM @cp_ins; "
-        "EXECUTE cp_stmt; "
-        "DEALLOCATE PREPARE cp_stmt;"
+        "DELETE FROM cubepi_schema_version WHERE version <> 5; "
+        "INSERT IGNORE INTO cubepi_schema_version (version) VALUES (5);"
     )

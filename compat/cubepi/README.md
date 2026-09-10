@@ -10,7 +10,8 @@ pip install cubeloop
 from cubeloop import Agent, tool
 ```
 
-This distribution is a transitional wrapper: it depends on `cubeloop==0.14.0`,
+This distribution is a transitional wrapper: it depends on a compatible
+`cubeloop>=0.14.1,<0.15`,
 re-exports the public API, and aliases `cubepi.*` imports onto `cubeloop.*`.
 Installing it prints a deprecation warning on first import.
 
