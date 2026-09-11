@@ -106,16 +106,13 @@ def upgrade():
     op.create_table(...)                            # auto-generated from cubeloop_metadata
     op.execute(create_message_partitions_op())      # 64 hash partitions of cubepi_messages
     op.execute(create_runs_partitions_op())         # 64 hash partitions of cubepi_runs
-    op.execute(write_schema_version_op())           # records EXPECTED_SCHEMA_VERSION
+    op.execute(write_schema_version_op())           # records historical schema v5
 ```
 
 Both helpers return a SQL string — you pass them to `op.execute(...)`.
-`write_schema_version_op()` is idempotent: it deletes any rows from a
-prior CubeLoop version and inserts the current one.
-
-When CubeLoop later upgrades and bumps `EXPECTED_SCHEMA_VERSION`, you
-generate a new revision and call `op.execute(write_schema_version_op())`
-again.
+`write_schema_version_op()` is the immutable historical v5 writer. It is
+idempotent, deleting other version rows before inserting 5. A future schema
+version must ship and use a new version-specific writer; do not reuse this one.
 
 ## Data model
 

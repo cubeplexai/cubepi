@@ -108,7 +108,7 @@ def upgrade():
     #     cubepi_schema_version, and cubepi_messages (keep ALL columns;
     #     ensure cubepi_messages has postgresql_partition_by="HASH (thread_id)") ...
     op.execute(create_message_partitions_op())  # the 64 child partitions
-    op.execute(write_schema_version_op())        # record EXPECTED_SCHEMA_VERSION
+    op.execute(write_schema_version_op())        # record historical schema v5
 ```
 
 > Do not hand-trim the `cubepi_messages` columns. The checkpointer writes
@@ -131,7 +131,7 @@ from cubeloop.checkpointer.postgres.alembic_helpers import (
 
 def upgrade():
     op.execute(add_pending_request_column_op())   # ADD COLUMN IF NOT EXISTS
-    op.execute(write_schema_version_op())         # bump to EXPECTED_SCHEMA_VERSION
+    op.execute(write_schema_version_op())         # record historical schema v5
 
 def downgrade():
     op.execute("ALTER TABLE cubepi_threads DROP COLUMN IF EXISTS pending_request")

@@ -34,7 +34,8 @@ Postgres 和 MySQL 的物理表名、分区名和索引名继续使用 `cubepi_*
 历史 Alembic revision 可以继续从 `cubeloop.checkpointer.*.alembic_helpers`
 导入 helper；这些 helper 保持原来的 v1–v5 SQL。不要添加表名 rename revision。
 
-从 0.13.6 或更早版本直接升级到 0.14.1 或更高版本，不需要数据库迁移。
+已有 schema v5 数据库不需要表名迁移。如果数据库仍是更早的 schema version，
+请先通过宿主 Alembic migration 正常升级到 v5，再启动 0.14.1 checkpointer。
 
 ## Tracing
 

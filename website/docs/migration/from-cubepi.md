@@ -38,8 +38,9 @@ Historical host Alembic revisions may import helpers from
 `cubeloop.checkpointer.*.alembic_helpers`; those helpers retain their original
 v1–v5 SQL. Do not add a rename revision.
 
-Upgrade directly from 0.13.6 or earlier to 0.14.1 or later. No database
-migration is required.
+An existing schema-v5 database needs no rename migration. If the database is on
+an earlier schema version, run its normal host Alembic migrations through v5
+before opening the 0.14.1 checkpointer.
 
 ## Tracing
 
