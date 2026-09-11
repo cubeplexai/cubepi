@@ -68,9 +68,10 @@ pip install cubeloop
 用于安装 CubeLoop 和构建 0.14 发布 API。
 
 CubeLoop 0.14 将 CubePi / `cubepi` 重命名为 CubeLoop / `cubeloop`：导入路径、
-PyPI 项目、CLI、文档站（`https://cubeloop.dev`）、OTel vendor 命名空间
-（`cubeloop.*`）、以及 Postgres/MySQL 表名（`cubeloop_*`）。
-`pip install cubepi` 0.14+ 是依赖 `cubeloop` 并告警的过渡包装。详见
+PyPI 项目、CLI、文档站（`https://cubeloop.dev`）和 OTel vendor 命名空间
+（`cubeloop.*`）。
+Postgres/MySQL 的物理名称继续使用 `cubepi_*`，schema version 保持 5。
+`cubepi` 0.14.1+ 是不带依赖的占位包，导入和命令会直接报错并提示迁移。详见
 [迁移指南](./migration/from-cubepi.md)。
 
 源代码、Issue 和讨论都在

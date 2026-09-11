@@ -20,11 +20,10 @@ from cubeloop import Agent, tool
 from cubeloop.providers.anthropic import AnthropicProvider
 ```
 
-`pip install -U cubepi` 仍可使用：0.14.1+ 是兼容包装，依赖同一 0.14 系列的
-CubeLoop，重新导出公共 API，并为 `cubepi.*` 深层导入提供别名。首次导入会告警，
-新项目应直接依赖 `cubeloop`。
+`cubepi` 0.14.1+ 是不带依赖的占位包。所有 `cubepi` 导入都会直接报错并提示迁移，
+不会安装或代理 CubeLoop。请明确替换项目依赖和全部 import。
 
-CLI 改为 `cubeloop trace`；包装包仍提供会告警的 `cubepi trace`。
+CLI 请将 `cubepi trace` 替换为 `cubeloop trace`。
 
 ## Checkpointer schema 保持 v5
 
@@ -35,17 +34,7 @@ Postgres 和 MySQL 的物理表名、分区名和索引名继续使用 `cubepi_*
 历史 Alembic revision 可以继续从 `cubeloop.checkpointer.*.alembic_helpers`
 导入 helper；这些 helper 保持原来的 v1–v5 SQL。不要添加表名 rename revision。
 
-### 从已撤回的 0.14.0 紧急恢复
-
-0.14.0 曾短暂把数据库对象改成 `cubeloop_*`，因此已被 yank。只有确实执行过
-那条迁移时才使用下面的恢复脚本。先停止全部应用实例并完成可验证备份，再用
-数据库管理客户端执行对应脚本：
-
-- [Postgres v6→v5 恢复脚本](/recovery/0.14.0/postgres-v6-to-v5.sql)
-- [MySQL v6→v5 恢复脚本](/recovery/0.14.0/mysql-v6-to-v5.sql)
-
-脚本会在修改前拒绝混合或冲突 schema。完成后核对表和行数，再部署 0.14.1。
-正常 v5 数据库不要执行这些脚本。
+从 0.13.6 或更早版本直接升级到 0.14.1 或更高版本，不需要数据库迁移。
 
 ## Tracing
 

@@ -74,10 +74,11 @@ documentation set for installing CubeLoop and building against the published
 0.14 API.
 
 CubeLoop 0.14 renames CubePi / `cubepi` to CubeLoop / `cubeloop`: import
-path, PyPI project, CLI, docs site (`https://cubeloop.dev`), OTel vendor
-namespace (`cubeloop.*`), and Postgres/MySQL table names (`cubeloop_*`).
-`pip install cubepi` 0.14+ is a transitional wrapper that depends on
-`cubeloop` and warns. See the [migration guide](./migration/from-cubepi.md).
+path, PyPI project, CLI, docs site (`https://cubeloop.dev`), and OTel vendor
+namespace (`cubeloop.*`). Persistent Postgres/MySQL names remain `cubepi_*` at
+schema v5. The `cubepi` 0.14.1+ distribution is a dependency-free tombstone;
+imports and commands fail with migration guidance. See the
+[migration guide](./migration/from-cubepi.md).
 
 Source, issues, and discussion live on
 [GitHub](https://github.com/cubeplexai/cubeloop).

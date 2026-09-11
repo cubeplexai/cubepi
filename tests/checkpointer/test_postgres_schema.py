@@ -15,9 +15,9 @@ def test_schema_mismatch_hint_names_every_step_across_multiple_versions():
     assert "upgrade_v4_to_v5_op()" in hint
 
 
-def test_newer_schema_hint_points_to_withdrawn_release_recovery():
+def test_newer_schema_hint_is_actionable():
     hint = _schema_mismatch_hint(actual=6, expected=5)
-    assert "withdrawn 0.14.0" in hint
+    assert "newer than this CubeLoop release" in hint
     assert "call  +" not in hint
 
 

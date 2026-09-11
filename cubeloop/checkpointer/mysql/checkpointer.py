@@ -189,14 +189,7 @@ class MySQLCheckpointer:
                             raise CubeloopSchemaMismatch(
                                 expected=EXPECTED_SCHEMA_VERSION,
                                 actual=actual,
-                                hint=(
-                                    "database schema is newer than this CubeLoop "
-                                    "release. If withdrawn 0.14.0 wrote version 6, "
-                                    "inspect the database and follow "
-                                    "https://cubeloop.dev/docs/migration/"
-                                    "from-cubepi#emergency-recovery-from-withdrawn-0140; "
-                                    "do not run a forward migration."
-                                ),
+                                hint="database schema is newer than this CubeLoop release.",
                             )
                         steps = ", ".join(
                             f"upgrade_v{v}_to_v{v + 1}_op()"
@@ -216,27 +209,10 @@ class MySQLCheckpointer:
                         )
                     return
 
-                withdrawn, withdrawn_missing = await self._select_version(
-                    cur, "cubeloop_schema_version"
-                )
-                if not withdrawn_missing and withdrawn is not None:
-                    actual = int(withdrawn[0])
-                    raise CubeloopSchemaMismatch(
-                        expected=EXPECTED_SCHEMA_VERSION,
-                        actual=actual,
-                        hint=(
-                            "database uses the withdrawn 0.14.0 cubeloop_* "
-                            "schema. Inspect it and follow "
-                            "https://cubeloop.dev/docs/migration/"
-                            "from-cubepi#emergency-recovery-from-withdrawn-0140; "
-                            "do not run a forward migration."
-                        ),
-                    )
-
                 await cur.execute(
                     "SELECT COUNT(*) FROM information_schema.tables "
                     "WHERE table_schema = DATABASE() "
-                    "AND table_name IN ('cubepi_threads', 'cubeloop_threads')"
+                    "AND table_name = 'cubepi_threads'"
                 )
                 count_row = await cur.fetchone()
                 if count_row and count_row[0]:

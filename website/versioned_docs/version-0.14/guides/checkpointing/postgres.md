@@ -250,8 +250,7 @@ def upgrade():
 
 The package rename does not change the persistence schema: physical names stay
 `cubepi_*` and `EXPECTED_SCHEMA_VERSION` stays 5. Existing 0.13.6 databases need
-no migration. See the [migration guide](../../migration/from-cubepi), including
-the exceptional recovery path for withdrawn 0.14.0.
+no migration. See the [migration guide](../../migration/from-cubepi).
 
 ## Common pitfalls
 

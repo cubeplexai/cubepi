@@ -650,14 +650,14 @@ class TestCanAcceptExtendedArgs:
     def test_returns_false_when_signature_raises_value_error(self):
         """When inspect.signature raises ValueError, should return False."""
         with patch(
-            "cubepi.providers.faux.inspect.signature", side_effect=ValueError("boom")
+            "cubeloop.providers.faux.inspect.signature", side_effect=ValueError("boom")
         ):
             assert _can_accept_extended_args(lambda: None) is False
 
     def test_returns_false_when_signature_raises_type_error(self):
         """When inspect.signature raises TypeError, should return False."""
         with patch(
-            "cubepi.providers.faux.inspect.signature", side_effect=TypeError("boom")
+            "cubeloop.providers.faux.inspect.signature", side_effect=TypeError("boom")
         ):
             assert _can_accept_extended_args(lambda: None) is False
 

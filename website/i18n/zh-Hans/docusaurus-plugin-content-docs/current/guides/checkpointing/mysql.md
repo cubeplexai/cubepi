@@ -188,7 +188,7 @@ def upgrade():
 
 ## CubeLoop 更名
 
-包名更改不会改变持久化 schema：物理名称继续使用 `cubepi_*`，`EXPECTED_SCHEMA_VERSION` 保持 5。已有 0.13.6 数据库无需迁移。撤回版本 0.14.0 的特殊恢复流程见[迁移指南](../../migration/from-cubepi)。
+包名更改不会改变持久化 schema：物理名称继续使用 `cubepi_*`，`EXPECTED_SCHEMA_VERSION` 保持 5。已有 0.13.6 数据库无需迁移。详见[迁移指南](../../migration/from-cubepi)。
 
 ## 常见陷阱
 

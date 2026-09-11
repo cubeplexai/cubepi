@@ -5,35 +5,27 @@
 **Worktree:** `.worktrees/2026-09-10-retain-cubepi-schema` on branch
 `2026-09-10-retain-cubepi-schema`.
 
-## 1. Prepare withdrawal communication
+## 1. Prepare deletion communication
 
-- Prepare the public incident/recovery page and v0.14.0 release-note amendment.
-- Do not yank until the recovery page is merged and deployed (or the release note
-  contains the complete recovery procedure inline).
+- Update the migration page and v0.14.0 release notes to say 0.14.0 was removed
+  and 0.14.1 is the first supported CubeLoop release.
 
 ## 2. Restore the v5 persistence contract
 
 - Change Postgres/MySQL model table/index names back to `cubepi_*` while retaining
   `Cubeloop*` Python names and `cubeloop_metadata`.
 - Set both database `EXPECTED_SCHEMA_VERSION` constants to 5.
-- Restore all runtime and verification SQL identifiers to `cubepi_*`; remove the
-  v6-specific diagnosis path.
+- Restore all runtime and verification SQL identifiers to `cubepi_*`; remove all
+  v6-specific diagnosis and recovery paths.
 - Restore Alembic helper SQL to the exact 0.13.6 storage semantics and remove
   `upgrade_v5_to_v6_op()`.
 - Restore examples and backend READMEs.
 
-## 3. Create and test the recovery source
+## 3. Remove the withdrawn recovery surface
 
-- Add canonical machine-readable scripts at
-  `website/static/recovery/0.14.0/postgres-v6-to-v5.sql` and
-  `website/static/recovery/0.14.0/mysql-v6-to-v5.sql`. These are the only
-  executable recovery source; EN/zh-Hans docs link to the same downloads and
-  explain backup, stop-the-world, execution, and verification rather than
-  maintaining translated SQL copies.
-- Each script performs collision/mixed-state preflight before mutation and
-  restores tables, Postgres partitions, indexes, and schema version 5.
-- Test both scripts against an exact v6 fixture with data, indexes, constraints,
-  and partitions; prove preflight failure leaves mixed/colliding schemas intact.
+- Delete the PostgreSQL/MySQL reverse-rename scripts and their integration tests.
+- Delete runtime probes and special error messages for `cubeloop_*` database
+  objects. Retain ordinary v5 version and missing-schema validation.
 
 ## 4. Lock down migration reproducibility
 
@@ -46,10 +38,13 @@
 
 ## 5. Repair packaging and documentation
 
-- Bump root and shim projects to 0.14.1 and change shim dependency/extras to
-  `>=0.14.1,<0.15`.
+- Bump root and tombstone projects to 0.14.1. Remove all tombstone dependencies,
+  extras forwarding, import aliases, API exports, and CLI dispatch.
+- Test top-level/deep imports and both command forms for non-zero actionable
+  failure without importing or installing `cubeloop`; Python tracebacks are
+  acceptable as long as they contain the guidance.
 - Rewrite the current and version-0.14 migration/checkpoint docs in English and
-  zh-Hans; include isolated emergency reverse-rename instructions for 0.14.0.
+  zh-Hans; remove every recovery link and state that 0.14.0 was deleted.
 - Correct the existing 0.14 pages in place; do not rerun docs version creation or
   alter versions/sidebars/latest-version state.
 - Update recipes, generated API references as required, changelog, and release
@@ -72,13 +67,12 @@
 - Run spec → plan → code reviews with `codex:rescue`, fixing until clean.
 - Commit and push the branch; open the replacement PR with test evidence.
 - Run the PR Codex poll/fix/`@codex` loop until clean and wait for CI.
-- Merge and wait for the recovery page and downloadable scripts to deploy.
-- Amend the v0.14.0 GitHub release, yank both 0.14.0 PyPI projects with the
-  approved reason, verify their JSON metadata, and close #223 as superseded.
+- Merge and wait for the migration page to deploy.
 - Verify the merged `main` commit already contains the reviewed 0.14.1 versions
   and changelog from this PR. Explicitly skip `dev/runbooks/cut-doc-version.md`
   and never run `docusaurus docs:version 0.14`; the existing snapshot was
   corrected in place.
-- Tag that exact clean `main` commit as v0.14.1, publish both wheels, then verify
-  PyPI metadata and clean-machine installation of both `cubeloop==0.14.1` and
-  `cubepi==0.14.1`.
+- Tag that exact clean `main` commit as v0.14.1, publish both wheels, and verify
+  PyPI metadata and clean-machine behavior. In the same release window, delete
+  both 0.14.0 PyPI releases and verify their files are gone. Then amend the
+  v0.14.0 GitHub release and close #223 as superseded.
