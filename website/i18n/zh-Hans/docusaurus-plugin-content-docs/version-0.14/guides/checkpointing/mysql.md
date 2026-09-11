@@ -102,7 +102,9 @@ def upgrade():
             op.execute(stmt)
 ```
 
-`write_schema_version_op()` 是幂等的：它会删除旧 CubeLoop 版本的记录行并插入当前版本。当 CubeLoop 之后更新 `EXPECTED_SCHEMA_VERSION` 时，生成新的 revision 并再次运行即可。
+`write_schema_version_op()` 是不可变的历史 v5 writer：它会删除其他版本行并写入 5，
+可以重复执行。未来 schema version 必须新增并调用对应版本的 writer，不能复用这个
+helper。
 
 ## 数据模型
 

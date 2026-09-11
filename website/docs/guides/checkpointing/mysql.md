@@ -120,10 +120,9 @@ def upgrade():
             op.execute(stmt)
 ```
 
-`write_schema_version_op()` is idempotent: it deletes any rows from a
-prior CubeLoop version and inserts the current one. When CubeLoop later
-bumps `EXPECTED_SCHEMA_VERSION`, generate a new revision and run it
-again.
+`write_schema_version_op()` is the immutable historical v5 writer. It is
+idempotent, deleting other version rows before inserting 5. A future schema
+version must ship and use a new version-specific writer; do not reuse this one.
 
 ## Data model
 

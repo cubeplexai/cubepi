@@ -90,15 +90,13 @@ def upgrade():
     op.create_table(...)                            # 从 cubeloop_metadata 自动生成
     op.execute(create_message_partitions_op())      # cubepi_messages 的 64 个哈希分区
     op.execute(create_runs_partitions_op())         # cubepi_runs 的 64 个哈希分区
-    op.execute(write_schema_version_op())           # 记录 EXPECTED_SCHEMA_VERSION
+    op.execute(write_schema_version_op())           # 记录历史 schema v5
 ```
 
 两个辅助函数都返回 SQL 字符串——你需要传入 `op.execute(...)`。
-`write_schema_version_op()` 是幂等的：它会删除之前 CubeLoop 版本的所有行，
-然后插入当前版本。
-
-当 CubeLoop 后续升级并提升了 `EXPECTED_SCHEMA_VERSION` 时，生成一个新的
-revision，再次调用 `op.execute(write_schema_version_op())`。
+`write_schema_version_op()` 是不可变的历史 v5 writer：它会删除其他版本行并写入
+5，可以重复执行。未来 schema version 必须新增并调用对应版本的 writer，不能复用
+这个 helper。
 
 ## 数据模型
 
