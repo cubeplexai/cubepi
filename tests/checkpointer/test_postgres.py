@@ -3,8 +3,6 @@
 Full E2E tests are in D1.3 once PostgresCheckpointer is implemented.
 """
 
-from pathlib import Path
-
 import asyncpg
 import pytest
 
@@ -509,102 +507,6 @@ async def test_existing_v5_schema_round_trip_without_migration(clean_db) -> None
 
 
 @pytest.mark.asyncio
-async def test_withdrawn_v6_recovery_script_round_trip(clean_db) -> None:
-    from cubeloop.checkpointer.postgres import PostgresCheckpointer
-    from cubeloop.providers.base import TextContent, UserMessage
-
-    await _setup_schema_v5(clean_db)
-    conn = await asyncpg.connect(clean_db)
-    try:
-        await conn.execute(
-            "INSERT INTO cubepi_threads (thread_id, extra) VALUES ('kept', '{}')"
-        )
-        await conn.execute("ALTER TABLE cubepi_threads RENAME TO cubeloop_threads")
-        await conn.execute("ALTER TABLE cubepi_messages RENAME TO cubeloop_messages")
-        for i in range(64):
-            await conn.execute(
-                f"ALTER TABLE cubepi_messages_p{i:02d} "
-                f"RENAME TO cubeloop_messages_p{i:02d}"
-            )
-        await conn.execute("ALTER TABLE cubepi_runs RENAME TO cubeloop_runs")
-        for i in range(64):
-            await conn.execute(
-                f"ALTER TABLE cubepi_runs_p{i:02d} RENAME TO cubeloop_runs_p{i:02d}"
-            )
-        await conn.execute(
-            "ALTER TABLE cubepi_hitl_answers RENAME TO cubeloop_hitl_answers"
-        )
-        await conn.execute(
-            "ALTER TABLE cubepi_schema_version RENAME TO cubeloop_schema_version"
-        )
-        await conn.execute(
-            "ALTER INDEX ix_cubepi_messages_metadata_gin "
-            "RENAME TO ix_cubeloop_messages_metadata_gin"
-        )
-        await conn.execute(
-            "ALTER INDEX ix_cubepi_messages_thread_run "
-            "RENAME TO ix_cubeloop_messages_thread_run"
-        )
-        await conn.execute(
-            "ALTER INDEX ix_cubepi_runs_thread_seq "
-            "RENAME TO ix_cubeloop_runs_thread_seq"
-        )
-        await conn.execute("UPDATE cubeloop_schema_version SET version = 6")
-        await conn.execute(
-            Path("website/static/recovery/0.14.0/postgres-v6-to-v5.sql").read_text()
-        )
-        assert (
-            await conn.fetchval(
-                "SELECT count(*) FROM cubepi_threads WHERE thread_id = 'kept'"
-            )
-            == 1
-        )
-        assert await conn.fetchval("SELECT version FROM cubepi_schema_version") == 5
-        assert (
-            await conn.fetchval(
-                "SELECT count(*) FROM pg_inherits i "
-                "JOIN pg_class p ON p.oid = i.inhparent "
-                "WHERE p.relname IN ('cubepi_messages', 'cubepi_runs')"
-            )
-            == 128
-        )
-        index_names = {
-            row["indexname"]
-            for row in await conn.fetch(
-                "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()"
-            )
-        }
-        assert "ix_cubepi_messages_thread_run" in index_names
-        assert "ix_cubepi_runs_thread_seq" in index_names
-    finally:
-        await conn.close()
-
-    async with PostgresCheckpointer(clean_db) as cp:
-        await cp.append("recovered", [UserMessage(content=[TextContent(text="ok")])])
-        data = await cp.load("recovered")
-    assert data is not None
-    assert len(data.messages) == 1
-
-
-@pytest.mark.asyncio
-async def test_withdrawn_v6_recovery_collision_is_atomic(clean_db) -> None:
-    await _setup_schema_v5(clean_db)
-    conn = await asyncpg.connect(clean_db)
-    try:
-        await conn.execute("ALTER TABLE cubepi_threads RENAME TO cubeloop_threads")
-        await conn.execute("CREATE TABLE cubepi_threads (thread_id TEXT PRIMARY KEY)")
-        with pytest.raises(asyncpg.PostgresError):
-            await conn.execute(
-                Path("website/static/recovery/0.14.0/postgres-v6-to-v5.sql").read_text()
-            )
-        await conn.execute("ROLLBACK")
-        assert await conn.fetchval("SELECT to_regclass('cubeloop_threads')")
-        assert await conn.fetchval("SELECT to_regclass('cubepi_threads')")
-    finally:
-        await conn.close()
-
-
-@pytest.mark.asyncio
 async def test_data_tables_without_version_table_are_not_uninitialized(
     clean_db,
 ) -> None:
@@ -629,30 +531,3 @@ async def test_data_tables_without_version_table_are_not_uninitialized(
             pass
     assert "Uninitialized" not in type(ei.value).__name__
     assert not isinstance(ei.value, CubeloopSchemaUninitialized)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("stored_version", [5, 6])
-async def test_withdrawn_v6_schema_points_to_recovery(
-    clean_db, stored_version: int
-) -> None:
-    from cubeloop.checkpointer.postgres import (
-        CubeloopSchemaMismatch,
-        PostgresCheckpointer,
-    )
-
-    conn = await asyncpg.connect(clean_db)
-    try:
-        await conn.execute(
-            "CREATE TABLE cubeloop_schema_version (version INTEGER PRIMARY KEY)"
-        )
-        await conn.execute(
-            "INSERT INTO cubeloop_schema_version VALUES ($1)", stored_version
-        )
-    finally:
-        await conn.close()
-    with pytest.raises(CubeloopSchemaMismatch) as exc_info:
-        async with PostgresCheckpointer(clean_db):
-            pass
-    assert exc_info.value.actual == stored_version
-    assert "withdrawn 0.14.0" in str(exc_info.value)

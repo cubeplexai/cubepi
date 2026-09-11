@@ -13,9 +13,10 @@
 | Product, package, imports, CLI | Remain CubeLoop / `cubeloop` |
 | Postgres and MySQL physical names | Keep `cubepi_*` permanently |
 | Schema version | Remain v5; the brand rename is not a schema change |
-| 0.14.0 | Yank both PyPI distributions, without deleting files or the GitHub tag/release |
-| Recovery scope | No runtime dual-schema support; document an emergency reverse rename for any early adopter |
+| 0.14.0 | Delete both PyPI releases; keep the GitHub tag/release as incident history |
+| Recovery scope | None; 0.14.0 had no users and is removed rather than supported |
 | Replacement | Publish 0.14.1 after clean review and CI |
+| `cubepi` package | Publish a dependency-free tombstone that always fails with migration guidance |
 
 ## 1. Problem
 
@@ -78,38 +79,34 @@ frozen v5 writer rather than tracking `EXPECTED_SCHEMA_VERSION`. Future schema
 work adds explicitly versioned writers and helpers; it must not retarget an
 existing helper or derive historical SQL from a mutable package constant.
 
-### 3.3 0.14.0 early-adopter recovery
+### 3.3 No 0.14.0 database recovery surface
 
-0.14.1 does not silently detect or mutate `cubeloop_*` databases. The migration
-guide contains conspicuous, dialect-specific emergency reverse-rename SQL for a
-database that actually ran the withdrawn v6 migration. It instructs operators to:
+Remove the reverse-rename SQL, withdrawn-schema runtime probing, and recovery
+guidance. Delete both 0.14.0 distributions during the 0.14.1 release cutover,
+after both replacement distributions are downloadable and verified, so package
+resolution never falls back to 0.13.6 or to no installable CubeLoop release.
+0.14.1 supports the stable v5 `cubepi_*` schema only. A database containing
+`cubeloop_*` objects is outside the supported contract; the package neither
+detects nor mutates it specially.
 
-1. stop all application instances;
-2. back up the database;
-3. rename tables, all Postgres child partitions, and indexes back;
-4. write schema version 5;
-5. verify object names and row counts before starting 0.14.1.
+### 3.4 Compatibility distribution becomes a tombstone
 
-The recovery is not part of the normal upgrade path.
-
-The documented SQL is executable source, not an untested snippet. Integration
-tests create the exact withdrawn 0.14.0 v6 schema, insert representative data,
-execute the documented recovery statements from a shared source verbatim, and
-verify v5 names, partitions, indexes, constraints, row counts, version 5, and a
-successful 0.14.1 checkpointer round trip. A preflight must detect name
-collisions or mixed v5/v6 schemas and fail before executing any rename.
-
-### 3.4 Compatibility distribution
-
-Publish `cubepi==0.14.1` with the real package. Its dependency and forwarded
-extras use `cubeloop>=0.14.1,<0.15`, allowing compatible 0.14 patch fixes while
-preventing an unreviewed minor-version jump. Both distributions remain versioned
-and published together.
+Publish `cubepi==0.14.1` as a dependency-free tombstone package. It must not
+depend on, import, re-export, alias, or dispatch to `cubeloop`. Importing
+`cubepi` or any `cubepi.*` path raises `ImportError` immediately with a concise
+message naming the replacement package/import and linking to the migration
+guide. The package declares no dependencies and no optional-dependency extras.
+Running the `cubepi` console script or `python -m cubepi` exits non-zero through
+that same import failure, with the same actionable guidance and no CubeLoop
+command dispatch. A normal Python import traceback is acceptable for these
+command forms; tests assert the non-zero status and guidance text, not polished
+CLI rendering.
 
 ### 3.5 Documentation and frozen 0.14 snapshot
 
 Update current English and zh-Hans checkpointing/migration docs, backend READMEs,
-examples, API reference inputs, and the existing 0.14 versioned snapshot.
+examples, API reference inputs, and the existing 0.14 versioned snapshot. State
+that 0.14.0 was removed and has no supported database migration.
 Although frozen snapshots normally do not change, 0.14.0 is withdrawn and 0.14.1
 is the supported 0.14 release, so the snapshot must describe the safe 0.14
 contract. Correct only the affected persistence/migration pages in place and
@@ -119,19 +116,16 @@ Record this exception in the changelog and release notes.
 
 Close PR #223 as superseded, preserving it as incident context.
 
-## 4. Yank and release operations
+## 4. Delete and release operations
 
-Yank both `cubeloop==0.14.0` and `cubepi==0.14.0` on PyPI with the reason:
-
-> Withdrawn: the database table rename breaks reproducible host Alembic history
-> and safe rollback. Use 0.14.1 or later.
-
-The public incident/recovery page must be live before its link is used. Release
-order is: merge and deploy that page; amend the GitHub 0.14.0 release notes;
-yank both PyPI projects; then publish 0.14.1. If an emergency yank must happen
-before the docs deploy, put self-contained recovery instructions in the GitHub
-release notes first. Do not delete artifacts, tags, or the GitHub release.
-TestPyPI may be yanked too if supported, but PyPI is the release blocker.
+Build both 0.14.1 distributions from the reviewed commit, upload them, and
+verify their files and behavior from PyPI. Then, in the same controlled release
+window, delete both `cubeloop==0.14.0` and `cubepi==0.14.0` and verify that their
+release JSON endpoints no longer advertise downloadable files. Preserve the
+GitHub tag/release as incident history and only then amend its notes to say the
+package release was removed and users should install 0.14.1. No recovery
+procedure is published because the confirmed operational premise is that nobody
+adopted 0.14.0.
 
 The 0.14.1 release follows the normal patch-release runbook, but does not rerun
 the docs-version creation runbook. Do not tag or publish until local Codex review
@@ -139,26 +133,25 @@ is clean, CI passes, and the PR Codex review loop is clean.
 
 ## 5. Acceptance criteria
 
-- Both PyPI 0.14.0 projects report all files as yanked with the agreed reason.
+- Both PyPI 0.14.0 projects have no downloadable release files.
 - A v5 Postgres/MySQL fixture opens and preserves data with 0.14.1 code and no DDL.
 - Fresh host Alembic history creates only `cubepi_*`, ends at version 5, and the
   checkpointer operates on it.
 - Golden tests prove the complete 0.13.6 helper output and MySQL split contract
   remain unchanged.
-- Both dialects recover an exact v6 fixture with representative data by executing
-  the shipped recovery source; mixed/colliding schemas fail before mutation.
 - No supported code or normal docs reference `upgrade_v5_to_v6_op()` or require
   `cubeloop_*` database objects.
 - Unit/integration tests, Ruff, formatting, mypy, and docs build pass.
-- 0.14.1 wheels smoke-test both `cubeloop` and the `cubepi` shim.
+- The 0.14.1 `cubeloop` wheel works normally; the dependency-free `cubepi`
+  tombstone wheel fails all imports and commands with migration guidance.
 - Current and version-0.14 English/zh-Hans docs state that physical DB names stay
-  `cubepi_*` and include the exceptional 0.14.0 recovery path.
+  `cubepi_*` and that 0.14.0 was removed.
 
 ## 6. Out of scope
 
 - Reverting the Python/package/CLI/domain/GitHub rename.
 - Reverting the new tracing namespace or trace directory.
-- Supporting mixed old/new table sets at runtime.
+- Supporting, detecting, or recovering mixed old/new table sets at runtime.
 - Yanking any 0.13.x release.
 - Renaming the physical database namespace in a later release without a new,
   separately approved expand/migrate/contract design.

@@ -626,45 +626,6 @@ dev = [
 name = "cubepi"
 version = "0.14.1"
 source = { editable = "compat/cubepi" }
-dependencies = [
-    { name = "cubeloop" },
-]
-
-[package.optional-dependencies]
-mcp = [
-    { name = "cubeloop", extra = ["mcp"] },
-]
-mysql = [
-    { name = "cubeloop", extra = ["mysql"] },
-]
-postgres = [
-    { name = "cubeloop", extra = ["postgres"] },
-]
-sqlite = [
-    { name = "cubeloop", extra = ["sqlite"] },
-]
-trace-cli = [
-    { name = "cubeloop", extra = ["trace-cli"] },
-]
-tracing = [
-    { name = "cubeloop", extra = ["tracing"] },
-]
-tracing-otlp = [
-    { name = "cubeloop", extra = ["tracing-otlp"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "cubeloop", editable = "." },
-    { name = "cubeloop", extras = ["mcp"], marker = "extra == 'mcp'", editable = "." },
-    { name = "cubeloop", extras = ["mysql"], marker = "extra == 'mysql'", editable = "." },
-    { name = "cubeloop", extras = ["postgres"], marker = "extra == 'postgres'", editable = "." },
-    { name = "cubeloop", extras = ["sqlite"], marker = "extra == 'sqlite'", editable = "." },
-    { name = "cubeloop", extras = ["trace-cli"], marker = "extra == 'trace-cli'", editable = "." },
-    { name = "cubeloop", extras = ["tracing"], marker = "extra == 'tracing'", editable = "." },
-    { name = "cubeloop", extras = ["tracing-otlp"], marker = "extra == 'tracing-otlp'", editable = "." },
-]
-provides-extras = ["sqlite", "postgres", "mysql", "mcp", "tracing", "tracing-otlp", "trace-cli"]
 
 [[package]]
 name = "distro"

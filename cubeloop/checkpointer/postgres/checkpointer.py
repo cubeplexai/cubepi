@@ -53,12 +53,7 @@ def _schema_mismatch_hint(actual: int, expected: int) -> str:
     transition, so the hint stays correct as EXPECTED_SCHEMA_VERSION grows.
     """
     if actual > expected:
-        return (
-            "database schema is newer than this CubeLoop release. If withdrawn "
-            "0.14.0 wrote version 6, inspect the database and follow "
-            "https://cubeloop.dev/docs/migration/from-cubepi#emergency-recovery-"
-            "from-withdrawn-0140; do not run a forward migration."
-        )
+        return "database schema is newer than this CubeLoop release."
     steps = ", ".join(f"upgrade_v{v}_to_v{v + 1}_op()" for v in range(actual, expected))
     return (
         "cubeloop was upgraded but host alembic is behind. "
@@ -73,12 +68,6 @@ _MISSING_VERSION_TABLE_HINT = (
     "data tables exist but schema_version is missing; cannot auto-classify. "
     "Restore cubepi_schema_version from the host's Alembic history; do not "
     "apply fresh CREATE TABLE statements on existing data."
-)
-
-_WITHDRAWN_V6_HINT = (
-    "database uses the withdrawn 0.14.0 cubeloop_* schema. Inspect it and "
-    "follow https://cubeloop.dev/docs/migration/from-cubepi#emergency-recovery-"
-    "from-withdrawn-0140; do not run a forward migration."
 )
 
 
@@ -180,22 +169,8 @@ class PostgresCheckpointer:
                     "SELECT version FROM cubepi_schema_version LIMIT 1"
                 )
             except asyncpg.UndefinedTableError:
-                try:
-                    withdrawn = await conn.fetchrow(
-                        "SELECT version FROM cubeloop_schema_version LIMIT 1"
-                    )
-                except asyncpg.UndefinedTableError:
-                    withdrawn = None
-                if withdrawn is not None:
-                    actual = int(withdrawn["version"])
-                    raise CubeloopSchemaMismatch(
-                        expected=EXPECTED_SCHEMA_VERSION,
-                        actual=actual,
-                        hint=_WITHDRAWN_V6_HINT,
-                    )
                 has_data = await conn.fetchval(
-                    "SELECT to_regclass('cubepi_threads') IS NOT NULL "
-                    "OR to_regclass('cubeloop_threads') IS NOT NULL"
+                    "SELECT to_regclass('cubepi_threads') IS NOT NULL"
                 )
                 if has_data:
                     raise CubeloopSchemaMismatch(
